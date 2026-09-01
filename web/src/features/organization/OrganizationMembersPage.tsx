@@ -850,13 +850,13 @@ export function OrganizationMembersPage() {
                   ) : null}
                   {access ? (
                     <span
-                      className={
-                        "shrink-0 " + access.tone === "danger"
+                      className={`shrink-0 ${
+                        access.tone === "danger"
                           ? "text-danger"
                           : access.tone === "muted"
                             ? "text-subtle"
                             : "text-muted"
-                      }
+                      }`}
                     >
                       {access.text}
                     </span>

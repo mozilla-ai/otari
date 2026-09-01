@@ -2300,39 +2300,38 @@ main {
    pick up Zilla Slab from the global h1–h6 rule, and its code the Fira Code
    stack, so the guide is set in the dashboard's own faces rather than in a
    second stack declared here. */
+/* 16/26, and the step *up* from the product's 14px is the point: everything
+   else in this dashboard is scanned and this is read. */
 .otari-markdown {
   color: var(--color-text);
-  font-size: 0.875rem;
-  line-height: 1.65;
+  font-size: 16px;
+  line-height: 26px;
 }
 .otari-markdown > :first-child {
   margin-top: 0;
 }
+/* Two steps and no more: the display face at 20px for a section, then the body
+   face at 16px on the semibold step for anything under it. A guide with four
+   heading sizes spends the whole scale on one document and leaves a reader
+   guessing which of the middle two outranks the other. */
 .otari-markdown h1,
-.otari-markdown h2,
+.otari-markdown h2 {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-semibold);
+  margin: 2rem 0 0.75rem;
+}
 .otari-markdown h3,
 .otari-markdown h4 {
   color: var(--color-text);
-  font-weight: 600;
-  line-height: 1.3;
-}
-.otari-markdown h1 {
-  font-size: 1.5rem;
-  margin: 2rem 0 0.75rem;
-}
-.otari-markdown h2 {
-  font-size: 1.25rem;
-  margin: 2rem 0 0.5rem;
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-markdown h3 {
-  font-size: 1.05rem;
-  margin: 1.5rem 0 0.5rem;
-}
-.otari-markdown h4 {
-  font-size: 0.95rem;
-  margin: 1.25rem 0 0.25rem;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: var(--font-weight-semibold);
+  margin: 1.75rem 0 0.5rem;
 }
 .otari-markdown p {
   margin: 0.75rem 0;
@@ -2376,12 +2375,48 @@ main {
   padding: 0.1rem 0.35rem;
   border-radius: 0;
 }
+/* A code block is a small object of its own on the prose ground, which is the
+   one place in this product where an edge is right: it is a verbatim thing to
+   be copied, not a division of the page. The label row above it is a cell of
+   the block rather than a control floating on it, which is what the copy family
+   does everywhere else. */
 .otari-markdown pre {
-  margin: 1rem 0;
+  margin: 1.25rem 0;
   padding: 0.85rem 1rem;
   background-color: var(--color-code-surface);
+  border: 1px solid var(--color-code-border);
   border-radius: 0;
   overflow-x: auto;
+}
+.otari-markdown .otari-code-block {
+  margin: 1.25rem 0;
+}
+.otari-markdown .otari-code-block pre {
+  margin: 0;
+  border-top: 0;
+}
+/* The label row: the language on the left, the copy affordance on the right,
+   both in mono at the caption step, on the block's own surface. */
+.otari-markdown .otari-code-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.375rem 1rem;
+  background-color: var(--color-code-control);
+  border: 1px solid var(--color-code-border);
+  color: var(--color-code-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+.otari-markdown .otari-code-label button {
+  color: inherit;
+  font: inherit;
+  opacity: 0.75;
+}
+.otari-markdown .otari-code-label button:hover {
+  opacity: 1;
 }
 .otari-markdown pre code {
   background-color: transparent;

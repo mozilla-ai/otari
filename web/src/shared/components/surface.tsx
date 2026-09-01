@@ -167,6 +167,36 @@ export function SettingsGroup({
   )
 }
 
+/**
+ * "There is nothing here", in one treatment.
+ *
+ * 14px muted, which is the table's, and it is the table's because that is the
+ * one the user picked when two of these turned up on the same screen at
+ * different sizes: a chart band's message at 12px above a table's at 14px, in a
+ * product where the two mean the same thing. Shared so the size cannot drift
+ * again, the same reason `SettingsGroup` is shared.
+ *
+ * `minHeight` because an empty chart band still has to hold the space its chart
+ * would have taken, or the page reflows the moment data arrives.
+ */
+export function EmptyMessage({
+  children,
+  minHeight,
+}: {
+  children: ReactNode
+  /** A CSS length, for the bands that must not collapse. */
+  minHeight?: string
+}) {
+  return (
+    <div
+      className="flex items-center justify-center px-4 py-10 text-center text-sm text-muted"
+      style={minHeight ? { minHeight, paddingBlock: 0 } : undefined}
+    >
+      {children}
+    </div>
+  )
+}
+
 /** A 6px square. The page's one status mark, in every place it appears. */
 export function Dot({ className }: { className: string }) {
   return <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${className}`} />

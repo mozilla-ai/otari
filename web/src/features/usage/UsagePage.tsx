@@ -32,6 +32,7 @@ import {
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
 import {
+  EmptyMessage,
   KpiCell,
   KpiStrip,
   Section,
@@ -1287,9 +1288,9 @@ export function UsagePage() {
                 <Spinner size="sm" />
               </div>
             ) : chart.data.length === 0 ? (
-              <div className="flex h-64 items-center justify-center text-sm text-muted">
+              <EmptyMessage minHeight="16rem">
                 No data in this range.
-              </div>
+              </EmptyMessage>
             ) : (
               <figure className="flex flex-col gap-2">
                 <TrendChart

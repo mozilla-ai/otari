@@ -851,6 +851,7 @@ function SpendChart({
                 date={shortDate(hoveredPoint.bucket_start)}
                 value={formatUsd(hoveredPoint.cost)}
                 atPercent={((hovered as number) + 0.5) / series.length}
+                barPercent={top > 0 ? hoveredPoint.cost / top : 0}
               />
             ) : null}
           </div>
@@ -882,25 +883,37 @@ function SpendChart({
  * tooltip is, on the floating rule (surface fill, control edge, square, no
  * shadow). A mono date over a rule, then the value.
  *
- * Positioned as a percentage of the plot rather than at a pixel, and clamped by
- * `translate` so the card at either end stays inside the plot instead of
- * hanging off it.
+ * Anchored to the top of the bar under the pointer, horizontally and
+ * vertically. It used to sit at `bottom-full`, above the whole plot, which put
+ * it a full plot-height away from a bar near the baseline: the card said one
+ * thing and the pointer was somewhere else entirely. `bottom` is now the bar's
+ * own height as a share of the plot, so the card rides up and down with what it
+ * is describing, which is what the Usage chart's tooltip does by following the
+ * pointer.
+ *
+ * Clamped at both ends. Horizontally by `translate`, so a card at either edge
+ * stays inside the plot; vertically at 72%, so a bar near the top does not push
+ * the card out through the plot's ceiling.
  */
 function ChartHoverCard({
   date,
   value,
   atPercent,
+  barPercent,
 }: {
   date: string
   value: string
   atPercent: number
+  /** The hovered bar's height as a share of the plot, 0 to 1. */
+  barPercent: number
 }) {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute bottom-full z-10 mb-2 min-w-[7.5rem] border border-control-border bg-surface text-xs"
+      className="pointer-events-none absolute z-10 mb-2 min-w-[7.5rem] border border-control-border bg-surface text-xs"
       style={{
         left: `${atPercent * 100}%`,
+        bottom: `${Math.min(72, Math.max(0, barPercent * 100))}%`,
         transform: `translateX(-${Math.min(90, Math.max(10, atPercent * 100))}%)`,
       }}
     >

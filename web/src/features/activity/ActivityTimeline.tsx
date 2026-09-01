@@ -9,7 +9,7 @@ import {
   type StackedPoint,
   TrendChart,
 } from "@/shared/components/charts"
-import { Tab, TabRow } from "@/shared/components/surface"
+import { EmptyMessage, Tab, TabRow } from "@/shared/components/surface"
 import {
   bucketDurationMs,
   bucketIndexRange,
@@ -342,9 +342,9 @@ export function ActivityTimeline({
             <Spinner size="sm" />
           </div>
         ) : n === 0 ? (
-          <div className="flex h-[90px] items-center justify-center text-xs text-muted">
+          <EmptyMessage minHeight="90px">
             No activity in this range.
-          </div>
+          </EmptyMessage>
         ) : (
           <div className="flex flex-col gap-1">
             <TrendChart

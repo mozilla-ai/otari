@@ -696,7 +696,7 @@ function AppShellChrome() {
           tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
           className={clsx(
-            "flex flex-col gap-4 border-r border-border bg-background p-3 focus:outline-none",
+            "flex flex-col border-r border-border bg-background focus:outline-none",
             isMobile
               ? clsx(
                   // Full width, starting below the top bar: `top-14` pairs with
@@ -725,126 +725,145 @@ function AppShellChrome() {
           {/* The scope the rail below belongs to. In the workspace context that
               is the switcher; in the organization context it is the way back
               out, which is how the prototype leaves that rail. */}
-          {showOrganizationRail ? (
-            <div className="flex min-h-14 items-center">
-              {inOrganization ? (
-                <Link
-                  to={workspaceLanding?.to ?? "/"}
-                  onClick={() => {
-                    // Leaving the organization rail is a sidebar move like any
-                    // other; it just does not go through `NavRowLink`.
-                    const to = workspaceLanding?.to ?? "/"
-                    recordNavigation(to, pathname === to)
-                    closeMobileNav()
-                  }}
-                  className={navRowClass({ collapsed: effectiveCollapsed })}
-                  aria-label={effectiveCollapsed ? backLabel : undefined}
-                  title={effectiveCollapsed ? backLabel : undefined}
-                >
-                  <FiArrowLeft aria-hidden="true" className={NAV_ICON_CLASS} />
-                  {effectiveCollapsed ? null : (
-                    <span className="min-w-0 flex-1 truncate">{backLabel}</span>
-                  )}
-                </Link>
-              ) : (
-                // The submenu's way back, which closes a level rather than
-                // navigating: the page under the drawer is still the workspace
-                // page you opened the menu from, so there is nothing to go back
-                // *to* yet. Same row and same name as the link above, because it
-                // means the same thing to whoever reads it and differs only in
-                // whether the route has moved yet. `cursor-pointer` because a
-                // bare button resolves to the default arrow, which is the one
-                // thing `navRowClass` leaves to its call sites.
-                <button
-                  type="button"
-                  ref={orgNavBackRef}
-                  onClick={() => setMobileOrgNavOpen(false)}
-                  className={`${navRowClass()} cursor-pointer`}
-                >
-                  <FiArrowLeft aria-hidden="true" className={NAV_ICON_CLASS} />
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {backLabel}
-                  </span>
-                </button>
-              )}
-            </div>
-          ) : (
-            <WorkspaceSwitcher collapsed={effectiveCollapsed} />
-          )}
-          <nav
-            // Named because the header's breadcrumb is a navigation landmark
-            // too, and two unnamed ones give a screen-reader user no way to tell
-            // the rail from the trail.
-            aria-label="Sidebar"
-            // Expanded, one 2px rhythm runs through rows *and* between groups:
-            // the 32px heading block is what separates one group from the next.
-            // Collapsed there are no headings, so the gap has to do that work.
-            className={clsx(
-              "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
-              effectiveCollapsed ? "gap-3" : "gap-0.5",
+          {/* The scope band, and its height and rule are load-bearing rather
+              than decorative: 56px with a `border-b` on the section tier means
+              it lands on exactly the same y as the top bar's own bottom rule,
+              so the two meet at the rail's vertical rule and read as one
+              unbroken line across the viewport. `h-14` and not `min-h-14`,
+              because a row that can grow is a row that can miss it. */}
+          <div className="flex h-14 shrink-0 items-center border-b border-border px-3">
+            {showOrganizationRail ? (
+              <div className="flex w-full items-center">
+                {inOrganization ? (
+                  <Link
+                    to={workspaceLanding?.to ?? "/"}
+                    onClick={() => {
+                      // Leaving the organization rail is a sidebar move like any
+                      // other; it just does not go through `NavRowLink`.
+                      const to = workspaceLanding?.to ?? "/"
+                      recordNavigation(to, pathname === to)
+                      closeMobileNav()
+                    }}
+                    className={navRowClass({ collapsed: effectiveCollapsed })}
+                    aria-label={effectiveCollapsed ? backLabel : undefined}
+                    title={effectiveCollapsed ? backLabel : undefined}
+                  >
+                    <FiArrowLeft
+                      aria-hidden="true"
+                      className={NAV_ICON_CLASS}
+                    />
+                    {effectiveCollapsed ? null : (
+                      <span className="min-w-0 flex-1 truncate">
+                        {backLabel}
+                      </span>
+                    )}
+                  </Link>
+                ) : (
+                  // The submenu's way back, which closes a level rather than
+                  // navigating: the page under the drawer is still the workspace
+                  // page you opened the menu from, so there is nothing to go back
+                  // *to* yet. Same row and same name as the link above, because it
+                  // means the same thing to whoever reads it and differs only in
+                  // whether the route has moved yet. `cursor-pointer` because a
+                  // bare button resolves to the default arrow, which is the one
+                  // thing `navRowClass` leaves to its call sites.
+                  <button
+                    type="button"
+                    ref={orgNavBackRef}
+                    onClick={() => setMobileOrgNavOpen(false)}
+                    className={`${navRowClass()} cursor-pointer`}
+                  >
+                    <FiArrowLeft
+                      aria-hidden="true"
+                      className={NAV_ICON_CLASS}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-left">
+                      {backLabel}
+                    </span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <WorkspaceSwitcher collapsed={effectiveCollapsed} />
             )}
-          >
-            {visibleSections.map(({ section, items }) => {
-              return (
-                <section
-                  key={section.id}
-                  aria-label={section.label}
-                  className="flex flex-col gap-0.5"
-                >
-                  {/* A heading labels each group when expanded. Collapsed there is
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 p-3">
+            <nav
+              // Named because the header's breadcrumb is a navigation landmark
+              // too, and two unnamed ones give a screen-reader user no way to tell
+              // the rail from the trail.
+              aria-label="Sidebar"
+              // Expanded, one 2px rhythm runs through rows *and* between groups:
+              // the 32px heading block is what separates one group from the next.
+              // Collapsed there are no headings, so the gap has to do that work.
+              className={clsx(
+                "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden",
+                effectiveCollapsed ? "gap-3" : "gap-0.5",
+              )}
+            >
+              {visibleSections.map(({ section, items }) => {
+                return (
+                  <section
+                    key={section.id}
+                    aria-label={section.label}
+                    className="flex flex-col gap-0.5"
+                  >
+                    {/* A heading labels each group when expanded. Collapsed there is
                       no width for one, and an unlabeled group never had one, so in
                       both cases the rhythm above does the separating instead of a
                       rule: a divider between every pair of groups reads as five
                       lists rather than one rail. */}
-                  {!effectiveCollapsed && section.label ? (
-                    <p className={NAV_SECTION_HEADING_CLASS}>{section.label}</p>
-                  ) : null}
-                  <div className="flex flex-col gap-0.5">
-                    {items.map((item) =>
-                      item.children ? (
-                        <NavGroup
-                          key={item.to}
-                          item={item}
-                          currentPath={pathname}
-                          onNavigate={closeMobileNav}
-                          isVisible={isVisible}
-                          collapsed={effectiveCollapsed}
-                        />
-                      ) : (
-                        // Highlighted from the registry's own answer rather than
-                        // from `activeProps`, whose default match is a prefix
-                        // one: on `/organization/members` that lights up
-                        // "General" as well, since `/organization` is its parent
-                        // route. `navItemForPath` prefers the exact entry, and a
-                        // future child route (`/routing/new`) still resolves to
-                        // its parent, which is the highlight that route wants.
-                        <NavRowLink
-                          key={item.to}
-                          to={item.to}
-                          label={item.label}
-                          icon={item.icon}
-                          isActive={currentItem?.to === item.to}
-                          collapsed={effectiveCollapsed}
-                          // Tapping a destination dismisses the mobile drawer so
-                          // the page it landed on is visible, not behind it.
-                          onNavigate={closeMobileNav}
-                        />
-                      ),
-                    )}
-                  </div>
-                </section>
-              )
-            })}
-          </nav>
-          {/* The account block, set off by a rule as in the navigation prototype:
+                    {!effectiveCollapsed && section.label ? (
+                      <p className={NAV_SECTION_HEADING_CLASS}>
+                        {section.label}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-col gap-0.5">
+                      {items.map((item) =>
+                        item.children ? (
+                          <NavGroup
+                            key={item.to}
+                            item={item}
+                            currentPath={pathname}
+                            onNavigate={closeMobileNav}
+                            isVisible={isVisible}
+                            collapsed={effectiveCollapsed}
+                          />
+                        ) : (
+                          // Highlighted from the registry's own answer rather than
+                          // from `activeProps`, whose default match is a prefix
+                          // one: on `/organization/members` that lights up
+                          // "General" as well, since `/organization` is its parent
+                          // route. `navItemForPath` prefers the exact entry, and a
+                          // future child route (`/routing/new`) still resolves to
+                          // its parent, which is the highlight that route wants.
+                          <NavRowLink
+                            key={item.to}
+                            to={item.to}
+                            label={item.label}
+                            icon={item.icon}
+                            isActive={currentItem?.to === item.to}
+                            collapsed={effectiveCollapsed}
+                            // Tapping a destination dismisses the mobile drawer so
+                            // the page it landed on is visible, not behind it.
+                            onNavigate={closeMobileNav}
+                          />
+                        ),
+                      )}
+                    </div>
+                  </section>
+                )
+              })}
+            </nav>
+            {/* The account block, set off by a rule as in the navigation prototype:
               the way onto the organization rail, the bundled guide, and the
               account control whose menu carries appearance and sign-out. */}
-          {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
+            {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
               right border, while the rows inside keep the rail's padding. A
               divider that stops short of the edge reads as a box's top border
               rather than as a division of the rail. */}
-          <div className="-mx-3 flex flex-col gap-1 border-t border-border px-3 pt-1 pb-[env(safe-area-inset-bottom)]">
-            {/* The way into the organization rail. Only in the workspace
+            <div className="-mx-3 flex flex-col gap-1 border-t border-border px-3 pt-1 pb-[env(safe-area-inset-bottom)]">
+              {/* The way into the organization rail. Only in the workspace
                 context, since the organization one has its own way back, and
                 only for someone who manages the organization: it is the single
                 destination the design hides outright rather than degrading to
@@ -868,61 +887,62 @@ function AppShellChrome() {
                 and a destination in it is what dismisses the drawer. That is
                 also what earns the trailing chevron back: it promises a submenu
                 only where one now opens. */}
-            {!showOrganizationRail && managesOrganization ? (
-              isMobile ? (
-                // `cursor-pointer` because a bare button resolves to the default
-                // arrow, which is the one thing `navRowClass` leaves to its call
-                // sites (its other rows are links or HeroUI buttons).
-                <button
-                  type="button"
-                  ref={orgNavTriggerRef}
-                  onClick={() => setMobileOrgNavOpen(true)}
-                  className={`${navRowClass()} cursor-pointer`}
-                >
-                  <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    Organization
-                  </span>
-                  <FiChevronRight
-                    aria-hidden="true"
-                    className={NAV_ICON_CLASS}
-                  />
-                </button>
-              ) : (
-                <Link
-                  to={organizationLanding?.to ?? "/organization/members"}
-                  onClick={() => {
-                    const to =
-                      organizationLanding?.to ?? "/organization/members"
-                    recordNavigation(to, pathname === to)
-                  }}
-                  className={navRowClass({ collapsed: effectiveCollapsed })}
-                  aria-label={effectiveCollapsed ? "Organization" : undefined}
-                  title={
-                    effectiveCollapsed
-                      ? "Organization: members, spend and budgets, users, settings"
-                      : undefined
-                  }
-                >
-                  <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
-                  {effectiveCollapsed ? null : (
-                    <span className="min-w-0 flex-1 truncate">
+              {!showOrganizationRail && managesOrganization ? (
+                isMobile ? (
+                  // `cursor-pointer` because a bare button resolves to the default
+                  // arrow, which is the one thing `navRowClass` leaves to its call
+                  // sites (its other rows are links or HeroUI buttons).
+                  <button
+                    type="button"
+                    ref={orgNavTriggerRef}
+                    onClick={() => setMobileOrgNavOpen(true)}
+                    className={`${navRowClass()} cursor-pointer`}
+                  >
+                    <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
+                    <span className="min-w-0 flex-1 truncate text-left">
                       Organization
                     </span>
-                  )}
-                </Link>
-              )
-            ) : null}
-            {/* One control, not a stack of links: the guide, appearance, and
+                    <FiChevronRight
+                      aria-hidden="true"
+                      className={NAV_ICON_CLASS}
+                    />
+                  </button>
+                ) : (
+                  <Link
+                    to={organizationLanding?.to ?? "/organization/members"}
+                    onClick={() => {
+                      const to =
+                        organizationLanding?.to ?? "/organization/members"
+                      recordNavigation(to, pathname === to)
+                    }}
+                    className={navRowClass({ collapsed: effectiveCollapsed })}
+                    aria-label={effectiveCollapsed ? "Organization" : undefined}
+                    title={
+                      effectiveCollapsed
+                        ? "Organization: members, spend and budgets, users, settings"
+                        : undefined
+                    }
+                  >
+                    <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
+                    {effectiveCollapsed ? null : (
+                      <span className="min-w-0 flex-1 truncate">
+                        Organization
+                      </span>
+                    )}
+                  </Link>
+                )
+              ) : null}
+              {/* One control, not a stack of links: the guide, appearance, and
                 sign-out all live in its menu, which is how the prototype ends
                 the rail. Sign-out used to sit in the page header. */}
-            {/* The design rules the account row off from the row above it, so
+              {/* The design rules the account row off from the row above it, so
                 the control that ends the rail is not read as one more
                 destination in the group that changes context. */}
-            {!showOrganizationRail && managesOrganization ? (
-              <div aria-hidden="true" className="h-px shrink-0 bg-border" />
-            ) : null}
-            <AccountMenu collapsed={effectiveCollapsed} />
+              {!showOrganizationRail && managesOrganization ? (
+                <div aria-hidden="true" className="h-px shrink-0 bg-border" />
+              ) : null}
+              <AccountMenu collapsed={effectiveCollapsed} />
+            </div>
           </div>
         </aside>
         {/* The right-hand pane: the header sits beside the rail rather than above
