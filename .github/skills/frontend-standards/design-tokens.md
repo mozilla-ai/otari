@@ -189,6 +189,14 @@ card title nested two sections deep may be an `<h3>` or an `<h4>` and still wear
 `text-title`. Pick the level that keeps the outline unbroken, then the role that matches the
 meaning.
 
+A role carries family, size, line-height, tracking, weight and ink together, so writing any of
+those beside one is a bug rather than a refinement: `@utility` definitions are emitted ahead of
+the theme's own utilities, so the `text-xs` in `text-caption text-xs` wins the size and the role
+compiles, emits and does nothing. `text-xs text-muted` is the caption role spelled that way, a
+point small and repeating an ink the role already sets. `src/styles/foundation.test.ts` sweeps
+`src` for both. The single deliberate pairing is `font-mono`, because a role sets the body face
+and an identifier does not belong in it.
+
 Zilla Slab is spent on `text-display` alone; every other role, `text-heading` included, is set
 in Mozilla Text, because at 18px a slab serif competes with the page title instead of sitting
 under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare `h1`-`h6` still defaults to the
