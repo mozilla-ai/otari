@@ -61,13 +61,13 @@ export const BLEED_INSET = "mx-auto w-full max-w-[1800px] px-4 md:px-6"
  * of a page title is currently a string that has to be kept in step across eight
  * files by hand and will not be.
  *
- * The type is deliberately the string those eight already carry rather than
- * `text-display`, so adopting this moves nothing on any page. It is 28/34 at
- * weight 600 where `text-display` is 26/32 at 500, which is a real divergence
- * from the type scale and not one to resolve from inside a component: closing it
- * means either the scale moves (and `text-display`'s other consumers, the
- * sign-in screen and `PageHeader`, move with it) or these pages come back to it.
- * Named here so the decision has somewhere to land.
+ * The type is `text-display`, and the scale is what moved to meet it. Those
+ * eight had each written `text-[28px] leading-[34px] font-semibold`, which is
+ * the size the direction draws a page title at and which rendered at weight 550
+ * rather than the 600 it asked for, because the weight axis has two values and
+ * 600 is not one of them. So the step became 28/34 at the semibold token and
+ * every consumer converged on it, rather than nine call sites carrying an
+ * arbitrary value that quietly disagreed with the scale.
  *
  * `pb-5` rather than a gap on the parent, because a page is a stack of bands
  * that set their own rules and spacing, and a column gap would add air above
@@ -85,9 +85,7 @@ export function PageIntro({
   return (
     <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
       <div className="max-w-[620px]">
-        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-          {title}
-        </h1>
+        <h1 className="text-display">{title}</h1>
         {children ? (
           <p className="mt-1 text-sm text-muted">{children}</p>
         ) : null}

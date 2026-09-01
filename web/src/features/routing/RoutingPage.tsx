@@ -1449,9 +1449,7 @@ export function RoutingPage() {
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-[620px]">
-          <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-            Routing
-          </h1>
+          <h1 className="text-display">Routing</h1>
           <p className="mt-1 text-sm text-muted">
             Named models your callers send as `model`. A policy decides which
             real model serves each request, what is tried if that fails, and

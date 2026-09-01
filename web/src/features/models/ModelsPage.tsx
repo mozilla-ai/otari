@@ -2045,9 +2045,7 @@ export function ModelsPage() {
   return (
     <div className="flex flex-col gap-6">
       <header className="pb-1">
-        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-          Models
-        </h1>
+        <h1 className="text-display">Models</h1>
         <p className="mt-1 max-w-[620px] text-sm text-muted">
           Every model your providers can serve. Set a price on any model so
           budgets and usage tracking work.

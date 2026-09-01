@@ -201,7 +201,7 @@ export function StatCard({
       <span className="text-overline">{label}</span>
       <span className="flex flex-wrap items-center gap-2">
         {/* text-xl (22px), deliberately a step *below* the page title's
-            text-display (26px). It used to be text-xl rising to text-2xl at
+            text-display (28px). It used to be text-xl rising to text-2xl at
             `sm`, which made a number inside a card the largest text on the
             page, 4px bigger than the name of the page itself. Fixing that by
             raising the title alone would have left the two agreeing by

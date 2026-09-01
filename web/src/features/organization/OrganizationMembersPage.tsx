@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type {
@@ -46,12 +46,17 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
+  Dot,
+  PageIntro,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import {
   Checkbox,
   CopyableValue,
   ErrorBanner,
   FilterSelect,
   InfoBanner,
-  PageHeader,
 } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -113,27 +118,39 @@ function memberRowKey(member: OrganizationMember): string {
   )
 }
 
-function StatusChip({ status }: { status: string }) {
+/**
+ * The frozen dot-and-word: a square mark, an uppercase word in mono, and ink
+ * that says how much to care. No chip, because a chip is a box and this page
+ * has none left.
+ *
+ * The severity rule the rest of the surface follows: a danger dot with muted
+ * words means "worth noticing", a danger dot with danger words means "this is
+ * refusing requests right now". Suspended is the first, blocked is the second.
+ */
+function StatusMark({ status }: { status: string }) {
   // Not a membership status: it is the gateway refusing this person's keys, and
   // it is shown here because the membership is active while every request fails.
-  if (status === "blocked") {
-    return (
-      <Chip size="sm" color="danger">
-        Blocked
-      </Chip>
-    )
-  }
-  if (status === "active") {
-    return (
-      <Chip size="sm" color="accent">
-        Active
-      </Chip>
-    )
-  }
+  const { dot, ink, word } =
+    status === "blocked"
+      ? { dot: "bg-danger", ink: "text-danger", word: "Blocked" }
+      : status === "active"
+        ? { dot: "bg-success", ink: "text-muted", word: "Active" }
+        : status === "suspended"
+          ? {
+              dot: "bg-danger",
+              ink: "text-muted",
+              word: membershipLabel(status),
+            }
+          : {
+              dot: "bg-surface-subtle",
+              ink: "text-subtle",
+              word: membershipLabel(status),
+            }
   return (
-    <Chip size="sm" color={status === "suspended" ? "warning" : "default"}>
-      {membershipLabel(status)}
-    </Chip>
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+      <Dot className={dot} />
+      {word.toUpperCase()}
+    </span>
   )
 }
 
@@ -195,71 +212,72 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Add member</div>
-        <ErrorBanner error={add.error} />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Email address"
-            value={email}
-            onChange={setEmail}
-            placeholder="alice@example.com"
-            isRequired
-            autoFocus
-            description="The handle this identity is claimed by. Nothing is emailed here; the membership is active straight away. Use Invite member instead to email an accept link."
-          />
-          <FilterSelect
-            label="Role"
-            value={role}
-            onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-            options={ROLE_OPTIONS}
-          />
-        </div>
-        {workspaces.data && workspaces.data.length > 0 ? (
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium text-foreground">
-              Workspaces (optional)
-            </legend>
-            <span className="text-xs text-muted">
-              Joined as a member of each, in the same request, so someone never
-              exists without the access they were added for. Workspace roles are
-              changed afterwards on the Workspaces page.
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="text-title">Add member</div>
+      <ErrorBanner error={add.error} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Email address"
+          value={email}
+          onChange={setEmail}
+          placeholder="alice@example.com"
+          isRequired
+          autoFocus
+          description="The handle this identity is claimed by. Nothing is emailed here; the membership is active straight away. Use Invite member instead to email an accept link."
+        />
+        <FilterSelect
+          label="Role"
+          value={role}
+          onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
+          options={ROLE_OPTIONS}
+        />
+      </div>
+      {workspaces.data && workspaces.data.length > 0 ? (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-medium text-foreground">
+            Workspaces (optional)
+          </legend>
+          <span className="text-xs text-muted">
+            Joined as a member of each, in the same request, so someone never
+            exists without the access they were added for. Workspace roles are
+            changed afterwards on the Workspaces page.
+          </span>
+          {workspaceIds.length === 0 ? (
+            <span className="text-xs text-warning">
+              With none selected they join the organization but no workspace,
+              and will see nothing until someone assigns them one.
             </span>
-            {workspaceIds.length === 0 ? (
-              <span className="text-xs text-warning">
-                With none selected they join the organization but no workspace,
-                and will see nothing until someone assigns them one.
-              </span>
-            ) : null}
-            {workspaces.data.map((workspace) => (
-              <Checkbox
-                key={workspace.id}
-                isSelected={workspaceIds.includes(workspace.id)}
-                onChange={(isSelected) =>
-                  toggleWorkspace(workspace.id, isSelected)
-                }
-              >
-                {workspace.name}
-              </Checkbox>
-            ))}
-          </fieldset>
-        ) : null}
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={trimmed === ""}
-            isPending={add.isPending}
-            onPress={submit}
-          >
-            Add member
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+          ) : null}
+          {workspaces.data.map((workspace) => (
+            <Checkbox
+              key={workspace.id}
+              isSelected={workspaceIds.includes(workspace.id)}
+              onChange={(isSelected) =>
+                toggleWorkspace(workspace.id, isSelected)
+              }
+            >
+              {workspace.name}
+            </Checkbox>
+          ))}
+        </fieldset>
+      ) : null}
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          isDisabled={trimmed === ""}
+          isPending={add.isPending}
+          onPress={submit}
+        >
+          Add member
+        </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -317,103 +335,103 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
   // to share by hand when it was not (or when mail is unconfigured entirely).
   if (result) {
     return (
-      <Card>
-        <Card.Content className="flex flex-col gap-4 p-5">
-          <div className="text-title">Invitation sent</div>
-          {result.mail_sent ? (
-            <InfoBanner>
-              An email with an accept link was sent to{" "}
-              <strong>{result.email}</strong>.
-            </InfoBanner>
-          ) : (
-            <InfoBanner>
-              {/* Not "mail isn't configured": mail_sent is also false when a
-                  configured transport's send failed, and that copy would send
-                  an operator to debug a configuration that may be fine. */}
-              Otari did not send the email. Share this link with{" "}
-              <strong>{result.email}</strong> yourself; it works the same either
-              way.
-              <div className="mt-2">
-                <CopyableValue value={result.accept_link} label="Accept link">
-                  <span className="break-all text-xs">
-                    {result.accept_link}
-                  </span>
-                </CopyableValue>
-              </div>
-            </InfoBanner>
-          )}
-          <div className="flex gap-2">
-            <Button variant="primary" onPress={onClose}>
-              Done
-            </Button>
-          </div>
-        </Card.Content>
-      </Card>
+      <Section
+        className="border-y border-border py-5"
+        contentClassName="flex flex-col gap-4"
+      >
+        <div className="text-title">Invitation sent</div>
+        {result.mail_sent ? (
+          <InfoBanner>
+            An email with an accept link was sent to{" "}
+            <strong>{result.email}</strong>.
+          </InfoBanner>
+        ) : (
+          <InfoBanner>
+            {/* Not "mail isn't configured": mail_sent is also false when a
+                configured transport's send failed, and that copy would send
+                an operator to debug a configuration that may be fine. */}
+            Otari did not send the email. Share this link with{" "}
+            <strong>{result.email}</strong> yourself; it works the same either
+            way.
+            <div className="mt-2">
+              <CopyableValue value={result.accept_link} label="Accept link">
+                <span className="break-all text-xs">{result.accept_link}</span>
+              </CopyableValue>
+            </div>
+          </InfoBanner>
+        )}
+        <div className="flex gap-2">
+          <Button variant="primary" onPress={onClose}>
+            Done
+          </Button>
+        </div>
+      </Section>
     )
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Invite member</div>
-        <ErrorBanner error={invite.error} />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Email address"
-            value={email}
-            onChange={setEmail}
-            placeholder="alice@example.com"
-            isRequired
-            autoFocus
-            description={
-              mail_ready
-                ? "An email with an accept link is sent here; the membership becomes active once they follow it."
-                : "Invitation email is unavailable, so you will get a link to share with them yourself."
-            }
-          />
-          <FilterSelect
-            label="Role"
-            value={role}
-            onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-            options={ROLE_OPTIONS}
-          />
-        </div>
-        {workspaces.data && workspaces.data.length > 0 ? (
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium text-foreground">
-              Workspaces (optional)
-            </legend>
-            <span className="text-xs text-muted">
-              Granted once the invitation is accepted, not before.
-            </span>
-            {workspaces.data.map((workspace) => (
-              <Checkbox
-                key={workspace.id}
-                isSelected={workspaceIds.includes(workspace.id)}
-                onChange={(isSelected) =>
-                  toggleWorkspace(workspace.id, isSelected)
-                }
-              >
-                {workspace.name}
-              </Checkbox>
-            ))}
-          </fieldset>
-        ) : null}
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={trimmed === ""}
-            isPending={invite.isPending}
-            onPress={submit}
-          >
-            Send invitation
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="text-title">Invite member</div>
+      <ErrorBanner error={invite.error} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Email address"
+          value={email}
+          onChange={setEmail}
+          placeholder="alice@example.com"
+          isRequired
+          autoFocus
+          description={
+            mail_ready
+              ? "An email with an accept link is sent here; the membership becomes active once they follow it."
+              : "Invitation email is unavailable, so you will get a link to share with them yourself."
+          }
+        />
+        <FilterSelect
+          label="Role"
+          value={role}
+          onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
+          options={ROLE_OPTIONS}
+        />
+      </div>
+      {workspaces.data && workspaces.data.length > 0 ? (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-medium text-foreground">
+            Workspaces (optional)
+          </legend>
+          <span className="text-xs text-muted">
+            Granted once the invitation is accepted, not before.
+          </span>
+          {workspaces.data.map((workspace) => (
+            <Checkbox
+              key={workspace.id}
+              isSelected={workspaceIds.includes(workspace.id)}
+              onChange={(isSelected) =>
+                toggleWorkspace(workspace.id, isSelected)
+              }
+            >
+              {workspace.name}
+            </Checkbox>
+          ))}
+        </fieldset>
+      ) : null}
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          isDisabled={trimmed === ""}
+          isPending={invite.isPending}
+          onPress={submit}
+        >
+          Send invitation
+        </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -600,111 +618,111 @@ function MemberEditor({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-5 p-5">
-        <div className="text-title">Edit {memberLabel(member)}</div>
-        <ErrorBanner error={error} />
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-5"
+    >
+      <div className="text-title">Edit {memberLabel(member)}</div>
+      <ErrorBanner error={error} />
 
-        {spendRow ? (
-          <ModelScopeControl
-            title="Model access (default for this member's keys)"
-            description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
-            initial={spendRow.allowed_models}
-            onChange={(value, isValid) => {
-              setAllowedModels(value)
-              setScopeValid(isValid)
-            }}
-          />
-        ) : (
-          <span className="text-xs text-muted">
-            No spend row yet, so there is no model access to set. One is minted
-            when a key is issued to this member.
-          </span>
-        )}
+      {spendRow ? (
+        <ModelScopeControl
+          title="Model access (default for this member's keys)"
+          description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+          initial={spendRow.allowed_models}
+          onChange={(value, isValid) => {
+            setAllowedModels(value)
+            setScopeValid(isValid)
+          }}
+        />
+      ) : (
+        <span className="text-xs text-muted">
+          No spend row yet, so there is no model access to set. One is minted
+          when a key is issued to this member.
+        </span>
+      )}
 
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-foreground">
-            Workspace access
-          </span>
-          <div className="max-w-3xl overflow-x-auto">
-            <table className="w-full min-w-lg text-sm">
-              <thead>
-                <tr className="text-left text-xs text-muted">
-                  <th className="py-1 font-medium">Workspace</th>
-                  <th className="py-1 font-medium">Role</th>
-                  <th className="py-1 font-medium">Budget</th>
-                </tr>
-              </thead>
-              <tbody>
-                {workspaces.map((workspace) => {
-                  const row = rows.get(workspace.id)
-                  if (!row) return null
-                  return (
-                    <tr key={workspace.id} className="border-t border-border">
-                      <td className="py-1.5">
-                        <label className="flex items-center gap-2 text-foreground">
-                          <input
-                            type="checkbox"
-                            checked={row.member}
-                            onChange={(event) =>
-                              setRow(workspace.id, {
-                                member: event.target.checked,
-                              })
-                            }
-                          />
-                          {workspace.name}
-                        </label>
-                      </td>
-                      <td className="py-1.5">
-                        <FilterSelect
-                          ariaLabel={`Role in ${workspace.name}`}
-                          value={row.role}
-                          onChange={(next) =>
-                            setRow(workspace.id, { role: next })
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-foreground">
+          Workspace access
+        </span>
+        <div className="max-w-3xl overflow-x-auto">
+          <table className="w-full min-w-lg text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted">
+                <th className="py-1 font-medium">Workspace</th>
+                <th className="py-1 font-medium">Role</th>
+                <th className="py-1 font-medium">Budget</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workspaces.map((workspace) => {
+                const row = rows.get(workspace.id)
+                if (!row) return null
+                return (
+                  <tr key={workspace.id} className="border-t border-border">
+                    <td className="py-1.5">
+                      <label className="flex items-center gap-2 text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={row.member}
+                          onChange={(event) =>
+                            setRow(workspace.id, {
+                              member: event.target.checked,
+                            })
                           }
-                          options={ROLE_OPTIONS}
-                          disabled={!row.member}
                         />
-                      </td>
-                      <td className="py-1.5">
-                        <FilterSelect
-                          ariaLabel={`Budget in ${workspace.name}`}
-                          value={row.budgetId}
-                          onChange={(next) =>
-                            setRow(workspace.id, { budgetId: next })
-                          }
-                          options={budgetOptions(
-                            defaultByWorkspace.get(workspace.id),
-                          )}
-                          disabled={!row.member}
-                        />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <span className="max-w-2xl text-xs text-muted">
-            Each workspace holds its own allowance, so someone in two workspaces
-            has two. The amount and the reset period belong to the budget, so
-            editing one moves everyone held to it; pick a different budget here
-            to change only this person. Adding them to a workspace that has a
-            default member budget gives them that budget unless another is
-            chosen.
-          </span>
+                        {workspace.name}
+                      </label>
+                    </td>
+                    <td className="py-1.5">
+                      <FilterSelect
+                        ariaLabel={`Role in ${workspace.name}`}
+                        value={row.role}
+                        onChange={(next) =>
+                          setRow(workspace.id, { role: next })
+                        }
+                        options={ROLE_OPTIONS}
+                        disabled={!row.member}
+                      />
+                    </td>
+                    <td className="py-1.5">
+                      <FilterSelect
+                        ariaLabel={`Budget in ${workspace.name}`}
+                        value={row.budgetId}
+                        onChange={(next) =>
+                          setRow(workspace.id, { budgetId: next })
+                        }
+                        options={budgetOptions(
+                          defaultByWorkspace.get(workspace.id),
+                        )}
+                        disabled={!row.member}
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
+        <span className="max-w-2xl text-xs text-muted">
+          Each workspace holds its own allowance, so someone in two workspaces
+          has two. The amount and the reset period belong to the budget, so
+          editing one moves everyone held to it; pick a different budget here to
+          change only this person. Adding them to a workspace that has a default
+          member budget gives them that budget unless another is chosen.
+        </span>
+      </div>
 
-        <div className="flex gap-2">
-          <Button variant="primary" isDisabled={!canSave} onPress={save}>
-            {saving ? "Saving…" : "Save changes"}
-          </Button>
-          <Button variant="ghost" isDisabled={saving} onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+      <div className="flex gap-2">
+        <Button variant="primary" isDisabled={!canSave} onPress={save}>
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+        <Button variant="ghost" isDisabled={saving} onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -794,16 +812,60 @@ export function OrganizationMembersPage() {
         id: "member",
         header: "Member",
         isRowHeader: true,
-        cell: (member) => (
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm text-foreground">
-              {memberLabel(member)}
-            </span>
-            {member.email && member.full_name ? (
-              <span className="text-xs text-muted">{member.email}</span>
-            ) : null}
-          </div>
-        ),
+        // Two lines, which is what sets the 58px row: who they are, and under
+        // it the ceiling every key issued to them inherits. Model access used
+        // to be a lane of its own, and as a lane it was a column of "All
+        // models" repeating down the page; under the name it is read once, with
+        // the person it belongs to. The address keeps its place on that line
+        // where there is one, because it is the handle a sign-in claims and the
+        // only thing distinguishing two people with the same display name.
+        cell: (member) => {
+          const spendRow = member.attribution_user_id
+            ? userByAttribution.get(member.attribution_user_id)
+            : undefined
+          const access = spendRow ? accessLabel(spendRow.allowed_models) : null
+          const email = member.email && member.full_name ? member.email : null
+          return (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-foreground">
+                {memberLabel(member)}
+              </span>
+              {email || access ? (
+                // Never wraps, and the address is the only part that gives way.
+                // Seeded with real names the line is three facts in a fixed
+                // lane, and letting it wrap took the row off its 58px pitch and
+                // pushed the name off its baseline. The marker is short and
+                // bounded, so the address truncates and keeps its full value in
+                // the title.
+                <span className="flex items-center gap-1.5 text-nowrap text-xs">
+                  {email ? (
+                    <span className="truncate text-muted" title={email}>
+                      {email}
+                    </span>
+                  ) : null}
+                  {email && access ? (
+                    <span aria-hidden className="text-subtle">
+                      ·
+                    </span>
+                  ) : null}
+                  {access ? (
+                    <span
+                      className={
+                        "shrink-0 " + access.tone === "danger"
+                          ? "text-danger"
+                          : access.tone === "muted"
+                            ? "text-subtle"
+                            : "text-muted"
+                      }
+                    >
+                      {access.text}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+          )
+        },
       },
       {
         id: "role",
@@ -863,37 +925,9 @@ export function OrganizationMembersPage() {
           // active, and every request the person makes is still refused, which
           // is what someone reading this column wants to know.
           return spendRow?.blocked ? (
-            <StatusChip status="blocked" />
+            <StatusMark status="blocked" />
           ) : (
-            <StatusChip status={member.status} />
-          )
-        },
-      },
-      {
-        id: "access",
-        header: "Model access",
-        // The default every key issued to this person inherits. A key may narrow
-        // it and never widen it, so this is the ceiling rather than the grant.
-        cell: (member) => {
-          const spendRow = member.attribution_user_id
-            ? userByAttribution.get(member.attribution_user_id)
-            : undefined
-          if (!spendRow) {
-            return <span className="text-xs text-muted">&mdash;</span>
-          }
-          const { text, tone } = accessLabel(spendRow.allowed_models)
-          return (
-            <span
-              className={
-                tone === "danger"
-                  ? "text-xs text-danger"
-                  : tone === "muted"
-                    ? "text-xs text-muted"
-                    : "text-xs text-foreground"
-              }
-            >
-              {text}
-            </span>
+            <StatusMark status={member.status} />
           )
         },
       },
@@ -910,15 +944,32 @@ export function OrganizationMembersPage() {
           if (placements.length === 0) {
             return <span className="text-xs text-muted">None</span>
           }
+          // Names in prose rather than chips: a chip is a box, and a cell of
+          // three boxes was the loudest thing in a row whose subject is a
+          // person. The ceiling stays with the workspace it applies to, in the
+          // quieter ink, because it is a qualifier on the name and not a second
+          // fact beside it.
           return (
-            <div className="flex flex-wrap gap-1">
-              {placements.map((placement) => (
-                <Chip key={placement.workspaceId} size="sm">
-                  {placement.workspaceName}
-                  {placement.ceiling?.max_budget != null
-                    ? ` · ${usd.format(placement.ceiling.max_budget)}`
-                    : ""}
-                </Chip>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+              {placements.map((placement, index) => (
+                <span
+                  key={placement.workspaceId}
+                  className="flex items-center gap-2"
+                >
+                  {index > 0 ? (
+                    <span aria-hidden className="text-subtle">
+                      ·
+                    </span>
+                  ) : null}
+                  <span className="text-foreground">
+                    {placement.workspaceName}
+                  </span>
+                  {placement.ceiling?.max_budget != null ? (
+                    <span className="text-subtle tabular-nums">
+                      {usd.format(placement.ceiling.max_budget)}
+                    </span>
+                  ) : null}
+                </span>
               ))}
             </div>
           )
@@ -1046,10 +1097,9 @@ export function OrganizationMembersPage() {
   )
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="flex flex-col">
+      <PageIntro
         title="Members"
-        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
         action={
           manages && !adding && !inviting ? (
             <div className="flex gap-2">
@@ -1062,7 +1112,14 @@ export function OrganizationMembersPage() {
             </div>
           ) : null
         }
-      />
+      >
+        Who belongs to this organization and what each of them may do. Roles are
+        fixed: owners and admins manage the organization, members use it,
+        viewers only read. Budgets and API keys do not attach to this list; they
+        attach to the gateway identity a member is linked to, which is what lets
+        a key be issued to them by name. A member with no such link yet shows no
+        access or spend, and cannot own a key until one exists.
+      </PageIntro>
 
       {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
           dialogs render each mutation's error themselves, and listing it here
@@ -1119,14 +1176,16 @@ export function OrganizationMembersPage() {
         />
       ) : null}
 
-      <DataTable
-        ariaLabel="Organization members"
-        columns={columns}
-        rows={rows}
-        getRowKey={memberRowKey}
-        isLoading={members.isLoading}
-        emptyContent="No members yet."
-      />
+      <TableScrollFrame className="otari-members-table">
+        <DataTable
+          ariaLabel="Organization members"
+          columns={columns}
+          rows={rows}
+          getRowKey={memberRowKey}
+          isLoading={members.isLoading}
+          emptyContent="No members yet."
+        />
+      </TableScrollFrame>
 
       <ConfirmDialog
         isOpen={removing !== null}

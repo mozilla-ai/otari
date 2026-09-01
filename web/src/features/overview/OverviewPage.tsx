@@ -560,9 +560,7 @@ function OverviewHeader({
   return (
     <header className="flex flex-col gap-4 pb-6 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-          Overview
-        </h1>
+        <h1 className="text-display">Overview</h1>
         {/* ~620px rather than `max-w-prose`: this paragraph sits beside the meta
             block, so its measure is set by the room the two share. */}
         <p className="mt-1 max-w-[620px] text-sm text-muted">

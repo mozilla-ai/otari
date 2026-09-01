@@ -1006,9 +1006,7 @@ export function KeysPage() {
     <div className="flex flex-col">
       <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-[620px]">
-          <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-            API keys
-          </h1>
+          <h1 className="text-display">API keys</h1>
           <p className="mt-1 text-sm text-muted">
             Issue and revoke the keys that authenticate callers to this gateway.
             Secrets are shown once at creation.

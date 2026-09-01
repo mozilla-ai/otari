@@ -1940,9 +1940,7 @@ export function ActivityPage() {
   return (
     <div className="flex flex-col">
       <header className="pb-5">
-        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-          Activity
-        </h1>
+        <h1 className="text-display">Activity</h1>
         <p className="mt-1 max-w-[620px] text-sm text-muted">
           A per-request log of what the gateway served: tokens, cost, latency,
           and failures. No request or response content is stored.

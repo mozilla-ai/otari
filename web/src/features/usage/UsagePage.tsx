@@ -1024,9 +1024,7 @@ export function UsagePage() {
     <div className="flex flex-col">
       <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-            Usage &amp; analytics
-          </h1>
+          <h1 className="text-display">Usage &amp; analytics</h1>
           <p className="mt-1 max-w-[620px] text-sm text-muted">
             Spend, tokens, cache use, and request volume over time. Group the
             chart by model, user, key, or source, and click a breakdown row to

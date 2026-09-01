@@ -735,8 +735,13 @@
   --text-lg--line-height: 26px;
   --text-xl: 22px;
   --text-xl--line-height: 28px;
-  --text-2xl: 26px;
-  --text-2xl--line-height: 32px;
+  /* 28/34 because that is what every page title in the direction is drawn at,
+     and eight pages had already reached it by spelling `text-[28px]` by hand
+     rather than by moving the step. The step moved instead: one scale value,
+     nine consumers, no arbitrary sizes left. `text-display` is its only
+     utility consumer. */
+  --text-2xl: 28px;
+  --text-2xl--line-height: 34px;
 
   /* Hierarchy comes from size and tracking, so the weight axis is two values
    * doing real work instead of four crowded together. 550 is the one emphasis
@@ -843,8 +848,11 @@
      read as set rather than as squeezed. The step keeps -0.02em for any sans
      consumer of text-2xl. */
   letter-spacing: -0.01em;
-  /* 500, and ZillaSlab-Medium.woff2 is the only cut this leaves in use. */
-  font-weight: 500;
+  /* The semibold step, which is 550 here. Written as the token rather than as a
+     number: the eight pages that spelled this header by hand asked for 600 and
+     rendered at 550 anyway, because the weight axis has two values and 600 is
+     not one of them. */
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
 @utility text-heading {
@@ -1685,6 +1693,68 @@ main {
    something back. */
 .otari-activity-table[data-scrolled="true"] .table__column[data-key="model"],
 .otari-activity-table[data-scrolled="true"] .table__cell[data-key="model"] {
+  border-right: 1px solid var(--color-control-border);
+}
+
+/* The organization members table. Same terms as the others (page ground,
+   rule-bounded overline header, faint separators), and the same 58px row the
+   Keys table takes, set by the two-line identity cell: a name over the address
+   and the model-access ceiling.
+
+   The identity lane is held while the rest scrolls, because every other lane on
+   this page is a fact *about* a person and is unreadable once the person has
+   slid off the left edge. It is 260px of the table, well under the third-width
+   ceiling the rule sets. There is no selection box on this table, so the
+   identity is the first lane and pins at 0. */
+.otari-members-table .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-members-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-members-table .otari-table .table__row,
+.otari-members-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-members-table .table__row .table__cell {
+  height: 58px;
+  padding-block: 0;
+}
+.otari-members-table .table__column[data-key="member"] {
+  width: 260px;
+  min-width: 260px;
+}
+.otari-members-table .table__column[data-key="role"] {
+  width: 140px;
+  min-width: 140px;
+}
+.otari-members-table .table__column[data-key="status"] {
+  width: 130px;
+  min-width: 130px;
+}
+.otari-members-table .table__column[data-key="workspaces"] {
+  min-width: 220px;
+}
+.otari-members-table .table__column[data-key="spend"] {
+  width: 120px;
+  min-width: 120px;
+}
+.otari-members-table .table__column[data-key="actions"] {
+  width: 200px;
+  min-width: 200px;
+}
+.otari-members-table .table__column[data-key="member"],
+.otari-members-table .table__cell[data-key="member"] {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-background);
+}
+/* One boundary, at the edge of the held lane, and only while it is holding
+   something back. */
+.otari-members-table[data-scrolled="true"] .table__column[data-key="member"],
+.otari-members-table[data-scrolled="true"] .table__cell[data-key="member"] {
   border-right: 1px solid var(--color-control-border);
 }
 

@@ -237,7 +237,7 @@ describe("OrganizationMembersPage", () => {
         name: /Remove Operator \(This is the last active owner/,
       }),
     ).toBeDisabled()
-    expect(within(owner).getByText("Active")).toBeInTheDocument()
+    expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("suspends a member rather than deleting them, and says so", async () => {
@@ -270,7 +270,7 @@ describe("OrganizationMembersPage", () => {
     // be an unconfirmed removal. The other direction has no subject: a
     // suspended membership is not listable, so no row exists to reactivate.
     expect(screen.queryByLabelText("Status for Analyst")).toBeNull()
-    expect(within(rowFor("Analyst")).getByText("Active")).toBeInTheDocument()
+    expect(within(rowFor("Analyst")).getByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("adds a member by address, into the workspaces that were ticked", async () => {

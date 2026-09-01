@@ -700,7 +700,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   return (
     <div className="flex flex-col gap-6">
       <header className="pb-1">
-        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+        <h1 className="text-display">
           {only
             ? (SERVICES.find((service) => service.key === only)?.label ??
               "Tools & Guardrails")

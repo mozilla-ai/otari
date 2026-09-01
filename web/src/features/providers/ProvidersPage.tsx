@@ -1050,9 +1050,7 @@ export function ProvidersPage() {
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-[620px]">
-          <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
-            Providers
-          </h1>
+          <h1 className="text-display">Providers</h1>
           <p className="mt-1 text-sm text-muted">
             Add provider API keys here to serve models without editing
             config.yml. Keys are encrypted at rest.
