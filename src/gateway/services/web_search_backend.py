@@ -335,11 +335,12 @@ class WebSearchBackend:
             span.set_attribute("tool.type", "otari_web_search")
             query = (arguments.get("query") or "").strip()
             span.set_attribute("web_search.query", query)
-            span.set_attribute("web_search.provider", ",".join(self._engines))
-            if self._base_url:
+            # What actually served the search, so one attribute answers the
+            # question: the licensed provider when this deployment configured
+            # one, and the SearXNG engine list only when a search reaches SearXNG.
+            span.set_attribute("web_search.provider", self._provider or ",".join(self._engines))
+            if self._base_url and not self._provider:
                 span.set_attribute("web_search.backend_url", self._base_url)
-            if self._provider:
-                span.set_attribute("web_search.backend_provider", self._provider)
             if not query:
                 span.set_status(trace.StatusCode.ERROR, "empty query")
                 return "[tool error] empty query"
@@ -384,8 +385,12 @@ class WebSearchBackend:
                 api_key=self._provider_api_key,
                 query=query,
                 # The same opaque bag the SearXNG path forwards as query params.
-                # Each provider whitelists the keys it understands.
-                options=self._provider_options,
+                # Each provider whitelists the keys it understands. The resolved
+                # ceiling leads it as the default: asking the provider for fewer
+                # hits than the deployment allows and then slicing to the same
+                # number is how a raised ``web_search_max_results`` used to have
+                # no effect. An explicit ``provider_options`` value still wins.
+                options={"max_results": self._max_results, **self._provider_options},
                 client=self._client,
                 timeout_s=self._search_timeout_s,
             )

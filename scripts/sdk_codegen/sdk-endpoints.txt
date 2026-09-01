@@ -314,3 +314,9 @@ GET /v1/workspaces/{workspace_id}/mcp-servers                             # oper
 POST /v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
 PATCH /v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
 DELETE /v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface
+# Web-search backend (otari#882): the SearXNG-shaped endpoint one gateway calls
+# on another, authenticated by a shared deployment token rather than an API key.
+# Its caller is a data-plane gateway, not an application, and no SDK holds that
+# token; an application reaches the same search through the otari_web_search
+# tool on a completion request.
+GET /v1/web-search/search                                                 # gateway-to-gateway

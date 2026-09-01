@@ -6393,6 +6393,68 @@
     {
       "item": [
         {
+          "name": "Web Search",
+          "request": {
+            "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "web-search",
+                "search"
+              ],
+              "query": [
+                {
+                  "description": "The search query.",
+                  "disabled": false,
+                  "key": "q",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "max_results",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "search_depth",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "topic",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "time_range",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "include_answer",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/web-search/search?q=&max_results=&search_depth=&topic=&time_range=&include_answer="
+            }
+          }
+        }
+      ],
+      "name": "web-search"
+    },
+    {
+      "item": [
+        {
           "name": "List Workspaces",
           "request": {
             "description": "List the workspaces the caller can see in their organization.",

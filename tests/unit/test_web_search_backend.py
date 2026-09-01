@@ -6,6 +6,7 @@ network access for trafilatura's per-URL fetches.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import patch
 
@@ -759,6 +760,47 @@ async def test_call_tool_emits_span_with_query_and_result_count(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_the_span_names_the_provider_that_served_the_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``web_search.provider`` answers what served the search, once.
+
+    It used to report the SearXNG engine list on a search that never touched
+    SearXNG, leaving a second attribute competing to answer the same question.
+    """
+    from opentelemetry import trace as otel_trace
+
+    import gateway.services.web_search_backend as wsb_module
+
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    wsb_module.tracer = provider.get_tracer(wsb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        _patched_async_client(
+            {("api.tavily.com", "/search"): httpx.Response(200, json={"results": []})},
+            monkeypatch,
+        )
+        async with WebSearchBackend(
+            base_url="http://searxng:8080",
+            provider="tavily",
+            provider_api_key="tvly-x",
+            extract_content=False,
+        ) as backend:
+            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        wsb_module.tracer = otel_trace.get_tracer(wsb_module.__name__)
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes is not None
+    assert span.attributes["web_search.provider"] == "tavily"
+    assert "web_search.backend_url" not in span.attributes
+
+
+@pytest.mark.asyncio
 async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """When the search backend is unreachable the span must record the exception
     and have an ERROR status."""
@@ -1044,6 +1086,40 @@ async def test_provider_failure_surfaces_as_unreachable(monkeypatch: pytest.Monk
     async with WebSearchBackend(provider="tavily", provider_api_key="tvly-x") as backend:
         with pytest.raises(WebSearchNotReachableError, match="tavily"):
             await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
+
+
+@pytest.mark.asyncio
+async def test_the_resolved_ceiling_is_what_the_provider_is_asked_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raised ``max_results`` used to change only the post-hoc slice, so a
+    deployment allowing 15 hits still got the provider's own default."""
+    transport = _patched_async_client(
+        {("api.tavily.com", "/search"): httpx.Response(200, json={"results": []})},
+        monkeypatch,
+    )
+    async with WebSearchBackend(
+        provider="tavily", provider_api_key="tvly-x", max_results=15, extract_content=False
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
+
+    assert json.loads(transport.captured[0].content)["max_results"] == 15
+
+
+@pytest.mark.asyncio
+async def test_provider_options_still_win_over_the_resolved_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {("api.tavily.com", "/search"): httpx.Response(200, json={"results": []})},
+        monkeypatch,
+    )
+    async with WebSearchBackend(
+        provider="tavily",
+        provider_api_key="tvly-x",
+        max_results=15,
+        provider_options={"max_results": 3},
+        extract_content=False,
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
+
+    assert json.loads(transport.captured[0].content)["max_results"] == 3
 
 
 def test_a_backend_with_no_way_to_search_is_refused_at_construction() -> None:

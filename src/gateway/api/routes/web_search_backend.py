@@ -23,6 +23,11 @@ someone self-hosts presents a credential of its own, and serving it here would
 put a deployment-owned credential's *use* behind a caller the managed-key
 boundary keeps it from ever holding. Nothing returned here is a credential; the
 response carries public search results.
+
+The query travels in the request target, as it does to a SearXNG container,
+because that is the contract ``WebSearchBackend`` speaks. A deployment whose
+access log records request targets therefore records search queries; a control
+plane that must not keep them turns that log off or redacts this path.
 """
 
 from __future__ import annotations
@@ -31,17 +36,22 @@ from hashlib import sha256
 from secrets import compare_digest
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config
 from gateway.core.config import GatewayConfig
+from gateway.inflight import track_request
+from gateway.log_config import logger
 from gateway.services.search_backend import get_search_client
+from gateway.services.web_search_backend import MAX_RESULTS_CAP, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 router = APIRouter(prefix="/v1/web-search", tags=["web-search"])
 
 ConfigDep = Annotated[GatewayConfig, Depends(get_config)]
+
+SEARCH_ENDPOINT = "/v1/web-search/search"
 
 
 class WebSearchBackendResult(BaseModel):
@@ -53,6 +63,13 @@ class WebSearchBackendResult(BaseModel):
     extracted_content: str | None = Field(
         default=None,
         description="The page's own text, when the provider returned it, so the caller can skip fetching the page.",
+    )
+    published_date: str | None = Field(
+        default=None,
+        description=(
+            "The provider's own recency string for the page, forwarded unparsed. Declared so a search "
+            "over this hop renders the same date an in-process one does."
+        ),
     )
 
 
@@ -83,10 +100,11 @@ def _authorize(config: GatewayConfig, presented: str | None) -> None:
 
 @router.get("/search", response_model=WebSearchBackendResponse, response_model_exclude_none=True)
 async def web_search(
+    request: Request,
     config: ConfigDep,
     q: Annotated[str, Query(min_length=1, description="The search query.")],
     x_gateway_token: Annotated[str | None, Header()] = None,
-    max_results: Annotated[int | None, Query(ge=1)] = None,
+    max_results: Annotated[int | None, Query(ge=1, le=MAX_RESULTS_CAP)] = None,
     search_depth: Annotated[str | None, Query(pattern="^(basic|advanced)$")] = None,
     topic: Annotated[str | None, Query(pattern="^(general|news|finance)$")] = None,
     time_range: Annotated[str | None, Query(pattern="^(day|week|month|year|d|w|m|y)$")] = None,
@@ -112,6 +130,14 @@ async def web_search(
             detail="No web-search provider is configured on this deployment",
         )
 
+    # Every gate has passed and the provider is about to be called, so the search
+    # is genuinely in flight from here. Registered for the same reason the direct
+    # search path registers: a paid call nobody can see running is a paid call
+    # nobody can see hanging. The entry is dropped by ``InFlightMiddleware``.
+    # There is no key or user to attribute it to; the caller is the deployment's
+    # own gateway, which reports its own usage.
+    track_request(request, endpoint=SEARCH_ENDPOINT, model=WEB_SEARCH_TOOL_NAME, provider=provider)
+
     options = {
         "max_results": max_results,
         "search_depth": search_depth,
@@ -128,9 +154,13 @@ async def web_search(
             client=get_search_client(),
         )
     except WebSearchProviderError as exc:
-        # The caller is told only that the upstream failed. The provider's status
-        # is on the chained error for a traceback to carry, and its body is never
-        # read: a provider's error text can echo back what was sent to it.
+        # Logged here because nothing else on this path does: the exception only
+        # becomes an ``HTTPException``'s ``__cause__``, which FastAPI renders and
+        # discards, leaving an operator debugging a 502 with nothing. The message
+        # names the provider and the upstream status and never its body, which
+        # can echo back what was sent to it.
+        logger.error("Web search backend call to '%s' failed: %s", provider, exc)
+        # The caller is told only that the upstream failed.
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"The {provider} search provider could not serve this query",

@@ -141,9 +141,11 @@ hosted shape: the control plane holds the key and runs the query, and its
 own control plane, and that token is what the route recognizes.
 
 Set `web_search_backend_token` on the serving process to the token its own
-gateway presents. Without it the route is not mounted at all, since it spends
-the deployment's search quota and a control plane is reachable from the
-internet. A gateway someone else self-hosts presents a credential of its own and
+gateway presents, which is that gateway's `OTARI_AI_TOKEN`. The two are one
+secret, so rotating the platform token stops web search for that data plane
+until both sides are updated. Without it the route is not mounted at all, since
+it spends the deployment's search quota and a control plane is reachable from
+the internet. A gateway someone else self-hosts presents a credential of its own and
 is refused, deliberately: that is the same boundary that keeps a deployment's
 provider keys off a foreign process. Such a gateway configures its own
 `web_search_provider` or `web_search_url` instead, and the per-workspace policy

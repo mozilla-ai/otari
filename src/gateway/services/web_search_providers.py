@@ -44,9 +44,10 @@ BRAVE_PROVIDER = "brave"
 _TAVILY_ENDPOINT = "https://api.tavily.com/search"
 _BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
-# Brave documents 20 as the ceiling on ``count``; asking for more is an error
-# rather than a clamp, so the request is clamped here.
-_BRAVE_MAX_COUNT = 20
+# Both providers document 20 as the ceiling on a page of results, and both treat
+# more as an error rather than clamping, so a request is clamped here. ``options``
+# is the opaque ``provider_options`` bag, which can name any number at all.
+_MAX_RESULTS_CEILING = 20
 _BRAVE_DEFAULT_COUNT = 10
 
 # Brave spells recency as ``freshness``. Both the single and the plural forms of
@@ -64,6 +65,10 @@ _BRAVE_FRESHNESS = {
     "year": "py",
 }
 
+# What Tavily serves when a request names no ``max_results``, kept here so the
+# bound below has the same shape for both providers.
+_TAVILY_DEFAULT_MAX_RESULTS = 5
+
 _DEFAULT_TIMEOUT_S = 15.0
 
 # Tavily request fields a ``provider_options`` bag may set. Anything else is
@@ -71,6 +76,8 @@ _DEFAULT_TIMEOUT_S = 15.0
 # forwarding it wholesale would let a workspace set Tavily request fields the
 # deployment never chose. Tavily takes ``time_range`` by that name; Brave spells
 # the same knob ``freshness`` and is mapped in :data:`_BRAVE_FRESHNESS`.
+# ``max_results`` is listed but not forwarded from here: it has a ceiling and a
+# caller-supplied default, and :func:`_bounded_max_results` applies both.
 _TAVILY_OPTION_KEYS = ("max_results", "search_depth", "topic", "time_range", "include_answer")
 
 
@@ -108,6 +115,19 @@ async def provider_search(
     raise ValueError(msg)
 
 
+def _bounded_max_results(options: Mapping[str, Any], default: int) -> int:
+    """The number of hits to ask the provider for, bounded at what it will serve.
+
+    ``default`` is the caller's own resolved ceiling, so a deployment that raised
+    ``web_search_max_results`` asks the provider for that many instead of taking
+    the provider's default and being trimmed to fewer by a post-hoc slice.
+    """
+    requested = options.get("max_results")
+    if isinstance(requested, int) and not isinstance(requested, bool) and requested > 0:
+        return min(requested, _MAX_RESULTS_CEILING)
+    return min(max(default, 1), _MAX_RESULTS_CEILING)
+
+
 async def _search_tavily(
     api_key: str,
     query: str,
@@ -116,10 +136,17 @@ async def _search_tavily(
     timeout_s: float,
 ) -> list[dict[str, Any]]:
     """Tavily's ``/search``, which returns extracted page text alongside snippets."""
-    body: dict[str, Any] = {"query": query, "include_raw_content": True}
+    body: dict[str, Any] = {
+        "query": query,
+        "include_raw_content": True,
+        # Sent always, and bounded, rather than forwarded from ``options`` like
+        # the keys below: it is the one option with a ceiling of its own and a
+        # default the caller wants to override.
+        "max_results": _bounded_max_results(options, _TAVILY_DEFAULT_MAX_RESULTS),
+    }
     for key in _TAVILY_OPTION_KEYS:
         value = options.get(key)
-        if value is not None:
+        if key != "max_results" and value is not None:
             body[key] = value
 
     payload = await _request(
@@ -168,12 +195,7 @@ async def _search_brave(
     ``extracted_content`` is deliberately left unset, so the caller fetches and
     extracts each page itself exactly as it does behind SearXNG.
     """
-    count = _BRAVE_DEFAULT_COUNT
-    max_results = options.get("max_results")
-    if isinstance(max_results, int) and max_results > 0:
-        count = min(max_results, _BRAVE_MAX_COUNT)
-
-    params: dict[str, Any] = {"q": query, "count": count}
+    params: dict[str, Any] = {"q": query, "count": _bounded_max_results(options, _BRAVE_DEFAULT_COUNT)}
     freshness = _BRAVE_FRESHNESS.get(str(options.get("time_range") or "").strip().lower())
     if freshness is not None:
         params["freshness"] = freshness

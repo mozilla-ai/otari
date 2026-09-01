@@ -12160,6 +12160,71 @@
         "title": "WebAuthnCredentialsPublic",
         "type": "object"
       },
+      "WebSearchBackendResponse": {
+        "description": "A SearXNG-compatible ``/search`` body.",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/WebSearchBackendResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "WebSearchBackendResponse",
+        "type": "object"
+      },
+      "WebSearchBackendResult": {
+        "description": "One hit, in the shape ``WebSearchBackend`` reads off a SearXNG response.",
+        "properties": {
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "extracted_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page's own text, when the provider returned it, so the caller can skip fetching the page.",
+            "title": "Extracted Content"
+          },
+          "published_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's own recency string for the page, forwarded unparsed. Declared so a search over this hop renders the same date an in-process one does.",
+            "title": "Published Date"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "WebSearchBackendResult",
+        "type": "object"
+      },
       "WorkspaceActivationPublic": {
         "description": "Where a workspace stands on its first successful request.",
         "properties": {
@@ -24887,6 +24952,161 @@
         "summary": "Get User Usage",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/v1/web-search/search": {
+      "get": {
+        "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
+        "operationId": "web_search_v1_web_search_search_get",
+        "parameters": [
+          {
+            "description": "The search query.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "The search query.",
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_results",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 20,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Results"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search_depth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(basic|advanced)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search Depth"
+            }
+          },
+          {
+            "in": "query",
+            "name": "topic",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(general|news|finance)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Topic"
+            }
+          },
+          {
+            "in": "query",
+            "name": "time_range",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(day|week|month|year|d|w|m|y)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Time Range"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_answer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Include Answer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-gateway-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Gateway-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSearchBackendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Web Search",
+        "tags": [
+          "web-search"
         ]
       }
     },

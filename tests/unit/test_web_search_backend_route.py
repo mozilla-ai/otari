@@ -20,6 +20,7 @@ from gateway.api.deps import reset_config
 from gateway.api.routes.web_search_backend import _authorize
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
+from gateway.inflight import InFlightRegistry
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 
@@ -30,6 +31,14 @@ TAVILY_OK = {
     "results": [
         {"url": "https://example.com/a", "title": "A", "content": "snippet a", "raw_content": "page a"},
     ]
+}
+
+BRAVE_DATED = {
+    "web": {
+        "results": [
+            {"url": "https://a.example", "title": "A", "description": "a", "page_age": "2026-08-30T00:00:00"},
+        ]
+    }
 }
 
 
@@ -148,6 +157,84 @@ def test_forwards_only_the_provider_options_it_declares(tmp_path: Path, upstream
     assert "format" not in body
 
 
+def test_the_recency_signal_survives_the_hop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undeclared here, Pydantic would drop it, and a search over this hop would
+    render without the date an in-process one renders with."""
+    recorder = _Recorder(httpx.Response(200, json=BRAVE_DATED))
+    monkeypatch.setattr(
+        "gateway.api.routes.web_search_backend.get_search_client",
+        lambda: httpx.AsyncClient(transport=recorder),
+    )
+    with _client(
+        tmp_path,
+        web_search_provider="brave",
+        web_search_provider_api_key="brv-x",
+        web_search_backend_token=BACKEND_TOKEN,
+    ) as client:
+        response = client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["published_date"] == "2026-08-30T00:00:00"
+
+
+def test_max_results_is_bounded_by_the_server(tmp_path: Path, upstream: _Recorder) -> None:
+    """The caller is another gateway forwarding an opaque ``provider_options``
+    bag, so the ceiling on upstream work and response size is enforced here."""
+    with _configured(tmp_path) as client:
+        response = client.get("/v1/web-search/search", params={"q": "x", "max_results": 500}, headers=AUTH)
+
+    assert response.status_code == 422
+    assert upstream.requests == []
+
+
+def test_a_search_in_progress_is_registered_in_flight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A paid call nobody can see running is a paid call nobody can see hanging.
+
+    Read from inside the provider call, which is the only moment the entry
+    exists: ``InFlightMiddleware`` drops it once the response is sent.
+    """
+    in_flight: list[tuple[str, str | None]] = []
+    registry: list[InFlightRegistry] = []
+
+    class _Watcher(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            in_flight.extend((entry.endpoint, entry.provider) for entry in registry[0].snapshot())
+            return httpx.Response(200, json=TAVILY_OK)
+
+    monkeypatch.setattr(
+        "gateway.api.routes.web_search_backend.get_search_client",
+        lambda: httpx.AsyncClient(transport=_Watcher()),
+    )
+    with _configured(tmp_path) as client:
+        registry.append(client.app.state.inflight)  # type: ignore[attr-defined]
+        assert client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 200
+
+    assert in_flight == [("/v1/web-search/search", "tavily")]
+
+
+def test_an_upstream_failure_is_logged_for_the_operator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nothing else on this path logs: the provider error only becomes an
+    ``HTTPException``'s ``__cause__``, which FastAPI renders and discards."""
+    recorder = _Recorder(httpx.Response(401, text="invalid api key tvly-secret"))
+    monkeypatch.setattr(
+        "gateway.api.routes.web_search_backend.get_search_client",
+        lambda: httpx.AsyncClient(transport=recorder),
+    )
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        with _configured(tmp_path) as client:
+            assert client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 502
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert "tavily" in caplog.text
+    assert "401" in caplog.text
+    assert "tvly-secret" not in caplog.text
+
+
 def test_upstream_failure_does_not_leak_the_provider_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = _Recorder(httpx.Response(401, text="invalid api key tvly-secret"))
     monkeypatch.setattr(
@@ -215,6 +302,19 @@ def test_a_half_configured_provider_is_warned_about(
         **overrides,
     )
     assert expected in _warnings_from(config, caplog)
+
+
+def test_a_backend_token_with_no_provider_is_warned_about(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The token gates a route that is not mounted without a provider to serve,
+    so on its own it silently does nothing."""
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'x.db'}",
+        master_key="sk-test-master",
+        web_search_backend_token=BACKEND_TOKEN,
+    )
+    assert "web_search_backend_token is set but no web-search provider" in _warnings_from(config, caplog)
 
 
 @pytest.mark.parametrize(

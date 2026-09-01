@@ -231,3 +231,36 @@ async def test_an_upstream_error_body_never_reaches_the_message() -> None:
     assert "401" in str(raised.value)
     assert "tvly-secret" not in str(raised.value)
     assert "acme" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_tavily_clamps_max_results_to_the_documented_ceiling() -> None:
+    """``options`` is the opaque ``provider_options`` bag and can name any number,
+    which Tavily answers with a 400 rather than a clamp."""
+    client, recorder = _client(httpx.Response(200, json=TAVILY_OK))
+    async with client:
+        await provider_search(
+            provider="tavily", api_key="tvly-x", query="q", options={"max_results": 500}, client=client
+        )
+
+    assert json.loads(recorder.requests[0].content)["max_results"] == 20
+
+
+@pytest.mark.parametrize("provider", ["tavily", "brave"])
+@pytest.mark.asyncio
+async def test_a_caller_ceiling_reaches_the_provider(provider: str) -> None:
+    """``WebSearchBackend`` passes its resolved ceiling as the default ``max_results``.
+
+    Without it the provider serves its own default and the ceiling is only a
+    post-hoc slice, so raising ``web_search_max_results`` returned no more hits.
+    """
+    payload = TAVILY_OK if provider == "tavily" else BRAVE_OK
+    client, recorder = _client(httpx.Response(200, json=payload))
+    async with client:
+        await provider_search(
+            provider=provider, api_key="k", query="q", options={"max_results": 15}, client=client
+        )
+
+    request = recorder.requests[0]
+    asked = json.loads(request.content)["max_results"] if provider == "tavily" else request.url.params["count"]
+    assert int(asked) == 15

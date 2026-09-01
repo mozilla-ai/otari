@@ -33,7 +33,19 @@ def generate_openapi_spec() -> dict[str, object]:
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         database_url = f"sqlite:///{Path(tmpdir) / 'openapi.db'}"
-        config = GatewayConfig(database_url=database_url, bootstrap_api_key=False)
+        config = GatewayConfig(
+            database_url=database_url,
+            bootstrap_api_key=False,
+            # Placeholders, so the conditionally mounted web-search backend route
+            # is in the published contract. It is mounted only where a provider
+            # and a backend token are both configured, and the spec has to
+            # describe every route this app can serve, not only the ones a bare
+            # default config happens to reach. Nothing is called during
+            # generation; these values are never used to authenticate anything.
+            web_search_provider="tavily",
+            web_search_provider_api_key="openapi-generation-placeholder",
+            web_search_backend_token="openapi-generation-placeholder",
+        )
         app = create_app(config)
         return cast(dict[str, object], app.openapi())
 
