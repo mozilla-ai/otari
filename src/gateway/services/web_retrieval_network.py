@@ -501,7 +501,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             self._closed = True
             pools = tuple(entry.pool for entry in self._pools.values())
             self._pools.clear()
-        await asyncio.gather(*(pool.aclose() for pool in pools))
+        await asyncio.gather(*(pool.aclose() for pool in pools), return_exceptions=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,15 +516,6 @@ async def _iter_bounded_decoded_chunks(
     chunk_size: int,
 ) -> AsyncIterator[bytes]:
     """Decode a streamed body without allowing one decoder call to inflate freely."""
-    try:
-        loaded_content = response.content
-    except httpx.ResponseNotRead:
-        loaded_content = None
-    if loaded_content is not None:
-        for offset in range(0, len(loaded_content), chunk_size):
-            yield loaded_content[offset : offset + chunk_size]
-        return
-
     encodings = [
         encoding.strip().lower()
         for value in response.headers.get_list("content-encoding")
@@ -579,6 +570,8 @@ async def read_capped_decoded_body(
         raise ValueError("max_bytes cannot be negative")
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
+    if response.is_stream_consumed:
+        raise httpx.StreamConsumed()
 
     decode_chunk_size = min(chunk_size, _MAX_DECODE_CHUNK_BYTES)
 
