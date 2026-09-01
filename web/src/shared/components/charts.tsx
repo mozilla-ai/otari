@@ -20,6 +20,15 @@ import {
 
 const BRAND = "var(--color-primary)"
 
+// Axis ticks are SVG `<text>`, so their size comes from a class rather than a
+// `fontSize` number: `text-xs` is the type scale's 12px floor and nothing below
+// it is legible. The fill stays a prop, which recharts writes as a presentation
+// attribute.
+const AXIS_TICK = {
+  className: "text-xs",
+  fill: "var(--color-text-muted)",
+} as const
+
 // One series of a (possibly stacked) trend chart. `color` is a CSS color,
 // normally one of the fixed `--color-chart-cat-*` slots or a step of
 // `--color-chart-ramp-*` (both validated per theme in globals.css), or a
@@ -275,7 +284,7 @@ export function TrendChart({
             interval="preserveStartEnd"
             minTickGap={40}
             tickFormatter={formatXTick}
-            tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}
+            tick={AXIS_TICK}
           />
           {showYAxis ? (
             <YAxis
@@ -283,7 +292,7 @@ export function TrendChart({
               tickLine={false}
               axisLine={false}
               tickFormatter={(value: number) => formatValue(value)}
-              tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}
+              tick={AXIS_TICK}
             />
           ) : null}
           <Tooltip

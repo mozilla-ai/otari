@@ -18,6 +18,32 @@ const STACK_SERIES: SeriesDef[] = [
 ]
 
 describe("TrendChart", () => {
+  it("sets axis ticks from the type scale rather than a raw px size", () => {
+    const { container } = render(
+      <TrendChart
+        data={[
+          { x: "2025-07-19T00:00:00Z", cost: 400 },
+          { x: "2025-07-20T00:00:00Z", cost: 840.5 },
+        ]}
+        series={COST_SERIES}
+        formatValue={(v: number) => `$${v}`}
+        ariaLabel="cost per day"
+        showYAxis
+      />,
+    )
+
+    const ticks = container.querySelectorAll(
+      "text.recharts-cartesian-axis-tick-value",
+    )
+    expect(ticks.length).toBeGreaterThan(0)
+    for (const tick of ticks) {
+      // `text-xs` is the scale's 12px floor; a `font-size` attribute here is
+      // the raw value the class replaced.
+      expect(tick.classList.contains("text-xs")).toBe(true)
+      expect(tick.getAttribute("font-size")).toBeNull()
+    }
+  })
+
   it("renders a single-series recharts bar chart with one bar per point", () => {
     const { container } = render(
       <TrendChart

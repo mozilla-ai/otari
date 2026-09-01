@@ -529,7 +529,7 @@ function InfoTooltip({
         type="button"
         aria-label={label}
         aria-describedby={tipId}
-        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
+        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-xs leading-none ${
           tone === "warning"
             ? "border-warning text-warning"
             : "border-border text-muted hover:border-accent hover:text-accent"

@@ -261,7 +261,7 @@ function BudgetForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">{title}</div>
+        <h2 className="text-title">{title}</h2>
         <ErrorBanner error={error} />
         <Field
           label="Name (optional)"
@@ -390,10 +390,18 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
       <table className="w-full border-collapse text-xs">
         <thead className="text-left text-muted">
           <tr>
-            <th className="py-1.5 pr-4 font-medium">User</th>
-            <th className="py-1.5 pr-4 font-medium">Spend cleared</th>
-            <th className="py-1.5 pr-4 font-medium">Reset at</th>
-            <th className="py-1.5 font-medium">Next reset</th>
+            <th scope="col" className="py-1.5 pr-4 font-medium">
+              User
+            </th>
+            <th scope="col" className="py-1.5 pr-4 font-medium">
+              Spend cleared
+            </th>
+            <th scope="col" className="py-1.5 pr-4 font-medium">
+              Reset at
+            </th>
+            <th scope="col" className="py-1.5 font-medium">
+              Next reset
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -598,7 +606,7 @@ function DeploymentBudgetsPage() {
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
-              <code className="text-[11px] text-muted" title={b.budget_id}>
+              <code className="text-caption" title={b.budget_id}>
                 {shortId(b.budget_id)}
               </code>
             </CopyableValue>

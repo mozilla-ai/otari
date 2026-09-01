@@ -857,13 +857,17 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                 <td className="px-3 py-2 tabular-nums">
                   {attempt.attempt_position ?? "?"}
                 </td>
-                <td className="px-3 py-2 break-all text-foreground">
-                  {pricingSelectorOf(attempt)}
-                  {attempt.id === entry.id ? (
-                    <span className="ml-2 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted">
-                      this row
+                <td className="px-3 py-2 text-foreground">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="break-all">
+                      {pricingSelectorOf(attempt)}
                     </span>
-                  ) : null}
+                    {attempt.id === entry.id ? (
+                      <span className="rounded-full border border-border px-1.5 py-0.5 text-overline">
+                        this row
+                      </span>
+                    ) : null}
+                  </span>
                 </td>
                 <td className="px-3 py-2">
                   {selectionReasonLabel(attempt.selection_reason) ?? "—"}
@@ -1923,7 +1927,7 @@ export function ActivityPage() {
                   the count inside is a summary of it. */}
               <span
                 role="img"
-                className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-1.5 py-0.5 text-[11px] font-medium text-primary-subtle-foreground"
+                className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-1.5 py-0.5 text-xs font-medium text-primary-subtle-foreground"
                 title={detail}
                 aria-label={`Gateway tools: ${detail}`}
               >
