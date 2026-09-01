@@ -205,8 +205,11 @@ class ExplainResponse(BaseModel):
     )
 
 
-def _validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
+def validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
     """Parse a spec body into a ``PolicySpec``, or raise a 400 naming the field.
+
+    Public because the tenant-scoped router needs the same parse before it can
+    check a policy's targets against what its organization may reach.
 
     The pydantic error is surfaced rather than flattened to a generic message: the
     schema's own messages explain the rules (one `default`, last; no `when` on a
@@ -431,13 +434,20 @@ async def list_policies(
     )
 
 
-@router.post("")
-async def set_policy(
+async def upsert_policy_in_workspace(
     request: PolicyRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    workspace_id: uuid.UUID,
 ) -> PolicyResponse:
-    """Create or update a stored policy in one workspace, optionally for one user.
+    """Create or update a stored policy in an already-resolved workspace.
+
+    ``workspace_id`` is a parameter rather than read off ``request`` because the
+    two routers that reach this resolve it differently and must keep doing so:
+    the operator's takes the deployment's default when none is named, while the
+    tenant-scoped one resolves it inside the caller's own organization
+    (``organization_routing``, otari-ai#1969).
 
     The spec is validated here and stored as given, so a row can never contain a
     body this build would refuse at load. The cache is refreshed twice: once before
@@ -453,8 +463,7 @@ async def set_policy(
     """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
-    workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
-    spec = _validated_spec(request.name, request.spec)
+    spec = validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
     _validate_write(config, request.name, spec, request.user_id)
     await _validate_router_pricing(config, db, spec, workspace_id)
@@ -546,28 +555,41 @@ async def set_policy(
     return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic)
 
 
-@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_policy(
-    name: str,
+@router.post("")
+async def set_policy(
+    request: PolicyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    user_id: Annotated[
-        str | None,
-        Query(description="Delete the policy scoped to this user. Omit to delete the workspace-wide one."),
-    ] = None,
-    workspace_id: Annotated[
-        uuid.UUID | None,
-        Query(description="Delete the policy in this workspace. Omit for the deployment's default workspace."),
-    ] = None,
+) -> PolicyResponse:
+    """Create or update a stored policy in one workspace, optionally for one user.
+
+    Omitting ``workspace_id`` means the deployment's default workspace, which is
+    where an operator acting deployment-wide writes.
+    """
+    return await upsert_policy_in_workspace(
+        request,
+        db,
+        config,
+        workspace_id=await resolve_managed_workspace_id(db, request.workspace_id),
+    )
+
+
+async def delete_policy_in_workspace(
+    name: str,
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
 ) -> None:
-    """Delete a stored policy in one scope.
+    """Delete a stored policy in one scope of an already-resolved workspace.
 
     Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
     deleting one workspace's policy must not touch another's, deleting the
     workspace-wide policy must not take a user's override with it, and deleting an
     override must leave the workspace-wide one serving everyone else.
     """
-    target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
+    target_workspace_id = workspace_id
     policy = (
         await db.execute(
             select(RoutingPolicy).where(
@@ -592,6 +614,30 @@ async def delete_policy(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
         ) from None
     await _refresh_quietly(db, name)
+
+
+@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_policy(
+    name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    user_id: Annotated[
+        str | None,
+        Query(description="Delete the policy scoped to this user. Omit to delete the workspace-wide one."),
+    ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Delete the policy in this workspace. Omit for the deployment's default workspace."),
+    ] = None,
+) -> None:
+    """Delete a stored policy in one scope."""
+    await delete_policy_in_workspace(
+        name,
+        db,
+        config,
+        workspace_id=await resolve_managed_workspace_id(db, workspace_id),
+        user_id=user_id,
+    )
 
 
 @router.post("/explain")
@@ -622,7 +668,7 @@ async def explain_policy(
         # normal editing flow: the operator is looking at policy "fast" and wants to
         # know what their unsaved edit would do, with the name kept for the label.
         name = request.name or "(draft)"
-        spec = _validated_spec(name, request.spec)
+        spec = validated_spec(name, request.spec)
     else:
         assert request.name is not None
         name = request.name

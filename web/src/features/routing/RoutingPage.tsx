@@ -9,17 +9,22 @@ import type {
   RoutingPolicyResponse,
 } from "@/client"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
-import { isDeploymentOperator } from "@/features/organization/roles"
+import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import {
   useAliases,
   useCreateAlias,
+  useCreateOrganizationAlias,
   useDeleteAlias,
+  useDeleteOrganizationAlias,
+  useDeleteOrganizationRoutingPolicy,
   useDeleteRoutingPolicy,
+  useOrganizationAliases,
   useOrganizationContext,
   useOrganizationRoutingPolicies,
   useRoutingPolicies,
+  useSetOrganizationRoutingPolicy,
   useSetRoutingPolicy,
   useToolSettings,
   useUsers,
@@ -34,6 +39,7 @@ import {
   PageHeader,
 } from "@/shared/components/ui"
 import { useUrlValue } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /** A row on this page: either a routing policy or a stored/config alias.
  *
@@ -397,14 +403,27 @@ function ModeToggle({
 function PolicyForm({
   existing,
   initialTarget = "",
+  workspaceId,
   onClose,
 }: {
   existing: RoutingRow | null
   initialTarget?: string
+  /**
+   * The workspace a tenant admin's write lands in, or null for an operator.
+   *
+   * Null is the deployment-wide surface, which defaults the workspace itself;
+   * a string is the tenant-scoped one, which requires it named and refuses a
+   * user scope. Both mutation pairs are always created, as hooks must be, and
+   * only the pair this says is ever mutated.
+   */
+  workspaceId: string | null
   onClose: () => void
 }) {
   const save = useSetRoutingPolicy()
   const saveAlias = useCreateAlias()
+  const saveOrgPolicy = useSetOrganizationRoutingPolicy()
+  const saveOrgAlias = useCreateOrganizationAlias()
+  const tenantScoped = workspaceId !== null
   const editing = existing !== null
   // Editing an alias writes back through the alias API: it is still a row in
   // model_aliases, and silently rewriting it as a policy would leave the original
@@ -600,8 +619,31 @@ function PolicyForm({
     if (!canSubmit || outgrewAlias) return
     const scope = userId === null ? null : userId.trim()
     if (editingAlias) {
+      if (workspaceId !== null) {
+        saveOrgAlias.mutate(
+          {
+            name: name.trim(),
+            target: effectiveTarget.trim(),
+            workspace_id: workspaceId,
+          },
+          { onSuccess: onClose },
+        )
+        return
+      }
       saveAlias.mutate(
         { name: name.trim(), target: effectiveTarget.trim(), user_id: scope },
+        { onSuccess: onClose },
+      )
+      return
+    }
+    if (workspaceId !== null) {
+      saveOrgPolicy.mutate(
+        {
+          name: name.trim(),
+          spec,
+          workspace_id: workspaceId,
+          ...(renaming ? { rename_from: previousName } : {}),
+        },
         { onSuccess: onClose },
       )
       return
@@ -637,7 +679,14 @@ function PolicyForm({
               "New routing policy"
             )}
           </h2>
-          <ErrorBanner error={save.error ?? saveAlias.error} />
+          <ErrorBanner
+            error={
+              save.error ??
+              saveAlias.error ??
+              saveOrgPolicy.error ??
+              saveOrgAlias.error
+            }
+          />
 
           <div className="grid gap-4 sm:grid-cols-2">
             {editingAlias ? (
@@ -712,6 +761,13 @@ function PolicyForm({
             <p className="text-caption">
               Who this applies to is the other half of the key. It cannot be
               changed here: delete and recreate to move it between scopes.
+            </p>
+          ) : tenantScoped ? (
+            // Withheld rather than disabled: a user id is a deployment-wide
+            // identifier, so the tenant-scoped writer refuses one outright and
+            // an organization's entries are workspace-wide.
+            <p className="text-xs text-muted">
+              This applies to everyone in the selected workspace.
             </p>
           ) : (
             <ScopePicker userId={userId} onChange={setUserId} />
@@ -1235,12 +1291,10 @@ export function RoutingPage() {
   // created. Scope this when resolution is scoped, not before.
   //
   // Which list is asked depends on who is signed in (otari-ai#1942): an
-  // operator reads the deployment-wide management view they edit from, and
-  // anyone else reads the tenant-scoped `/v1/organizations/me/routing-policies`
-  // read-only. The member read waits for the context to settle rather than
-  // taking "not yet an operator" as "member", so an operator's page does not
-  // fire a read it is about to drop. Aliases have no tenant-scoped sibling yet,
-  // so a member's table lists policies alone.
+  // operator reads the deployment-wide management view, and anyone else reads
+  // the tenant-scoped `/v1/organizations/me/*` pair. Both reads wait for the
+  // context to settle rather than taking "not yet an operator" as "member", so
+  // an operator's page does not fire a read it is about to drop.
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
   const isContextSettled =
@@ -1250,8 +1304,29 @@ export function RoutingPage() {
     isContextSettled && !isOperator,
   )
   const aliases = useAliases(isOperator)
+  const memberAliases = useOrganizationAliases(isContextSettled && !isOperator)
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
+  const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
+  const deleteOrgAlias = useDeleteOrganizationAlias()
+  // Where a tenant admin's write lands, and null for an operator, who writes
+  // deployment-wide. The tenant surface requires the workspace named, so an
+  // admin who belongs to none has nowhere to write and is shown the read-only
+  // page: the switcher is seeded from their own memberships, not the
+  // organization's whole list (otari-ai#1969).
+  const { selected: selectedWorkspace } = useSelectedWorkspace()
+  const writeWorkspaceId = isOperator
+    ? null
+    : (selectedWorkspace?.workspace_id ?? null)
+  const canEdit =
+    isOperator || (canManage(organization.data) && writeWorkspaceId !== null)
+  // An admin's list spans every workspace of the organization, not just the
+  // selected one, so a write to an existing row goes back to the workspace that
+  // row lives in (`rowWorkspace` below, and the Edit form's `workspaceId`).
+  // Using the selection would create a second policy of the same name in the
+  // selected workspace and leave the edited one untouched. Written inline at
+  // both sites rather than as a helper, so the columns memo keeps depending on
+  // two stable values instead of a function rebuilt every render.
   // A deep link may pre-fill the add form with ?target=provider:model.
   const initialTarget = useUrlValue("target")
   const [adding, setAdding] = useState(initialTarget !== "")
@@ -1265,7 +1340,7 @@ export function RoutingPage() {
   // initializer would drop an operator's deep link, since `isOperator` is still
   // false at the moment it runs. A member arriving on that link gets the
   // read-only empty state instead of a form whose only outcome is a refusal.
-  const isAdding = adding && isOperator
+  const isAdding = adding && canEdit
 
   // Aliases and policies are listed together: an alias is the one-target case,
   // and this page is the only place either is managed.
@@ -1282,7 +1357,7 @@ export function RoutingPage() {
         kind: "policy" as const,
       }),
     ),
-    ...(isOperator ? (aliases.data ?? []) : []).map(aliasAsRow),
+    ...((isOperator ? aliases.data : memberAliases.data) ?? []).map(aliasAsRow),
   ].sort(
     (a, b) =>
       a.name.localeCompare(b.name) ||
@@ -1294,7 +1369,7 @@ export function RoutingPage() {
     !isContextSettled ||
     (isOperator
       ? policies.isLoading || aliases.isLoading
-      : memberPolicies.isLoading)
+      : memberPolicies.isLoading || memberAliases.isLoading)
 
   // Stable so DataTable's row cache holds; see its docstring.
   const renderDetail = useCallback(
@@ -1387,7 +1462,7 @@ export function RoutingPage() {
     ]
     // No actions column for a caller who cannot act: every affordance in it is
     // either a write or the Examples panel, whose read is operator-only.
-    if (!isOperator) return base
+    if (!canEdit) return base
     base.push({
       id: "actions",
       header: "",
@@ -1402,19 +1477,22 @@ export function RoutingPage() {
         // Edit and Delete.
         // Only for a backend that learns: a weighted policy has nothing to teach,
         // so offering Examples on one would promise a screen that cannot help it.
-        const readiness = routerBackendOf(policy.spec) === KNN_BACKEND && (
-          <Button
-            size="sm"
-            variant="outline"
-            onPress={() =>
-              setExpanded((current) =>
-                current === rowKeyOf(policy) ? null : rowKeyOf(policy),
-              )
-            }
-          >
-            {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-          </Button>
-        )
+        // Operator-only within an actions column an admin now also gets: the
+        // panel reads `/v1/routing/status`, which is deployment-wide.
+        const readiness = isOperator &&
+          routerBackendOf(policy.spec) === KNN_BACKEND && (
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={() =>
+                setExpanded((current) =>
+                  current === rowKeyOf(policy) ? null : rowKeyOf(policy),
+                )
+              }
+            >
+              {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
+            </Button>
+          )
         return policy.source === "config" ? (
           <div className="flex items-center justify-end gap-2">
             {readiness}
@@ -1446,18 +1524,34 @@ export function RoutingPage() {
             )}
             <ConfirmButton
               confirmLabel="Confirm"
-              isPending={deletePolicy.isPending || deleteAlias.isPending}
-              onConfirm={() =>
-                policy.kind === "alias"
-                  ? deleteAlias.mutate({
-                      name: policy.name,
-                      userId: policy.user_id,
-                    })
-                  : deletePolicy.mutate({
-                      name: policy.name,
-                      userId: policy.user_id,
-                    })
+              isPending={
+                deletePolicy.isPending ||
+                deleteAlias.isPending ||
+                deleteOrgPolicy.isPending ||
+                deleteOrgAlias.isPending
               }
+              onConfirm={() => {
+                // The tenant surface names the workspace and has no user scope;
+                // the deployment-wide one defaults the workspace and keeps it.
+                const rowWorkspace = isOperator
+                  ? null
+                  : (policy.workspace_id ?? writeWorkspaceId)
+                if (rowWorkspace !== null) {
+                  const scoped = {
+                    name: policy.name,
+                    workspaceId: rowWorkspace,
+                  }
+                  if (policy.kind === "alias") deleteOrgAlias.mutate(scoped)
+                  else deleteOrgPolicy.mutate(scoped)
+                  return
+                }
+                const deployment = {
+                  name: policy.name,
+                  userId: policy.user_id,
+                }
+                if (policy.kind === "alias") deleteAlias.mutate(deployment)
+                else deletePolicy.mutate(deployment)
+              }}
             >
               Delete
             </ConfirmButton>
@@ -1466,7 +1560,16 @@ export function RoutingPage() {
       },
     })
     return base
-  }, [deletePolicy, deleteAlias, expanded, isOperator])
+  }, [
+    canEdit,
+    deleteAlias,
+    deleteOrgAlias,
+    deleteOrgPolicy,
+    deletePolicy,
+    expanded,
+    isOperator,
+    writeWorkspaceId,
+  ])
 
   return (
     <div className="flex flex-col gap-6">
@@ -1475,10 +1578,12 @@ export function RoutingPage() {
         description={
           isOperator
             ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
-            : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the policies in force in your workspaces; a deployment operator manages them."
+            : canEdit
+              ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
+              : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."
         }
         action={
-          !isOperator || isAdding || editing !== null ? undefined : (
+          !canEdit || isAdding || editing !== null ? undefined : (
             <Button
               variant="primary"
               onPress={() => {
@@ -1497,8 +1602,11 @@ export function RoutingPage() {
           policies.error ??
           memberPolicies.error ??
           aliases.error ??
+          memberAliases.error ??
           deletePolicy.error ??
-          deleteAlias.error
+          deleteAlias.error ??
+          deleteOrgPolicy.error ??
+          deleteOrgAlias.error
         }
       />
 
@@ -1506,15 +1614,22 @@ export function RoutingPage() {
         <PolicyForm
           existing={null}
           initialTarget={initialTarget}
+          workspaceId={writeWorkspaceId}
           onClose={() => setAdding(false)}
         />
       ) : null}
       {editing !== null ? (
-        <PolicyForm existing={editing} onClose={() => setEditing(null)} />
+        <PolicyForm
+          existing={editing}
+          workspaceId={
+            isOperator ? null : (editing.workspace_id ?? writeWorkspaceId)
+          }
+          onClose={() => setEditing(null)}
+        />
       ) : null}
 
       {rows.length === 0 && !isListLoading && !isAdding ? (
-        isOperator ? (
+        canEdit ? (
           <EmptyState title="No routing policies yet">
             <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
               <li>
@@ -1539,8 +1654,8 @@ export function RoutingPage() {
         ) : (
           <EmptyState title="No routing policies yet">
             <p className="text-sm text-muted">
-              Policies that apply in your workspaces will be listed here once a
-              deployment operator defines them.
+              Policies that apply in your workspaces will be listed here once
+              your organization's admins define them.
             </p>
           </EmptyState>
         )

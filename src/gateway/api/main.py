@@ -182,9 +182,11 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     # rather than beside the usage routers, because what it is scoped to is what
     # decides who may call it (otari#837).
     app.include_router(organization_usage.router)
-    # The tenant-scoped read over the same table ``/v1/routing/policies`` serves
-    # to an operator, mounted here for the same reason (otari-ai#1942).
-    app.include_router(organization_routing.router)
+    # The tenant-scoped reads and writes over the same tables ``/v1/routing/policies``
+    # and ``/v1/aliases`` serve to an operator, mounted here for the same reason
+    # (otari-ai#1942, otari-ai#1969).
+    app.include_router(organization_routing.policies_router)
+    app.include_router(organization_routing.aliases_router)
     # The member-scoped key surface: the caller's own keys, in workspaces they
     # may see. Mounted here for the reason the usage sibling above is; the
     # deployment-wide ``keys.router`` keeps its operator gate unchanged
@@ -217,6 +219,11 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(settings.router)
     app.include_router(mail.router)
     app.include_router(maintenance_mode.router)
-    app.include_router(tool_settings.router)
+    # Both prefixed /v1/tool-settings, split by who may call them: the reader is
+    # the one route a tenant may reach, narrowed inside the handler
+    # (otari-ai#1969). Operator first, matching the pair above, though neither
+    # router here ends with a catch-all for the other to sit behind.
+    app.include_router(tool_settings.operator_router)
+    app.include_router(tool_settings.reader_router)
     app.include_router(search_tools.router)
     app.include_router(tools.router)

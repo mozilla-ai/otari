@@ -69,7 +69,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("scoped_budgets", scoped_budgets.router),
     ("search_tools", search_tools.router),
     ("settings", settings.router),
-    ("tool_settings", tool_settings.router),
+    ("tool_settings", tool_settings.operator_router),
     ("usage", usage.operator_router),
     ("users", users.router),
 ]
@@ -82,6 +82,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
+    ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
     ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
 ]

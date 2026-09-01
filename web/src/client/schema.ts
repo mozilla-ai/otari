@@ -324,11 +324,6 @@ export interface paths {
         /**
          * Delete Alias
          * @description Delete a stored alias in one scope.
-         *
-         *     Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
-         *     deleting one workspace's alias must not touch another's, deleting the
-         *     workspace-wide alias must not take a user's override with it, and deleting an
-         *     override must leave the workspace-wide one serving everyone else.
          */
         delete: operations["delete_alias_v1_aliases__name__delete"];
         options?: never;
@@ -1590,6 +1585,58 @@ export interface paths {
         patch: operations["update_active_organization_v1_organizations_me_patch"];
         trace?: never;
     };
+    "/v1/organizations/me/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Visible Aliases
+         * @description List the aliases in force in the workspaces this caller may see.
+         *
+         *     The policies list's sibling, over ``model_aliases``, and scoped the same way:
+         *     stored rows from the caller's visible workspaces, plus the config-file
+         *     aliases, which are deployment-wide.
+         */
+        get: operations["list_visible_aliases_v1_organizations_me_aliases_get"];
+        put?: never;
+        /**
+         * Set Organization Alias
+         * @description Create or update a stored alias in one of the organization's workspaces.
+         *
+         *     Organization owners and admins only, with the same two scope rules the policy
+         *     write has: ``workspace_id`` is required and resolved inside the caller's
+         *     organization, and ``user_id`` is not accepted.
+         */
+        post: operations["set_organization_alias_v1_organizations_me_aliases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/aliases/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Alias
+         * @description Delete a stored alias from one of the organization's workspaces. Owners and admins only.
+         */
+        delete: operations["delete_organization_alias_v1_organizations_me_aliases__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/budgets": {
         parameters: {
             query?: never;
@@ -2114,12 +2161,40 @@ export interface paths {
          *     Stored policies from the caller's visible workspaces plus the config-file
          *     policies, which are deployment-wide and resolve in every workspace. The
          *     response is the shape ``GET /v1/routing/policies`` answers, narrowed to the
-         *     caller's own organization; only an operator can write any of it.
+         *     caller's own organization.
          */
         get: operations["list_visible_routing_policies_v1_organizations_me_routing_policies_get"];
         put?: never;
-        post?: never;
+        /**
+         * Set Organization Routing Policy
+         * @description Create or update a stored policy in one of the organization's workspaces.
+         *
+         *     Organization owners and admins only. ``workspace_id`` is required and must
+         *     name a workspace of the caller's own organization; ``user_id`` is not
+         *     accepted here.
+         */
+        post: operations["set_organization_routing_policy_v1_organizations_me_routing_policies_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/routing-policies/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Routing Policy
+         * @description Delete a stored policy from one of the organization's workspaces. Owners and admins only.
+         */
+        delete: operations["delete_organization_routing_policy_v1_organizations_me_routing_policies__name__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2743,17 +2818,8 @@ export interface paths {
          * Set Policy
          * @description Create or update a stored policy in one workspace, optionally for one user.
          *
-         *     The spec is validated here and stored as given, so a row can never contain a
-         *     body this build would refuse at load. The cache is refreshed twice: once before
-         *     validating (so the shadowing checks see other writers' policies) and once after
-         *     committing (so this worker serves the new policy immediately).
-         *
-         *     ``rename_from`` renames the row instead of keying on ``name``. It is part of
-         *     this write rather than an endpoint of its own so that an edit which both renames
-         *     a policy and re-targets it cannot land half-applied, leaving the old name serving
-         *     the new spec. The new name is validated exactly as a fresh one is, because a
-         *     rename can walk a policy into every collision a create can. Sending the field
-         *     asserts the named policy is stored, so it never falls back to creating one.
+         *     Omitting ``workspace_id`` means the deployment's default workspace, which is
+         *     where an operator acting deployment-wide writes.
          */
         post: operations["set_policy_v1_routing_policies_post"];
         delete?: never;
@@ -2804,11 +2870,6 @@ export interface paths {
         /**
          * Delete Policy
          * @description Delete a stored policy in one scope.
-         *
-         *     Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
-         *     deleting one workspace's policy must not touch another's, deleting the
-         *     workspace-wide policy must not take a user's override with it, and deleting an
-         *     override must leave the workspace-wide one serving everyone else.
          */
         delete: operations["delete_policy_v1_routing_policies__name__delete"];
         options?: never;
@@ -3260,6 +3321,12 @@ export interface paths {
         /**
          * Get Tool Settings
          * @description Return the effective tool/guardrail settings for the dashboard.
+         *
+         *     Authentication only on the router: the role decides *how much* rather than
+         *     whether, so this is not the deployment-wide gate ``require_deployment_operator``
+         *     names. A header master key is the deployment credential and reads everything;
+         *     a session reads everything only while it operates the deployment, and
+         *     otherwise gets the fields without the service endpoints in them.
          */
         get: operations["get_tool_settings_v1_tool_settings_get"];
         put?: never;
@@ -12473,6 +12540,91 @@ export interface operations {
             };
         };
     };
+    list_visible_aliases_v1_organizations_me_aliases_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AliasResponse"][];
+                };
+            };
+        };
+    };
+    set_organization_alias_v1_organizations_me_aliases_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AliasRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AliasResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_organization_alias_v1_organizations_me_aliases__name__delete: {
+        parameters: {
+            query?: {
+                /** @description Delete the alias in this workspace of the caller's organization. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_organization_budgets_v1_organizations_me_budgets_get: {
         parameters: {
             query?: {
@@ -13507,6 +13659,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResponse"][];
+                };
+            };
+        };
+    };
+    set_organization_routing_policy_v1_organizations_me_routing_policies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_organization_routing_policy_v1_organizations_me_routing_policies__name__delete: {
+        parameters: {
+            query?: {
+                /** @description Delete the policy in this workspace of the caller's organization. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -10,6 +10,7 @@ import type {
   RoutingPolicyResponse,
 } from "@/client"
 import { RoutingPage } from "@/features/routing/RoutingPage"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -92,10 +93,19 @@ function mockApi(
     context?: OrganizationContext
     // What `/v1/organizations/me/routing-policies` answers, for member tests.
     memberPolicies?: RoutingPolicyResponse[]
+    // What `/v1/organizations/me/aliases` answers, its sibling.
+    memberAliases?: {
+      name: string
+      target: string
+      source: string
+      user_id: string | null
+    }[]
   } = {},
 ) {
   let list = [...policies]
   let aliasList = [...aliases]
+  let memberList = [...(opts.memberPolicies ?? [])]
+  let memberAliasList = [...(opts.memberAliases ?? [])]
   const calls: { url: string; method: string; body: unknown }[] = []
   const spy = vi
     .spyOn(globalThis, "fetch")
@@ -107,7 +117,45 @@ function mockApi(
       calls.push({ url, method, body })
 
       if (url.includes("/v1/organizations/me/routing-policies")) {
-        return jsonResponse(opts.memberPolicies ?? [])
+        if (method === "POST") {
+          const row = policy(body.name, body.spec)
+          memberList = [
+            ...memberList.filter((item) => item.name !== row.name),
+            row,
+          ]
+          return jsonResponse(row)
+        }
+        if (method === "DELETE") {
+          const name = decodeURIComponent(
+            url.split("?")[0].split("/").pop() ?? "",
+          )
+          memberList = memberList.filter((item) => item.name !== name)
+          return new Response(null, { status: 204 })
+        }
+        return jsonResponse(memberList)
+      }
+      if (url.includes("/v1/organizations/me/aliases")) {
+        if (method === "POST") {
+          const row = {
+            name: body.name as string,
+            target: body.target as string,
+            source: "stored",
+            user_id: null,
+          }
+          memberAliasList = [
+            ...memberAliasList.filter((item) => item.name !== row.name),
+            row,
+          ]
+          return jsonResponse(row)
+        }
+        if (method === "DELETE") {
+          const name = decodeURIComponent(
+            url.split("?")[0].split("/").pop() ?? "",
+          )
+          memberAliasList = memberAliasList.filter((item) => item.name !== name)
+          return new Response(null, { status: 204 })
+        }
+        return jsonResponse(memberAliasList)
       }
       if (url.endsWith("/v1/organizations/me")) {
         return jsonResponse(opts.context ?? organizationContext())
@@ -231,6 +279,34 @@ function renderPage(ui: ReactElement, url = "/") {
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
     { wrapper: withRouter({ url }) },
   )
+}
+
+// The workspace a tenant admin's write is scoped to comes from the shell's
+// switcher, so the provider is part of the harness for those tests. Outside it
+// `useSelectedWorkspace` answers "none selected", which is the state that
+// leaves an admin with the read-only page.
+const ADMIN_WORKSPACE = "44444444-4444-4444-4444-444444444444"
+
+function renderInWorkspace(ui: ReactElement, url = "/") {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+    </QueryClientProvider>,
+    { wrapper: withRouter({ url }) },
+  )
+}
+
+function adminContext(): OrganizationContext {
+  return organizationContext({
+    deployment_operator: false,
+    role: "admin",
+    workspace_memberships: [
+      { workspace_id: ADMIN_WORKSPACE, name: "Alpha one", role: "admin" },
+    ],
+  })
 }
 
 afterEach(() => {
@@ -1317,7 +1393,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing?target=openai:gpt-4o")
 
     expect(
-      await screen.findByText(/once a deployment operator defines them/),
+      await screen.findByText(/once your organization's admins define them/),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /Create policy/i }),
@@ -1344,9 +1420,172 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     expect(
-      await screen.findByText(/once a deployment operator defines them/),
+      await screen.findByText(/once your organization's admins define them/),
     ).toBeInTheDocument()
     // The operator's numbered getting-started walkthrough is not for them.
     expect(screen.queryByText(/Create a policy/)).not.toBeInTheDocument()
+  })
+})
+
+// otari-ai#1969: the Build pages are Edit for admins. An organization admin
+// writes the tenant-scoped routers, which name the workspace and take no user
+// scope; an operator keeps the deployment-wide ones, unchanged above.
+describe("RoutingPage for an organization admin", () => {
+  it("writes a new policy through the tenant-scoped router", async () => {
+    const { calls } = mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [],
+    })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "tenant-fast",
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /^serves$/i }),
+      "openai:gpt-5-mini",
+    )
+    // Close the combobox popover, which otherwise aria-hides the submit button.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Create policy" }))
+
+    const written = calls.find(
+      (call) =>
+        call.method === "POST" &&
+        call.url.includes("/v1/organizations/me/routing-policies"),
+    )
+    expect(written).toBeDefined()
+    expect(written?.body).toMatchObject({
+      name: "tenant-fast",
+      workspace_id: ADMIN_WORKSPACE,
+    })
+    // The deployment-wide router is never reached, whatever the form did.
+    expect(
+      calls.some(
+        (call) =>
+          call.method === "POST" && call.url.endsWith("/v1/routing/policies"),
+      ),
+    ).toBe(false)
+  })
+
+  it("offers no user scope, which the tenant router refuses", async () => {
+    mockApi([], null, [], { context: adminContext(), memberPolicies: [] })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    expect(
+      await screen.findByText(/applies to everyone in the selected workspace/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("For one user")).not.toBeInTheDocument()
+  })
+
+  it("deletes through the tenant-scoped router, naming the workspace", async () => {
+    const { calls } = mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [policy("doomed", CHAIN)],
+    })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("doomed")
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    const deleted = calls.find((call) => call.method === "DELETE")
+    expect(deleted?.url).toContain("/v1/organizations/me/routing-policies/")
+    expect(deleted?.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
+  })
+
+  it("writes an edit back to the row's own workspace, not the selected one", async () => {
+    // An admin's list spans the organization, so the row being edited need not
+    // live in the workspace the switcher points at. Writing to the selection
+    // would create a second policy of that name and leave this one untouched.
+    const OTHER_WORKSPACE = "55555555-5555-5555-5555-555555555555"
+    const { calls } = mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [
+        policy("elsewhere", CHAIN, { workspace_id: OTHER_WORKSPACE }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("elsewhere")
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.click(await screen.findByRole("button", { name: "Save" }))
+
+    const written = calls.find(
+      (call) =>
+        call.method === "POST" &&
+        call.url.includes("/v1/organizations/me/routing-policies"),
+    )
+    expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
+  })
+
+  it("lists the tenant-scoped aliases beside the policies", async () => {
+    mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [policy("mine", CHAIN)],
+      memberAliases: [
+        {
+          name: "tenant-alias",
+          target: "openai:gpt-5",
+          source: "stored",
+          user_id: null,
+        },
+      ],
+    })
+    renderInWorkspace(<RoutingPage />)
+
+    expect(await screen.findByText("mine")).toBeInTheDocument()
+    expect(screen.getByText("tenant-alias")).toBeInTheDocument()
+  })
+
+  it("withholds the write affordances from an admin in no workspace", async () => {
+    // The switcher is seeded from the caller's own memberships, so an admin who
+    // joined none has no workspace to scope a write to and gets the read-only
+    // page rather than a form whose only outcome is a 422.
+    mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "admin",
+      }),
+      memberPolicies: [policy("mine", CHAIN)],
+    })
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("mine")
+    expect(
+      screen.queryByRole("button", { name: "New policy" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Delete" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("still withholds the write affordances from a member", async () => {
+    mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+        workspace_memberships: [
+          { workspace_id: ADMIN_WORKSPACE, name: "Alpha one", role: "member" },
+        ],
+      }),
+      memberPolicies: [policy("mine", CHAIN)],
+    })
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("mine")
+    expect(
+      screen.queryByRole("button", { name: "New policy" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Delete" }),
+    ).not.toBeInTheDocument()
   })
 })

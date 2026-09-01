@@ -565,17 +565,46 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
   )
 }
 
+// What a member is shown: the same field, as a value rather than as a control.
+// A disabled input would be the cheaper change and the worse one, since it reads
+// as a form that is briefly unavailable rather than as something this caller
+// does not set. The service-endpoint fields never reach here at all: the server
+// withholds them from a non-operator (otari-ai#1969).
+function ReadOnlyRow({ field }: { field: ToolSettingField }) {
+  const shown =
+    field.value === null || field.value === ""
+      ? "Default"
+      : field.value === true
+        ? "On"
+        : field.value === false
+          ? "Off"
+          : String(field.value)
+  return (
+    <div className={ROW_CLASS}>
+      <FieldLabel field={field} />
+      <span className="break-words text-sm text-foreground sm:col-start-2">
+        {shown}
+      </span>
+    </div>
+  )
+}
+
 function ServiceRow({
   field,
   onSave,
   saveError,
   disabled,
+  readOnly,
 }: {
   field: ToolSettingField
   onSave: (value: boolean | number | string | null) => void
   saveError?: string
   disabled: boolean
+  readOnly: boolean
 }) {
+  if (readOnly) {
+    return <ReadOnlyRow field={field} />
+  }
   if (field.type === "url") {
     return (
       <UrlRow
@@ -626,13 +655,14 @@ function ServiceRow({
  */
 export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // The Tools group is member-visible for the workspace and organization cards
-  // below, but the service settings, the pricing row, and the /v1/search tools
-  // are deployment-wide, and their reads are operator-only on the server. Gate
-  // them on the same answer the sidebar uses, so a workspace admin gets their
-  // cards rather than a 403 banner over a page of forms they cannot use.
+  // below. Of the deployment-wide reads above them, only the tool settings now
+  // answer a tenant, without the service endpoints in them (otari-ai#1969), so
+  // that one is asked unconditionally and rendered read-only. The pricing row
+  // and the /v1/search tools stay operator-only on the server, so they are still
+  // gated on the same answer the sidebar uses rather than fired into a 403.
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
-  const query = useToolSettings(isOperator)
+  const query = useToolSettings()
   const tools = useTools(isOperator)
   const pricing = usePricing(isOperator)
   const setPricing = useSetPricing()
@@ -713,7 +743,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
         description={
           isOperator
             ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist. URLs are validated for shape (http/https) and can be tested for reachability before saving; the network-safety gates for these services live on the Settings page."
-            : "What your workspace may use of this deployment's built-in tools, and what your organization mandates. The service backends themselves are configured by a deployment operator."
+            : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates. The service backends themselves are a deployment operator's to configure."
         }
       />
 
@@ -788,6 +818,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                           onSave={(value) => save(field, value)}
                           saveError={errors[field.key]}
                           disabled={disabled}
+                          readOnly={!isOperator}
                         />
                       ))}
                       {managed ? <HowToCallCard tool={managed} /> : null}

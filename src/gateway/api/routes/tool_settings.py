@@ -7,7 +7,13 @@ validation and per-service reachability tests. Standalone-only and master-key
 gated, mirroring the other management routers.
 
 * ``GET /v1/tool-settings`` returns each field's effective value (the value a
-  request would actually use), grouped by service, with URL passwords masked.
+  request would actually use), grouped by service, with URL passwords masked. It
+  is the one verb here a non-operator may call, because the roles matrix has the
+  Tools pages at View for a member (otari-ai#1969): a member is told what the
+  built-in tools will do to their requests, and the service endpoints are
+  withheld from them entirely rather than masked. Masking a URL still publishes
+  the host, which is internal infrastructure and the input to the SSRF gates on
+  the Settings page.
 * ``PATCH /v1/tool-settings`` persists overrides (an explicit ``null`` clears a
   field back to the configured env/YAML default; an omitted field is unchanged)
   and applies them to the running worker.
@@ -23,10 +29,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
+from gateway.api.deps import get_config, get_db, get_session_identity, require_deployment_operator, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.models.tenancy import User as TenancyUser
 from gateway.services.runtime_settings_service import SettingValue
+from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import (
     SERVICE_URL_FIELD,
     TOOL_SETTABLE_KEYS,
@@ -39,10 +47,20 @@ from gateway.services.tool_settings_service import (
 )
 from gateway.services.url_safety import redact_url_secrets
 
-router = APIRouter(
+# Two routers, because one route here must not carry the operator gate, which is
+# the split #895 made for ``models.py``, ``pricing.py`` and ``usage.py``: a
+# router-level dependency always runs, so a route cannot opt out of one in place.
+# The reader declares ``verify_master_key`` and then decides how much to return
+# from the caller's standing, exactly as the tenant-scoped routers do.
+operator_router = APIRouter(
     prefix="/v1/tool-settings",
     tags=["tool-settings"],
     dependencies=[Depends(require_deployment_operator)],
+)
+reader_router = APIRouter(
+    prefix="/v1/tool-settings",
+    tags=["tool-settings"],
+    dependencies=[Depends(verify_master_key)],
 )
 
 _URL_FIELDS = frozenset(SERVICE_URL_FIELD.values())
@@ -111,7 +129,15 @@ def _display_value(config: GatewayConfig, key: str) -> bool | int | str | None:
     return cast("bool | int | str | None", value)
 
 
-def _current_fields(config: GatewayConfig) -> ToolSettingsResponse:
+def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> ToolSettingsResponse:
+    """The effective value of every editable field, or of the non-URL ones.
+
+    ``include_urls`` is false for a tenant reader. The remaining fields say what
+    a request gets (whether web search is intercepted, how many results, which
+    sandbox image); the URLs say where this deployment's own infrastructure
+    lives, which is nothing a tenant acts on.
+    """
+    keys = TOOL_SETTABLE_KEYS if include_urls else tuple(k for k in TOOL_SETTABLE_KEYS if k not in _URL_FIELDS)
     fields = [
         ToolSettingField(
             key=key,
@@ -120,20 +146,32 @@ def _current_fields(config: GatewayConfig) -> ToolSettingsResponse:
             value=_display_value(config, key),
             description=GatewayConfig.model_fields[key].description,
         )
-        for key in TOOL_SETTABLE_KEYS
+        for key in keys
     ]
     return ToolSettingsResponse(fields=fields)
 
 
-@router.get("")
+@reader_router.get("")
 async def get_tool_settings(
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> ToolSettingsResponse:
-    """Return the effective tool/guardrail settings for the dashboard."""
-    return _current_fields(config)
+    """Return the effective tool/guardrail settings for the dashboard.
+
+    Authentication only on the router: the role decides *how much* rather than
+    whether, so this is not the deployment-wide gate ``require_deployment_operator``
+    names. A header master key is the deployment credential and reads everything;
+    a session reads everything only while it operates the deployment, and
+    otherwise gets the fields without the service endpoints in them.
+    """
+    include_urls = session_identity is None or await DeploymentUserService(db).has_administration_access(
+        session_identity
+    )
+    return _current_fields(config, include_urls=include_urls)
 
 
-@router.patch("")
+@operator_router.patch("")
 async def update_tool_settings(
     request: UpdateToolSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -173,7 +211,7 @@ async def update_tool_settings(
     return _current_fields(config)
 
 
-@router.post("/{service}/test")
+@operator_router.post("/{service}/test")
 async def test_service(
     service: str,
     request: TestServiceRequest,

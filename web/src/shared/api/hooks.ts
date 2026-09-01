@@ -160,6 +160,7 @@ const ROUTING_POLICIES = "routing-policies"
 // answer different endpoints for different callers, and an operator's policy
 // write invalidates the deployment-wide one it changed.
 const ORGANIZATION_ROUTING_POLICIES = "organization-routing-policies"
+const ORGANIZATION_ALIASES = "organization-aliases"
 const ROUTER_STATUS = "router-status"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
@@ -547,6 +548,20 @@ export function useOrganizationRoutingPolicies(enabled = true) {
   })
 }
 
+// The aliases in force where the caller may see, the policies list's sibling
+// over `model_aliases` and scoped the same way. This is the read a signed-in
+// member gets (otari-ai#1969); the deployment-wide `useAliases` above stays
+// operator-only, so the Routing page picks between the two off
+// `isDeploymentOperator`.
+export function useOrganizationAliases(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_ALIASES],
+    queryFn: () => apiFetch<AliasResponse[]>("/v1/organizations/me/aliases"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
 export function useSetRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -593,6 +608,91 @@ export function useDeleteRoutingPolicy() {
       })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
+  })
+}
+
+/**
+ * The four tenant-scoped writers behind the Build pages' Edit for admins.
+ *
+ * Each is its operator sibling above with one difference the server insists on:
+ * the workspace is named rather than defaulted, because the deployment's default
+ * workspace is not the caller's organization's to write into (otari-ai#1969).
+ * `user_id` has no counterpart here at all: an organization's entries are
+ * workspace-wide.
+ *
+ * Both list keys are invalidated by each of them, because which of the two a
+ * page is reading is a function of the caller's role rather than of the write.
+ */
+function invalidateRoutingLists(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_ROUTING_POLICIES],
+  })
+  void queryClient.invalidateQueries({ queryKey: [ALIASES] })
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_ALIASES] })
+  // A policy and an alias are both listed as models, so the catalog changes too.
+  void queryClient.invalidateQueries({ queryKey: [MODELS] })
+}
+
+export function useSetOrganizationRoutingPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: SetRoutingPolicyRequest & { workspace_id: string }) =>
+      apiFetch<RoutingPolicyResponse>("/v1/organizations/me/routing-policies", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateRoutingLists(queryClient),
+  })
+}
+
+export function useDeleteOrganizationRoutingPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      name,
+      workspaceId,
+    }: {
+      name: string
+      workspaceId: string
+    }) =>
+      apiFetch<void>(
+        `/v1/organizations/me/routing-policies/${encodeURIComponent(name)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateRoutingLists(queryClient),
+  })
+}
+
+export function useCreateOrganizationAlias() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateAliasRequest & { workspace_id: string }) =>
+      apiFetch<AliasResponse>("/v1/organizations/me/aliases", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateRoutingLists(queryClient),
+  })
+}
+
+export function useDeleteOrganizationAlias() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      name,
+      workspaceId,
+    }: {
+      name: string
+      workspaceId: string
+    }) =>
+      apiFetch<void>(
+        `/v1/organizations/me/aliases/${encodeURIComponent(name)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateRoutingLists(queryClient),
   })
 }
 
@@ -932,9 +1032,10 @@ export function useSendTestMail() {
   })
 }
 
-// GET /v1/tool-settings is deployment-operator-only, so the caller passes the
-// client half of that gate (`isDeploymentOperator`) as `enabled` rather than
-// firing a read whose only outcome for anyone else is a 403 banner.
+// Any signed-in caller may read this now (otari-ai#1969); a non-operator is
+// answered without the three service-endpoint fields rather than refused, so a
+// page renders whatever came back instead of gating the read. `enabled` stays
+// for the callers that have a reason not to ask at all.
 export function useToolSettings(enabled = true) {
   return useQuery({
     queryKey: [TOOL_SETTINGS],

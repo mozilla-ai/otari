@@ -107,6 +107,25 @@ class OrgProviderKeyRepository(
         )
         return result.scalars().first()
 
+    async def list_provider_names(self, organization_id: uuid.UUID) -> list[str]:
+        """The distinct providers this organization holds a live key for.
+
+        Unpaginated, unlike :meth:`list_for_organization`, because the result is
+        one row per provider rather than per key: the catalog filter needs the
+        whole set to decide what a member may be shown, and a page of it would
+        silently hide providers.
+        """
+        result = await self.db.execute(
+            select(col(OrgProviderKey.provider))
+            .where(
+                col(OrgProviderKey.organization_id) == organization_id,
+                col(OrgProviderKey.archived_at).is_(None),
+            )
+            .distinct()
+            .order_by(col(OrgProviderKey.provider))
+        )
+        return list(result.scalars().all())
+
     async def list_for_organization(
         self,
         organization_id: uuid.UUID,

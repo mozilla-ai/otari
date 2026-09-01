@@ -94,6 +94,17 @@ explicitly priced models. For a backend with no listing API, use the instance's
 Hosted mode keeps `GET /v1/models` for control-plane discovery. Hybrid mode
 does not serve the local catalog.
 
+### Who is shown which models
+
+An API key is shown the models its allow-list permits, so the catalog never
+advertises a model that would be refused at inference. A dashboard session is
+answered the same way, from its membership: a caller who operates the deployment
+sees the whole catalog, and anyone else sees every `providers:` instance, which
+is deployment-wide, plus the models their own organization's provider keys
+reach, narrowed by any workspace model restriction. A deployment whose providers
+all come from `config.yml` therefore shows every tenant the same catalog it
+always did.
+
 ## Capabilities
 
 `model_capabilities` can correct image and PDF support when a compatible

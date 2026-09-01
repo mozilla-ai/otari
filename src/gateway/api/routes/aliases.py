@@ -199,16 +199,23 @@ async def list_aliases(
     )
 
 
-@router.post("")
-async def set_alias(
+async def upsert_alias_in_workspace(
     request: AliasRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    workspace_id: uuid.UUID,
 ) -> AliasResponse:
-    """Create or update a stored alias in one workspace, optionally for one user."""
+    """Create or update a stored alias in an already-resolved workspace.
+
+    ``workspace_id`` is a parameter rather than read off ``request`` because the
+    two routers that reach this resolve it differently and must keep doing so:
+    the operator's takes the deployment's default when none is named, while the
+    tenant-scoped one resolves it inside the caller's own organization
+    (``organization_routing``, otari-ai#1969).
+    """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
-    workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
     await refresh_alias_cache(db)
     _validate(config, request.name, request.target, request.user_id)
 
@@ -254,33 +261,37 @@ async def set_alias(
     return AliasResponse.from_model(alias)
 
 
-@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_alias(
-    name: str,
+@router.post("")
+async def set_alias(
+    request: AliasRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    user_id: Annotated[
-        str | None,
-        Query(
-            description=(
-                "Delete the alias scoped to this user. Omit to delete the workspace-wide alias "
-                "of that name."
-            )
-        ),
-    ] = None,
-    workspace_id: Annotated[
-        uuid.UUID | None,
-        Query(description="Delete the alias in this workspace. Omit for the deployment's default workspace."),
-    ] = None,
+) -> AliasResponse:
+    """Create or update a stored alias in one workspace, optionally for one user."""
+    return await upsert_alias_in_workspace(
+        request,
+        db,
+        config,
+        workspace_id=await resolve_managed_workspace_id(db, request.workspace_id),
+    )
+
+
+async def delete_alias_in_workspace(
+    name: str,
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
 ) -> None:
-    """Delete a stored alias in one scope.
+    """Delete a stored alias in one scope of an already-resolved workspace.
 
     Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
     deleting one workspace's alias must not touch another's, deleting the
     workspace-wide alias must not take a user's override with it, and deleting an
     override must leave the workspace-wide one serving everyone else.
     """
-    target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
+    target_workspace_id = workspace_id
     alias = (
         await db.execute(
             select(ModelAlias).where(
@@ -311,3 +322,36 @@ async def delete_alias(
         await refresh_alias_cache(db)
     except SQLAlchemyError:
         logger.warning("Alias cache refresh failed after deleting '%s'; converges within TTL", name)
+
+
+@router.delete(
+    "/{name:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_operator)],
+)
+async def delete_alias(
+    name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    user_id: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Delete the alias scoped to this user. Omit to delete the workspace-wide alias "
+                "of that name."
+            )
+        ),
+    ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Delete the alias in this workspace. Omit for the deployment's default workspace."),
+    ] = None,
+) -> None:
+    """Delete a stored alias in one scope."""
+    await delete_alias_in_workspace(
+        name,
+        db,
+        config,
+        workspace_id=await resolve_managed_workspace_id(db, workspace_id),
+        user_id=user_id,
+    )

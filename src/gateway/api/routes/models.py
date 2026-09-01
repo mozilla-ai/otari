@@ -10,13 +10,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_session_identity,
+    require_deployment_operator,
+    verify_catalog_reader,
+)
 from gateway.api.routes.pricing import PricingTier
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing
 from gateway.models.money import as_float
 from gateway.models.routing import PolicySpec
+from gateway.models.tenancy import User as TenancyUser
 from gateway.services.alias_service import effective_aliases
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_catalog_service import (
@@ -40,6 +47,8 @@ from gateway.services.pricing_service import (
     normalize_effective_at,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.organization_model_access import resolve_session_model_allowlist
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -433,11 +442,36 @@ async def _get_pricing_map(
     return {p.model_key: p for p in pricings}
 
 
+async def _catalog_allowlist(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+) -> list[str] | None:
+    """The allow-list governing what this caller may be shown. ``None`` is unrestricted.
+
+    Three callers reach the catalog and each is answered by its own rule. An API
+    key gets its stored allow-list, as it always has. A header master key is the
+    deployment credential itself, so it is unrestricted. A dashboard session is
+    unrestricted only while it operates the deployment; otherwise it is answered
+    by its membership, so a member sees the providers their own organization
+    holds rather than every tenant's (otari-ai#1969).
+    """
+    if session_identity is not None:
+        if await DeploymentUserService(db).has_administration_access(session_identity):
+            return None
+        return await resolve_session_model_allowlist(db, config, user=session_identity)
+    api_key, is_master_key = auth
+    return None if is_master_key else await resolve_request_allowlist(db, api_key)
+
+
 @catalog_router.get("/models")
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
 ) -> ModelListResponse:
     """List all available models.
@@ -570,8 +604,7 @@ async def list_models(
     # catalog never advertises a model that would 403 at inference. Both surfaces
     # feed the SAME matcher the SAME canonical instance:model key; an alias id is a
     # display name, so it is matched on its resolved target. Master key sees all.
-    api_key, is_master_key = auth
-    key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
+    key_allowlist = await _catalog_allowlist(db, config, auth=auth, session_identity=session_identity)
     if key_allowlist is not None:
         # A dynamic policy is listed when the key may use *any* of its candidates,
         # which is what the compiler will do at request time: it drops the ones the
@@ -675,9 +708,10 @@ async def get_model(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> ModelObject:
     """Get details for a specific model."""
-    api_key, is_master_key = auth
+    api_key, _is_master_key = auth
     # Same scoping as the listing: the caller's own aliases, plus their
     # workspace's and the configured ones. A master-key caller has neither, so it
     # reads the configured layer and the default workspace's.
@@ -691,7 +725,7 @@ async def get_model(
     # missing one, so this endpoint cannot be used to probe which models exist
     # behind an allow-list. Uses the same matcher/canonical key as the listing and
     # inference. Master key bypasses.
-    key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
+    key_allowlist = await _catalog_allowlist(db, config, auth=auth, session_identity=session_identity)
     if key_allowlist is not None:
         target = aliases.get(model_id, model_id)
         if not is_model_allowed(key_allowlist, normalize_pricing_key(config, target)):

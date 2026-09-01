@@ -82,6 +82,12 @@ const FIELDS: ToolSettingField[] = [
 
 const RESPONSE: ToolSettingsResponse = { fields: FIELDS }
 
+// What the server hands a non-operator: the same fields with the three
+// service endpoints withheld rather than masked (otari-ai#1969).
+const TENANT_RESPONSE: ToolSettingsResponse = {
+  fields: FIELDS.filter((field) => field.type !== "url"),
+}
+
 // GET /v1/tools drives the "how to call this" card. `accepted_types` is what the
 // deployment currently honors, so it is the interesting axis here.
 const TOOLS: ToolsResponse = {
@@ -131,6 +137,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 interface MockOpts {
+  /** The tool-settings body, for the tenant read that comes back without URLs. */
+  settings?: ToolSettingsResponse
   patchStatus?: number
   patchDetail?: string
   testBody?: { ok: boolean; reason: string }
@@ -143,7 +151,7 @@ interface MockOpts {
 }
 
 function mockApi(opts: MockOpts = {}) {
-  let current = RESPONSE
+  let current = opts.settings ?? RESPONSE
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input, init) => {
@@ -580,8 +588,9 @@ describe("ToolsGuardrailsPage by caller role", () => {
     vi.restoreAllMocks()
   })
 
-  it("shows a non-operator the workspace cards and never fires the operator reads", async () => {
+  it("shows a non-operator the workspace cards and the still-operator-only reads are not fired", async () => {
     const fetchMock = mockApi({
+      settings: TENANT_RESPONSE,
       context: organizationContext({
         deployment_operator: false,
         role: "member",
@@ -598,14 +607,40 @@ describe("ToolsGuardrailsPage by caller role", () => {
       screen.getByText(/Per-workspace code execution is set on a workspace/),
     ).toBeInTheDocument()
 
-    // No operator form, no deployment search-tools card, and no error banner.
-    expect(screen.queryByLabelText("web_search_url")).not.toBeInTheDocument()
+    // No deployment search-tools card, whose read is still operator-only.
     expect(
       screen.queryByRole("heading", { name: "Search tools" }),
     ).not.toBeInTheDocument()
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
-    expect(urls.some((url) => url.includes("/v1/tool-settings"))).toBe(false)
     expect(urls.some((url) => url.includes("/v1/search-tools"))).toBe(false)
+  })
+
+  it("renders a non-operator's tool settings as values rather than controls", async () => {
+    mockApi({
+      settings: TENANT_RESPONSE,
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    renderWithClient(<ToolsGuardrailsPage />)
+
+    // The field is shown, so a member is told what the tools do to their
+    // requests, and it is text: there is no control to press.
+    expect(
+      await screen.findByText("web_search_max_results"),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByLabelText("web_search_max_results"),
+    ).not.toBeInTheDocument()
+    // Deliberately not "no Save button on the page": the workspace cards below
+    // are a member's to edit and have their own.
+    expect(
+      screen.queryByLabelText("web_search_purpose_hint"),
+    ).not.toBeInTheDocument()
+    // The service endpoints never arrive, so nothing renders them either.
+    expect(screen.queryByText("web_search_url")).not.toBeInTheDocument()
+    expect(screen.queryByText("guardrails_url")).not.toBeInTheDocument()
   })
 
   it("keeps a narrowed service page working for a non-operator", async () => {

@@ -35,6 +35,15 @@ Interception is off by default because enabling it changes who performs searches
 for providers that already support a native search tool. It requires
 `web_search_url`.
 
+### Who may read the settings
+
+`GET /v1/tool-settings` answers any signed-in identity, so a member is told how
+the built-in tools behave on their requests. A caller who does not operate the
+deployment is answered without `web_search_url`, `sandbox_url` and
+`guardrails_url`: those name this deployment's own infrastructure, which is what
+the network-safety gates on the Settings page are set against, and no tenant
+acts on them. Changing any setting stays a deployment operator's to do.
+
 ## Pricing a gateway-run tool
 
 In standalone mode, gateway-run tools are priced per successful call:

@@ -181,6 +181,14 @@ manage stored policies through the Routing page or `/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
 user.
 
+An organization's owners and admins manage their own workspaces' policies and
+aliases through `/v1/organizations/me/routing-policies` and
+`/v1/organizations/me/aliases`, which the Routing page uses for a caller who
+does not operate the deployment. Those routes require the workspace named, must
+name a workspace of the caller's own organization, accept no user scope, and
+refuse a target the organization holds no provider access for. A member of the
+organization reads the same two lists and writes neither.
+
 The authenticating API key determines which workspace resolves a policy.
 User-scoped entries take precedence over wider entries. A config-file policy
 cannot be changed through the API.
