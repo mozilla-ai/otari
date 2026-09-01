@@ -1,7 +1,8 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 import { useMailSettings, useSendTestMail } from "@/shared/api/hooks"
 import { Field } from "@/shared/components/Field"
+import { SettingsGroup } from "@/shared/components/surface"
 import { ErrorBanner, InfoBanner, PageLoading } from "@/shared/components/ui"
 
 // What each transport means to an operator reading this page. Keyed by the
@@ -60,85 +61,80 @@ export function MailDeliveryCard() {
   const loading = mail.isPending && !data
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Email delivery</h2>
-      <Card>
-        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-          <div className="flex flex-col gap-4 py-4">
-            <ErrorBanner error={mail.error} />
-            {loading ? <PageLoading label="Loading mail settings…" /> : null}
-            {data ? (
-              <>
-                <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[10rem_1fr]">
-                  <dt className="text-muted">Transport</dt>
-                  <dd className="text-foreground">
-                    {TRANSPORT_LABEL[data.transport] ?? data.transport}
-                  </dd>
-                  <dt className="text-muted">From</dt>
-                  <dd className="text-foreground">
-                    {data.from_email
-                      ? `${data.from_name} <${data.from_email}>`
-                      : "Not set"}
-                  </dd>
-                  <dt className="text-muted">Public base URL</dt>
-                  <dd className="break-all text-foreground">
-                    {data.public_base_url ?? "Not set"}
-                  </dd>
-                </dl>
-                {ready ? null : <MissingSettings missing={data.missing} />}
-              </>
-            ) : null}
-          </div>
+    <SettingsGroup title="Email delivery">
+      <div className="flex flex-col gap-4 py-4">
+        <ErrorBanner error={mail.error} />
+        {loading ? <PageLoading label="Loading mail settings…" /> : null}
+        {data ? (
+          <>
+            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[10rem_1fr]">
+              <dt className="text-muted">Transport</dt>
+              <dd className="text-foreground">
+                {TRANSPORT_LABEL[data.transport] ?? data.transport}
+              </dd>
+              <dt className="text-muted">From</dt>
+              <dd className="text-foreground">
+                {data.from_email
+                  ? `${data.from_name} <${data.from_email}>`
+                  : "Not set"}
+              </dd>
+              <dt className="text-muted">Public base URL</dt>
+              <dd className="break-all text-foreground">
+                {data.public_base_url ?? "Not set"}
+              </dd>
+            </dl>
+            {ready ? null : <MissingSettings missing={data.missing} />}
+          </>
+        ) : null}
+      </div>
 
-          <div className="flex flex-col gap-4 py-4">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground">
-                Send a test email
-              </p>
-              <p className="mt-1 max-w-3xl text-sm text-muted">
-                {loading
-                  ? "Checking whether this deployment can send mail…"
-                  : ready
-                    ? "Sends a short message through the configured transport, so you can confirm delivery before anyone is invited."
-                    : "Unavailable until a transport and a public base URL are configured."}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-end gap-3">
-              <Field
-                label="Recipient"
-                value={to}
-                onChange={setTo}
-                placeholder="you@example.com"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                isDisabled={!ready || to.trim() === "" || sendTest.isPending}
-                onPress={() => sendTest.mutate({ to: to.trim() })}
-              >
-                {sendTest.isPending ? "Sending…" : "Send test email"}
-              </Button>
-            </div>
-            <ErrorBanner error={sendTest.error} />
-            {result ? (
-              <p
-                className={`text-sm ${result.ok ? "text-success" : "text-danger"}`}
-                role="status"
-                aria-live="polite"
-              >
-                {result.ok
-                  ? result.transport === "console"
-                    ? // The console transport delivers to nobody, so telling an
-                      // operator to check an inbox would send them looking for a
-                      // message that was only ever written to the gateway log.
-                      "Written to the gateway log. The console transport delivers to nobody."
-                    : `Sent over ${result.transport}. Check the recipient's inbox.`
-                  : `Not sent: ${result.reason ?? "the transport gave no reason."}`}
-              </p>
-            ) : null}
-          </div>
-        </Card.Content>
-      </Card>
-    </section>
+      <div className="flex flex-col gap-4 py-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">
+            Send a test email
+          </p>
+          <p className="mt-1 max-w-3xl text-sm text-muted">
+            {loading
+              ? "Checking whether this deployment can send mail…"
+              : ready
+                ? "Sends a short message through the configured transport, so you can confirm delivery before anyone is invited."
+                : "Unavailable until a transport and a public base URL are configured."}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field
+            label="Recipient"
+            value={to}
+            onChange={setTo}
+            placeholder="you@example.com"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={!ready || to.trim() === "" || sendTest.isPending}
+            onPress={() => sendTest.mutate({ to: to.trim() })}
+          >
+            {sendTest.isPending ? "Sending…" : "Send test email"}
+          </Button>
+        </div>
+        <ErrorBanner error={sendTest.error} />
+        {result ? (
+          <p
+            className={`text-sm ${result.ok ? "text-success" : "text-danger"}`}
+            role="status"
+            aria-live="polite"
+          >
+            {result.ok
+              ? result.transport === "console"
+                ? // The console transport delivers to nobody, so telling an
+                  // operator to check an inbox would send them looking for a
+                  // message that was only ever written to the gateway log.
+                  "Written to the gateway log. The console transport delivers to nobody."
+                : `Sent over ${result.transport}. Check the recipient's inbox.`
+              : `Not sent: ${result.reason ?? "the transport gave no reason."}`}
+          </p>
+        ) : null}
+      </div>
+    </SettingsGroup>
   )
 }

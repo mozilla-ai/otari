@@ -95,6 +95,48 @@ export function PageIntro({
   )
 }
 
+/**
+ * A settings list: a heading between rules, then its rows on the page ground
+ * divided by row separators.
+ *
+ * Four blocks were spelling this by hand and had already drifted: two used an
+ * 18px heading and two a 16px one, for groups of the same rank on the same
+ * page. Shared so the rank of a group is decided once.
+ *
+ * Two bands rather than one, which is what puts the heading *between* rules
+ * rather than above them: the first carries the rule over the heading, the
+ * second the rule under it and the rule closing the last row.
+ */
+export function SettingsGroup({
+  title,
+  count,
+  children,
+}: {
+  title: string
+  /** Shown beside the title where a group's size is worth knowing up front. */
+  count?: number
+  children: ReactNode
+}) {
+  return (
+    <>
+      <Section className="border-t border-border pt-6 pb-3">
+        <h2 className="text-title">
+          {title}
+          {count === undefined ? null : (
+            <span className="font-normal text-subtle"> ({count})</span>
+          )}
+        </h2>
+      </Section>
+      <Section
+        className="border-y border-border"
+        contentClassName="flex flex-col divide-y divide-border"
+      >
+        {children}
+      </Section>
+    </>
+  )
+}
+
 /** A 6px square. The page's one status mark, in every place it appears. */
 export function Dot({ className }: { className: string }) {
   return <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${className}`} />
