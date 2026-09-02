@@ -27,17 +27,16 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { SecretField } from "@/shared/components/SecretField"
 import {
+  ConfirmRowAction,
   Dot,
+  RowAction,
+  RowActionRow,
   Section,
   Tab,
   TableScrollFrame,
   TabRow,
 } from "@/shared/components/surface"
-import {
-  ConfirmButton,
-  ErrorBanner,
-  errorMessage,
-} from "@/shared/components/ui"
+import { ErrorBanner, errorMessage } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
 
 import {
@@ -997,10 +996,8 @@ export function ProvidersPage() {
       cell: (row) =>
         row.source === "stored" ? (
           <div className="flex flex-col items-end gap-1.5">
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
+            <RowActionRow>
+              <RowAction
                 // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
                 isDisabled={
                   tests[row.instance]?.status === "pending" ||
@@ -1009,18 +1006,16 @@ export function ProvidersPage() {
                 onPress={() => void runTest(row.instance)}
               >
                 Test
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
+              </RowAction>
+              <RowAction
                 onPress={() => {
                   setAddOpen(false)
                   setEditing(row.instance)
                 }}
               >
                 Edit
-              </Button>
-              <ConfirmButton
+              </RowAction>
+              <ConfirmRowAction
                 confirmLabel="Delete"
                 isPending={deleteProvider.isPending}
                 // Clear the verdict too: a provider re-added under the same name
@@ -1032,8 +1027,8 @@ export function ProvidersPage() {
                 }
               >
                 Delete
-              </ConfirmButton>
-            </div>
+              </ConfirmRowAction>
+            </RowActionRow>
             <TestOutcome state={tests[row.instance]} />
           </div>
         ) : (

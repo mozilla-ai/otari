@@ -33,7 +33,13 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
-import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
+import {
+  Dot,
+  RowAction,
+  RowActionRow,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
 import {
   CopyField,
   EmptyState,
@@ -204,38 +210,6 @@ function RevealSecretStrip({
 }
 
 // ---------- row actions and the armed strip ----------
-
-/**
- * A row action: 13px of muted text, no button, no border, no fill. A row has
- * four of these and boxing each one turned the last lane into a control panel;
- * the actions are the only interactive things in a row of static values, so
- * they need no shape to be found. Danger ink is reserved for the armed state,
- * which is the only moment one of them is about to do something irreversible.
- */
-function RowAction({
-  onPress,
-  isDanger,
-  isDisabled,
-  children,
-}: {
-  onPress: () => void
-  isDanger?: boolean
-  isDisabled?: boolean
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      disabled={isDisabled}
-      onClick={onPress}
-      className={`text-[13px] transition-colors motion-reduce:transition-none disabled:opacity-50 ${
-        isDanger ? "text-danger" : "text-muted hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
 
 /**
  * The confirmation, as a strip spanning the whole table directly under the row
@@ -909,7 +883,7 @@ export function KeysPage() {
         header: "Actions",
         align: "end",
         cell: (k) => (
-          <div className="flex items-center justify-end gap-4">
+          <RowActionRow>
             <RowAction
               isDisabled={updateKey.isPending}
               onPress={() => setActive(k, !k.is_active)}
@@ -940,7 +914,7 @@ export function KeysPage() {
                 Delete
               </RowAction>
             )}
-          </div>
+          </RowActionRow>
         ),
       },
     ],

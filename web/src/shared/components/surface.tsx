@@ -1,4 +1,10 @@
-import { type HTMLAttributes, type ReactNode, useEffect, useRef } from "react"
+import {
+  type HTMLAttributes,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 
 /**
  * The shared vocabulary of the divided surface: the full-bleed rule, the square
@@ -232,6 +238,83 @@ export function Toolbar({
       {children}
     </div>
   )
+}
+
+/**
+ * A row's action: 13px of muted text, no border, no fill, no box.
+ *
+ * A row has three or four of these and boxing each one turned the last lane
+ * into a control panel, louder than the row it acts on. The destructive one is
+ * the same text until it is armed, and takes danger ink only then: the colour
+ * marks the state you are about to commit rather than the control that offers
+ * it, which is the same rule the spend figure follows.
+ *
+ * Shared once two pages had spelled it. Pair with `RowActionRow`, which sets the
+ * 16px between them.
+ */
+export function RowAction({
+  onPress,
+  isDanger,
+  isDisabled,
+  children,
+}: {
+  onPress: () => void
+  isDanger?: boolean
+  isDisabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      disabled={isDisabled}
+      onClick={onPress}
+      className={`text-[13px] whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-50 ${
+        isDanger ? "text-danger" : "text-muted hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** The lane those sit in: right-aligned, 16px apart. */
+export function RowActionRow({ children }: { children: ReactNode }) {
+  return <div className="flex items-center justify-end gap-4">{children}</div>
+}
+
+/**
+ * A destructive row action that asks twice, in text rather than in buttons.
+ *
+ * Armed, the label becomes the confirmation in danger ink with a plain Cancel
+ * beside it. It replaces `ConfirmButton` on a table row for the same reason the
+ * other actions lost their boxes; `ConfirmButton` stays for the forms and cards
+ * where a destructive control is the only control and a button is right.
+ */
+export function ConfirmRowAction({
+  confirmLabel,
+  onConfirm,
+  isPending,
+  children,
+}: {
+  confirmLabel: string
+  onConfirm: () => void
+  isPending?: boolean
+  children: ReactNode
+}) {
+  const [armed, setArmed] = useState(false)
+  if (armed) {
+    return (
+      <>
+        <RowAction isDanger isDisabled={isPending} onPress={onConfirm}>
+          {confirmLabel}
+        </RowAction>
+        <RowAction isDisabled={isPending} onPress={() => setArmed(false)}>
+          Cancel
+        </RowAction>
+      </>
+    )
+  }
+  return <RowAction onPress={() => setArmed(true)}>{children}</RowAction>
 }
 
 /** A 6px square. The page's one status mark, in every place it appears. */
