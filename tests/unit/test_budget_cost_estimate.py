@@ -185,7 +185,9 @@ def _axis(budget: Budget, *, new_request: bool = True, **counters: object) -> st
         "reserved_tokens": 0,
         "requests": 0,
         "reserved_requests": 0,
-        "held": Decimal(0),
+        # A dollar amount of zero, not an absent one: `None` says the request has
+        # no dollar axis at all, which is the free-model case tested separately.
+        "amount": Decimal(0),
         "held_tokens": 0,
         "held_requests": 0,
     }
@@ -209,7 +211,7 @@ def test_the_refusal_names_an_axis_already_at_its_cap() -> None:
 def test_the_refusal_names_the_axis_a_hold_would_push_past() -> None:
     budget = Budget(budget_id="b", max_budget=10.0, token_limit=1_000)
 
-    assert _axis(budget, spend=9.0, held=Decimal("2")) == "budget"
+    assert _axis(budget, spend=9.0, amount=Decimal("2")) == "budget"
     assert _axis(budget, tokens=900, held_tokens=200) == "token"
 
 
@@ -239,3 +241,21 @@ def test_a_top_up_is_not_asked_the_arrival_question() -> None:
 
     assert _axis(budget, tokens=1_000, new_request=True) == "token"
     assert _axis(budget, tokens=1_000, new_request=False) == "budget"
+
+
+def test_an_absent_dollar_amount_removes_that_axis_from_the_answer() -> None:
+    """A free request is never gated on dollars, so dollars cannot have refused it.
+
+    Both caps are spent here, so naming either would look plausible; only the
+    token one was actually asked.
+    """
+    budget = Budget(budget_id="b", max_budget=10.0, token_limit=1_000)
+    spent = {"spend": 10.0, "tokens": 1_000}
+
+    assert _axis(budget, amount=Decimal(0), **spent) == "budget"
+    assert _axis(budget, amount=None, **spent) == "token"
+
+
+def test_an_absent_dollar_amount_with_no_other_cap_names_nothing() -> None:
+    """Rather than falling back to the axis it was not gated on."""
+    assert _axis(Budget(budget_id="b", max_budget=10.0), amount=None, spend=10.0) == "budget"

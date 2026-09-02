@@ -517,7 +517,8 @@ async def blocked_axis(
     Both of the clauses :func:`admits` builds, and for its reason: an arrival is
     refused either because the axis is already at its cap or because this hold
     would push it past, and a helper reproducing one of them finds no axis for
-    the other shape. The hold therefore has to come from the caller, since the
+    the other shape. ``amount=None`` skips the dollar axis, which :func:`reserve`
+    likewise does not ask about. The hold therefore has to come from the caller, since the
     row cannot say what was being asked of it. The dollar axis is called
     "budget", so its message is unchanged; see
     ``budget_service._blocked_axis``.
@@ -544,7 +545,10 @@ async def blocked_axis(
         # to name and guessing one would be worse than saying nothing.
         return "budget"
     axes = (
-        ("budget", row[0], row[1], row[2], amount if amount is not None else ZERO),
+        # Skipped when the request has no dollar amount, which is a free-priced
+        # model: :func:`reserve` does not gate that axis, so it cannot be what
+        # refused, and naming it would point at the one cap with room.
+        ("budget", row[0] if amount is not None else None, row[1], row[2], amount or ZERO),
         ("token", row[3], row[4], row[5], tokens),
         ("request", row[6], row[7], row[8], requests),
     )

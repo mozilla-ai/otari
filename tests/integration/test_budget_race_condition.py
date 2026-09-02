@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 
-from gateway.models.entities import Budget, ModelPricing, User
+from gateway.models.entities import MAX_COUNT_LIMIT, Budget, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_service import (
     estimate_cost,
@@ -417,3 +417,50 @@ async def test_a_token_only_top_up_is_held(async_db: Any) -> None:
 
     await async_db.refresh(user)
     assert (user.reserved_tokens, user.reserved) == (0, Decimal(0))
+
+
+@pytest.mark.asyncio
+async def test_a_free_model_refusal_names_the_axis_that_gated_it(async_db: Any) -> None:
+    """The dollar axis is not asked of a free request, so it cannot be the answer.
+
+    A zero-priced model reserves no dollars, so the gate never tests that cap.
+    Reporting it anyway named the one cap with room as the one that refused,
+    which is worse than the unqualified word the axis naming replaced.
+    """
+    async_db.add(
+        ModelPricing(model_key="openai:free-axis", input_price_per_million=0.0, output_price_per_million=0.0)
+    )
+    # Both caps are spent, so a paid request would legitimately report either.
+    async_db.add(Budget(budget_id="both-spent", max_budget=10.0, token_limit=1_000))
+    async_db.add(
+        User(user_id="free-axis-user", budget_id="both-spent", spend=Decimal("10.0"), current_tokens=1_000)
+    )
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(
+            async_db, "free-axis-user", 5.0, model="openai:free-axis", estimated_tokens=1
+        )
+
+    assert "token limit" in str(refusal.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_a_token_top_up_is_clamped_before_any_hold_is_taken(async_db: Any) -> None:
+    """The ceilings are held first, so a delta bounded after them is bounded too late.
+
+    The estimate derives from a client-supplied output bound that nothing on the
+    wire limits, and every hold is added to a BIGINT server-side: an unclamped
+    delta answers with an overflow where a refusal was owed.
+    """
+    async_db.add(Budget(budget_id="clamped", max_budget=10.0))
+    async_db.add(User(user_id="clamped-user", budget_id="clamped"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "clamped-user", 1.0, estimated_tokens=10)
+    await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=10**18)
+
+    user = await get_active_user(async_db, "clamped-user")
+    assert user is not None
+    assert handle.token_estimate == 10 + MAX_COUNT_LIMIT
+    assert user.reserved_tokens == 10 + MAX_COUNT_LIMIT

@@ -193,7 +193,7 @@ def _blocked_axis(
     reserved_tokens: int,
     requests: int,
     reserved_requests: int,
-    held: Decimal,
+    amount: Decimal | None,
     held_tokens: int,
     held_requests: int,
     new_request: bool,
@@ -217,13 +217,25 @@ def _blocked_axis(
     key on, and the ask this answers was for signal on the two axes that had
     none. A refusal that changes wording for the case that already worked buys
     nothing and breaks readers.
+
+    ``amount=None`` is the free-model request, whose dollar axis the gate does not
+    ask about at all. It is skipped here for the same reason: naming an axis the
+    request was never gated on would report the one cap with room as the one that
+    refused, which is worse than the unqualified word this replaced.
     """
     # Widened rather than trusted: these come off a User the session may still
     # hold as the caller assigned it, so ``spend`` can be the float a fixture
     # wrote and ``float + Decimal`` raises. ``to_usd`` at the boundary is the same
     # rule the counters themselves follow.
     axes: tuple[tuple[str, Decimal | int | None, Decimal | int, Decimal | int], ...] = (
-        ("budget", budget.max_budget, to_usd(spend) + to_usd(reserved), to_usd(held)),
+        # A NULL cap on the dollar axis and an absent amount are different
+        # reasons to skip it, and both mean it cannot be what refused.
+        (
+            "budget",
+            budget.max_budget if amount is not None else None,
+            to_usd(spend) + to_usd(reserved),
+            to_usd(amount or ZERO),
+        ),
         ("token", budget.token_limit, tokens + reserved_tokens, held_tokens),
         ("request", budget.request_limit, requests + reserved_requests, held_requests),
     )
@@ -727,7 +739,7 @@ async def reserve_budget(
                 reserved_tokens=refused_on.reserved_tokens,
                 requests=refused_on.current_requests,
                 reserved_requests=refused_on.reserved_requests,
-                held=usd or ZERO,
+                amount=usd,
                 held_tokens=held_tokens,
                 held_requests=held_requests,
                 new_request=new_request,
@@ -997,7 +1009,11 @@ async def increase_reservation(
     # while a model priced at zero leaves the dollar one untouched, and returning
     # on the dollar delta alone would let those tokens go unheld.
     additional = max(to_usd(additional_estimate), ZERO)
-    grown_tokens = max(additional_tokens, 0)
+    # Clamped here, not only inside the per-user call below: the scoped hold is
+    # taken first, so a delta bounded after it has already gone out is a delta the
+    # ceilings added to a BIGINT unbounded. Same overflow that turns a 403 into a
+    # 500 as the admission estimate's clamp prevents.
+    grown_tokens = min(max(additional_tokens, 0), MAX_COUNT_LIMIT)
     if additional <= ZERO and grown_tokens == 0:
         return
     # A budget-exempt request never grows a reservation: there is nothing to hold and
