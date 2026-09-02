@@ -40,7 +40,7 @@ export const TELEMETRY_EVENTS = {
   TAB_CHANGED: "Tab Changed",
 
   /**
-   * The post-sign-in setup guide shown to a new account, and dismissed.
+   * The post-sign-in setup guide shown to a new account.
    *
    * Named here and fired by nobody in this build, for the same reason as
    * `CHECKOUT_CANCELLED` below: the guide is a hosted surface an overlay
@@ -51,10 +51,16 @@ export const TELEMETRY_EVENTS = {
    * them, and an overlay that invented a string for it would split the funnel
    * this vocabulary is base-owned to hold together.
    *
-   * The properties the platform sends with them are `workspace_id` and
+   * The properties the platform sends with it are `workspace_id` and
    * `presentation_count`.
    */
   ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
+  /**
+   * That guide dismissed, whether by finishing it or by closing it.
+   *
+   * Overlay-fired and base-named for the reason given on
+   * `ACTIVATION_GUIDE_SHOWN` above, and carries the same two properties.
+   */
   ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
 
   /**
