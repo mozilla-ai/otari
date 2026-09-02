@@ -24,6 +24,14 @@ member, Edit for an admin (otari-ai#1942, otari-ai#1969).
   page, because the dashboard renders policies and aliases as one sorted table
   and a page of one beside every row of the other would be incoherent; the bound
   is there for the organization that outgrows the page, not to paginate the page.
+* **Workspace-wide rows only, on the reads as much as the writes.** A stored row
+  may be scoped to one ``users.user_id`` as well as to a workspace, and neither
+  half of this surface handles that scope. The write refuses ``user_id`` because
+  it is a deployment-wide identifier; the read has to agree, or an admin is shown
+  a row they cannot address. While these were listed, Delete on one carried no
+  user scope, so it matched ``user_id IS NULL`` and destroyed the workspace-wide
+  row of that name while answering 204. A tenant cannot interpret the identifier
+  either: it names an API-key user, where a dashboard member is a tenancy UUID.
 * **A write needs a named workspace, resolved inside the organization.** There is
   no default-workspace fallback here, unlike the operator routers: the
   deployment's default workspace is not the tenant's to write into unless it
@@ -73,7 +81,9 @@ from gateway.models.entities import ModelAlias, RoutingPolicy
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.services.alias_service import all_alias_names
 from gateway.services.model_access import is_model_allowed
+from gateway.services.policy_store import all_policy_names
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
@@ -154,12 +164,20 @@ async def _require_reachable_targets(
     resolution follows the name. Answered as a 400 naming the target, because it
     is a statement about the body rather than about the caller's role, and the
     catalog the dashboard offers already excludes these.
+
+    A target that names another alias or policy is left alone, because the write
+    helpers refuse chaining a step later and say so precisely. Checking it here
+    first would answer "not available to this organization", which is true of an
+    indirection name and useless for fixing it.
     """
     if not targets:
         return
+    indirections = all_alias_names(config) | all_policy_names(config)
     allowlist = await resolve_session_model_allowlist(db, config, user=user)
     unreachable = [
-        target for target in targets if not is_model_allowed(allowlist, normalize_pricing_key(config, target))
+        target
+        for target in targets
+        if target not in indirections and not is_model_allowed(allowlist, normalize_pricing_key(config, target))
     ]
     if unreachable:
         raise HTTPException(
@@ -224,7 +242,12 @@ async def list_visible_routing_policies(
     caller's own organization.
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))
-    statement = select(RoutingPolicy).where(col(RoutingPolicy.workspace_id).in_(_visible_workspace_ids(scope)))
+    statement = select(RoutingPolicy).where(
+        col(RoutingPolicy.workspace_id).in_(_visible_workspace_ids(scope)),
+        # Workspace-wide only; see the module docstring for why a user-scoped row
+        # is neither this surface's to show nor its to act on.
+        col(RoutingPolicy.user_id).is_(None),
+    )
     rows = (await db.execute(statement.order_by(RoutingPolicy.name).limit(limit))).scalars().all()
     policies = []
     for row in rows:
@@ -314,7 +337,10 @@ async def list_visible_aliases(
     aliases, which are deployment-wide.
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))
-    statement = select(ModelAlias).where(col(ModelAlias.workspace_id).in_(_visible_workspace_ids(scope)))
+    statement = select(ModelAlias).where(
+        col(ModelAlias.workspace_id).in_(_visible_workspace_ids(scope)),
+        col(ModelAlias.user_id).is_(None),
+    )
     rows = (await db.execute(statement.order_by(ModelAlias.name).limit(limit))).scalars().all()
     aliases = [AliasResponse.from_model(row) for row in rows]
     for name, target in config.aliases.items():

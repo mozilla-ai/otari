@@ -50,6 +50,7 @@ from gateway.repositories.tenancy.org_provider_key_repository import (
 from gateway.services.provider_kwargs import provider_key
 from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolve_visible_workspace_scope
 from gateway.services.tenancy.errors import TenancyForbiddenError, TenancyNotFoundError
+from gateway.services.tenancy.org_provider_key_service import key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.workspace_scope import lookup_default_workspace_id
 
@@ -104,7 +105,10 @@ async def _byo_entries_for_workspaces(
             by_provider[key.provider].append((key, override))
         for provider, group in by_provider.items():
             resolved = resolve_active_key(group)
-            if resolved is not None:
+            # A key whose secret will not decrypt supplies no credential at
+            # dispatch, so advertising its models would break the rule this
+            # allow-list exists to keep.
+            if resolved is not None and key_is_usable(resolved):
                 active[(workspace_id, resolved.id)] = provider
 
     restrictions = await WorkspaceProviderModelRestrictionRepository(db).list_for_workspace_keys(active)
@@ -166,8 +170,11 @@ async def resolve_session_catalog_scope(
         return SessionCatalogScope(allowlist=sorted(entries), reads_default_workspace=False)
 
     if scope.sees_every_workspace:
-        providers = await OrgProviderKeyRepository(db).list_provider_names(scope.organization.id)
-        entries.update(f"{provider_key(provider)}:*" for provider in providers)
+        entries.update(
+            f"{provider_key(key.provider)}:*"
+            for key in await OrgProviderKeyRepository(db).list_live_keys(scope.organization.id)
+            if key_is_usable(key)
+        )
     else:
         entries |= await _byo_entries_for_workspaces(
             db,

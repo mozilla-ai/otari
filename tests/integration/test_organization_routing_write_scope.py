@@ -34,6 +34,7 @@ from gateway.models.entities import DashboardSession
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 _POLICIES = "/v1/organizations/me/routing-policies"
 _ALIASES = "/v1/organizations/me/aliases"
@@ -43,6 +44,17 @@ _ALIASES = "/v1/organizations/me/aliases"
 # tested against.
 _ALPHA_TARGET = "openai:gpt-4o-mini"
 _BETA_TARGET = "anthropic:claude-3-5-haiku-latest"
+
+
+@pytest.fixture(autouse=True)
+def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real key, so the stored credentials below decrypt.
+
+    The target guard asks what the organization can actually reach, and a row
+    whose secret will not decrypt reaches nothing, so without this every write
+    here is refused for the wrong reason.
+    """
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
 
 @dataclass
@@ -110,7 +122,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                     organization_id=organization_id,
                     provider=provider,
                     name=f"{provider}-primary",
-                    encrypted_api_key="encrypted",
+                    encrypted_api_key=encrypt_secret("sk-test-value"),
                     last4="1234",
                     is_org_default=True,
                 )
@@ -290,3 +302,79 @@ def test_both_lists_are_bounded(client: TestClient, world: _World) -> None:
         assert _get(client, world, "alpha_admin", f"{path}?limit=100000").status_code == (
             status.HTTP_422_UNPROCESSABLE_CONTENT
         )
+
+
+def test_a_user_scoped_row_is_neither_listed_nor_destroyed_by_a_tenant_delete(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """A tenant may not address a user-scoped row, so it may not be shown one either.
+
+    The write refuses ``user_id`` because it is a deployment-wide identifier, and
+    the read has to agree: while these rows were listed, an admin got an Edit and
+    a Delete on one, and the delete carried no user scope, so it matched
+    ``user_id IS NULL`` and destroyed the *workspace-wide* row of that name while
+    answering 204. Both rows sort adjacent under the page's own ordering, so
+    nothing about the result looked wrong.
+    """
+    operator_workspace = str(world.workspaces["alpha_one"])
+    assert (
+        client.post("/v1/users", json={"user_id": "scoped-user"}, headers=master_key_header).status_code == 200
+    )
+    for user_id in (None, "scoped-user"):
+        stored = client.post(
+            "/v1/routing/policies",
+            json={
+                "name": "shared",
+                "spec": {"select": [{"default": _ALPHA_TARGET}]},
+                "workspace_id": operator_workspace,
+                **({"user_id": user_id} if user_id is not None else {}),
+            },
+            headers=master_key_header,
+        )
+        assert stored.status_code == status.HTTP_200_OK, stored.text
+
+    listed = _get(client, world, "alpha_admin", _POLICIES).json()
+    scopes = {(row["name"], row["user_id"]) for row in listed if row["source"] == "stored"}
+    assert ("shared", None) in scopes
+    assert ("shared", "scoped-user") not in scopes, "a user-scoped row is not the tenant's to see"
+
+    deleted = _delete(client, world, "alpha_admin", f"{_POLICIES}/shared?workspace_id={operator_workspace}")
+    assert deleted.status_code == status.HTTP_204_NO_CONTENT, deleted.text
+
+    # The workspace-wide row is the one the tenant addressed and the one that
+    # went; the user-scoped row it never saw is still there.
+    survivors = {
+        (row["name"], row["user_id"])
+        for row in client.get("/v1/routing/policies", headers=master_key_header).json()
+        if row["source"] == "stored"
+    }
+    assert ("shared", "scoped-user") in survivors
+    assert ("shared", None) not in survivors
+
+
+def test_the_alias_list_omits_user_scoped_rows_too(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """The sibling half of the rule above, over ``model_aliases``."""
+    operator_workspace = str(world.workspaces["alpha_one"])
+    assert client.post("/v1/users", json={"user_id": "alias-user"}, headers=master_key_header).status_code == 200
+    for user_id in (None, "alias-user"):
+        stored = client.post(
+            "/v1/aliases",
+            json={
+                "name": "shared-alias",
+                "target": _ALPHA_TARGET,
+                "workspace_id": operator_workspace,
+                **({"user_id": user_id} if user_id is not None else {}),
+            },
+            headers=master_key_header,
+        )
+        assert stored.status_code == status.HTTP_200_OK, stored.text
+
+    scopes = {
+        (row["name"], row["user_id"])
+        for row in _get(client, world, "alpha_admin", _ALIASES).json()
+        if row["source"] == "stored"
+    }
+    assert ("shared-alias", None) in scopes
+    assert ("shared-alias", "alias-user") not in scopes

@@ -32,6 +32,7 @@ from gateway.models.entities import DashboardSession
 from gateway.models.provider_keys import OrgProviderKey, WorkspaceProviderModelRestriction
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 # Priced but undiscovered models: phase 2 of the listing publishes them, so the
 # catalog is deterministic without dialing a provider.
@@ -40,6 +41,17 @@ _OPENAI_OTHER = "openai:gpt-4o"
 _ANTHROPIC_MODEL = "anthropic:claude-3-5-haiku-latest"
 _MISTRAL_MODEL = "mistral:mistral-small-latest"
 _ALL_MODELS = (_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL, _MISTRAL_MODEL)
+
+
+@pytest.fixture(autouse=True)
+def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real key, so a stored credential decrypts as it would in production.
+
+    Without it every BYO row is unusable and the catalog withholds its provider,
+    which is correct behavior (see the undecryptable-key test below) and would
+    make every other case here vacuous.
+    """
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
 
 @dataclass
@@ -113,12 +125,18 @@ def _unmembered_identity(session: Session, *, email: str, organization_id: uuid.
     return token
 
 
-def _byo_key(session: Session, *, organization_id: uuid.UUID, provider: str) -> uuid.UUID:
+def _byo_key(
+    session: Session,
+    *,
+    organization_id: uuid.UUID,
+    provider: str,
+    encrypted_api_key: str | None = None,
+) -> uuid.UUID:
     key = OrgProviderKey(
         organization_id=organization_id,
         provider=provider,
         name=f"{provider}-primary",
-        encrypted_api_key="encrypted",
+        encrypted_api_key=encrypted_api_key or encrypt_secret("sk-test-value"),
         last4="1234",
         is_org_default=True,
     )
@@ -324,3 +342,29 @@ def test_a_foreign_workspaces_alias_names_are_not_listed(
     # The control: an operator is answered from the workspace the alias lives in,
     # so the name is still there for the caller it belongs to.
     assert "acme-confidential-summarizer" in _catalog_as(client, world, "superuser")
+
+
+def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The catalog must not advertise what dispatch cannot serve.
+
+    ``refresh_org_provider_cache`` skips a row whose secret will not decrypt, so
+    a request through that provider has no credential. Listing its models would
+    break the rule this filter exists to keep, that the catalog never shows a
+    model the caller cannot actually use.
+    """
+    session = db_session_factory()
+    try:
+        _byo_key(
+            session,
+            organization_id=world.beta,
+            provider="mistral",
+            encrypted_api_key="not-a-fernet-token",
+        )
+    finally:
+        session.close()
+
+    listed = _catalog_as(client, world, "beta_member")
+    assert _ANTHROPIC_MODEL in listed, "beta's decryptable key still counts"
+    assert _MISTRAL_MODEL not in listed, "the undecryptable key's provider is withheld"

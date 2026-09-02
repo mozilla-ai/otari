@@ -190,6 +190,12 @@ refuse a target the organization holds no provider access for. Both reads take a
 server-capped `limit`, which bounds the response rather than paginating it. A
 member of the organization reads the same two lists and writes neither.
 
+Those routes are workspace-wide entries only, on the reads as much as the
+writes. A stored policy or alias can also be scoped to one user, and `user_id`
+names an API-key user rather than a dashboard identity, so it is neither a
+tenant's to set nor a tenant's to interpret. Managing a user-scoped entry stays
+on the deployment-wide routes.
+
 The authenticating API key determines which workspace resolves a policy.
 User-scoped entries take precedence over wider entries. A config-file policy
 cannot be changed through the API.

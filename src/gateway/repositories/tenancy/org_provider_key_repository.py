@@ -107,22 +107,22 @@ class OrgProviderKeyRepository(
         )
         return result.scalars().first()
 
-    async def list_provider_names(self, organization_id: uuid.UUID) -> list[str]:
-        """The distinct providers this organization holds a live key for.
+    async def list_live_keys(self, organization_id: uuid.UUID) -> Sequence[OrgProviderKey]:
+        """Every non-archived key this organization holds, oldest-first per provider.
 
-        Unpaginated, unlike :meth:`list_for_organization`, because the result is
-        one row per provider rather than per key: the catalog filter needs the
-        whole set to decide what a member may be shown, and a page of it would
-        silently hide providers.
+        Unpaginated, unlike :meth:`list_for_organization`, because the caller is
+        deciding what a tenant may reach and a page of it would silently hide
+        providers. Rows rather than distinct provider names, because whether a
+        provider is reachable depends on whether any of its keys can be
+        decrypted, which only the row can answer.
         """
         result = await self.db.execute(
-            select(col(OrgProviderKey.provider))
+            select(OrgProviderKey)
             .where(
                 col(OrgProviderKey.organization_id) == organization_id,
                 col(OrgProviderKey.archived_at).is_(None),
             )
-            .distinct()
-            .order_by(col(OrgProviderKey.provider))
+            .order_by(col(OrgProviderKey.provider), col(OrgProviderKey.created_at), col(OrgProviderKey.id))
         )
         return list(result.scalars().all())
 

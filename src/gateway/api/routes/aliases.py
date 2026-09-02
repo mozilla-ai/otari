@@ -324,11 +324,7 @@ async def delete_alias_in_workspace(
         logger.warning("Alias cache refresh failed after deleting '%s'; converges within TTL", name)
 
 
-@router.delete(
-    "/{name:path}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alias(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],

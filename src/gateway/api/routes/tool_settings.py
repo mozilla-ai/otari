@@ -63,7 +63,11 @@ reader_router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-_URL_FIELDS = frozenset(SERVICE_URL_FIELD.values())
+# Derived from each field's declared type rather than from ``SERVICE_URL_FIELD``,
+# which maps a service to the URL its reachability probe uses. A URL field with
+# no probe endpoint is absent from that map, so deriving the withheld set from it
+# would publish the next such field to a tenant.
+_URL_FIELDS = frozenset(key for key in TOOL_SETTABLE_KEYS if field_type(key) == "url")
 
 # Reachability probe timeout. Short so a mistyped or dead host fails fast in the
 # dashboard rather than hanging the operator's Test click.

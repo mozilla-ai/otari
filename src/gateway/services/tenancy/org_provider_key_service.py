@@ -133,6 +133,22 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
     return entry
 
 
+def key_is_usable(key: OrgProviderKey) -> bool:
+    """Whether this key can actually supply a credential on this deployment.
+
+    A row whose secret will not decrypt (no ``OTARI_SECRET_KEY``, or the wrong
+    one) is skipped by the dispatch-path cache below, so anything that reports
+    what a tenant may *reach* has to skip it too, or the catalog advertises
+    models every request through that provider then fails on. Single-sourced
+    here so the two answers cannot drift.
+    """
+    try:
+        _row_to_entry(key)
+    except (SecretBoxUnavailableError, SecretDecryptionError):
+        return False
+    return True
+
+
 def cached_org_provider_kwargs(workspace_id: uuid.UUID, provider: str) -> dict[str, Any] | None:
     """The decrypted overlay entry this worker last loaded for this workspace+provider, if any."""
     entry = _org_cache.get((workspace_id, provider))
