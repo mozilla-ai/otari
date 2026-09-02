@@ -1291,17 +1291,46 @@ main {
  * keyboard user most needs to know where they are was the one moment nothing
  * said so.
  * ============================================================= */
+/* The trigger's content box is three fixed slots and no reserve to keep in
+   step: 11px padding, the label lane, an 8px gap, a 14px chevron, 11px padding.
+   The label lane is what flexes.
+
+   It is slots rather than padding because a reserve is two numbers that have to
+   agree, and the last time they disagreed every trigger in the product overlapped
+   its own chevron by 11px and nothing failed. Here the chevron is a flex child
+   with a fixed basis, so the label physically cannot run under it: there is no
+   number to keep in step. */
 .select__trigger,
 .combo-box__trigger,
 .dropdown__trigger {
   border-color: var(--color-control-border);
   box-shadow: none;
-  /* START only. `padding-inline` here was a regression: HeroUI reserves the
-     chevron's lane with `pe-7` on a trigger that has an indicator, and setting
-     both sides took that lane away, so the value sat 11px ON TOP of the chevron
-     rather than beside it. The end padding is the indicator's, and it is not
-     ours to set. */
-  padding-inline-start: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 11px;
+}
+/* Static, not absolute. An out-of-flow chevron is exactly what let the label
+   run underneath it; in flow it takes a lane of its own and the label stops
+   where it starts. */
+.select__indicator {
+  position: static;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-subtle);
+}
+.select__value {
+  flex: 1 1 0%;
+  /* LOAD-BEARING, and it looks like a no-op. A flex item's `min-width` is
+     `auto`, which means it refuses to shrink below its content, so `overflow:
+     hidden` on its own truncates nothing and the value pushes the chevron out
+     of the trigger instead. Deleting this line brings back the overlap in a
+     different costume. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .select__trigger[data-open="true"],
 .select__trigger[aria-expanded="true"],
@@ -1309,11 +1338,6 @@ main {
 .dropdown__trigger[data-open="true"] {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
-}
-.select__indicator {
-  width: 14px;
-  height: 14px;
-  color: var(--color-text-subtle);
 }
 /* 6px, not 8: the menu belongs to the control, and the gap was wide enough to
    read as two unrelated things. Measured rather than derived: the offset is
