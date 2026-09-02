@@ -834,14 +834,20 @@ export function Badge({
   tone: "muted" | "warn"
   children: string
 }) {
-  const className =
-    tone === "warn"
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-border bg-surface text-muted"
+  // The status form, not a pill: a square dot and a word. A `warn` badge says
+  // the row is not doing what its neighbors are, which is what the danger dot
+  // with muted words means everywhere else here; `muted` states a fact about
+  // the row and takes the quiet dot.
+  const dot = tone === "warn" ? "bg-danger" : "bg-text-subtle"
+  const ink = tone === "warn" ? "text-muted" : "text-subtle"
   return (
-    <span
-      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
-    >
+    // Not uppercased and not mono, unlike the status marks it shares a dot
+    // with. Those draw from a fixed vocabulary of one or two words; this one
+    // takes whatever a caller passes, and its callers pass sentences ("Every
+    // workspace, including new ones"). Uppercasing a sentence is shouting, and
+    // mono is for values you copy rather than prose you read.
+    <span className={`flex items-center gap-2 text-xs ${ink}`}>
+      <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${dot}`} />
       {children}
     </span>
   )

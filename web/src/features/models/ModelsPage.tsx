@@ -9,6 +9,7 @@ import {
   useState,
 } from "react"
 import type { Selection, SortDescriptor } from "react-aria-components"
+import { FiInfo } from "react-icons/fi"
 import type { DiscoverableProvider, ModelMetadata, PricingTier } from "@/client"
 import { isPricingTier } from "@/client"
 import { currentPricing, providerFromModelKey } from "@/features/models/pricing"
@@ -28,12 +29,8 @@ import {
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import {
-  Dot,
-  Section,
-  TableScrollFrame,
-  Toolbar,
-} from "@/shared/components/surface"
+import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
 import { TablePagination } from "@/shared/components/TablePagination"
 import {
   ConfirmButton,
@@ -132,6 +129,31 @@ const MODALITY_LABELS: Record<string, string> = {
   video: "Video",
   pdf: "PDF",
 }
+
+/* Hoisted so the select that sets a filter and the chip that reports it read
+   from one list. Inline arrays meant a chip could name an option the control no
+   longer offers, which is a disagreement nothing would catch. */
+const PRICING_OPTIONS = [
+  { value: "all", label: "Any pricing" },
+  { value: "configured", label: "Custom price" },
+  { value: "default", label: "Default price" },
+  { value: "priced", label: "Priced" },
+  { value: "unpriced", label: "Unpriced" },
+]
+
+const SOURCE_OPTIONS = [
+  { value: "all", label: "Any source" },
+  { value: "discovered", label: "Discovered" },
+  { value: "custom", label: "Custom (not discovered)" },
+]
+
+const CAPABILITY_OPTIONS = [
+  { value: "all", label: "Any capability" },
+  ...MODEL_FILTER_CAPABILITIES.map((entry) => ({
+    value: entry.value,
+    label: entry.label,
+  })),
+]
 
 const CONTEXT_OPTIONS = [
   { value: "0", label: "Any context" },
@@ -555,17 +577,20 @@ function InfoTooltip({
   const tipId = useId()
   return (
     <span className="group relative inline-flex items-center font-normal normal-case">
+      {/* An icon, not a badge. This was a letter "i" inside a 16px circled div,
+          which put it in the radius conversation it does not belong to: a glyph
+          is not a container, and an icon carries its own shape. The 16px box
+          was also below the touch floor for something whose whole job is to be
+          tapped. Real icon at 14px in a 24px target now. */}
       <button
         type="button"
         aria-label={label}
         aria-describedby={tipId}
-        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
-          tone === "warning"
-            ? "border-warning text-warning"
-            : "border-border text-muted hover:border-accent hover:text-link"
+        className={`inline-flex h-6 w-6 items-center justify-center ${
+          tone === "warning" ? "text-warning" : "text-muted hover:text-link"
         }`}
       >
-        i
+        <FiInfo aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
       <span
         id={tipId}
@@ -974,7 +999,9 @@ function SearchInput({
       // The product's field, not a fourth spelling of one. It measured 34px
       // and had a corner radius nothing else had; inside a `Toolbar` it takes
       // the dense height like the filter selects beside it.
-      className={`max-w-xs ${INPUT_CLASS}`}
+      // `min-w-0` so it gives way when the row is tight instead of holding its
+      // width and pushing a filter onto a second line.
+      className={`min-w-0 max-w-xs ${INPUT_CLASS}`}
     />
   )
 }
@@ -1597,6 +1624,85 @@ export function ModelsPage() {
     setPage(0)
   }
 
+  /**
+   * The filters that are set, as chips under the row that sets them.
+   *
+   * Only the ones actually narrowing anything: a chip for "Any pricing" would
+   * be a chip on every load saying nothing. Each carries the option's own label
+   * rather than its value, so a chip reads the way the control that set it did.
+   */
+  const modelFilterChips: FilterChip[] = (
+    [
+      [
+        "pricing",
+        "Pricing",
+        pricingFilter,
+        "all",
+        PRICING_OPTIONS,
+        setPricingFilter,
+      ],
+      [
+        "source",
+        "Source",
+        sourceFilter,
+        "all",
+        SOURCE_OPTIONS,
+        setSourceFilter,
+      ],
+      [
+        "capability",
+        "Capability",
+        capabilityFilter,
+        "all",
+        CAPABILITY_OPTIONS,
+        setCapabilityFilter,
+      ],
+      [
+        "context",
+        "Min context",
+        minContext,
+        "0",
+        CONTEXT_OPTIONS,
+        setMinContext,
+      ],
+      ["maxInput", "Max input price", maxInput, "", PRICE_OPTIONS, setMaxInput],
+      [
+        "compare",
+        "Compare at",
+        comparisonContext,
+        "",
+        PRICE_COMPARISON_OPTIONS,
+        setComparisonContext,
+      ],
+      [
+        "release",
+        "Released",
+        releaseFilter,
+        "all",
+        RELEASE_OPTIONS,
+        setReleaseFilter,
+      ],
+    ] as const
+  )
+    .filter(([, , value, unset]) => value !== unset)
+    .map(([key, label, value, unset, options, setter]) => ({
+      key,
+      label,
+      value: options.find((option) => option.value === value)?.label ?? value,
+      onClear: () => changeFilter(setter as (next: string) => void)(unset),
+    }))
+
+  const clearModelFilters = () => {
+    setPricingFilter("all")
+    setSourceFilter("all")
+    setCapabilityFilter("all")
+    setMinContext("0")
+    setMaxInput("")
+    setComparisonContext("")
+    setReleaseFilter("all")
+    setPage(0)
+  }
+
   const rows = useMemo<ModelRow[]>(() => {
     const configured = new Map(
       currentPricing(pricing.data ?? []).map((row) => [row.model_key, row]),
@@ -2073,77 +2179,75 @@ export function ModelsPage() {
         }`}
       >
         <div className="flex min-w-0 flex-col gap-3">
-          <Toolbar>
-            <SearchInput
-              value={search}
-              onChange={changeSearch}
-              placeholder="Search models…"
-            />
+          {/* Two controls stay inline and the other six move behind "Add
+              filter", which is the pattern Activity already uses. The row had
+              stopped fitting: at 1728 its children measured 1434px in a 1416px
+              container, and at 1512 it was 1259px in 1200px, so it was already
+              wrapping before anybody widened anything. Search and provider are
+              the two somebody reaches for first; the rest are narrowing moves
+              that earn a click. */}
+          <FilterChips
+            chips={modelFilterChips}
+            onClearAll={clearModelFilters}
+            start={
+              <>
+                <SearchInput
+                  value={search}
+                  onChange={changeSearch}
+                  placeholder="Search models…"
+                />
+                <FilterSelect
+                  ariaLabel="Filter by provider"
+                  value={providerFilter}
+                  onChange={changeFilter(setProviderFilter)}
+                  options={providerOptions}
+                />
+              </>
+            }
+          >
             <FilterSelect
-              ariaLabel="Filter by provider"
-              value={providerFilter}
-              onChange={changeFilter(setProviderFilter)}
-              options={providerOptions}
-            />
-            <FilterSelect
-              ariaLabel="Filter by pricing"
+              label="Pricing"
               value={pricingFilter}
               onChange={changeFilter(setPricingFilter)}
-              options={[
-                { value: "all", label: "Any pricing" },
-                { value: "configured", label: "Custom price" },
-                { value: "default", label: "Default price" },
-                { value: "priced", label: "Priced" },
-                { value: "unpriced", label: "Unpriced" },
-              ]}
+              options={PRICING_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Filter by source"
+              label="Source"
               value={sourceFilter}
               onChange={changeFilter(setSourceFilter)}
-              options={[
-                { value: "all", label: "Any source" },
-                { value: "discovered", label: "Discovered" },
-                { value: "custom", label: "Custom (not discovered)" },
-              ]}
+              options={SOURCE_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Filter by capability"
+              label="Capability"
               value={capabilityFilter}
               onChange={changeFilter(setCapabilityFilter)}
-              options={[
-                { value: "all", label: "Any capability" },
-                ...MODEL_FILTER_CAPABILITIES.map((entry) => ({
-                  value: entry.value,
-                  label: entry.label,
-                })),
-              ]}
+              options={CAPABILITY_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Minimum context window"
+              label="Min context"
               value={minContext}
               onChange={changeFilter(setMinContext)}
               options={CONTEXT_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Maximum input price"
+              label="Max input price"
               value={maxInput}
               onChange={changeFilter(setMaxInput)}
               options={PRICE_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Compare prices at context"
+              label="Compare at"
               value={comparisonContext}
               onChange={setComparisonContext}
               options={PRICE_COMPARISON_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Filter by release date"
+              label="Released"
               value={releaseFilter}
               onChange={changeFilter(setReleaseFilter)}
               options={RELEASE_OPTIONS}
             />
-          </Toolbar>
+          </FilterChips>
 
           <DiscoveredErrors
             providers={discoveredErrors}

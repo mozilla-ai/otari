@@ -368,7 +368,7 @@ export function ActivityTimeline({
             {zoomed || panSel ? (
               <div
                 ref={railRef}
-                className="relative h-2.5 w-full rounded-full bg-surface-alt"
+                className="relative h-2.5 w-full bg-surface-alt"
               >
                 <div
                   role="slider"
@@ -378,7 +378,10 @@ export function ActivityTimeline({
                   aria-valuenow={Math.min(sel.startIndex, panMax)}
                   aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
                   tabIndex={0}
-                  className="absolute inset-y-0 cursor-grab touch-none rounded-full bg-accent/40 hover:bg-accent/60 active:cursor-grabbing"
+                  // Square, and here that is the point rather than
+                  // consistency: the window's edges assert two exact instants,
+                  // and a rounded end blurs the only thing the shape states.
+                  className="absolute inset-y-0 cursor-grab touch-none bg-accent/40 hover:bg-accent/60 active:cursor-grabbing"
                   style={{
                     left: `${loPct}%`,
                     width: `${Math.max(2, hiPct - loPct)}%`,

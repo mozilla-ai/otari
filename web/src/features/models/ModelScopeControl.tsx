@@ -5,7 +5,7 @@ import {
   useDiscoverableModels,
   useProviders,
 } from "@/shared/api/hooks"
-import { Tab, TabRow } from "@/shared/components/surface"
+import { DismissChip, Tab, TabRow } from "@/shared/components/surface"
 
 // The per-key model access-list is a tri-state:
 //   null  -> "any"   (unrestricted, the default)
@@ -167,20 +167,12 @@ export function ModelScopeControl({
               </span>
             ) : (
               entries.map((entry) => (
-                <span
+                <DismissChip
                   key={entry}
-                  className="inline-flex items-center gap-1 rounded-full bg-primary-subtle px-2.5 py-1 font-mono text-xs text-primary-subtle-foreground"
-                >
-                  {entry}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${entry}`}
-                    onClick={() => removeEntry(entry)}
-                    className="text-primary-subtle-foreground hover:text-danger"
-                  >
-                    ×
-                  </button>
-                </span>
+                  value={<span className="font-mono">{entry}</span>}
+                  onDismiss={() => removeEntry(entry)}
+                  dismissLabel={`Remove ${entry}`}
+                />
               ))
             )}
           </div>

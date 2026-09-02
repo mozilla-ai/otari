@@ -335,6 +335,64 @@ export function ConfirmRowAction({
   return <RowAction onPress={() => setArmed(true)}>{children}</RowAction>
 }
 
+/**
+ * A value somebody chose, with the way to unchoose it.
+ *
+ * One form, implemented three times before this: applied filters, a key's model
+ * scope, a budget's users. They were the same thing (a label, a value, a cross)
+ * and had drifted apart in shape and in ink, and all three gave the cross a
+ * 16px box, which is a target nobody on a touchscreen hits.
+ *
+ * Square, like everything else. It was a pill because a chip is a pill
+ * elsewhere in the world, and the roundness test this product uses is narrower
+ * than that: a shape keeps its radius only where the shape itself carries a
+ * meaning squareness would destroy. A chip's does not; it is a label with a
+ * border.
+ *
+ * The dismiss is a real 24px target holding a 12px glyph. It reads as small and
+ * is not, which is the point: the visible cross stays quiet while the thing a
+ * finger has to land on is the size a finger needs.
+ */
+export function DismissChip({
+  label,
+  value,
+  onDismiss,
+  dismissLabel,
+}: {
+  /** The dimension, shown before the value where a chip states both. */
+  label?: string
+  value: ReactNode
+  onDismiss: () => void
+  /** Names the target for assistive tech; falls back to the label and value. */
+  dismissLabel?: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 border border-border bg-primary-subtle py-0.5 pr-0.5 pl-2.5 text-xs text-primary-subtle-foreground">
+      {label ? <span className="text-muted">{label}:</span> : null}
+      <span className="font-medium">{value}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label={
+          dismissLabel ?? `Remove ${label ? `${label} ` : ""}${value}`
+        }
+        className="inline-flex h-6 w-6 items-center justify-center text-muted hover:text-foreground"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          className="h-3 w-3"
+          aria-hidden="true"
+        >
+          <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+        </svg>
+      </button>
+    </span>
+  )
+}
+
 /** A 6px square. The page's one status mark, in every place it appears. */
 export function Dot({ className }: { className: string }) {
   return <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${className}`} />

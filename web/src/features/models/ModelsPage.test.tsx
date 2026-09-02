@@ -264,6 +264,19 @@ function modelOrder(): string[] {
     .filter((text) => text.includes(":"))
 }
 
+/**
+ * Open the filter panel.
+ *
+ * Seven of the nine filters moved behind "Add filter" when the row stopped
+ * fitting, so a test that reaches for one has to open the panel the way a
+ * person does. Idempotent: the toggle reads "Done" once it is open, so calling
+ * this twice in a test does not close it again.
+ */
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  const toggle = screen.queryByRole("button", { name: "Add filter" })
+  if (toggle) await user.click(toggle)
+}
+
 describe("ModelsPage", () => {
   beforeEach(() => {
     // The page persists sort choice in localStorage; start each test clean so
@@ -466,7 +479,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Filter by pricing", "Custom price")
+    await openFilters(user)
+    await pickOption(user, "Pricing", "Custom price")
 
     expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument()
     expect(
@@ -494,7 +508,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("mistral:large")
 
-    await pickOption(user, "Filter by source", "Custom (not discovered)")
+    await openFilters(user)
+    await pickOption(user, "Source", "Custom (not discovered)")
 
     expect(within(table()).getByText("mistral:large")).toBeInTheDocument()
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument()
@@ -509,7 +524,8 @@ describe("ModelsPage", () => {
 
     // Reasoning is a model-level flag (models.dev), not a provider capability:
     // only claude-sonnet-4 reports it, so the two gpt-4o models drop out.
-    await pickOption(user, "Filter by capability", "Reasoning")
+    await openFilters(user)
+    await pickOption(user, "Capability", "Reasoning")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -536,7 +552,8 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
-    await pickOption(user, "Filter by capability", "Vision")
+    await openFilters(user)
+    await pickOption(user, "Capability", "Vision")
 
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument()
   })
@@ -549,7 +566,8 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o")
 
     // No mock model reports PDF input, so the list empties for a filter reason.
-    await pickOption(user, "Filter by capability", "PDF")
+    await openFilters(user)
+    await pickOption(user, "Capability", "PDF")
 
     expect(
       within(table()).getByText("No models match your filters."),
@@ -563,7 +581,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Minimum context window", "≥ 200K")
+    await openFilters(user)
+    await pickOption(user, "Min context", "≥ 200K")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -901,7 +920,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Compare prices at context", "Compare at 200K")
+    await openFilters(user)
+    await pickOption(user, "Compare at", "Compare at 200K")
 
     expect(
       screen.getByRole("columnheader", { name: /at 200K in \/ out \/ 1M/ }),

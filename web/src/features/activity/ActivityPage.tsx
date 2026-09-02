@@ -601,7 +601,7 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
         preserveAspectRatio="none"
         role="img"
         aria-label={`Token composition: ${summary}`}
-        className="h-1.5 w-20 overflow-hidden rounded-full bg-primary-subtle"
+        className="h-1.5 w-20 overflow-hidden bg-primary-subtle"
       >
         {rects
           .filter((rect) => rect.width > 0)
@@ -855,7 +855,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                 <td className="px-3 py-2 break-all text-foreground">
                   {pricingSelectorOf(attempt)}
                   {attempt.id === entry.id ? (
-                    <span className="ml-2 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted">
+                    <span className="ml-2 border border-border px-1.5 py-0.5 text-[10px] text-muted">
                       this row
                     </span>
                   ) : null}
