@@ -817,7 +817,16 @@ export function ConfirmButton({
  * thing it still is is an element rather than a component.
  */
 export const INPUT_CLASS =
-  "input input--primary min-h-10 w-full px-3 py-2 text-sm"
+  // No padding here: `.input` carries it now, so a page cannot spell field
+  // padding again and the pagination place can override it in one selector
+  // rather than fighting a utility. The height is the form floor; a named place
+  // lowers it.
+  // No width either: it was `w-full`, which collided with the `w-12` and `w-28`
+  // call sites. Two width utilities on one element are settled by Tailwind's
+  // emitted order, not by the class string, so which one won was not something
+  // a reader could tell from the call site. Every caller that wants full width
+  // already says so.
+  "input input--primary min-h-10 text-sm"
 
 /**
  * A small status pill for a row that has something to say about itself.

@@ -664,18 +664,14 @@ function MemberEditor({
                 return (
                   <tr key={workspace.id} className="border-t border-border">
                     <td className="py-1.5">
-                      <label className="flex items-center gap-2 text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={row.member}
-                          onChange={(event) =>
-                            setRow(workspace.id, {
-                              member: event.target.checked,
-                            })
-                          }
-                        />
+                      <Checkbox
+                        isSelected={row.member}
+                        onChange={(next) =>
+                          setRow(workspace.id, { member: next })
+                        }
+                      >
                         {workspace.name}
-                      </label>
+                      </Checkbox>
                     </td>
                     <td className="py-1.5">
                       <FilterSelect

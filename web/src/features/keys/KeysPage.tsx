@@ -41,6 +41,7 @@ import {
   TableScrollFrame,
 } from "@/shared/components/surface"
 import {
+  Checkbox,
   CopyField,
   EmptyState,
   ErrorBanner,
@@ -307,22 +308,22 @@ function BudgetExemptToggle({
   onChange: (value: boolean) => void
 }) {
   return (
-    <label className="flex items-start gap-2 border border-control-border p-3 text-sm">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 accent-accent"
-        aria-label="Exempt this key from budget"
-      />
-      <span className="flex flex-col gap-0.5">
-        <span className="font-medium text-foreground">Exempt from budget</span>
-        <span className="text-xs text-muted">
-          Requests on this key are logged with their cost but never counted
-          toward the owner&apos;s budget or spend, and never blocked by it.
+    // The description is inside the checkbox's own label rather than in a
+    // wrapping one: `Checkbox` already renders the label element, and nesting a
+    // second around it left a label with no control of its own.
+    <div className="border border-control-border p-3 text-sm">
+      <Checkbox isSelected={checked} onChange={onChange}>
+        <span className="flex flex-col gap-0.5">
+          <span className="font-medium text-foreground">
+            Exempt from budget
+          </span>
+          <span className="text-xs text-muted">
+            Requests on this key are logged with their cost but never counted
+            toward the owner&apos;s budget or spend, and never blocked by it.
+          </span>
         </span>
-      </span>
-    </label>
+      </Checkbox>
+    </div>
   )
 }
 

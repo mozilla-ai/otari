@@ -1,7 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import { useEffect, useId, useState } from "react"
 
-import { FilterSelect } from "@/shared/components/ui"
+import { FilterSelect, INPUT_CLASS } from "@/shared/components/ui"
 
 // Shared pager for the dashboard tables: rows-per-page on the left, a truthful
 // "range of total" summary in the middle, and first / prev / type-a-page / next
@@ -86,7 +86,7 @@ export function TablePagination({
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="otari-pagination flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2">
         <label htmlFor={sizeSelectId} className="text-sm text-muted">
           Rows
@@ -142,12 +142,11 @@ export function TablePagination({
                 }
               }}
               onBlur={commitPage}
-              // Neither a form field nor a toolbar filter, and so not on
-              // either named field height: it is one control inside the
-              // pagination group and it matches the small buttons it sits
-              // between. It measured 30px against their 32, which was a
-              // mismatch nobody chose rather than a size anybody picked.
-              className="h-8 w-12 border border-control-border bg-surface-alt px-2 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
+              // A real field, taking the pagination place's 32px rather than
+              // hard-coding a height. Hand-rolling it is how it escaped the
+              // 40px floor in the first place, which looked like the right
+              // answer and was the right answer for the wrong reason.
+              className={`w-12 text-center tabular-nums ${INPUT_CLASS}`}
             />
             {pageCount != null ? (
               <span className="tabular-nums">

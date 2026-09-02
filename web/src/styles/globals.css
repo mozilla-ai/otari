@@ -1231,7 +1231,17 @@ main {
   border: 1px solid var(--color-control-border);
 }
 
+/* An outlined button is an object, so it takes the object edge. HeroUI gives it
+   `--color-border`, the 0.08 divider alpha, which is tuned to separate two
+   surfaces of nearly the same value and leaves a button on the page ground with
+   no edge to speak of in dark. Select triggers already took the control edge in
+   the block above, so one control family had the rule and the other did not. */
+.button--outline {
+  border-color: var(--color-control-border);
+}
+
 /* =============================================================
+ * The inside of a menu./* =============================================================
  * The inside of a menu.
  *
  * The popover shell was ours; everything inside it was stock, which is how a
@@ -1300,15 +1310,30 @@ main {
    its own chevron by 11px and nothing failed. Here the chevron is a flex child
    with a fixed basis, so the label physically cannot run under it: there is no
    number to keep in step. */
+/* `.input` joins its siblings here, which is the sibling-family rule the
+   guidance now carries: a ruling that lands on the trigger families and not on
+   the text field leaves one control family with the rule and one without, and
+   this is the second time that happened. Inline padding only, and the edge. The
+   BLOCK padding is deliberately not touched: it is inert under the 40px
+   min-height above, and cancelling it would be a wholesale patch of the kind
+   `web/AGENTS.md` warns about, for no visible gain. */
+.input,
 .select__trigger,
 .combo-box__trigger,
 .dropdown__trigger {
   border-color: var(--color-control-border);
   box-shadow: none;
+  padding-inline: 11px;
+}
+/* The slot layout is the triggers' alone: an `<input>` is a replaced element
+   with no children to lay out, so `display: flex` and a `gap` on it would be
+   two declarations that read as intent and do nothing. */
+.select__trigger,
+.combo-box__trigger,
+.dropdown__trigger {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-inline: 11px;
 }
 /* Static, not absolute. An out-of-flow chevron is exactly what let the label
    run underneath it; in flow it takes a lane of its own and the label stops
@@ -1347,6 +1372,22 @@ main {
 .combo-box__popover,
 .dropdown__popover {
   margin-top: 2px;
+}
+
+/* The pagination strip is the third named place, and the last: 32px controls at
+   8px inline padding. It earns one because it is chrome UNDER a table rather
+   than a control surface inside one, and 32 is what its buttons already are, so
+   naming the place moves the one control that disagreed instead of reopening
+   the two that agreed. Three field sizes is the accepted cost, stated: 40 in a
+   form, 38 in a toolbar, 32 in this strip. */
+.otari-pagination .input,
+.otari-pagination .select__trigger {
+  /* `height`, not `min-height`: HeroUI's own block padding plus its line box
+     already make 38, so a floor of 32 is a floor nothing was under. Measured
+     before assuming, which is why this line is not the one first written. */
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 8px;
 }
 
 /* A select inside a table row is the second named dense place, joining the

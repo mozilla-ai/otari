@@ -1233,7 +1233,9 @@ export function UsagePage() {
             className="border-b border-border py-5"
             contentClassName="flex flex-col gap-3"
           >
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* The named dense place: this row's controls sit above a chart
+                and its table, which is the toolbar position. */}
+            <div className="otari-toolbar flex flex-wrap items-center justify-between gap-3">
               <TabRow>
                 {METRIC_TABS.map((tab) => (
                   <Tab

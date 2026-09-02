@@ -515,7 +515,7 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     // The exempt toggle lives under the Advanced disclosure.
     await user.click(screen.getByRole("button", { name: "Advanced" }))
-    await user.click(screen.getByLabelText("Exempt this key from budget"))
+    await user.click(screen.getByLabelText(/Exempt from budget/))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
     const post = fetchMock.mock.calls.find(
@@ -741,9 +741,7 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(
-      await screen.findByLabelText("Exempt this key from budget"),
-    )
+    await user.click(await screen.findByLabelText(/Exempt from budget/))
     await user.click(screen.getByRole("button", { name: "Save changes" }))
 
     const patch = fetchMock.mock.calls.find(

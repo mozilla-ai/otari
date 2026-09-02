@@ -14,6 +14,7 @@ import {
 import { SettingsGroup } from "@/shared/components/surface"
 import {
   Badge,
+  Checkbox,
   ConfirmButton,
   ErrorBanner,
   errorMessage,
@@ -74,6 +75,7 @@ function WorkspaceScope({
   onEverywhere,
   onToggle,
 }: {
+  /** Names the workspace group, so a box reads as "Beta" inside "prompt-injection". */
   scopeName: string
   everywhere: boolean
   selected: readonly string[]
@@ -95,28 +97,28 @@ function WorkspaceScope({
         disabled={disabled}
       />
       {everywhere ? null : (
-        <div className="flex flex-wrap gap-3">
+        // A named group rather than a per-box aria-label. Each box is labelled
+        // by the workspace name a reader can see, and the group says which
+        // guardrail those names belong to; an aria-label on the box would have
+        // replaced the visible text for assistive tech instead of qualifying it.
+        <fieldset aria-label={scopeName} className="flex flex-wrap gap-3">
           {workspaces.map((workspace) => (
-            <label
-              key={workspace.id}
-              className="flex items-center gap-1 text-sm text-muted"
-            >
-              <input
-                type="checkbox"
-                aria-label={`${scopeName}: ${workspace.name}`}
-                checked={selected.includes(workspace.id)}
-                disabled={disabled}
+            <span key={workspace.id} className="text-sm text-muted">
+              <Checkbox
+                isSelected={selected.includes(workspace.id)}
+                isDisabled={disabled}
                 onChange={() => onToggle(workspace.id)}
-              />
-              {workspace.name}
-            </label>
+              >
+                {workspace.name}
+              </Checkbox>
+            </span>
           ))}
           {workspaces.length === 0 ? (
             <span className="text-xs text-muted">
               No workspaces to choose from yet.
             </span>
           ) : null}
-        </div>
+        </fieldset>
       )}
     </div>
   )
@@ -405,7 +407,7 @@ function AddGuardrailForm({
         />
       </div>
       <WorkspaceScope
-        scopeName="New guardrail"
+        scopeName={profile || "New guardrail"}
         everywhere={everywhere}
         selected={scope}
         workspaces={workspaces}

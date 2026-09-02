@@ -385,7 +385,7 @@ function MoneyInput({
       aria-label={ariaLabel}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
+      className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
     />
   )
 }
@@ -457,7 +457,7 @@ function PricingTierEditor({
               onChange={(event) =>
                 update(tier.id, "minInputTokens", event.target.value)
               }
-              className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
+              className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
@@ -1001,7 +1001,7 @@ function SearchInput({
       // the dense height like the filter selects beside it.
       // `min-w-0` so it gives way when the row is tight instead of holding its
       // width and pushing a filter onto a second line.
-      className={`min-w-0 max-w-xs ${INPUT_CLASS}`}
+      className={`w-full min-w-0 max-w-xs ${INPUT_CLASS}`}
     />
   )
 }

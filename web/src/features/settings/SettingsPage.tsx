@@ -13,8 +13,10 @@ import {
 } from "@/shared/api/hooks"
 import { PageIntro, SettingsGroup, Toolbar } from "@/shared/components/surface"
 import {
+  Checkbox,
   ErrorBanner,
   FilterSelect,
+  INPUT_CLASS,
   InfoBanner,
   PageLoading,
 } from "@/shared/components/ui"
@@ -102,7 +104,7 @@ function NumberSetting({
         value={draft}
         disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
-        className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none disabled:opacity-50"
+        className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
       />
       <Button
         size="sm"
@@ -146,7 +148,7 @@ function TextSetting({
         disabled={disabled}
         placeholder="unset"
         onChange={(event) => setDraft(event.target.value)}
-        className="w-56 rounded-md border border-field-border bg-field px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
+        className={`w-56 ${INPUT_CLASS}`}
       />
       <Button
         size="sm"
@@ -663,15 +665,9 @@ export function SettingsPage() {
           }}
           className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
         />
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input
-            type="checkbox"
-            checked={settableOnly}
-            onChange={(event) => setSettableOnly(event.target.checked)}
-            className="h-4 w-4 accent-accent"
-          />
+        <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only
-        </label>
+        </Checkbox>
       </Toolbar>
 
       {data ? (
