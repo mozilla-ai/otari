@@ -534,7 +534,10 @@ async def blocked_axis(db: AsyncSession, budget: ApplicableBudget) -> str:
         ("token", row[3], row[4], row[5]),
         ("request", row[6], row[7], row[8]),
     ):
-        if cap is not None and spent + held >= cap:
+        # Compared as Decimals whatever the driver handed back: a NUMERIC column
+        # arrives as Decimal on PostgreSQL and can arrive as float on SQLite, and
+        # adding one of each raises rather than comparing.
+        if cap is not None and Decimal(str(spent)) + Decimal(str(held)) >= Decimal(str(cap)):
             return name
     return "budget"
 

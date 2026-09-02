@@ -196,26 +196,45 @@ def _blocked_axis(
     held: Decimal,
     held_tokens: int,
     held_requests: int,
+    new_request: bool,
 ) -> str:
     """Which capped axis had no room, for the refusal message.
 
     The gate is one conditional UPDATE that matches no row, so nothing in its
-    result says which of three caps bound. Recomputed here from the counters
-    rather than inferred, and only on the refusal path, so a cutover onto a token
-    or request cap has something to read: "exceeded budget limit" alone leaves an
-    operator unable to tell a spent allowance from a spent token allowance.
-    Returns the first axis with no room, in the order the gate builds its clauses;
-    where two are exhausted at once, either answer is true.
+    result says which of three caps bound. Recomputed here from the counters, on
+    the refusal path only, so a cutover onto a token or request cap has something
+    to read: "exceeded budget limit" alone cannot tell an operator a spent
+    allowance from a spent token allowance.
+
+    The test per axis is the gate's own, both clauses, or this names no axis for
+    the commonest refusal of all: a request that fits the remaining headroom
+    exactly because there is none, which the strict clause is what catches.
+    Returns the first axis with no room, in the order the gate builds its
+    clauses; where two are exhausted at once, either answer is true.
     """
-    if budget.max_budget is not None and spend + reserved + held > budget.max_budget:
-        return "spend"
-    if budget.token_limit is not None and tokens + reserved_tokens + held_tokens > budget.token_limit:
-        return "token"
-    if budget.request_limit is not None and requests + reserved_requests + held_requests > budget.request_limit:
-        return "request"
-    # Every axis has room, so the row moved under this request between the gate
-    # and here, or the user was deleted. Neither is an axis, and naming one would
-    # be a guess.
+    # Widened rather than trusted: these come off a User the session may still
+    # hold as the caller assigned it, so ``spend`` can be the float a fixture
+    # wrote and ``float + Decimal`` raises. ``to_usd`` at the boundary is the same
+    # rule the counters themselves follow.
+    axes: tuple[tuple[str, Decimal | int | None, Decimal | int, Decimal | int], ...] = (
+        ("spend", budget.max_budget, to_usd(spend) + to_usd(reserved), to_usd(held)),
+        ("token", budget.token_limit, tokens + reserved_tokens, held_tokens),
+        ("request", budget.request_limit, requests + reserved_requests, held_requests),
+    )
+    for name, cap, committed, wanted in axes:
+        if cap is None:
+            continue
+        # The second clause of the gate: this hold would push the axis past its
+        # cap. Exact for a top-up, which is asked only that.
+        if committed + wanted > cap:
+            return name
+        # And the first, which only an arrival is asked: the axis is already at or
+        # over its cap, so even a hold of nothing is refused.
+        if new_request and committed >= cap:
+            return name
+    # Every capped axis has room, so the row moved under this request between the
+    # gate and here, or the user was deleted. Neither is an axis, and naming one
+    # would be a guess.
     return "budget"
 
 
@@ -697,6 +716,7 @@ async def reserve_budget(
                 held=usd or ZERO,
                 held_tokens=held_tokens,
                 held_requests=held_requests,
+                new_request=new_request,
             )
             if refused_on is not None
             else "budget"

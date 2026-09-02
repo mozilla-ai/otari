@@ -931,7 +931,9 @@ async def test_token_ceiling_holds_the_estimate_and_records_the_measured_total(
         async_db, tenancy.user_id, 0.0, estimated_tokens=4_000, scope=tenancy.scope()
     )
 
-    assert handle.token_estimate == 4_000
+    # The ceiling leg, because this fixture's user has no budget row: the per-user
+    # leg holds nothing, which is what the split makes explicit.
+    assert (handle.token_estimate, handle.scoped_token_estimate) == (0, 4_000)
     assert await _token_counters(async_db, cap.id) == (0, 4_000)
 
     await reconcile_reservation(async_db, handle, 0.0, actual_tokens=1_200)

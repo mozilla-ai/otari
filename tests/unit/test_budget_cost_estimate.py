@@ -9,8 +9,8 @@ estimate that had gone back to binary floating point.
 from decimal import Decimal
 from typing import Any
 
-from gateway.models.entities import MAX_COUNT_LIMIT, ModelPricing
-from gateway.services.budget_service import estimate_cost, estimate_tokens
+from gateway.models.entities import MAX_COUNT_LIMIT, Budget, ModelPricing
+from gateway.services.budget_service import _blocked_axis, estimate_cost, estimate_tokens
 
 
 def _micro_dollars(*terms: Decimal | int) -> Decimal:
@@ -174,3 +174,60 @@ def test_the_count_limit_survives_the_round_trip_through_a_json_number() -> None
     assert int(float(MAX_COUNT_LIMIT)) == MAX_COUNT_LIMIT
     # And three of them still fit the column the gate sums into.
     assert 3 * MAX_COUNT_LIMIT < 2**63 - 1
+
+
+def _axis(budget: Budget, *, new_request: bool = True, **counters: object) -> str:
+    """``_blocked_axis`` with every counter at zero unless the case sets it."""
+    base: dict[str, object] = {
+        "spend": Decimal(0),
+        "reserved": Decimal(0),
+        "tokens": 0,
+        "reserved_tokens": 0,
+        "requests": 0,
+        "reserved_requests": 0,
+        "held": Decimal(0),
+        "held_tokens": 0,
+        "held_requests": 0,
+    }
+    base.update(counters)
+    return _blocked_axis(budget, new_request=new_request, **base)  # type: ignore[arg-type]
+
+
+def test_the_refusal_names_an_axis_already_at_its_cap() -> None:
+    """The commonest refusal of all, and the one a "would exceed" test alone misses.
+
+    A user at their cap is refused for a request that holds nothing, so the axis
+    has to be found by the gate's strict clause rather than by arithmetic on the
+    hold.
+    """
+    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0) == "spend"
+    assert _axis(Budget(budget_id="b", token_limit=1_000), tokens=1_000) == "token"
+    assert _axis(Budget(budget_id="b", request_limit=2), requests=2, held_requests=1) == "request"
+
+
+def test_the_refusal_names_the_axis_a_hold_would_push_past() -> None:
+    budget = Budget(budget_id="b", max_budget=10.0, token_limit=1_000)
+
+    assert _axis(budget, spend=9.0, held=Decimal("2")) == "spend"
+    assert _axis(budget, tokens=900, held_tokens=200) == "token"
+
+
+def test_the_refusal_names_the_spent_axis_not_the_one_with_room() -> None:
+    """The point of naming it: a token cutover cannot debug "budget limit"."""
+    budget = Budget(budget_id="b", max_budget=10.0, token_limit=5)
+
+    assert _axis(budget, spend=1.0, tokens=5) == "token"
+
+
+def test_a_money_counter_read_as_a_float_does_not_raise() -> None:
+    """A session can still hold the float a caller assigned, and mixing raises.
+
+    This is what made the refusal path a 500 instead of a 403 for a user exactly
+    at their cap.
+    """
+    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0, reserved=Decimal(0)) == "spend"
+
+
+def test_a_top_up_is_not_asked_the_arrival_question() -> None:
+    """Its own hold is what filled the axis, so "already at the cap" is not its test."""
+    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0, new_request=False) == "budget"
