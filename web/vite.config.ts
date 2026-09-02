@@ -50,6 +50,14 @@ const announceApiTarget = {
   },
 } as const
 
+// Node 26 renamed the flag to `--webstorage` and takes `--no-webstorage`; 22 and
+// 24 know only the experimental spelling and abort on the new one. CI runs the
+// LTS and the images build on 26, so the suite has to start under both.
+const webStorageOptOut =
+  Number(process.versions.node.split(".")[0]) >= 26
+    ? "--no-webstorage"
+    : "--no-experimental-webstorage"
+
 export default defineConfig({
   base: "/",
   plugins: [
@@ -148,6 +156,15 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/tests/setup.ts"],
+    // Node 26 installs its own Web Storage globals, and vitest's jsdom
+    // environment leaves a global the process already defines alone. So Node's
+    // pair shadows jsdom's: `localStorage` reads as undefined (its getter wants
+    // --localstorage-file), and `sessionStorage` is worse for working, because
+    // Node's is one per process where jsdom's is rebuilt per test file. Node's
+    // storage is also file-backed and survives the run, which is not what a
+    // test suite wants from `localStorage`. Opting the test process out hands
+    // both globals back to the DOM environment that owns them.
+    execArgv: [webStorageOptOut],
     css: true,
     // Vitest owns the component tests under src/; the Playwright specs in e2e/
     // run in a real browser and must not be collected here.
