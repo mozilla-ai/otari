@@ -41,7 +41,12 @@ export function UpdatePrompt() {
     <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex justify-center">
       <div
         role="status"
-        className="pointer-events-auto mt-1.5 flex items-center gap-3 rounded-full border border-accent bg-primary-subtle py-1.5 pr-1.5 pl-4 text-sm text-primary-subtle-foreground shadow-elevation-md"
+        // Square, and it took a named class to get there: `rounded-full` is one of
+        // the four spellings the `--radius` change is documented as unable to
+        // reach, so this stayed a pill through the whole teardown. The shadow
+        // class goes with it, since the elevation tokens are zero and it was
+        // painting nothing.
+        className="pointer-events-auto mt-1.5 flex items-center gap-3 border border-accent bg-primary-subtle py-1.5 pr-1.5 pl-4 text-sm text-primary-subtle-foreground"
       >
         <span>
           <strong className="font-semibold">An update is available.</strong>{" "}

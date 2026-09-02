@@ -935,13 +935,21 @@ function AppShellChrome() {
               {/* One control, not a stack of links: the guide, appearance, and
                 sign-out all live in its menu, which is how the prototype ends
                 the rail. Sign-out used to sit in the page header. */}
-              {/* The design rules the account row off from the row above it, so
-                the control that ends the rail is not read as one more
-                destination in the group that changes context. */}
-              {!showOrganizationRail && managesOrganization ? (
-                <div aria-hidden="true" className="h-px shrink-0 bg-border" />
-              ) : null}
-              <AccountMenu collapsed={effectiveCollapsed} />
+              {/* The rail's closing band, and the mirror of the scope band at
+                its top: 56px, a rule on the section tier running the rail's
+                full width, and a flat row inside it. The two ends of the rail
+                are then the same shape, and the account control reads as the
+                chrome it is rather than as one more destination in the group
+                above it.
+
+                `-mx-3 px-3` for the reason the block above uses it: a rule that
+                stops short of the edge reads as a box's border rather than as a
+                division of the rail. Unconditional now, where the hairline it
+                replaces appeared only for someone who managed an organization,
+                so the rail ended differently depending on who was looking. */}
+              <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border px-3">
+                <AccountMenu collapsed={effectiveCollapsed} />
+              </div>
             </div>
           </div>
         </aside>

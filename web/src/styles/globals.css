@@ -1296,7 +1296,12 @@ main {
 .dropdown__trigger {
   border-color: var(--color-control-border);
   box-shadow: none;
-  padding-inline: 11px;
+  /* START only. `padding-inline` here was a regression: HeroUI reserves the
+     chevron's lane with `pe-7` on a trigger that has an indicator, and setting
+     both sides took that lane away, so the value sat 11px ON TOP of the chevron
+     rather than beside it. The end padding is the indicator's, and it is not
+     ours to set. */
+  padding-inline-start: 11px;
 }
 .select__trigger[data-open="true"],
 .select__trigger[aria-expanded="true"],
