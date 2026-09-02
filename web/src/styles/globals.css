@@ -188,6 +188,33 @@
      accent on the accent tint", does not work for the small text these chips
      and active nav items are set in. This is the darker step instead. */
   --color-primary-subtle-foreground: #005b63;
+  /* The primary BUTTON's fill, and deliberately not `--color-primary`.
+     `--color-primary` is aliased to HeroUI's `--accent`, which feeds the badge,
+     chip, progress bar, meter, spinner and switch as well as the button, so
+     moving it would have recoloured the toggle's on-knob and every progress
+     fill along with the CTA. The accent stays #0098a4 for data ink, the mark
+     and the control accents; only the button family darkens, and it darkens
+     because the ramp now runs under white ink, where the old lightening ramp
+     lost contrast as it went.
+     4.71:1, 5.53:1 and 6.01:1 against white. #006e77 is a new value in this
+     file and is the user's own pick rather than a shade derived here.
+     One set for both themes: a button's fill is its own ground, so its ramp
+     does not depend on the page behind it. */
+  --color-primary-button: #00808a;
+  --color-primary-button-hover: #00747e;
+  --color-primary-button-active: #006e77;
+  --color-primary-button-foreground: #ffffff;
+  /* The armed confirm's fill. The rule the two button families share: a filled
+     button's ground is a DARKENED STEP OF ITS OWN INK. Primary's fill is the
+     same in both themes only because primary's ink is; danger's ink differs by
+     theme, so its fill does too, and the dark value below is not this one. That
+     is deliberate rather than an oversight: sharing one value would couple the
+     themes, and moving light's danger token would silently move dark's confirm
+     button with it.
+     #cb2526 is danger's existing light ink, already 5.48:1 under white, so it
+     darkens no further than contrast asks for. */
+  --color-danger-button: #cb2526;
+  --color-danger-button-foreground: #ffffff;
 
   /* ── Link & focus ───────────────────────────────────────────────────────
    * Link is the accent's darker step, clearly distinct from the accent itself
@@ -451,6 +478,21 @@
   --color-primary-active: #00c1d0;
   --color-primary-subtle: rgb(0 152 164 / 0.18); /* selection / soft fill */
   --color-primary-foreground: #08090a;
+  /* The same four values as the light block, and that is the point rather than
+     an omission: a filled button carries its own ground, so the ink on it and
+     the ramp under it do not change with the page behind them. Declared here
+     anyway because each block owns the complete set it needs. */
+  --color-primary-button: #00808a;
+  --color-primary-button-hover: #00747e;
+  --color-primary-button-active: #006e77;
+  --color-primary-button-foreground: #ffffff;
+  /* A true step off dark's own danger ink (#f6453f), not light's value: 4.69:1
+     under white, and 4.06 and 4.25 against the surface and the canvas it sits
+     on. The nearer step (#d83d37) reaches 4.52, which passes 4.5 by two
+     hundredths and is the rounded-ratio trap; this one also matches primary's
+     4.71 headroom, so the two filled buttons carry the same margin. */
+  --color-danger-button: #d43b36;
+  --color-danger-button-foreground: #ffffff;
   /* Same role as the light block's, and not simply the accent-on-tint
      pairing for the same reason. The contrast direction inverts here, so
      this is a lifted step rather than a darker one. */
@@ -1095,16 +1137,27 @@ body {
  * content box, so growing the box keeps the text centered without a second
  * number to keep in step with the first.
  * ============================================================= */
+/* 36 in a form, 32 in a dense place. `padding-block` alongside the floor is
+   what actually moves them: HeroUI's own 8px padding plus its 20px line box
+   make 38 regardless of a min-height under it, so setting the floor alone
+   changes nothing. Textarea keeps a floor rather than a height, since it is the
+   one field that should grow. */
 .input,
-.select__trigger,
+.select__trigger {
+  min-height: 36px;
+  height: 36px;
+  padding-block: 6px;
+}
 .otari-markdown textarea,
 textarea.input {
-  min-height: 40px;
+  min-height: 36px;
+  padding-block: 6px;
 }
 .otari-toolbar .input,
 .otari-toolbar .select__trigger,
 .otari-toolbar input[type="search"] {
-  min-height: 38px;
+  min-height: 32px;
+  padding-block: 4px;
 }
 
 /* =============================================================
@@ -1231,7 +1284,29 @@ main {
   border: 1px solid var(--color-control-border);
 }
 
-/* An outlined button is an object, so it takes the object edge. HeroUI gives it
+/* The primary button's own ramp, which darkens rather than lightens. HeroUI
+   drives it from `--accent`, so this overrides the four variables the button
+   reads instead of moving the accent: everything else `--accent` feeds (the
+   switch knob, the meter and progress fills, the spinner) keeps #0098a4.
+   Pressed takes its own step, where HeroUI reuses hover for both. */
+/* The armed confirm. Same override shape as the primary below, and for the
+   same reason: `--danger` feeds the status dot, the danger ink and the meter's
+   over-limit fill, none of which should follow a button's ground. */
+.button--danger {
+  --button-bg: var(--color-danger-button);
+  --button-bg-hover: var(--color-danger-button);
+  --button-bg-pressed: var(--color-danger-button);
+  --button-fg: var(--color-danger-button-foreground);
+}
+
+.button--primary {
+  --button-bg: var(--color-primary-button);
+  --button-bg-hover: var(--color-primary-button-hover);
+  --button-bg-pressed: var(--color-primary-button-active);
+  --button-fg: var(--color-primary-button-foreground);
+}
+
+/* An outlined button is an object, so it takes the object edge./* An outlined button is an object, so it takes the object edge. HeroUI gives it
    `--color-border`, the 0.08 divider alpha, which is tuned to separate two
    surfaces of nearly the same value and leaves a button on the page ground with
    no edge to speak of in dark. Select triggers already took the control edge in
@@ -1323,7 +1398,7 @@ main {
 .dropdown__trigger {
   border-color: var(--color-control-border);
   box-shadow: none;
-  padding-inline: 11px;
+  padding-inline: 12px;
 }
 /* The slot layout is the triggers' alone: an `<input>` is a replaced element
    with no children to lay out, so `display: flex` and a `gap` on it would be
@@ -1378,24 +1453,31 @@ main {
    8px inline padding. It earns one because it is chrome UNDER a table rather
    than a control surface inside one, and 32 is what its buttons already are, so
    naming the place moves the one control that disagreed instead of reopening
-   the two that agreed. Three field sizes is the accepted cost, stated: 40 in a
-   form, 38 in a toolbar, 32 in this strip. */
+   the two that agreed.
+
+   TWO SIZES NOW, not three: dense is 32 everywhere, so the pagination strip
+   stopped being a place of its own and became an ordinary instance of the
+   dense one. It keeps only its tighter inline padding, which is about a strip
+   of small controls sitting shoulder to shoulder rather than about height. */
 .otari-pagination .input,
-.otari-pagination .select__trigger {
-  /* `height`, not `min-height`: HeroUI's own block padding plus its line box
-     already make 38, so a floor of 32 is a floor nothing was under. Measured
-     before assuming, which is why this line is not the one first written. */
+.otari-pagination .select__trigger,
+.table__cell .select__trigger {
+  /* `height` alongside the floor, because HeroUI's block padding and line box
+     make 38 on their own and a floor alone leaves that untouched. */
   height: 32px;
   min-height: 32px;
+  padding-block: 4px;
+}
+.otari-pagination .input,
+.otari-pagination .select__trigger {
   padding-inline: 8px;
 }
-
-/* A select inside a table row is the second named dense place, joining the
-   toolbar: a row's controls sit on the row's own pitch, and a 40px trigger in a
-   58px row leaves nothing around it. The place is named here rather than at a
-   call site, which is the whole point of having places. */
-.table__cell .select__trigger {
-  min-height: 38px;
+/* Same for a toolbar's controls, which the min-height above cannot bring down
+   on its own for the same reason. */
+.otari-toolbar .input,
+.otari-toolbar .select__trigger,
+.otari-toolbar input[type="search"] {
+  height: 32px;
 }
 
 /* =============================================================
