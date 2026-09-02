@@ -40,14 +40,31 @@ export const TELEMETRY_EVENTS = {
   TAB_CHANGED: "Tab Changed",
 
   /**
+   * The post-sign-in setup guide shown to a new account, and dismissed.
+   *
+   * Named here and fired by nobody in this build, for the same reason as
+   * `CHECKOUT_CANCELLED` below: the guide is a hosted surface an overlay
+   * contributes, and no base page shows it. Naming the step here is what keeps
+   * the activation funnel in one piece. `SIGNUP_STARTED` through
+   * `LOGIN_SUCCESS` are recorded from Otari's own auth pages and the first
+   * settled request is measured server-side, so this is the one step between
+   * them, and an overlay that invented a string for it would split the funnel
+   * this vocabulary is base-owned to hold together.
+   *
+   * The properties the platform sends with them are `workspace_id` and
+   * `presentation_count`.
+   */
+  ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
+  ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
+
+  /**
    * A wallet top-up abandoned at the payment provider.
    *
-   * Named here and fired by nobody in this build, which is the one deliberate
-   * gap in this list: billing is ARCHITECTURE.md's canonical overlay-only
-   * capability, this gateway meters spend but holds no wallet, and no base page
-   * ever sees the return from a checkout. It is named so the overlay that does
-   * own that return records it under the platform's existing name rather than
-   * inventing a second one.
+   * Named here and fired by nobody in this build: billing is ARCHITECTURE.md's
+   * canonical overlay-only capability, this gateway meters spend but holds no
+   * wallet, and no base page ever sees the return from a checkout. It is named
+   * so the overlay that does own that return records it under the platform's
+   * existing name rather than inventing a second one.
    */
   CHECKOUT_CANCELLED: "Checkout Cancelled",
 } as const

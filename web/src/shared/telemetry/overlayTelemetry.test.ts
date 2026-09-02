@@ -120,7 +120,7 @@ describe("the base build's dependencies", () => {
 })
 
 describe("the event catalog", () => {
-  it("carries the twelve names the platform already records under", () => {
+  it("carries the fourteen names the platform already records under", () => {
     // Pinned as strings, not just as keys: a superset build reports into the
     // analytics workspace otari-ai already reports into, so renaming one here
     // splits its funnel in two rather than failing anything.
@@ -136,6 +136,8 @@ describe("the event catalog", () => {
       RESEND_VERIFICATION_CLICKED: "Resend Verification Clicked",
       FORM_VALIDATION_FAILED: "Form Validation Failed",
       TAB_CHANGED: "Tab Changed",
+      ACTIVATION_GUIDE_SHOWN: "Activation Guide Shown",
+      ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
       CHECKOUT_CANCELLED: "Checkout Cancelled",
     })
   })
@@ -173,14 +175,18 @@ describe("the wiring behind the catalog", () => {
   const sources = baseSources(join(WEB, "src"))
 
   /**
-   * Named here and fired by nobody, deliberately, and the only such name.
+   * Named here and fired by nobody, deliberately.
    *
    * Listed rather than left silently outside the assertion below: an unfired
    * name reads as dead, and the next person to tidy one away would be breaking
-   * a contract rather than removing a leftover. `events.ts` says why this one
-   * is here.
+   * a contract rather than removing a leftover. `events.ts` says why each of
+   * these is here.
    */
-  const NOT_FIRED_HERE = ["CHECKOUT_CANCELLED"]
+  const NOT_FIRED_HERE = [
+    "ACTIVATION_GUIDE_SHOWN",
+    "ACTIVATION_GUIDE_DISMISSED",
+    "CHECKOUT_CANCELLED",
+  ]
 
   it.each(
     Object.keys(TELEMETRY_EVENTS).filter(
