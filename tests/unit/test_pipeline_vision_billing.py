@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
 from gateway.core.config import GatewayConfig
-from gateway.services.budget_service import ReservationHandle
+from gateway.services.budget_service import ReservationHandle, estimate_tokens
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
 
@@ -117,12 +117,15 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         log_writer=cast(Any, object()),
         model="openai:gpt-4",
         user_id_from_request=None,
-        estimate_prompt_chars=100,
+        estimate_prompt_chars=_PROMPT_CHARS,
         estimate_max_output_tokens=None,
         master_key_user_required_detail="user required",
         user_forbidden_detail="forbidden",
         normalize_messages=_normalize_with_vision,
     )
+
+
+_PROMPT_CHARS = 100
 
 
 def _config() -> GatewayConfig:
@@ -189,6 +192,13 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
         # hand, so it is the one that passes the deployment's own reservation TTL
         # rather than letting the ledger fall back to its module default.
         "reservation_ttl_sec": 900,
+        # The token hold, built from the same prompt size and output bound the
+        # dollar estimate is priced from, so the two describe one request.
+        "estimated_tokens": estimate_tokens(
+            prompt_chars=_PROMPT_CHARS,
+            max_output_tokens=None,
+            default_output_tokens=_config().budget_estimate_default_output_tokens,
+        ),
     }
     # The scoped ceilings narrow on the same resolved provider the pricing does,
     # and bill to the key that authenticated the request.
