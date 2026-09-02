@@ -84,6 +84,29 @@ For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`. Operators can read the
 non-secret effective set through `GET /v1/settings`.
 
+### Database connections
+
+| Setting | Purpose |
+| --- | --- |
+| `db_pool_size`, `db_max_overflow` | Connections available for serving requests. |
+| `db_pool_timeout` | Seconds a request waits for a free connection before it is refused. |
+| `db_pool_recycle` | Retire a connection after this many seconds. `-1` disables. |
+| `db_connect_timeout` | Seconds to wait for a new connection to be established. |
+| `db_command_timeout` | Client-side ceiling on one statement. `0` disables. |
+| `db_statement_timeout_ms` | Server-side ceiling on one statement. `0` disables. |
+| `db_log_pool_size` | Connections reserved for usage logging, separate from the pool above. |
+
+The pool sizes bound concurrent *database* work, not concurrent provider calls:
+a request hands its connection back before the upstream call. Raise them for a
+deployment whose dashboard and management traffic are heavy, not because
+inference is.
+
+Recycling and the two statement timeouts matter most behind a managed database
+or a NAT, which drop idle connections without closing them. The pool's pre-ping
+would catch a closed connection, but the ping is itself a statement and blocks
+on a socket that went away silently, so leaving these unset turns a dropped
+connection into a request that hangs for minutes.
+
 ## Provider configuration
 
 The `providers` map is keyed by provider instance. A standard provider needs

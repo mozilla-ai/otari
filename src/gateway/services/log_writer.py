@@ -8,7 +8,7 @@ from typing import Protocol
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from gateway.core.database import create_session
+from gateway.core.database import create_log_session
 from gateway.log_config import logger
 from gateway.metrics import (
     log_writer_batch_size,
@@ -31,7 +31,7 @@ class SingleLogWriter:
     """Write each usage log inline, one transaction per event."""
 
     async def put(self, log: UsageLog) -> None:
-        async with create_session() as db:
+        async with create_log_session() as db:
             try:
                 # Spend is owned by the budget reservation reconcile path
                 # (gateway.services.budget_service), not the log writer — the
@@ -110,7 +110,7 @@ class BatchLogWriter:
         start = time.monotonic()
         log_writer_batch_size.labels(writer="batch").observe(len(batch))
         try:
-            async with create_session() as db:
+            async with create_log_session() as db:
                 # Spend is reconciled inline via the budget reservation path, not
                 # here — see SingleLogWriter.put. The writer only persists rows.
                 for log in batch:

@@ -1072,6 +1072,31 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
 
 
 @pytest.mark.asyncio
+async def test_successful_admission_releases_the_database_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admission is the last database work before the provider call, so it hands the connection back.
+
+    Held instead, one pooled connection is pinned per in-flight upstream call
+    and ``db_pool_size + db_max_overflow`` silently becomes the ceiling on
+    concurrent provider calls. A gateway-run tool loop makes that worse, since
+    it spans several provider calls plus each tool call. Past the ceiling a
+    request waits ``db_pool_timeout`` and is refused by the auth dependency,
+    which reports a pool timeout as an authentication outage.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
+
+    db = AsyncMock()
+    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+
+    await _call_prepare_gateway_tools(ctx)
+
+    db.commit.assert_awaited_once()
+    # The reservation is still held: this request is going to the provider.
+    assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
 async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)

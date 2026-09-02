@@ -2645,6 +2645,11 @@ async def prepare_gateway_tools(
             await release_reservation(ctx)
         raise
 
+    # Last statement of the preamble: everything after this is the provider
+    # call. See :func:`release_request_connection` for why the connection must
+    # not be held across it.
+    await release_request_connection(ctx)
+
     return ToolContext(
         config=ctx.config,
         mcp_server_configs=mcp_servers,
@@ -3021,6 +3026,46 @@ async def release_reservation(ctx: RequestContext) -> None:
         await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge)
         return
     await refund_reservation(ctx.db, ctx.reservation)
+
+
+async def release_request_connection(ctx: RequestContext) -> None:
+    """Return the request's pooled database connection before the provider call.
+
+    Every read the standalone preamble makes (the API key, the billed user and
+    its budget, the organization's guardrails, the workspace's MCP / sandbox /
+    web-search rows) runs on the request-scoped session from ``get_db``. That
+    session opens a transaction on its first statement and holds its connection
+    until it is committed, rolled back, or closed, and ``get_db`` only closes it
+    when the request ends. Nothing in the preamble commits, so without this the
+    connection stays checked out for the whole upstream call.
+
+    That makes ``db_pool_size + db_max_overflow`` a hard ceiling on *concurrent
+    provider calls* rather than on concurrent database work, which is not what
+    those settings describe. Past the ceiling a request waits ``db_pool_timeout``
+    and then fails in :func:`gateway.api.deps._verify_and_update_api_key`, whose
+    ``SQLAlchemyError`` arm reports a pool timeout as
+    "Authentication temporarily unavailable, please retry": a saturated gateway
+    telling every caller its credentials might be the problem. A gateway-run tool
+    loop holds the connection across several provider calls plus each tool call,
+    so the ceiling binds sooner the more the deployment uses.
+
+    Committing rather than closing keeps the session usable: reconciliation and
+    the failure-row write after dispatch simply check a connection back out. It
+    is safe to commit here because the session factory sets
+    ``expire_on_commit=False``, so rows the preamble already loaded keep their
+    values, and the codebase declares no ORM ``relationship()``, so nothing
+    lazy-loads afterwards.
+
+    Best-effort: a request that has reached the provider must not fail because
+    the commit did. A poisoned session would already have been rolled back by
+    the caller's ``SQLAlchemyError`` arm.
+    """
+    if ctx.db is None:
+        return
+    try:
+        await ctx.db.commit()
+    except SQLAlchemyError:
+        logger.warning("Could not release the request's database connection before dispatch", exc_info=True)
 
 
 def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:

@@ -63,3 +63,7 @@ def test_reset_db_allows_reinit() -> None:
 
     assert database._engine is None
     assert database._SessionLocal is None
+    # The metering pool is a second engine and has to be reset with the first,
+    # or a re-init leaves the usage-log writer bound to a disposed one.
+    assert database._log_engine is None
+    assert database._LogSessionLocal is None

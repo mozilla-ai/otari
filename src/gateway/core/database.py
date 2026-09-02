@@ -19,6 +19,8 @@ from gateway.core.config import GatewayConfig
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
+_log_engine: AsyncEngine | None = None
+_LogSessionLocal: async_sessionmaker[AsyncSession] | None = None
 
 # How long a SQLite connection waits for a held lock before raising
 # "database is locked", in milliseconds.
@@ -107,28 +109,85 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
         cursor.close()
 
 
+def engine_kwargs(
+    config: GatewayConfig,
+    *,
+    connect_args: dict[str, Any],
+    is_sqlite: bool,
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+) -> dict[str, Any]:
+    """Build ``create_async_engine`` kwargs for this deployment's database.
+
+    ``pool_size`` / ``max_overflow`` override the configured request-pool sizes
+    for a secondary pool; PostgreSQL only, since SQLite runs on ``NullPool``.
+
+    The PostgreSQL arm adds the timeouts that otherwise do not exist anywhere on
+    the database path. ``pool_pre_ping`` is what keeps a connection the server
+    has closed from being handed to a request, but the ping is itself a
+    statement: on a socket that went away without a FIN, which managed
+    PostgreSQL and the NAT in front of it do to idle connections routinely, it
+    blocks on TCP retransmission rather than failing. With no ``command_timeout``
+    that wait is the operating system's to end, minutes later, and every request
+    behind it is waiting on a pool slot the whole time. ``pool_recycle`` retires
+    connections before they get old enough to be in that state at all.
+    """
+    kwargs: dict[str, Any] = {"pool_pre_ping": True, "connect_args": connect_args}
+    if is_sqlite:
+        kwargs["poolclass"] = NullPool
+        return kwargs
+
+    kwargs["pool_size"] = config.db_pool_size if pool_size is None else pool_size
+    kwargs["max_overflow"] = config.db_max_overflow if max_overflow is None else max_overflow
+    kwargs["pool_timeout"] = config.db_pool_timeout
+    if config.db_pool_recycle >= 0:
+        kwargs["pool_recycle"] = config.db_pool_recycle
+
+    connect_args["timeout"] = config.db_connect_timeout
+    if config.db_command_timeout > 0:
+        connect_args["command_timeout"] = config.db_command_timeout
+    if config.db_statement_timeout_ms > 0:
+        # Server-side backstop for the client-side ``command_timeout`` above:
+        # this one still ends the statement when the client is the wedged half.
+        server_settings = dict(connect_args.get("server_settings") or {})
+        server_settings.setdefault("statement_timeout", str(config.db_statement_timeout_ms))
+        connect_args["server_settings"] = server_settings
+    return kwargs
+
+
 def init_db(config: GatewayConfig) -> None:
     """Initialize async database engine and optionally run migrations."""
 
-    global _engine, _SessionLocal  # noqa: PLW0603
+    global _engine, _SessionLocal, _log_engine, _LogSessionLocal  # noqa: PLW0603
 
     database_url = config.database_url
     async_url, connect_args = _to_async_url(database_url)
 
     is_sqlite = async_url.startswith("sqlite+aiosqlite")
 
-    engine_kwargs: dict[str, Any] = {"pool_pre_ping": True, "connect_args": connect_args}
-    if is_sqlite:
-        engine_kwargs["poolclass"] = NullPool
-    else:
-        engine_kwargs["pool_size"] = config.db_pool_size
-        engine_kwargs["max_overflow"] = config.db_max_overflow
-        engine_kwargs["pool_timeout"] = config.db_pool_timeout
-        if config.db_pool_recycle >= 0:
-            engine_kwargs["pool_recycle"] = config.db_pool_recycle
-
-    _engine = create_async_engine(async_url, **engine_kwargs)
+    _engine = create_async_engine(
+        async_url,
+        **engine_kwargs(config, connect_args=connect_args, is_sqlite=is_sqlite),
+    )
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
+
+    # Usage logging gets a pool of its own. It shares the request pool's
+    # database, but not its contention: a saturated request pool used to time
+    # the writer out too, and a dropped usage row is unrecoverable. Metering is
+    # how spend, budgets and the activity log are reconstructed afterwards, so
+    # it must not be the first thing a busy gateway loses. Small and with no
+    # overflow, because the writer batches and is never a source of bursts.
+    _log_engine = create_async_engine(
+        async_url,
+        **engine_kwargs(
+            config,
+            connect_args=connect_args,
+            is_sqlite=is_sqlite,
+            pool_size=config.db_log_pool_size,
+            max_overflow=0,
+        ),
+    )
+    _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
@@ -160,29 +219,52 @@ async def create_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+@asynccontextmanager
+async def create_log_session() -> AsyncIterator[AsyncSession]:
+    """Session for the usage-log writer, on the metering pool.
+
+    Falls back to the request pool when :func:`init_db` has not run, which is
+    only the case in tests that construct a writer directly.
+    """
+    factory = _LogSessionLocal or _SessionLocal
+    if factory is None:
+        msg = "Database not initialized. Call init_db() first."
+        raise RuntimeError(msg)
+
+    async with factory() as session:
+        yield session
+
+
 def reset_db() -> None:
     """Dispose the active engine so it can be re-initialized (testing helper)."""
 
-    global _engine, _SessionLocal  # noqa: PLW0603
+    global _engine, _SessionLocal, _log_engine, _LogSessionLocal  # noqa: PLW0603
 
-    engine = _engine
+    engines = [engine for engine in (_engine, _log_engine) if engine is not None]
     _engine = None
     _SessionLocal = None
+    _log_engine = None
+    _LogSessionLocal = None
 
-    if engine is None:
+    if not engines:
         return
 
-    dispose_coro = engine.dispose()
+    async def _dispose_all() -> None:
+        for engine in engines:
+            await engine.dispose()
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(dispose_coro)
+        asyncio.run(_dispose_all())
     else:
-        loop.create_task(dispose_coro)
+        loop.create_task(_dispose_all())
 
 
 __all__ = [
+    "create_log_session",
     "create_session",
+    "engine_kwargs",
     "get_db",
     "init_db",
     "reset_db",
