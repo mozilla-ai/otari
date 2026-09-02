@@ -88,10 +88,10 @@ first resolution.
 
 ## Toolchain and build
 
-Use pnpm as pinned in `package.json`. The Docker and CI Node major is 22, so
-`@types/node` follows 22. Keep shared React Aria dependencies on the version
-HeroUI resolves, and approve required install scripts in
-`pnpm-workspace.yaml`.
+Use pnpm as pinned in `package.json`. The Docker build stage is Node 26 and CI
+tracks the `lts/*` alias, so `@types/node` follows the image at 26. Keep shared
+React Aria dependencies on the version HeroUI resolves, and approve required
+install scripts in `pnpm-workspace.yaml`.
 
 The React Compiler runs through the configured Babel pass. Avoid reflexive
 `useMemo`, `useCallback`, and `React.memo`; effects still need correct

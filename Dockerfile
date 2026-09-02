@@ -4,16 +4,17 @@
 # so without this the whole install + vite build runs a second time under QEMU for
 # the non-native arch on every publish. The output is JavaScript, CSS, and PNGs,
 # which are architecture-independent, so one native build serves both images.
-FROM --platform=$BUILDPLATFORM node:22-slim AS web
+FROM --platform=$BUILDPLATFORM node:26-slim AS web
 
 WORKDIR /app/web
 
-# The dashboard is a pnpm project. Corepack ships with Node and reads the
-# `packageManager` field in web/package.json, so the image installs with exactly
-# the pnpm the lockfile was written by, and the version is pinned in one place
-# rather than here as well. The prompt would block a non-interactive build.
+# The dashboard is a pnpm project. Corepack reads the `packageManager` field in
+# web/package.json, so the image installs with exactly the pnpm the lockfile was
+# written by, and the version is pinned in one place rather than here as well.
+# Node 26 no longer bundles corepack, hence the install. The prompt would block
+# a non-interactive build.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
+RUN npm install --global corepack@latest && corepack enable
 
 # Install from the lockfile alone, so the dependency layer is reused whenever
 # only dashboard sources changed. pnpm-workspace.yaml carries the build-script

@@ -80,7 +80,7 @@ after a rebuild.
 
 Who builds it instead:
 
-- The Docker image builds it in a `node:22-slim` stage (see `Dockerfile`), so a
+- The Docker image builds it in a `node:26-slim` stage (see `Dockerfile`), so a
   container ships the dashboard with no action from you.
 - From a source checkout, run `make dashboard` (repo root) once. Without a built
   bundle the gateway serves the get-started tutorial at `/` instead.
