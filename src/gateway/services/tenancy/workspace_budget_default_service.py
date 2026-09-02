@@ -118,6 +118,8 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
     # so this shape stays what it was before the limit moved onto the budget.
     name: str | None
     max_budget: float | None
+    token_limit: int | None
+    request_limit: int | None
     budget_duration_sec: int | None
     # The other way the budget can carry a period, alongside
     # ``budget_duration_sec`` and never with it (a CHECK on ``budgets`` refuses
@@ -139,6 +141,8 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
             # Narrowed on the way out: the cap is exact in the database, while
             # the wire contract and the dashboard client stay float.
             max_budget=as_float(budget.max_budget),
+            token_limit=budget.token_limit,
+            request_limit=budget.request_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             created_at=default.created_at.isoformat(),

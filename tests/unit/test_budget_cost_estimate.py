@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.models.entities import ModelPricing
-from gateway.services.budget_service import estimate_cost
+from gateway.services.budget_service import estimate_cost, estimate_tokens
 
 
 def _micro_dollars(*terms: Decimal | int) -> Decimal:
@@ -128,3 +128,23 @@ def test_estimate_cost_preserves_a_free_cache_write_rate() -> None:
     )
 
     assert estimate == _micro_dollars(1_000 * 3)
+
+
+def test_estimate_tokens_sums_the_two_figures_the_cost_is_priced_from() -> None:
+    """Prompt chars at four to the token, rounded up, plus the declared output bound."""
+    assert estimate_tokens(prompt_chars=401, max_output_tokens=1_000, default_output_tokens=4_096) == 101 + 1_000
+
+
+def test_estimate_tokens_falls_back_to_the_default_output_bound() -> None:
+    """An unbounded request reserves the deployment's cap, as the cost estimate does."""
+    assert estimate_tokens(prompt_chars=0, max_output_tokens=None, default_output_tokens=4_096) == 4_096
+
+
+def test_estimate_tokens_treats_a_zero_output_bound_as_a_bound() -> None:
+    """``max_output_tokens=0`` is an explicit "no output", not an omitted field."""
+    assert estimate_tokens(prompt_chars=8, max_output_tokens=0, default_output_tokens=4_096) == 2
+
+
+def test_estimate_tokens_clamps_hostile_inputs() -> None:
+    """Negatives cannot shrink a hold: both figures floor at zero."""
+    assert estimate_tokens(prompt_chars=-100, max_output_tokens=-50, default_output_tokens=4_096) == 0

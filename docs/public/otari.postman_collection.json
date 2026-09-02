@@ -1397,7 +1397,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -1455,7 +1455,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -2777,7 +2777,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
             },
             "description": "Define a budget owned by this organization. Owners and admins only.",
             "header": [
@@ -2811,7 +2811,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
             },
             "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
             "header": [

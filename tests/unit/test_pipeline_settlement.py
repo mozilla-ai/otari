@@ -261,6 +261,7 @@ class _Settlement:
 
     def __init__(self) -> None:
         self.reconciled: list[float] = []
+        self.settled_tokens: list[int] = []
         self.refunded = 0
         self.logged: list[dict[str, Any]] = []
 
@@ -272,8 +273,9 @@ class _Settlement:
                 return float(kwargs["cost_override"])
             return 0.25 if usage else None
 
-        async def fake_reconcile(db: Any, handle: Any, actual_cost: float) -> None:
+        async def fake_reconcile(db: Any, handle: Any, actual_cost: float, *, actual_tokens: int = 0) -> None:
             self.reconciled.append(actual_cost)
+            self.settled_tokens.append(actual_tokens)
 
         async def fake_refund(db: Any, handle: Any) -> None:
             self.refunded += 1
@@ -335,6 +337,9 @@ async def test_stream_with_usage_reconciles_actual_cost(monkeypatch: pytest.Monk
     await _drain(_build(stream(), GatewayConfig()))
 
     assert settlement.reconciled == [0.25]
+    # The provider's own total, so a token ceiling settles at what was used
+    # rather than at the estimate the request was admitted on.
+    assert settlement.settled_tokens == [15]
     assert settlement.refunded == 0
 
 

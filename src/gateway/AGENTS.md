@@ -91,6 +91,11 @@ it in a route or tool backend.
 Per-user budgets and scoped budgets are both enforced. A shared `Budget` row
 gives each attached user the full limit; it is not a pooled account.
 
+A budget caps dollars, tokens and requests independently, and both mechanisms
+hold and settle all three: a limit added to `budgets` needs a counter and a hold
+on `users` and on `scoped_budgets`, or it binds through one reachability and is
+silently ignored through the other.
+
 `budget_service.reserve_budget` places the estimate before dispatch and the
 shared settlement helpers reconcile or refund it. Scoped reservations use
 conditional updates in one total order and compensate earlier holds when a

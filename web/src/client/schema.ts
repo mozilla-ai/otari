@@ -4896,9 +4896,11 @@ export interface components {
          * BudgetResponse
          * @description Response model for budget information.
          *
-         *     ``max_budget`` is the per-user spending limit, and multiple users can share
-         *     one budget, so the usage rollup is an aggregate over the users assigned to
-         *     this budget: how many there are and their combined ``spend`` / ``reserved``.
+         *     ``max_budget``, ``token_limit`` and ``request_limit`` are the per-user
+         *     ceilings, each independent and each unlimited when null, and multiple users
+         *     can share one budget, so the usage rollup is an aggregate over the users
+         *     assigned to this budget: how many there are and their combined ``spend`` /
+         *     ``reserved``.
          *     Assigning users to a budget is done through the users API (dashboard support
          *     lands with user management), so a fresh gateway reports zeros here.
          */
@@ -4915,8 +4917,12 @@ export interface components {
             name: string | null;
             /** Organization Id */
             organization_id: string | null;
+            /** Request Limit */
+            request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Token Limit */
+            token_limit: number | null;
             /**
              * Total Reserved
              * @default 0
@@ -5304,10 +5310,20 @@ export interface components {
              */
             name?: string | null;
             /**
+             * Request Limit
+             * @description Maximum requests over the period. Independent of max_budget; null is unlimited
+             */
+            request_limit?: number | null;
+            /**
              * Reset Alignment
              * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Token Limit
+             * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
+             */
+            token_limit?: number | null;
         };
         /**
          * CreateKeyRequest
@@ -6985,10 +7001,20 @@ export interface components {
              */
             name?: string | null;
             /**
+             * Request Limit
+             * @description Maximum requests over one period; null caps nothing. Independent of max_budget
+             */
+            request_limit?: number | null;
+            /**
              * Reset Alignment
              * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Token Limit
+             * @description Maximum tokens over one period; null caps nothing. Independent of max_budget
+             */
+            token_limit?: number | null;
         };
         /**
          * OrganizationBudgetPublic
@@ -7020,8 +7046,12 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
+            /** Request Limit */
+            request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Token Limit */
+            token_limit: number | null;
             /** Updated At */
             updated_at: string;
         };
@@ -7054,10 +7084,20 @@ export interface components {
              */
             name?: string | null;
             /**
+             * Request Limit
+             * @description Maximum requests over one period; null caps nothing. Independent of max_budget
+             */
+            request_limit?: number | null;
+            /**
              * Reset Alignment
              * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Token Limit
+             * @description Maximum tokens over one period; null caps nothing. Independent of max_budget
+             */
+            token_limit?: number | null;
         };
         /** OrganizationBudgetsPublic */
         OrganizationBudgetsPublic: {
@@ -7541,8 +7581,12 @@ export interface components {
             budget_id: string;
             /** Created At */
             created_at: string;
+            /** Current Requests */
+            current_requests: number;
             /** Current Spend */
             current_spend: number;
+            /** Current Tokens */
+            current_tokens: number;
             /** Id */
             id: string;
             /** Manageable */
@@ -7557,14 +7601,22 @@ export interface components {
             period_start: string | null;
             /** Provider Key Id */
             provider_key_id: string | null;
+            /** Request Limit */
+            request_limit: number | null;
+            /** Reserved Requests */
+            reserved_requests: number;
             /** Reserved Spend */
             reserved_spend: number;
+            /** Reserved Tokens */
+            reserved_tokens: number;
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
             scope_type: string;
+            /** Token Limit */
+            token_limit: number | null;
             /** Updated At */
             updated_at: string;
         };
@@ -8269,9 +8321,9 @@ export interface components {
          *     enforced against ``current_spend + reserved_spend``, so there is no rollup
          *     over users to compute.
          *
-         *     ``max_budget``, ``budget_duration_sec`` and ``reset_alignment`` are read off
-         *     the budget rather than stored here, and are carried on the wire so a caller
-         *     can render a ceiling without fetching every budget to resolve one id.
+         *     Every limit, along with ``budget_duration_sec`` and ``reset_alignment``, is
+         *     read off the budget rather than stored here, and carried on the wire so a
+         *     caller can render a ceiling without fetching every budget to resolve one id.
          */
         ScopedBudgetResponse: {
             /** Budget Duration Sec */
@@ -8280,8 +8332,12 @@ export interface components {
             budget_id: string;
             /** Created At */
             created_at: string;
+            /** Current Requests */
+            current_requests: number;
             /** Current Spend */
             current_spend: number;
+            /** Current Tokens */
+            current_tokens: number;
             /** Id */
             id: string;
             /** Max Budget */
@@ -8294,14 +8350,22 @@ export interface components {
             period_start: string | null;
             /** Provider Key Id */
             provider_key_id: string | null;
+            /** Request Limit */
+            request_limit: number | null;
+            /** Reserved Requests */
+            reserved_requests: number;
             /** Reserved Spend */
             reserved_spend: number;
+            /** Reserved Tokens */
+            reserved_tokens: number;
             /** Reset Alignment */
             reset_alignment: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
             scope_type: string;
+            /** Token Limit */
+            token_limit: number | null;
             /** Updated At */
             updated_at: string;
         };
@@ -8894,8 +8958,18 @@ export interface components {
             max_budget?: number | null;
             /** Name */
             name?: string | null;
+            /**
+             * Request Limit
+             * @description Maximum requests over the period. Independent of max_budget; null is unlimited
+             */
+            request_limit?: number | null;
             /** Reset Alignment */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Token Limit
+             * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
+             */
+            token_limit?: number | null;
         };
         /**
          * UpdateKeyRequest
@@ -10041,8 +10115,12 @@ export interface components {
             name: string | null;
             /** Provider Key Id */
             provider_key_id: string | null;
+            /** Request Limit */
+            request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Token Limit */
+            token_limit: number | null;
             /** Updated At */
             updated_at: string;
             /**

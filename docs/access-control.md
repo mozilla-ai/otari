@@ -86,6 +86,17 @@ Two budget forms exist:
 - A scoped budget limits an organization, workspace, membership, or API key and
   can optionally narrow the limit to one provider.
 
+A budget caps up to three things over its period, each set independently and
+each unlimited when left unset: spend in USD (`max_budget`), total tokens
+(`token_limit`), and requests (`request_limit`). A request must have room on
+every axis the budget caps. Spend and tokens are held at an upper bound before
+dispatch and reconciled to the measured figures afterwards, so an over-estimate
+costs the budget nothing; a request counts as one request when it is admitted.
+Endpoints that hold no token estimate (embeddings, rerank, and the other
+pass-through routes) are refused once a token cap is exhausted rather than
+reserving headroom for themselves, so a token cap can be passed by the requests
+already in flight when it runs out.
+
 Scoped budgets can use a rolling duration or a UTC calendar boundary. A key with
 `exclude_from_budget`, or a deployment with `budget_strategy: disabled`,
 bypasses enforcement.

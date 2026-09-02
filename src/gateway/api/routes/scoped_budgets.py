@@ -74,9 +74,9 @@ class ScopedBudgetResponse(BaseModel):
     enforced against ``current_spend + reserved_spend``, so there is no rollup
     over users to compute.
 
-    ``max_budget``, ``budget_duration_sec`` and ``reset_alignment`` are read off
-    the budget rather than stored here, and are carried on the wire so a caller
-    can render a ceiling without fetching every budget to resolve one id.
+    Every limit, along with ``budget_duration_sec`` and ``reset_alignment``, is
+    read off the budget rather than stored here, and carried on the wire so a
+    caller can render a ceiling without fetching every budget to resolve one id.
     """
 
     id: str
@@ -88,6 +88,12 @@ class ScopedBudgetResponse(BaseModel):
     max_budget: float | None
     current_spend: float
     reserved_spend: float
+    token_limit: int | None
+    current_tokens: int
+    reserved_tokens: int
+    request_limit: int | None
+    current_requests: int
+    reserved_requests: int
     budget_duration_sec: int | None
     reset_alignment: str | None
     period_start: str | None
@@ -110,6 +116,14 @@ class ScopedBudgetResponse(BaseModel):
             max_budget=as_float(limit.max_budget),
             current_spend=float(budget.current_spend),
             reserved_spend=float(budget.reserved_spend),
+            # Counts stay integers on the wire: unlike the money columns there is
+            # no exact-decimal type to narrow from.
+            token_limit=limit.token_limit,
+            current_tokens=budget.current_tokens,
+            reserved_tokens=budget.reserved_tokens,
+            request_limit=limit.request_limit,
+            current_requests=budget.current_requests,
+            reserved_requests=budget.reserved_requests,
             budget_duration_sec=limit.budget_duration_sec,
             reset_alignment=limit.reset_alignment,
             period_start=budget.period_start.isoformat() if budget.period_start else None,

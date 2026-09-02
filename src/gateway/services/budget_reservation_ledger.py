@@ -53,6 +53,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import case, delete, select, update
+from sqlalchemy.orm import Mapped
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
@@ -101,6 +102,11 @@ def release_reserved_expression(estimate: Decimal) -> object:
     )
 
 
+def release_reserved_count_expression(column: Mapped[int], amount: int) -> object:
+    """The same clamp for one of the token or request holds, whose arms are integers."""
+    return case((column - amount < 0, 0), else_=column - amount)
+
+
 async def record(
     db: AsyncSession,
     *,
@@ -109,6 +115,8 @@ async def record(
     user_reserved: bool,
     scoped_budgets: Sequence[ApplicableBudget],
     scoped_estimate: Decimal,
+    token_estimate: int = 0,
+    request_estimate: int = 0,
     ttl_seconds: int,
 ) -> str | None:
     """Write the row for a hold that has already been taken, returning its id.
@@ -117,6 +125,12 @@ async def record(
     is the common case for a free model, a budget-exempt key or a user with no
     budget row: there is no hold to make reclaimable, so a row would be pure
     write amplification on the hot path.
+
+    The token and request holds take one figure each rather than the money
+    amount's per-leg pair, because a request holds the same count on the user leg
+    and on every ceiling. Which legs hold at all is already recorded:
+    ``user_reserved`` for the per-user one, and the existence of a line for each
+    ceiling.
     """
     if not user_reserved and not scoped_budgets:
         return None
@@ -127,6 +141,8 @@ async def record(
             id=reservation_id,
             user_id=user_id,
             estimate=estimate,
+            token_estimate=token_estimate if user_reserved else 0,
+            request_estimate=request_estimate if user_reserved else 0,
             user_reserved=user_reserved,
             status=RESERVATION_ACTIVE,
             expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
@@ -138,6 +154,8 @@ async def record(
                 reservation_id=reservation_id,
                 scoped_budget_id=applicable.budget_id,
                 amount=scoped_estimate,
+                token_amount=token_estimate,
+                request_amount=request_estimate,
             )
         )
     await db.commit()
@@ -150,8 +168,12 @@ async def grow(
     *,
     user_delta: Decimal,
     scoped_delta: Decimal,
+    token_delta: int = 0,
 ) -> bool:
     """Fold a top-up into the row that already records this request's hold.
+
+    A top-up grows the dollar and token holds; it never grows the request one,
+    because the top-up belongs to a request the ceiling has already counted.
 
     ``increase_reservation`` grows the counters in place, so the ledger grows the
     same row rather than opening a second one: two rows for one request would
@@ -173,7 +195,10 @@ async def grow(
             BudgetReservation.id == reservation_id,
             BudgetReservation.status == RESERVATION_ACTIVE,
         )
-        .values(estimate=BudgetReservation.estimate + user_delta)
+        .values(
+            estimate=BudgetReservation.estimate + user_delta,
+            token_estimate=BudgetReservation.token_estimate + (token_delta if user_delta > ZERO else 0),
+        )
         .execution_options(synchronize_session=False)
     )
     if not getattr(result, "rowcount", 0):
@@ -190,7 +215,10 @@ async def grow(
         await db.execute(
             update(BudgetReservationScope)
             .where(BudgetReservationScope.reservation_id == reservation_id)
-            .values(amount=BudgetReservationScope.amount + scoped_delta)
+            .values(
+                amount=BudgetReservationScope.amount + scoped_delta,
+                token_amount=BudgetReservationScope.token_amount + token_delta,
+            )
             .execution_options(synchronize_session=False)
         )
     await db.commit()
@@ -269,31 +297,54 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
     lines = (
         (
             await db.execute(
-                select(BudgetReservationScope.scoped_budget_id, BudgetReservationScope.amount).where(
-                    BudgetReservationScope.reservation_id == reservation.id
-                )
+                select(
+                    BudgetReservationScope.scoped_budget_id,
+                    BudgetReservationScope.amount,
+                    BudgetReservationScope.token_amount,
+                    BudgetReservationScope.request_amount,
+                ).where(BudgetReservationScope.reservation_id == reservation.id)
             )
         )
         .tuples()
         .all()
     )
-    # Grouped by amount because ``scoped_budget_service.release`` takes one figure
-    # for a set of ceilings. Today every line of a reservation carries the same
-    # amount, so this is one call; it stays correct if that ever stops being true.
-    by_amount: dict[Decimal, list[str]] = {}
-    for scoped_budget_id, amount in lines:
-        if amount > ZERO:
-            by_amount.setdefault(amount, []).append(scoped_budget_id)
-    for amount, budget_ids in by_amount.items():
-        await release_scoped(db, budget_ids, amount, commit=False)
-
-    if reservation.user_reserved and reservation.estimate > ZERO:
-        await db.execute(
-            update(User)
-            .where(User.user_id == reservation.user_id, User.deleted_at.is_(None))
-            .values(reserved=release_reserved_expression(reservation.estimate))
-            .execution_options(synchronize_session=False)
+    # Grouped by the amounts because ``scoped_budget_service.release`` takes one
+    # figure per axis for a set of ceilings. Today every line of a reservation
+    # carries the same three, so this is one call; it stays correct if that ever
+    # stops being true.
+    by_amounts: dict[tuple[Decimal, int, int], list[str]] = {}
+    for scoped_budget_id, amount, token_amount, request_amount in lines:
+        if amount > ZERO or token_amount > 0 or request_amount > 0:
+            by_amounts.setdefault((amount, token_amount, request_amount), []).append(scoped_budget_id)
+    for (amount, token_amount, request_amount), budget_ids in by_amounts.items():
+        await release_scoped(
+            db,
+            budget_ids,
+            amount,
+            tokens=token_amount,
+            requests=request_amount,
+            commit=False,
         )
+
+    if reservation.user_reserved:
+        values: dict[str, object] = {}
+        if reservation.estimate > ZERO:
+            values["reserved"] = release_reserved_expression(reservation.estimate)
+        if reservation.token_estimate > 0:
+            values["reserved_tokens"] = release_reserved_count_expression(
+                User.reserved_tokens, reservation.token_estimate
+            )
+        if reservation.request_estimate > 0:
+            values["reserved_requests"] = release_reserved_count_expression(
+                User.reserved_requests, reservation.request_estimate
+            )
+        if values:
+            await db.execute(
+                update(User)
+                .where(User.user_id == reservation.user_id, User.deleted_at.is_(None))
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
 
 
 async def _reclaim(db: AsyncSession, expired: Sequence[BudgetReservation]) -> int:

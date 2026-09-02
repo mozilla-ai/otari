@@ -262,3 +262,80 @@ async def test_reconcile_clamps_negative_cost(async_db: Any) -> None:
     assert user is not None
     assert user.spend == Decimal("10.0")  # not reduced by the negative cost
     assert user.reserved == Decimal("0.0")  # hold released
+
+
+@pytest.mark.asyncio
+async def test_reserve_budget_enforces_a_token_only_budget(async_db: Any) -> None:
+    """A budget with no dollar cap still binds through its token cap, and settles at the actual."""
+    async_db.add(Budget(budget_id="token-budget", max_budget=None, token_limit=5_000))
+    async_db.add(User(user_id="token-user", budget_id="token-budget"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "token-user", 0.0, estimated_tokens=1_500)
+
+    assert handle.reserved
+    user = await get_active_user(async_db, "token-user")
+    assert user is not None
+    assert (user.current_tokens, user.reserved_tokens) == (0, 1_500)
+
+    await reconcile_reservation(async_db, handle, 0.0, actual_tokens=900)
+
+    await async_db.refresh(user)
+    assert (user.current_tokens, user.reserved_tokens) == (900, 0)
+
+
+@pytest.mark.asyncio
+async def test_reserve_budget_rejects_at_the_token_limit(async_db: Any) -> None:
+    """A user whose window has reached its token cap is rejected, estimate or no estimate."""
+    async_db.add(Budget(budget_id="spent-tokens", max_budget=None, token_limit=1_000))
+    async_db.add(User(user_id="spent-token-user", budget_id="spent-tokens", current_tokens=1_000))
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, "spent-token-user", 0.0, estimated_tokens=0)
+
+    assert refusal.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reserve_budget_rejects_over_the_request_limit(async_db: Any) -> None:
+    """A request cap admits exactly its count and refuses the next one."""
+    async_db.add(Budget(budget_id="two-requests", max_budget=None, request_limit=2))
+    async_db.add(User(user_id="counted-user", budget_id="two-requests"))
+    await async_db.commit()
+
+    for _ in range(2):
+        handle = await reserve_budget(async_db, "counted-user", 0.0)
+        await reconcile_reservation(async_db, handle, 0.0)
+
+    user = await get_active_user(async_db, "counted-user")
+    assert user is not None
+    assert (user.current_requests, user.reserved_requests) == (2, 0)
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, "counted-user", 0.0)
+
+    assert refusal.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_grows_the_token_hold_without_counting_a_second_request(async_db: Any) -> None:
+    """Attachments expanding the prompt grow the token hold; the request stays one request."""
+    async_db.add(Budget(budget_id="topped-up", max_budget=10.0, token_limit=10_000, request_limit=1))
+    async_db.add(User(user_id="topped-up-user", budget_id="topped-up"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "topped-up-user", 1.0, estimated_tokens=1_000)
+    await increase_reservation(async_db, handle, Decimal("0.5"), additional_tokens=500)
+
+    user = await get_active_user(async_db, "topped-up-user")
+    assert user is not None
+    assert user.reserved_tokens == 1_500
+    # A request cap of one would refuse the top-up if it took a second hold.
+    assert user.reserved_requests == 1
+    assert handle.token_estimate == 1_500
+
+    await refund_reservation(async_db, handle)
+
+    await async_db.refresh(user)
+    assert (user.reserved_tokens, user.reserved_requests) == (0, 0)

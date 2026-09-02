@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -134,6 +135,14 @@ class APIKey(Base):
         }
 
 
+# The ceiling a token or request limit, and the counters compared against it,
+# share: they are all BIGINT. A route bounds an operator-typed limit by this,
+# because above it PostgreSQL refuses the write with a bare integer overflow,
+# which a route can only render as a 500. Exact in the int the wire carries,
+# unlike :data:`gateway.models.money.MAX_USD_LIMIT`, so no headroom is needed.
+MAX_COUNT_LIMIT = 9_223_372_036_854_775_807
+
+
 class Budget(Base):
     """Budget model for spending limits."""
 
@@ -176,6 +185,16 @@ class Budget(Base):
     # would decide a 403 against an amount an operator never typed
     # (mozilla-ai/otari#691).
     max_budget: Mapped[Decimal | None] = mapped_column(UsdCost())
+    # The non-USD ceilings, independent of ``max_budget`` and of each other: a
+    # budget may cap dollars, tokens, requests, or any combination, and a NULL on
+    # an axis is unbounded there. Deliberately no "at least one limit" constraint,
+    # because a budget with every limit NULL is a named period that admits
+    # everything and predates these columns.
+    #
+    # BIGINT: a monthly token allowance for one organization outgrows a 32-bit
+    # counter, and the counters compared against these are the same width.
+    token_limit: Mapped[int | None] = mapped_column(BigInteger(), default=None)
+    request_limit: Mapped[int | None] = mapped_column(BigInteger(), default=None)
     budget_duration_sec: Mapped[int | None] = mapped_column()
     # Snap the window to a UTC calendar boundary instead of counting a fixed
     # number of seconds, which is the only way to express a calendar month (2592000
@@ -200,6 +219,8 @@ class Budget(Base):
             "budget_id": self.budget_id,
             "name": self.name,
             "max_budget": self.max_budget,
+            "token_limit": self.token_limit,
+            "request_limit": self.request_limit,
             "budget_duration_sec": self.budget_duration_sec,
             "reset_alignment": self.reset_alignment,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -225,6 +246,14 @@ class User(Base):
     # ``spend + reserved``; reservations are reconciled into ``spend`` (actual
     # cost) on success or released on failure. See gateway.services.budget_service.
     reserved: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
+    # The token and request counters, gated by the same budget's ``token_limit``
+    # and ``request_limit`` the way the pair above is gated by ``max_budget``.
+    # Each axis names itself rather than extending the bare ``spend``/``reserved``
+    # pair, which is USD and predates them.
+    current_tokens: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    reserved_tokens: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    current_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    reserved_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     # Indexed: the budgets list groups users by this column to build each budget's
     # usage rollup, so an unindexed FK turns that page into a users table scan.
     budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
@@ -1110,7 +1139,7 @@ class BudgetResetLog(Base):
 
 
 class ScopedBudget(Base):
-    """A USD ceiling on one tenancy scope, optionally narrowed to one provider.
+    """A spending ceiling on one tenancy scope, optionally narrowed to one provider.
 
     Two axes. The identity axis is ``(scope_type, scope_id)``: who is capped, an
     organization, a workspace, a member of either, or a single API key. The
@@ -1120,9 +1149,9 @@ class ScopedBudget(Base):
     counters and its own period window, unlike ``budgets``, where the window and
     the counters live on the user.
 
-    Nothing here is denominated in dollars. A limit is a property of the budget
-    this names, which is the only place in the schema that maps a cap to an
-    amount.
+    No limit is stored here. A limit is a property of the budget this names,
+    which is the only place in the schema that maps a cap to a figure, on any of
+    the three axes it can cap.
 
     ``scope_type`` is a plain string rather than a database enum so a new scope
     needs no enum migration, and ``scope_id`` is a string so it holds both this
@@ -1194,6 +1223,14 @@ class ScopedBudget(Base):
     # reserved_spend``; a period roll zeroes ``current_spend`` only, so a hold
     # taken before the roll is still released correctly after it.
     reserved_spend: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
+    # One counter pair per non-USD axis the budget can cap, holding and settling
+    # exactly as the money pair above does. A period roll zeroes the ``current_*``
+    # of all three axes and leaves every hold, so a hold taken before a roll is
+    # still released correctly after it.
+    current_tokens: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    reserved_tokens: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    current_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    reserved_requests: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -1256,6 +1293,12 @@ class BudgetReservation(Base):
     # What the per-user leg holds in ``users.reserved``. Zero when the request
     # held only scoped ceilings (a user with no budget row still passes those).
     estimate: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
+    # What the same leg holds on the other two axes. Recorded per axis because the
+    # sweep has to give back every axis a leaked hold took: a period roll zeroes
+    # ``current_*`` and deliberately leaves the holds, so a token hold nothing
+    # releases shrinks that ceiling for good.
+    token_estimate: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    request_estimate: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
     # Whether the ``users.reserved`` write actually happened. Distinct from
     # ``estimate > 0`` because a zero-cost request on an enforced budget still
     # takes the hold, and the release has to match what the reserve did.
@@ -1282,10 +1325,10 @@ class BudgetReservationScope(Base):
     flight leaves an orphan line that the release skips, rather than forcing the
     delete to cascade into live holds.
 
-    The amount is stored per line even though today every ceiling of a request
-    holds the same figure. A ledger line that does not say what it holds is not
-    a ledger line, and reading the amount from the parent would silently become
-    wrong the first time the two diverge.
+    The amounts are stored per line, one per axis, even though today every
+    ceiling of a request holds the same figures. A ledger line that does not say
+    what it holds is not a ledger line, and reading the amounts from the parent
+    would silently become wrong the first time the two diverge.
     """
 
     __tablename__ = "budget_reservation_scopes"
@@ -1297,6 +1340,8 @@ class BudgetReservationScope(Base):
     )
     scoped_budget_id: Mapped[str] = mapped_column(nullable=False)
     amount: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
+    token_amount: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
+    request_amount: Mapped[int] = mapped_column(BigInteger(), default=0, server_default="0")
 
 
 class OrganizationModelPricing(Base):

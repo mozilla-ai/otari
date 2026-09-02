@@ -1488,7 +1488,7 @@
         "type": "object"
       },
       "BudgetResponse": {
-        "description": "Response model for budget information.\n\n``max_budget`` is the per-user spending limit, and multiple users can share\none budget, so the usage rollup is an aggregate over the users assigned to\nthis budget: how many there are and their combined ``spend`` / ``reserved``.\nAssigning users to a budget is done through the users API (dashboard support\nlands with user management), so a fresh gateway reports zeros here.",
+        "description": "Response model for budget information.\n\n``max_budget``, ``token_limit`` and ``request_limit`` are the per-user\nceilings, each independent and each unlimited when null, and multiple users\ncan share one budget, so the usage rollup is an aggregate over the users\nassigned to this budget: how many there are and their combined ``spend`` /\n``reserved``.\nAssigning users to a budget is done through the users API (dashboard support\nlands with user management), so a fresh gateway reports zeros here.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [
@@ -1543,6 +1543,17 @@
             ],
             "title": "Organization Id"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -1553,6 +1564,17 @@
               }
             ],
             "title": "Reset Alignment"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
           },
           "total_reserved": {
             "default": 0.0,
@@ -1579,6 +1601,8 @@
           "organization_id",
           "name",
           "max_budget",
+          "token_limit",
+          "request_limit",
           "budget_duration_sec",
           "reset_alignment",
           "created_at",
@@ -2517,6 +2541,20 @@
             "description": "Admin-facing label for the budget",
             "title": "Name"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum requests over the period. Independent of max_budget; null is unlimited",
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -2533,6 +2571,20 @@
             ],
             "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
             "title": "Reset Alignment"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum tokens over the period. Independent of max_budget; null is unlimited",
+            "title": "Token Limit"
           }
         },
         "title": "CreateBudgetRequest",
@@ -6113,6 +6165,20 @@
             "description": "Admin-facing label for the budget",
             "title": "Name"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum requests over one period; null caps nothing. Independent of max_budget",
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -6129,6 +6195,20 @@
             ],
             "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
             "title": "Reset Alignment"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum tokens over one period; null caps nothing. Independent of max_budget",
+            "title": "Token Limit"
           }
         },
         "title": "OrganizationBudgetCreate",
@@ -6187,6 +6267,17 @@
             "title": "Organization Id",
             "type": "string"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -6198,6 +6289,17 @@
             ],
             "title": "Reset Alignment"
           },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -6208,6 +6310,8 @@
           "organization_id",
           "name",
           "max_budget",
+          "token_limit",
+          "request_limit",
           "budget_duration_sec",
           "reset_alignment",
           "ceiling_count",
@@ -6260,6 +6364,20 @@
             "description": "Admin-facing label for the budget",
             "title": "Name"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum requests over one period; null caps nothing. Independent of max_budget",
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -6276,6 +6394,20 @@
             ],
             "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
             "title": "Reset Alignment"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum tokens over one period; null caps nothing. Independent of max_budget",
+            "title": "Token Limit"
           }
         },
         "title": "OrganizationBudgetUpdate",
@@ -7180,9 +7312,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "current_requests": {
+            "title": "Current Requests",
+            "type": "integer"
+          },
           "current_spend": {
             "title": "Current Spend",
             "type": "number"
+          },
+          "current_tokens": {
+            "title": "Current Tokens",
+            "type": "integer"
           },
           "id": {
             "title": "Id",
@@ -7247,9 +7387,28 @@
             ],
             "title": "Provider Key Id"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
+          "reserved_requests": {
+            "title": "Reserved Requests",
+            "type": "integer"
+          },
           "reserved_spend": {
             "title": "Reserved Spend",
             "type": "number"
+          },
+          "reserved_tokens": {
+            "title": "Reserved Tokens",
+            "type": "integer"
           },
           "reset_alignment": {
             "anyOf": [
@@ -7270,6 +7429,17 @@
             "title": "Scope Type",
             "type": "string"
           },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -7285,6 +7455,12 @@
           "max_budget",
           "current_spend",
           "reserved_spend",
+          "token_limit",
+          "current_tokens",
+          "reserved_tokens",
+          "request_limit",
+          "current_requests",
+          "reserved_requests",
           "budget_duration_sec",
           "reset_alignment",
           "period_start",
@@ -8885,7 +9061,7 @@
         "type": "object"
       },
       "ScopedBudgetResponse": {
-        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\n``max_budget``, ``budget_duration_sec`` and ``reset_alignment`` are read off\nthe budget rather than stored here, and are carried on the wire so a caller\ncan render a ceiling without fetching every budget to resolve one id.",
+        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [
@@ -8906,9 +9082,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "current_requests": {
+            "title": "Current Requests",
+            "type": "integer"
+          },
           "current_spend": {
             "title": "Current Spend",
             "type": "number"
+          },
+          "current_tokens": {
+            "title": "Current Tokens",
+            "type": "integer"
           },
           "id": {
             "title": "Id",
@@ -8969,9 +9153,28 @@
             ],
             "title": "Provider Key Id"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
+          "reserved_requests": {
+            "title": "Reserved Requests",
+            "type": "integer"
+          },
           "reserved_spend": {
             "title": "Reserved Spend",
             "type": "number"
+          },
+          "reserved_tokens": {
+            "title": "Reserved Tokens",
+            "type": "integer"
           },
           "reset_alignment": {
             "anyOf": [
@@ -8992,6 +9195,17 @@
             "title": "Scope Type",
             "type": "string"
           },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -9007,6 +9221,12 @@
           "max_budget",
           "current_spend",
           "reserved_spend",
+          "token_limit",
+          "current_tokens",
+          "reserved_tokens",
+          "request_limit",
+          "current_requests",
+          "reserved_requests",
           "budget_duration_sec",
           "reset_alignment",
           "period_start",
@@ -10173,6 +10393,20 @@
             ],
             "title": "Name"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum requests over the period. Independent of max_budget; null is unlimited",
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -10188,6 +10422,20 @@
               }
             ],
             "title": "Reset Alignment"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum tokens over the period. Independent of max_budget; null is unlimited",
+            "title": "Token Limit"
           }
         },
         "title": "UpdateBudgetRequest",
@@ -13398,6 +13646,17 @@
             ],
             "title": "Provider Key Id"
           },
+          "request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Limit"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -13408,6 +13667,17 @@
               }
             ],
             "title": "Reset Alignment"
+          },
+          "token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Limit"
           },
           "updated_at": {
             "title": "Updated At",
@@ -13426,6 +13696,8 @@
           "provider_key_id",
           "name",
           "max_budget",
+          "token_limit",
+          "request_limit",
           "budget_duration_sec",
           "reset_alignment",
           "created_at",

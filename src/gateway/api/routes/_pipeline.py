@@ -126,6 +126,7 @@ from gateway.services.budget_service import (
     ZERO,
     ReservationHandle,
     estimate_cost,
+    estimate_tokens,
     get_budget_state,
     increase_reservation,
     reconcile_reservation,
@@ -1739,6 +1740,13 @@ async def resolve_request_context(
             default_output_tokens=estimate_inputs.default_output_tokens,
             cache_write_ttl=estimate_inputs.cache_write_ttl,
         )
+        # The same two figures the estimate is priced from, summed, for the token
+        # ceiling's hold. A budget with no token cap ignores it.
+        estimated_tokens = estimate_tokens(
+            prompt_chars=estimate_inputs.prompt_chars,
+            max_output_tokens=estimate_inputs.max_output_tokens,
+            default_output_tokens=estimate_inputs.default_output_tokens,
+        )
         # A key flagged exclude_from_budget still logs its cost but is never
         # reserved, reconciled into users.spend, or gated. Master-key callers have
         # api_key None and stay on the enforced path. The decision is threaded
@@ -1755,6 +1763,7 @@ async def resolve_request_context(
                 estimate,
                 model=gate_model,
                 pricing_provider=gate_instance,
+                estimated_tokens=estimated_tokens,
                 strategy=config.budget_strategy,
                 counts_toward_budget=not budget_exempt,
                 # The tenancy-scoped ceilings resolve from the key's workspace and
@@ -1867,10 +1876,16 @@ async def resolve_request_context(
                     default_output_tokens=estimate_inputs.default_output_tokens,
                     cache_write_ttl=estimate_inputs.cache_write_ttl,
                 )
+                post_estimated_tokens = estimate_tokens(
+                    prompt_chars=estimate_inputs.prompt_chars,
+                    max_output_tokens=estimate_inputs.max_output_tokens,
+                    default_output_tokens=estimate_inputs.default_output_tokens,
+                )
                 await increase_reservation(
                     db,
                     reservation,
                     post_estimate - estimate,
+                    additional_tokens=post_estimated_tokens - estimated_tokens,
                     model=model,
                     strategy=config.budget_strategy,
                 )
@@ -2970,6 +2985,11 @@ async def _apply_tool_charges(
         )
 
 
+def _settled_tokens(usage: CompletionUsage | None) -> int:
+    """The measured total a token ceiling settles against, or zero when unreported."""
+    return max(int(usage.total_tokens or 0), 0) if usage is not None else 0
+
+
 def _handle_counts_toward_budget(reservation: ReservationHandle | None) -> bool:
     """Row-level budget flag for a settled request, derived from its reservation.
 
@@ -3442,7 +3462,9 @@ def build_streaming_response(
             workspace_id=workspace_id,
         )
         if reservation is not None:
-            await reconcile_reservation(db, reservation, actual_cost or Decimal(0))
+            await reconcile_reservation(
+                db, reservation, actual_cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
+            )
         return None
 
     async def _on_no_usage() -> None:
@@ -3513,7 +3535,15 @@ def build_streaming_response(
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
-        await reconcile_reservation(db, reservation, settled_cost or reservation.estimate)
+        # The token axis settles at its estimate for the same reason: the provider
+        # reported no count, and the alternative records zero tokens for a request
+        # that certainly used some.
+        await reconcile_reservation(
+            db,
+            reservation,
+            settled_cost or reservation.estimate,
+            actual_tokens=reservation.token_estimate,
+        )
 
     async def _on_error(exc: BaseException) -> None:
         if platform_active:
@@ -4441,7 +4471,9 @@ async def run_standalone_non_stream(
                     workspace_id=ctx.workspace_id,
                 )
             if ctx.reservation is not None:
-                await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or Decimal(0))
+                await reconcile_reservation(
+                    ctx.db, ctx.reservation, actual_cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
+                )
         if display_model is not None:
             relabel_model(result, display_model)
         return result

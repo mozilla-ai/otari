@@ -63,7 +63,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.models.entities import APIKey, Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.entities import MAX_COUNT_LIMIT, APIKey, Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.entities import User as GatewayUser
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -127,7 +127,7 @@ def _require_single_period_source(duration: int | None, alignment: str | None) -
 
 
 class OrganizationBudgetRates(BaseModel):
-    """The figure and the period a budget holds, shared by the create and update bodies."""
+    """The figures and the period a budget holds, shared by the create and update bodies."""
 
     name: str | None = Field(default=None, max_length=200, description="Admin-facing label for the budget")
     max_budget: float | None = Field(
@@ -135,6 +135,18 @@ class OrganizationBudgetRates(BaseModel):
         ge=0,
         le=MAX_USD_LIMIT,
         description="Maximum spend in USD over one period; null caps nothing",
+    )
+    token_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_COUNT_LIMIT,
+        description="Maximum tokens over one period; null caps nothing. Independent of max_budget",
+    )
+    request_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_COUNT_LIMIT,
+        description="Maximum requests over one period; null caps nothing. Independent of max_budget",
     )
     budget_duration_sec: int | None = Field(default=None, gt=0, description=_PERIOD_DESCRIPTION)
     # The `Literal`, not a bare `str`: an unrecognized alignment is stored happily
@@ -184,6 +196,8 @@ class OrganizationBudgetPublic(BaseModel):
     organization_id: uuid.UUID
     name: str | None
     max_budget: float | None
+    token_limit: int | None
+    request_limit: int | None
     budget_duration_sec: int | None
     reset_alignment: str | None
     ceiling_count: int
@@ -204,6 +218,8 @@ class OrganizationBudgetPublic(BaseModel):
             # Narrowed on the way out: the cap is exact in the database, while
             # the wire contract and the dashboard client stay float.
             max_budget=as_float(budget.max_budget),
+            token_limit=budget.token_limit,
+            request_limit=budget.request_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             ceiling_count=ceiling_count,
@@ -283,6 +299,12 @@ class OrganizationScopedBudgetPublic(BaseModel):
     max_budget: float | None
     current_spend: float
     reserved_spend: float
+    token_limit: int | None
+    current_tokens: int
+    reserved_tokens: int
+    request_limit: int | None
+    current_requests: int
+    reserved_requests: int
     budget_duration_sec: int | None
     reset_alignment: str | None
     period_start: str | None
@@ -313,6 +335,12 @@ class OrganizationScopedBudgetPublic(BaseModel):
             max_budget=as_float(budget.max_budget),
             current_spend=float(ceiling.current_spend),
             reserved_spend=float(ceiling.reserved_spend),
+            token_limit=budget.token_limit,
+            current_tokens=ceiling.current_tokens,
+            reserved_tokens=ceiling.reserved_tokens,
+            request_limit=budget.request_limit,
+            current_requests=ceiling.current_requests,
+            reserved_requests=ceiling.reserved_requests,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             period_start=ceiling.period_start.isoformat() if ceiling.period_start else None,
@@ -512,6 +540,8 @@ class OrganizationBudgetService:
             organization_id=organization.id,
             name=request.name,
             max_budget=to_usd_or_none(request.max_budget),
+            token_limit=request.token_limit,
+            request_limit=request.request_limit,
             budget_duration_sec=request.budget_duration_sec,
             reset_alignment=request.reset_alignment,
         )
@@ -561,6 +591,10 @@ class OrganizationBudgetService:
             budget.name = request.name
         if "max_budget" in fields:
             budget.max_budget = to_usd_or_none(request.max_budget)
+        if "token_limit" in fields:
+            budget.token_limit = request.token_limit
+        if "request_limit" in fields:
+            budget.request_limit = request.request_limit
         if "budget_duration_sec" in fields:
             budget.budget_duration_sec = request.budget_duration_sec
         if "reset_alignment" in fields:

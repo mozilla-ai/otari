@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import get_db, require_deployment_operator
-from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
+from gateway.models.entities import (
+    MAX_COUNT_LIMIT,
+    Budget,
+    BudgetResetLog,
+    ScopedBudget,
+    User,
+    WorkspaceBudgetDefault,
+)
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd, to_usd_or_none
 from gateway.models.tenancy import Workspace
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
@@ -46,6 +53,18 @@ class CreateBudgetRequest(BaseModel):
 
     name: str | None = Field(default=None, description="Admin-facing label for the budget")
     max_budget: float | None = Field(default=None, ge=0, le=MAX_USD_LIMIT, description="Maximum spending limit")
+    token_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_COUNT_LIMIT,
+        description="Maximum tokens over the period. Independent of max_budget; null is unlimited",
+    )
+    request_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_COUNT_LIMIT,
+        description="Maximum requests over the period. Independent of max_budget; null is unlimited",
+    )
     budget_duration_sec: int | None = Field(
         default=None, gt=0, description="Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)"
     )
@@ -61,9 +80,11 @@ class CreateBudgetRequest(BaseModel):
 class BudgetResponse(BaseModel):
     """Response model for budget information.
 
-    ``max_budget`` is the per-user spending limit, and multiple users can share
-    one budget, so the usage rollup is an aggregate over the users assigned to
-    this budget: how many there are and their combined ``spend`` / ``reserved``.
+    ``max_budget``, ``token_limit`` and ``request_limit`` are the per-user
+    ceilings, each independent and each unlimited when null, and multiple users
+    can share one budget, so the usage rollup is an aggregate over the users
+    assigned to this budget: how many there are and their combined ``spend`` /
+    ``reserved``.
     Assigning users to a budget is done through the users API (dashboard support
     lands with user management), so a fresh gateway reports zeros here.
     """
@@ -76,6 +97,8 @@ class BudgetResponse(BaseModel):
     organization_id: uuid.UUID | None
     name: str | None
     max_budget: float | None
+    token_limit: int | None
+    request_limit: int | None
     budget_duration_sec: int | None
     reset_alignment: str | None
     created_at: str
@@ -101,6 +124,8 @@ class BudgetResponse(BaseModel):
             # Narrowed on the way out: the cap is exact in the database, while
             # the wire contract and the dashboard client stay float.
             max_budget=as_float(budget.max_budget),
+            token_limit=budget.token_limit,
+            request_limit=budget.request_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             created_at=budget.created_at.isoformat(),
@@ -116,6 +141,18 @@ class UpdateBudgetRequest(BaseModel):
 
     name: str | None = Field(default=None)
     max_budget: float | None = Field(default=None, ge=0, le=MAX_USD_LIMIT)
+    token_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_COUNT_LIMIT,
+        description="Maximum tokens over the period. Independent of max_budget; null is unlimited",
+    )
+    request_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_COUNT_LIMIT,
+        description="Maximum requests over the period. Independent of max_budget; null is unlimited",
+    )
     budget_duration_sec: int | None = Field(default=None, gt=0)
     reset_alignment: ResetAlignment | None = Field(default=None)
 
@@ -170,6 +207,8 @@ async def create_budget(
     budget = Budget(
         name=request.name,
         max_budget=to_usd_or_none(request.max_budget),
+        token_limit=request.token_limit,
+        request_limit=request.request_limit,
         budget_duration_sec=request.budget_duration_sec,
         reset_alignment=request.reset_alignment,
     )
@@ -276,6 +315,10 @@ async def update_budget(
         budget.name = request.name
     if request.max_budget is not None:
         budget.max_budget = to_usd(request.max_budget)
+    if request.token_limit is not None:
+        budget.token_limit = request.token_limit
+    if request.request_limit is not None:
+        budget.request_limit = request.request_limit
     # The two cadence fields settle together, because each is only legal in terms
     # of the other: the pair that has to hold is the one the row ends up with, so
     # an omitted field contributes what is stored. Switching a rolling budget to a

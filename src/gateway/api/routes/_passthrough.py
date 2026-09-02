@@ -512,7 +512,16 @@ async def run_passthrough(
                 usage_log.billing_meters, usage_log.pricing_breakdown = billing
 
         await log_writer.put(usage_log)
-        await reconcile_reservation(db, reservation, cost if cost is not None else 0.0)
+        # The measured total, so a token ceiling counts this endpoint's traffic.
+        # These paths hold no token estimate at admission (the estimate callback is
+        # priced in dollars), so a token cap refuses them once it is exhausted
+        # rather than reserving headroom for each one.
+        await reconcile_reservation(
+            db,
+            reservation,
+            cost if cost is not None else 0.0,
+            actual_tokens=max(total_tokens or 0, 0),
+        )
 
     except HTTPException:
         await refund_reservation(db, reservation)
