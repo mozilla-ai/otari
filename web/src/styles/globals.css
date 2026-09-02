@@ -196,13 +196,17 @@
      and the control accents; only the button family darkens, and it darkens
      because the ramp now runs under white ink, where the old lightening ramp
      lost contrast as it went.
-     4.71:1, 5.53:1 and 6.01:1 against white. #006e77 is a new value in this
-     file and is the user's own pick rather than a shade derived here.
-     One set for both themes: a button's fill is its own ground, so its ramp
-     does not depend on the page behind it. */
+     4.71:1, 6.09:1 and 7.86:1 against white. The steps are spaced by
+     lightness, not by eye: L* 48.60, 41.60, 34.73, so each is a step of about
+     7, which is the cadence the danger family below moves at in this theme.
+     The first pair shipped 4.37 and then 2.26, and a 2.26 press is barely one
+     just-noticeable difference, so the button had a hover and effectively no
+     pressed state.
+     The rest value is shared with dark, because a button's fill is its own
+     ground; the two steps are not, because dark's are frozen (see below). */
   --color-primary-button: #00808a;
-  --color-primary-button-hover: #00747e;
-  --color-primary-button-active: #006e77;
+  --color-primary-button-hover: #006d76;
+  --color-primary-button-active: #005b62;
   --color-primary-button-foreground: #ffffff;
   /* The armed confirm's fill. The rule the two button families share: a filled
      button's ground is a DARKENED STEP OF ITS OWN INK. Primary's fill is the
