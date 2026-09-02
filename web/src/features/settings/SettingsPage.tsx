@@ -190,10 +190,11 @@ function SettingControl({
   disabled: boolean
 }) {
   if (!field.settable) {
+    const display = formatValue(field)
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-body tabular-nums">{formatValue(field)}</span>
-        <span className="rounded-full border border-border px-2 py-0.5 text-caption">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 break-all text-body tabular-nums" title={display}>{display}</span>
+        <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-caption">
           startup-only
         </span>
       </div>
