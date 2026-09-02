@@ -333,6 +333,14 @@ export function scopedBudget(
     max_budget: 50,
     current_spend: 0,
     reserved_spend: 0,
+    // The other two axes a budget can cap, unset here so this fixture is a
+    // dollars-only ceiling, which is what most of the suite is about.
+    token_limit: null,
+    current_tokens: 0,
+    reserved_tokens: 0,
+    request_limit: null,
+    current_requests: 0,
+    reserved_requests: 0,
     budget_duration_sec: null,
     reset_alignment: null,
     period_start: null,
@@ -352,6 +360,8 @@ export function budget(overrides: Partial<Budget> = {}): Budget {
     organization_id: null,
     name: "Team standard",
     max_budget: 100,
+    token_limit: null,
+    request_limit: null,
     budget_duration_sec: 2_592_000,
     // The calendar cadence, which lives here rather than on the rows enforcing
     // this budget: a limit and the period it is spent over are one decision.
@@ -403,6 +413,8 @@ export function workspaceBudgetDefault(
     provider_key_id: null,
     name: "Default member budget",
     max_budget: 50.0,
+    token_limit: null,
+    request_limit: null,
     budget_duration_sec: 2_592_000,
     // The other arm of the period pair, exclusive with the one above: a default
     // whose budget snaps to a calendar boundary carries this instead.

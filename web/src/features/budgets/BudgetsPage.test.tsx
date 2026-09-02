@@ -37,6 +37,8 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     organization_id: null,
     name: null,
     max_budget: 100,
+    token_limit: null,
+    request_limit: null,
     reset_alignment: null,
     budget_duration_sec: 86_400,
     created_at: "2026-01-01T00:00:00+00:00",

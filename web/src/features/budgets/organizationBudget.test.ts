@@ -19,6 +19,8 @@ function budget(
     organization_id: "11111111-1111-1111-1111-111111111111",
     name: null,
     max_budget: 250,
+    token_limit: null,
+    request_limit: null,
     budget_duration_sec: null,
     reset_alignment: "calendar_month",
     ceiling_count: 0,
