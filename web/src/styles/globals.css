@@ -206,6 +206,15 @@
      ground; the two steps are not, because dark's are frozen (see below). */
   --color-primary-button: #00808a;
   --color-primary-button-hover: #006d76;
+  /* One unit of blue from `--color-primary-subtle-foreground` (#005b63), and
+     that is arithmetic rather than a shared meaning. The two are independent
+     derivations of "primary, darkened to pair with white", pinned by different
+     inputs: that one is ink on the accent tint held to AA, this one is a fill
+     under white ink held to the ramp's step. Either input can move without the
+     other, so they are free to drift apart and must not be tidied into an
+     alias. An alias is right when two roles share an input, as
+     `--color-control-border` and `--color-text-subtle` do; it is wrong when
+     they only happen to share a value today. */
   --color-primary-button-active: #005b62;
   --color-primary-button-foreground: #ffffff;
   /* The armed confirm's fill. The rule the two button families share: a filled
