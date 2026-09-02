@@ -45,6 +45,13 @@ class UserResponse(BaseModel):
     alias: str | None
     spend: float
     reserved: float
+    # The other two axes the attached budget can cap, carried for the same reason
+    # the ceiling reads carry theirs: a caller refused on a token or request cap
+    # has to be able to see the counter that refused them.
+    current_tokens: int
+    reserved_tokens: int
+    current_requests: int
+    reserved_requests: int
     budget_id: str | None
     allowed_models: list[str] | None
     budget_started_at: str | None
@@ -63,6 +70,10 @@ class UserResponse(BaseModel):
             # In-flight budget held by accepted-but-not-yet-settled requests;
             # the effective committed amount is spend + reserved.
             reserved=float(user.reserved),
+            current_tokens=user.current_tokens,
+            reserved_tokens=user.reserved_tokens,
+            current_requests=user.current_requests,
+            reserved_requests=user.reserved_requests,
             budget_id=user.budget_id,
             allowed_models=list(user.allowed_models) if user.allowed_models is not None else None,
             budget_started_at=user.budget_started_at.isoformat() if user.budget_started_at else None,
@@ -170,7 +181,11 @@ async def create_user(
     if existing_user and existing_user.deleted_at is not None:
         user = existing_user
         user.deleted_at = None
+        # Every axis, or the recreated user inherits a cap the deleted one had
+        # already partly spent.
         user.spend = Decimal(0)
+        user.current_tokens = 0
+        user.current_requests = 0
         user.alias = request.alias
         user.budget_id = request.budget_id
         user.blocked = request.blocked

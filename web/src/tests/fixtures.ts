@@ -388,6 +388,12 @@ export function user(overrides: Partial<User> = {}): User {
     alias: null,
     spend: 0,
     reserved: 0,
+    // The other two axes the attached budget can cap, readable now so a caller
+    // refused on one can see the counter that refused them.
+    current_tokens: 0,
+    reserved_tokens: 0,
+    current_requests: 0,
+    reserved_requests: 0,
     budget_id: null,
     allowed_models: null,
     budget_started_at: null,

@@ -20,6 +20,10 @@ function testUser(user_id: string): User {
     alias: null,
     spend: 0,
     reserved: 0,
+    current_tokens: 0,
+    reserved_tokens: 0,
+    current_requests: 0,
+    reserved_requests: 0,
     budget_id: null,
     allowed_models: null,
     budget_started_at: null,
@@ -210,9 +214,31 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    expect(within(row).getByText("Unlimited")).toBeInTheDocument()
+    // One vocabulary across both budget pages, where this table used to say
+    // "Unlimited" and the organization one "No limit" for the same state.
+    expect(within(row).getByText("No limit")).toBeInTheDocument()
     expect(within(row).getByText("No reset")).toBeInTheDocument()
     expect(within(row).getByText("No users assigned")).toBeInTheDocument()
+  })
+
+  it("names a token cap instead of calling the budget unlimited", async () => {
+    // A budget capping only tokens refuses requests, so the page it is
+    // inspected from must not read as though nothing binds it.
+    mockApi({
+      budgets: [
+        budget({
+          max_budget: null,
+          token_limit: 1_000_000,
+          budget_duration_sec: null,
+          user_count: 0,
+        }),
+      ],
+    })
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("11111111")).closest("tr")!
+    expect(within(row).getByText("1,000,000 tokens")).toBeInTheDocument()
+    expect(within(row).queryByText("No limit")).not.toBeInTheDocument()
   })
 
   it("shows an aggregate spend bar across assigned users", async () => {

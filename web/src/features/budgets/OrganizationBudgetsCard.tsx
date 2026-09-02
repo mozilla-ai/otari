@@ -68,7 +68,7 @@ export function OrganizationBudgetsCard() {
       id: "limit",
       header: "Limit",
       align: "end",
-      cell: (row) => limitLabel(row.max_budget),
+      cell: (row) => limitLabel(row),
     },
     {
       id: "resets",

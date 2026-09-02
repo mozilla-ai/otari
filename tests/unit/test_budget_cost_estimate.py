@@ -9,7 +9,7 @@ estimate that had gone back to binary floating point.
 from decimal import Decimal
 from typing import Any
 
-from gateway.models.entities import ModelPricing
+from gateway.models.entities import MAX_COUNT_LIMIT, ModelPricing
 from gateway.services.budget_service import estimate_cost, estimate_tokens
 
 
@@ -148,3 +148,29 @@ def test_estimate_tokens_treats_a_zero_output_bound_as_a_bound() -> None:
 def test_estimate_tokens_clamps_hostile_inputs() -> None:
     """Negatives cannot shrink a hold: both figures floor at zero."""
     assert estimate_tokens(prompt_chars=-100, max_output_tokens=-50, default_output_tokens=4_096) == 0
+
+
+def test_estimate_tokens_is_clamped_by_the_reserve_path_not_here() -> None:
+    """The estimator reports what a request asks for; the gate is what bounds it.
+
+    ``max_output_tokens`` is client-supplied and nothing on the wire limits it, so
+    an enormous figure reaches here honestly and ``reserve_budget`` clamps it to
+    ``MAX_COUNT_LIMIT`` before it can be added to a BIGINT counter.
+    """
+    asked = estimate_tokens(
+        prompt_chars=0, max_output_tokens=10**18, default_output_tokens=4_096
+    )
+
+    assert asked == 10**18
+    assert min(asked, MAX_COUNT_LIMIT) == MAX_COUNT_LIMIT
+
+
+def test_the_count_limit_survives_the_round_trip_through_a_json_number() -> None:
+    """The published schema carries this as a double, so it has to be exact as one.
+
+    The BIGINT maximum is not: it renders as one *above* itself, so a client
+    sending the maximum the spec advertises would send a value the column refuses.
+    """
+    assert int(float(MAX_COUNT_LIMIT)) == MAX_COUNT_LIMIT
+    # And three of them still fit the column the gate sums into.
+    assert 3 * MAX_COUNT_LIMIT < 2**63 - 1

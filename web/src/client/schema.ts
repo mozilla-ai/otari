@@ -9691,6 +9691,10 @@ export interface components {
             budget_started_at: string | null;
             /** Created At */
             created_at: string;
+            /** Current Requests */
+            current_requests: number;
+            /** Current Tokens */
+            current_tokens: number;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -9699,6 +9703,10 @@ export interface components {
             next_budget_reset_at: string | null;
             /** Reserved */
             reserved: number;
+            /** Reserved Requests */
+            reserved_requests: number;
+            /** Reserved Tokens */
+            reserved_tokens: number;
             /** Spend */
             spend: number;
             /** Updated At */

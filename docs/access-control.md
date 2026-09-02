@@ -105,7 +105,12 @@ bypasses enforcement.
 
 Imported usage is retrospective and never counts toward a budget. Batch cost is
 also settled after submission, so operators should not treat those paths as a
-hard real-time cap. See [Importing external usage](external-usage.md).
+hard real-time cap. Batch settles dollars alone: its results arrive outside the
+reservation that gated the submission, so a batch counts as the one request that
+created it and contributes no tokens to a token cap, however many prompts it
+carried. The same holds for the vision side-call a request makes to describe an
+attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
+[Importing external usage](external-usage.md).
 
 ## Workspace-scoped spend
 

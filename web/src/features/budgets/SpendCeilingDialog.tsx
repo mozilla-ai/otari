@@ -72,7 +72,7 @@ export function SpendCeilingDialog({
 
   const ownOptions = budgets.map((budget) => ({
     value: budget.budget_id,
-    label: `${budgetLabel(budget)} — ${limitLabel(budget.max_budget)}`,
+    label: `${budgetLabel(budget)} — ${limitLabel(budget)}`,
   }))
   // A ceiling holding a budget set at the deployment level opens on an id no
   // option carries, and `FilterSelect` renders such a value as itself: a raw
@@ -87,7 +87,7 @@ export function SpendCeilingDialog({
     ? [
         {
           value: editing.budget_id,
-          label: `Set at the deployment level — ${limitLabel(editing.max_budget)}`,
+          label: `Set at the deployment level — ${limitLabel(editing)}`,
         },
         ...ownOptions,
       ]

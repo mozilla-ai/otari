@@ -497,6 +497,48 @@ async def reserve(
     return None
 
 
+async def blocked_axis(db: AsyncSession, budget: ApplicableBudget) -> str:
+    """Which capped axis left this ceiling no room, for the refusal message.
+
+    :func:`reserve` refuses by matching no row, so nothing in its result says
+    which of three caps bound. Read here instead, on the refusal path only, and
+    named in the 403: "has exceeded budget limit" alone cannot tell an operator a
+    spent allowance from a spent token allowance, which is the signal a cutover
+    onto a token or request cap needs. Returns the first exhausted axis, in the
+    order :func:`reserve` builds its clauses; where two are exhausted at once,
+    either answer is true.
+    """
+    row = (
+        await db.execute(
+            select(
+                Budget.max_budget,
+                ScopedBudget.current_spend,
+                ScopedBudget.reserved_spend,
+                Budget.token_limit,
+                ScopedBudget.current_tokens,
+                ScopedBudget.reserved_tokens,
+                Budget.request_limit,
+                ScopedBudget.current_requests,
+                ScopedBudget.reserved_requests,
+            )
+            .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
+            .where(ScopedBudget.id == budget.budget_id)
+        )
+    ).first()
+    if row is None:
+        # The ceiling went away between the refusal and here, so there is no axis
+        # to name and guessing one would be worse than saying nothing.
+        return "budget"
+    for name, cap, spent, held in (
+        ("spend", row[0], row[1], row[2]),
+        ("token", row[3], row[4], row[5]),
+        ("request", row[6], row[7], row[8]),
+    ):
+        if cap is not None and spent + held >= cap:
+            return name
+    return "budget"
+
+
 async def settle(
     db: AsyncSession,
     budget_ids: Sequence[str],
@@ -563,6 +605,7 @@ __all__ = [
     "ApplicableBudget",
     "BudgetScopeRequest",
     "applicable_budgets",
+    "blocked_axis",
     "period_window",
     "release",
     "reserve",

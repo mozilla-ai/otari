@@ -135,12 +135,25 @@ class APIKey(Base):
         }
 
 
-# The ceiling a token or request limit, and the counters compared against it,
-# share: they are all BIGINT. A route bounds an operator-typed limit by this,
-# because above it PostgreSQL refuses the write with a bare integer overflow,
-# which a route can only render as a 500. Exact in the int the wire carries,
-# unlike :data:`gateway.models.money.MAX_USD_LIMIT`, so no headroom is needed.
-MAX_COUNT_LIMIT = 9_223_372_036_854_775_807
+# The largest token or request limit a route accepts, and the largest hold it
+# will place. Well below the BIGINT ceiling those columns are, for the two
+# reasons :data:`gateway.models.money.MAX_USD_LIMIT` keeps its own headroom.
+#
+# The wire cannot carry the type's maximum. JSON numbers are doubles, so
+# ``9223372036854775807`` renders in the published schema as
+# ``9.223372036854776e+18``, which is 9223372036854775808: a client sending
+# exactly the maximum the spec advertises sends a value the column refuses. A
+# quadrillion is exact as a double, so the schema says what it means.
+#
+# And the gate adds server-side. Every reserve evaluates
+# ``current + reserved + held`` as BIGINT arithmetic, so a nonzero counter plus a
+# hold near the type's ceiling overflows and answers with a 500 where a 403 was
+# owed. Holds are clamped to this too, because the token estimate derives from a
+# client-supplied output bound that nothing else limits.
+#
+# A quadrillion tokens is four orders of magnitude past any real allowance, and
+# leaves the sum of three of them ~9000x inside the type.
+MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
 
 class Budget(Base):

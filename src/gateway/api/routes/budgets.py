@@ -315,9 +315,13 @@ async def update_budget(
         budget.name = request.name
     if request.max_budget is not None:
         budget.max_budget = to_usd(request.max_budget)
-    if request.token_limit is not None:
+    # Tri-state like the name, and unlike ``max_budget`` above: null is the value
+    # that means "caps nothing on this axis", so a cap that could be raised and
+    # lowered but never taken back off would be a cap with no way out. The
+    # organization-scoped service settles the same two fields the same way.
+    if "token_limit" in request.model_fields_set:
         budget.token_limit = request.token_limit
-    if request.request_limit is not None:
+    if "request_limit" in request.model_fields_set:
         budget.request_limit = request.request_limit
     # The two cadence fields settle together, because each is only legal in terms
     # of the other: the pair that has to hold is the one the row ends up with, so

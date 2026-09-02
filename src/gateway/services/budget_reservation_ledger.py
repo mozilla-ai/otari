@@ -116,6 +116,7 @@ async def record(
     scoped_budgets: Sequence[ApplicableBudget],
     scoped_estimate: Decimal,
     token_estimate: int = 0,
+    scoped_token_estimate: int = 0,
     request_estimate: int = 0,
     ttl_seconds: int,
 ) -> str | None:
@@ -126,11 +127,11 @@ async def record(
     budget row: there is no hold to make reclaimable, so a row would be pure
     write amplification on the hot path.
 
-    The token and request holds take one figure each rather than the money
-    amount's per-leg pair, because a request holds the same count on the user leg
-    and on every ceiling. Which legs hold at all is already recorded:
-    ``user_reserved`` for the per-user one, and the existence of a line for each
-    ceiling.
+    Every amount is per leg, as the caller knows them: ``token_estimate`` is what
+    the per-user leg holds and ``scoped_token_estimate`` what each ceiling does,
+    and the two diverge whenever a top-up grows one and not the other. The request
+    count takes one figure because it never grows, so both legs hold what they
+    held at admission; the row records it only when that leg holds at all.
     """
     if not user_reserved and not scoped_budgets:
         return None
@@ -141,7 +142,7 @@ async def record(
             id=reservation_id,
             user_id=user_id,
             estimate=estimate,
-            token_estimate=token_estimate if user_reserved else 0,
+            token_estimate=token_estimate,
             request_estimate=request_estimate if user_reserved else 0,
             user_reserved=user_reserved,
             status=RESERVATION_ACTIVE,
@@ -154,7 +155,7 @@ async def record(
                 reservation_id=reservation_id,
                 scoped_budget_id=applicable.budget_id,
                 amount=scoped_estimate,
-                token_amount=token_estimate,
+                token_amount=scoped_token_estimate,
                 request_amount=request_estimate,
             )
         )
@@ -169,11 +170,14 @@ async def grow(
     user_delta: Decimal,
     scoped_delta: Decimal,
     token_delta: int = 0,
+    scoped_token_delta: int = 0,
 ) -> bool:
     """Fold a top-up into the row that already records this request's hold.
 
     A top-up grows the dollar and token holds; it never grows the request one,
-    because the top-up belongs to a request the ceiling has already counted.
+    because the top-up belongs to a request the ceiling has already counted. Each
+    token delta is the one its own leg took: the ceilings grow whenever the
+    request has any, and the per-user leg only when it has a budget to grow.
 
     ``increase_reservation`` grows the counters in place, so the ledger grows the
     same row rather than opening a second one: two rows for one request would
@@ -214,7 +218,7 @@ async def grow(
         # ``budget_service._cas_reset_user_budget``. The caller's own compensating
         # writes commit this empty transaction along with them.
         return False
-    if scoped_delta > ZERO or token_delta > 0:
+    if scoped_delta > ZERO or scoped_token_delta > 0:
         # In the same transaction as the guarded UPDATE above, so the lines cannot
         # grow against a row that turned terminal between the two statements. Each
         # axis grows only by what it was actually given, so a token-only top-up
@@ -224,7 +228,7 @@ async def grow(
             .where(BudgetReservationScope.reservation_id == reservation_id)
             .values(
                 amount=BudgetReservationScope.amount + scoped_delta,
-                token_amount=BudgetReservationScope.token_amount + token_delta,
+                token_amount=BudgetReservationScope.token_amount + scoped_token_delta,
             )
             .execution_options(synchronize_session=False)
         )

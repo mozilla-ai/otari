@@ -2544,7 +2544,7 @@
           "request_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -2575,7 +2575,7 @@
           "token_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6168,7 +6168,7 @@
           "request_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6199,7 +6199,7 @@
           "token_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6367,7 +6367,7 @@
           "request_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6398,7 +6398,7 @@
           "token_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -10396,7 +10396,7 @@
           "request_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -10426,7 +10426,7 @@
           "token_limit": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -12673,6 +12673,14 @@
             "title": "Created At",
             "type": "string"
           },
+          "current_requests": {
+            "title": "Current Requests",
+            "type": "integer"
+          },
+          "current_tokens": {
+            "title": "Current Tokens",
+            "type": "integer"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -12693,6 +12701,14 @@
             "title": "Reserved",
             "type": "number"
           },
+          "reserved_requests": {
+            "title": "Reserved Requests",
+            "type": "integer"
+          },
+          "reserved_tokens": {
+            "title": "Reserved Tokens",
+            "type": "integer"
+          },
           "spend": {
             "title": "Spend",
             "type": "number"
@@ -12711,6 +12727,10 @@
           "alias",
           "spend",
           "reserved",
+          "current_tokens",
+          "reserved_tokens",
+          "current_requests",
+          "reserved_requests",
           "budget_id",
           "allowed_models",
           "budget_started_at",

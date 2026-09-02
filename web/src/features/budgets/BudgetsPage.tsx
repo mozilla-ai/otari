@@ -36,8 +36,8 @@ import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
-
 import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
+import { hasNoLimit, limitLabel } from "./organizationBudget"
 
 // ---------- formatting ----------
 
@@ -639,12 +639,11 @@ function DeploymentBudgetsPage() {
       {
         id: "limit",
         header: "Limit (per user)",
-        cell: (b) =>
-          b.max_budget === null ? (
-            <span className="text-muted">Unlimited</span>
-          ) : (
-            formatUSD(b.max_budget)
-          ),
+        cell: (b) => (
+          <span className={hasNoLimit(b) ? "text-muted" : undefined}>
+            {limitLabel(b)}
+          </span>
+        ),
       },
       {
         id: "reset",

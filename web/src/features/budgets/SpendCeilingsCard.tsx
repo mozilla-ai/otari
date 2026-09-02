@@ -111,7 +111,7 @@ export function SpendCeilingsCard({
       align: "end",
       cell: (row) => (
         <div className="flex flex-col items-end gap-0.5">
-          <span>{limitLabel(row.max_budget)}</span>
+          <span>{limitLabel(row)}</span>
           {row.manageable ? null : (
             // Not a warning: the ceiling is correct and enforcing, it simply is
             // not this organization's figure to change. The word "deployment"

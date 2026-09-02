@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { OrganizationBudget } from "@/client"
 import {
   budgetLabel,
+  hasNoLimit,
   limitLabel,
   PERIOD_OPTIONS,
   periodLabel,
@@ -30,21 +31,57 @@ function budget(
   }
 }
 
+const caps = (
+  overrides: Partial<{
+    max_budget: number | null
+    token_limit: number | null
+    request_limit: number | null
+  }> = {},
+) => ({
+  max_budget: null,
+  token_limit: null,
+  request_limit: null,
+  ...overrides,
+})
+
 describe("limitLabel", () => {
-  it("says an absent limit is no limit, not zero", () => {
-    // A budget with no `max_budget` admits every request, which is the opposite
-    // of what "$0.00" reads as.
-    expect(limitLabel(null)).toBe("No limit")
-    expect(limitLabel(undefined)).toBe("No limit")
+  it("says a budget capping nothing is no limit, not zero", () => {
+    // A budget with no cap on any axis admits every request, which is the
+    // opposite of what "$0.00" reads as.
+    expect(limitLabel(caps())).toBe("No limit")
+    expect(hasNoLimit(caps())).toBe(true)
   })
 
   it("formats a real limit as money", () => {
-    expect(limitLabel(250)).toContain("250")
+    expect(limitLabel(caps({ max_budget: 250 }))).toContain("250")
   })
 
   it("keeps a zero limit distinct from an absent one", () => {
     // Zero is a real cap that refuses everything, and an operator can set it.
-    expect(limitLabel(0)).not.toBe("No limit")
+    expect(limitLabel(caps({ max_budget: 0 }))).not.toBe("No limit")
+    expect(hasNoLimit(caps({ max_budget: 0 }))).toBe(false)
+  })
+
+  it("names a token-only cap rather than reading as unlimited", () => {
+    // The case the dollar-only label got wrong: this budget refuses requests.
+    expect(limitLabel(caps({ token_limit: 1_000_000 }))).toBe(
+      "1,000,000 tokens",
+    )
+    expect(hasNoLimit(caps({ token_limit: 1_000_000 }))).toBe(false)
+  })
+
+  it("names a request-only cap", () => {
+    expect(limitLabel(caps({ request_limit: 500 }))).toBe("500 requests")
+  })
+
+  it("names every cap a budget holds", () => {
+    const label = limitLabel(
+      caps({ max_budget: 25, token_limit: 1_000, request_limit: 10 }),
+    )
+
+    expect(label).toContain("25")
+    expect(label).toContain("1,000 tokens")
+    expect(label).toContain("10 requests")
   })
 })
 

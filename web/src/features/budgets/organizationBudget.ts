@@ -12,7 +12,7 @@ import type {
   OrganizationSpendCeiling,
   Workspace,
 } from "@/client"
-import { formatUsd } from "@/shared/helpers/format"
+import { formatNumber, formatUsd } from "@/shared/helpers/format"
 
 /**
  * The calendar boundaries the API accepts, derived from the generated client
@@ -93,12 +93,43 @@ export function periodLabel(
   return `Every ${seconds}s, from the last reset`
 }
 
-/** A budget's cap, where an absent one is uncapped rather than zero. */
-export function limitLabel(value: number | null | undefined): string {
-  // Not `formatUsd(0)`: a budget with no `max_budget` admits every request,
-  // which is the opposite of what "$0.00" reads as.
-  if (value === null || value === undefined) return "No limit"
-  return formatUsd(value)
+/** The three caps a budget can hold, as every response shape carries them. */
+type BudgetCaps = {
+  max_budget: number | null
+  token_limit: number | null
+  request_limit: number | null
+}
+
+/** Whether a budget caps nothing on any axis, and so admits every request. */
+export function hasNoLimit(budget: BudgetCaps): boolean {
+  return (
+    budget.max_budget == null &&
+    budget.token_limit == null &&
+    budget.request_limit == null
+  )
+}
+
+/**
+ * Every cap a budget holds, where holding none is uncapped rather than zero.
+ *
+ * All three axes, not the dollar one: a budget capping only tokens reads as
+ * unlimited when the label is derived from `max_budget` alone, which is the
+ * opposite of what it does. The surface a token-capped ceiling is inspected
+ * from is the one place that must not say that.
+ */
+export function limitLabel(budget: BudgetCaps): string {
+  // Not `formatUsd(0)`: a budget with no cap on an axis admits every request on
+  // it, which is the opposite of what "$0.00" reads as.
+  if (hasNoLimit(budget)) return "No limit"
+  const caps: string[] = []
+  if (budget.max_budget != null) caps.push(formatUsd(budget.max_budget))
+  if (budget.token_limit != null) {
+    caps.push(`${formatNumber(budget.token_limit)} tokens`)
+  }
+  if (budget.request_limit != null) {
+    caps.push(`${formatNumber(budget.request_limit)} requests`)
+  }
+  return caps.join(" + ")
 }
 
 /** How a budget is named on screen: its label, else the head of its id. */
