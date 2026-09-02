@@ -497,16 +497,30 @@ async def reserve(
     return None
 
 
-async def blocked_axis(db: AsyncSession, budget: ApplicableBudget) -> str:
+async def blocked_axis(
+    db: AsyncSession,
+    budget: ApplicableBudget,
+    *,
+    amount: Decimal | None,
+    tokens: int,
+    requests: int,
+    new_request: bool,
+) -> str:
     """Which capped axis left this ceiling no room, for the refusal message.
 
     :func:`reserve` refuses by matching no row, so nothing in its result says
     which of three caps bound. Read here instead, on the refusal path only, and
     named in the 403: "has exceeded budget limit" alone cannot tell an operator a
     spent allowance from a spent token allowance, which is the signal a cutover
-    onto a token or request cap needs. Returns the first exhausted axis, in the
-    order :func:`reserve` builds its clauses; where two are exhausted at once,
-    either answer is true.
+    onto a token or request cap needs.
+
+    Both of the clauses :func:`admits` builds, and for its reason: an arrival is
+    refused either because the axis is already at its cap or because this hold
+    would push it past, and a helper reproducing one of them finds no axis for
+    the other shape. The hold therefore has to come from the caller, since the
+    row cannot say what was being asked of it. The dollar axis is called
+    "budget", so its message is unchanged; see
+    ``budget_service._blocked_axis``.
     """
     row = (
         await db.execute(
@@ -529,18 +543,22 @@ async def blocked_axis(db: AsyncSession, budget: ApplicableBudget) -> str:
         # The ceiling went away between the refusal and here, so there is no axis
         # to name and guessing one would be worse than saying nothing.
         return "budget"
-    for name, cap, spent, held in (
-        # "budget" rather than "spend" for the dollar axis: the message a dollar
-        # refusal sends is unchanged, and the two new axes are the ones that had
-        # no signal. See ``budget_service._blocked_axis``.
-        ("budget", row[0], row[1], row[2]),
-        ("token", row[3], row[4], row[5]),
-        ("request", row[6], row[7], row[8]),
-    ):
+    axes = (
+        ("budget", row[0], row[1], row[2], amount if amount is not None else ZERO),
+        ("token", row[3], row[4], row[5], tokens),
+        ("request", row[6], row[7], row[8], requests),
+    )
+    for name, cap, spent, reserved, wanted in axes:
+        if cap is None:
+            continue
         # Compared as Decimals whatever the driver handed back: a NUMERIC column
-        # arrives as Decimal on PostgreSQL and can arrive as float on SQLite, and
-        # adding one of each raises rather than comparing.
-        if cap is not None and Decimal(str(spent)) + Decimal(str(held)) >= Decimal(str(cap)):
+        # arrives as Decimal on PostgreSQL and can arrive as a float on SQLite,
+        # and adding one of each raises rather than comparing.
+        committed = Decimal(str(spent)) + Decimal(str(reserved))
+        limit = Decimal(str(cap))
+        if committed + Decimal(str(wanted)) > limit:
+            return name
+        if new_request and committed >= limit:
             return name
     return "budget"
 

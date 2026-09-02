@@ -1198,3 +1198,30 @@ async def test_a_spent_dollar_cap_still_reads_as_a_budget_refusal(
         await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=1, scope=tenancy.scope())
 
     assert "budget limit" in str(refusal.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_names_the_axis_a_hold_would_push_past(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The other refusal shape: room now, none once this request's hold lands.
+
+    The ceiling is under its cap, so a helper testing only "already at the cap"
+    finds no axis and falls back to the unqualified word. Both clauses of the
+    gate have to be reproduced, which is why the hold comes from the caller.
+    """
+    cap = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=None,
+        token_limit=1_000,
+    )
+    cap.current_tokens = 900
+    async_db.add(cap)
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=200, scope=tenancy.scope())
+
+    assert "token limit" in str(refusal.value.detail)

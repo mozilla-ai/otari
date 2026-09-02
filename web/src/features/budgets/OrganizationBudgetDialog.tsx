@@ -133,7 +133,10 @@ export function OrganizationBudgetDialog({
                   placeholder="250"
                   isInvalid={limitInvalid}
                   errorMessage="Enter an amount of zero or more, or leave it blank for no limit."
-                  description="Leave blank for no limit, which admits every request."
+                  // "no dollar limit", not "admits every request": a budget
+                  // capping tokens or requests still refuses, so the old wording
+                  // is a claim about behavior this field no longer decides alone.
+                  description="Leave blank for no dollar limit."
                 />
                 <FilterSelect
                   label="Resets"

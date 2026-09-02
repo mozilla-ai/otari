@@ -602,9 +602,17 @@ async def reserve_budget(
         )
         if refused is not None:
             record_budget_exceeded()
+            axis = await blocked_axis(
+                db,
+                refused,
+                amount=usd,
+                tokens=held_tokens,
+                requests=held_requests,
+                new_request=new_request,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {await blocked_axis(db, refused)} limit",
+                detail=f"{refused.subject} has exceeded {axis} limit",
             )
 
     if budget is None:
@@ -1003,9 +1011,17 @@ async def increase_reservation(
         )
         if refused is not None:
             record_budget_exceeded()
+            axis = await blocked_axis(
+                db,
+                refused,
+                amount=additional,
+                tokens=grown_tokens,
+                requests=0,
+                new_request=False,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {await blocked_axis(db, refused)} limit",
+                detail=f"{refused.subject} has exceeded {axis} limit",
             )
         # Recorded here, next to the hold it describes, and before the per-user
         # call below can refuse: what the caller's refund releases is what the

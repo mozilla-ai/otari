@@ -333,7 +333,10 @@ function UsageCell({ budget }: { budget: Budget }) {
     return (
       <span className="text-xs text-foreground">
         {formatUSD(spent)} spent
-        <span className="text-muted"> · no limit</span>
+        {/* "dollar", because this cell is a spend bar and the budget may still
+            cap tokens or requests: the Limit column beside it names those, and
+            an unqualified "no limit" here contradicts it. */}
+        <span className="text-muted"> · no dollar limit</span>
       </span>
     )
   }
