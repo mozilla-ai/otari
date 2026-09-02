@@ -33,6 +33,7 @@ from gateway.metrics import record_abandoned_attempt
 from gateway.models.mcp import McpServerConfig
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.provider_kwargs import with_anthropic_default_timeout
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 
@@ -172,7 +173,8 @@ class _AttemptFailure(NamedTuple):
 
 def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None:
     """Build the ``client_args`` any-llm needs to construct this attempt's
-    provider client, or ``None`` when the attempt carries no ``extra_params``.
+    provider client, or ``None`` when the attempt carries no ``extra_params``
+    and needs none injected (see ``with_anthropic_default_timeout``).
 
     This *must* be a separate ``client_args`` dict, not merged flat into the
     completion kwargs: any-llm's ``acompletion()`` only forwards a
@@ -188,14 +190,16 @@ def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None
     Bedrock gets dedicated handling (see :mod:`gateway.services.bedrock_gateway_auth`)
     because it also needs its secret aliased to a different boto3 kwarg name
     and, for the bearer-token ("Bedrock API key") credential shape, a custom
-    pre-built client. Every other provider's ``extra_params`` is forwarded
-    as-is.
+    pre-built client. Anthropic gets a default ``timeout`` filled in when the
+    attempt carries none (see :func:`gateway.services.provider_kwargs.with_anthropic_default_timeout`,
+    otari#533). Every other provider's ``extra_params`` is forwarded as-is.
     """
+    provider = LLMProvider(attempt.provider)
     if not attempt.extra_params:
-        return None
-    if LLMProvider(attempt.provider) == LLMProvider.BEDROCK:
+        return with_anthropic_default_timeout(provider, None)
+    if provider == LLMProvider.BEDROCK:
         return build_bedrock_client_args(attempt.api_key, attempt.extra_params)
-    return dict(attempt.extra_params)
+    return with_anthropic_default_timeout(provider, dict(attempt.extra_params))
 
 
 def default_attempt_kwargs(

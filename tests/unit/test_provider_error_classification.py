@@ -16,7 +16,7 @@ import asyncio
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import InvalidRequestError, UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -25,6 +25,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_BILLING_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
+    PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
@@ -345,6 +346,63 @@ def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
 def test_unsupported_feature_is_recorded_as_400_on_the_usage_log() -> None:
     """The usage-log status follows the classification rather than the generic 502."""
     assert failure_status_code(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)) == 400
+
+
+_ANTHROPIC_NONSTREAMING_TIMEOUT_MSG = (
+    "Streaming is required for operations that may take longer than 10 minutes. See "
+    "https://github.com/anthropics/anthropic-sdk-python#long-requests for more details"
+)
+
+
+def test_anthropic_nonstreaming_timeout_guard_maps_to_400() -> None:
+    """otari#533: the anthropic SDK's own pre-flight guard for a non-streaming
+    request whose max_tokens implies over 10 minutes raises a bare, status-less
+    ValueError, which used to fall through to a generic 502 telling the caller
+    nothing about the client-side limit it hit."""
+    mapping = classify_provider_error(ValueError(_ANTHROPIC_NONSTREAMING_TIMEOUT_MSG))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert mapping.detail == PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL
+
+
+def test_anthropic_nonstreaming_timeout_guard_survives_the_unified_exception_wrapper() -> None:
+    """The message match still fires once ANY_LLM_UNIFIED_EXCEPTIONS=1 wraps the
+    raw error, because the wrapper keeps it on ``original_exception``."""
+    mapping = classify_provider_error(_WrappedError(500, ValueError(_ANTHROPIC_NONSTREAMING_TIMEOUT_MSG)))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert mapping.detail == PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL
+
+
+def test_anthropic_nonstreaming_timeout_guard_is_recorded_as_400_on_the_usage_log() -> None:
+    assert failure_status_code(ValueError(_ANTHROPIC_NONSTREAMING_TIMEOUT_MSG)) == 400
+
+
+def test_unrelated_value_error_is_not_mistaken_for_the_timeout_guard() -> None:
+    """The match is a specific substring of the SDK's own wording, not any
+    ValueError: an unrelated caller-code or config ValueError must still return
+    None so it stays on the generic 502 rather than a wrong client-facing 400."""
+    assert classify_provider_error(ValueError("invalid literal for int() with base 10")) is None
+
+
+def test_anthropic_nonstreaming_timeout_guard_via_the_real_any_llm_wrapper() -> None:
+    """any-llm-sdk 1.25 already translates the raw ValueError into its own
+    InvalidRequestError (any_llm/providers/anthropic/base.py's
+    _translating_nonstreaming_guard), which is what actually reaches this
+    classifier through acompletion(); it is not a bare ValueError, but it does
+    carry the original one on .original_exception, which
+    upstream_exception_chain walks."""
+    original = ValueError(_ANTHROPIC_NONSTREAMING_TIMEOUT_MSG)
+    exc = InvalidRequestError(
+        "A non-streaming request with max_tokens=65536 can exceed the default per-request time "
+        "limit, so it needs an explicit timeout. Pass a `timeout` (in seconds) or use `stream=True`.",
+        original_exception=original,
+        provider_name="anthropic",
+    )
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert mapping.detail == PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL
 
 
 def test_rejected_param_maps_to_400_naming_the_param() -> None:

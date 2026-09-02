@@ -91,6 +91,28 @@ _AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 # and no key takes the keyless placeholder, so it never reaches a caller alone.
 _NON_CREDENTIAL_KWARGS = frozenset({"client_args"})
 
+# The anthropic SDK's non-streaming pre-flight guard fires for a large max_tokens
+# only while the client's timeout is untouched (otari#533); this is also the
+# guard's own fallback value, so setting it explicitly disables the guard alone.
+ANTHROPIC_DEFAULT_TIMEOUT_SECONDS = 600.0
+
+
+def with_anthropic_default_timeout(
+    provider: LLMProvider, client_args: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Ensure an Anthropic ``client_args`` carries an explicit ``timeout``.
+
+    A no-op for every other provider. An operator's own ``timeout`` (set via
+    ``client_args`` on the provider config or a platform attempt's
+    ``extra_params``) is left untouched; this only fills the gap when nothing
+    was configured.
+    """
+    if provider != LLMProvider.ANTHROPIC:
+        return client_args
+    merged = dict(client_args) if client_args else {}
+    merged.setdefault("timeout", ANTHROPIC_DEFAULT_TIMEOUT_SECONDS)
+    return merged
+
 
 def _kwargs_carry_a_credential(kwargs: dict[str, Any]) -> bool:
     """Whether anything in a resolved provider's kwargs could authenticate a call.
@@ -226,6 +248,9 @@ def get_provider_kwargs(
     placeholder = keyless_placeholder_api_key(provider, kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
         kwargs["api_key"] = placeholder
+
+    if provider == LLMProvider.ANTHROPIC:
+        kwargs["client_args"] = with_anthropic_default_timeout(provider, kwargs.get("client_args"))
 
     return kwargs
 
