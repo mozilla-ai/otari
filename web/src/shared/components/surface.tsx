@@ -256,17 +256,26 @@ export function RowAction({
   onPress,
   isDanger,
   isDisabled,
+  ariaLabel,
   children,
 }: {
   onPress: () => void
   isDanger?: boolean
   isDisabled?: boolean
+  /**
+   * Replaces the visible label for assistive tech, which is how a row action
+   * says which row it acts on and why it is refused: a disabled control takes
+   * no focus, so a tooltip reaches a pointer and nothing else, and the reason
+   * has to be in the name.
+   */
+  ariaLabel?: string
   children: ReactNode
 }) {
   return (
     <button
       type="button"
       disabled={isDisabled}
+      aria-label={ariaLabel}
       onClick={onPress}
       className={`text-[13px] whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-50 ${
         isDanger ? "text-danger" : "text-muted hover:text-foreground"

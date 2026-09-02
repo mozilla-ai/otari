@@ -11,7 +11,13 @@ import {
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
+import {
+  Dot,
+  RowAction,
+  RowActionRow,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
 import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { formatCost, formatDateTime } from "@/shared/helpers/format"
 import {
@@ -186,24 +192,18 @@ export function RateOverridesCard() {
       cell: (row) => (
         // Both controls stay mounted and disabled for a reader rather than
         // vanishing, so the page does not reflow between roles.
-        <div className="flex justify-end gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            isDisabled={!canEdit}
-            onPress={() => openEdit(row)}
-          >
+        <RowActionRow>
+          <RowAction isDisabled={!canEdit} onPress={() => openEdit(row)}>
             Edit
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
+          </RowAction>
+          <RowAction
+            isDanger
             isDisabled={!canEdit}
             onPress={() => setPendingDelete(row)}
           >
             Delete
-          </Button>
-        </div>
+          </RowAction>
+        </RowActionRow>
       ),
     },
   ]

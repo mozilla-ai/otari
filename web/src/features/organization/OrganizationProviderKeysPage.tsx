@@ -27,17 +27,15 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { SecretField } from "@/shared/components/SecretField"
 import {
+  ConfirmRowAction,
   Dot,
   PageIntro,
+  RowAction,
+  RowActionRow,
   Section,
   TableScrollFrame,
 } from "@/shared/components/surface"
-import {
-  Checkbox,
-  ConfirmButton,
-  ErrorBanner,
-  InfoBanner,
-} from "@/shared/components/ui"
+import { Checkbox, ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage } from "./roles"
@@ -312,51 +310,45 @@ export function OrganizationProviderKeysPage() {
       header: "Actions",
       align: "end",
       cell: (row) => (
-        <div className="flex items-center justify-end gap-1.5">
+        <RowActionRow>
           {row.archived_at ? (
             <>
-              <Button
-                size="sm"
-                variant="outline"
+              <RowAction
                 isDisabled={restore.isPending}
                 onPress={() => restore.mutate(row.id)}
               >
                 Restore
-              </Button>
+              </RowAction>
               {/* Permanent, and the only place it is offered: the API
                     accepts a delete for an archived key alone. */}
-              <ConfirmButton
+              <ConfirmRowAction
                 confirmLabel="Delete"
                 isPending={remove.isPending}
                 onConfirm={() => remove.mutate(row.id)}
               >
                 Delete
-              </ConfirmButton>
+              </ConfirmRowAction>
             </>
           ) : (
             <>
-              <Button
-                size="sm"
-                variant="outline"
+              <RowAction
                 isDisabled={row.is_org_default || setDefault.isPending}
                 onPress={() => setDefault.mutate(row.id)}
               >
                 Make default
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
+              </RowAction>
+              <RowAction
                 onPress={() => {
                   setAdding(false)
                   setEditingId(row.id)
                 }}
               >
                 Edit
-              </Button>
+              </RowAction>
               {/* Archive rather than delete: it is reversible, it is what
                     clears the default, and it is the step the API requires
                     before a key can be removed for good. */}
-              <ConfirmButton
+              <ConfirmRowAction
                 confirmLabel="Archive"
                 isPending={archive.isPending}
                 onConfirm={() =>
@@ -368,10 +360,10 @@ export function OrganizationProviderKeysPage() {
                 }
               >
                 Archive
-              </ConfirmButton>
+              </ConfirmRowAction>
             </>
           )}
-        </div>
+        </RowActionRow>
       ),
     })
   }

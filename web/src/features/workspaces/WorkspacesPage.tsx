@@ -23,6 +23,8 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
   PageIntro,
+  RowAction,
+  RowActionRow,
   Section,
   TableScrollFrame,
 } from "@/shared/components/surface"
@@ -694,10 +696,8 @@ export function WorkspacesPage() {
         header: "Actions",
         align: "end",
         cell: (workspace) => (
-          <div className="flex items-center justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
+          <RowActionRow>
+            <RowAction
               isDisabled={!manages}
               onPress={() => {
                 setCreating(false)
@@ -705,7 +705,7 @@ export function WorkspacesPage() {
               }}
             >
               Edit
-            </Button>
+            </RowAction>
             {/* The server keeps every organization on at least one workspace
                 (`LastWorkspaceError`), and first boot is the one-workspace
                 state, so the ordinary case would be a button that always
@@ -714,10 +714,8 @@ export function WorkspacesPage() {
                 control takes no focus, so a tooltip would reach a pointer and
                 nothing else. */}
             <span title={isOnlyWorkspace ? LAST_WORKSPACE_REASON : undefined}>
-              <Button
-                size="sm"
-                variant="danger-soft"
-                aria-label={
+              <RowAction
+                ariaLabel={
                   isOnlyWorkspace
                     ? `Delete ${workspace.name} (${LAST_WORKSPACE_REASON})`
                     : undefined
@@ -726,9 +724,9 @@ export function WorkspacesPage() {
                 onPress={() => setDeleting(workspace)}
               >
                 Delete
-              </Button>
+              </RowAction>
             </span>
-          </div>
+          </RowActionRow>
         ),
       },
     ],

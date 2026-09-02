@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type { DeploymentUser } from "@/client"
@@ -9,7 +8,13 @@ import {
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Dot, PageIntro, TableScrollFrame } from "@/shared/components/surface"
+import {
+  Dot,
+  PageIntro,
+  RowAction,
+  RowActionRow,
+  TableScrollFrame,
+} from "@/shared/components/surface"
 import {
   EmptyState,
   ErrorBanner,
@@ -140,20 +145,18 @@ export function DeploymentAccountsPage() {
         cell: (account) => {
           const blocked = accountLockoutReason(account)
           return (
-            <div className="flex justify-end gap-2">
+            <RowActionRow>
               {/* `title` reaches a mouse; the reason is folded into the
                   control's own name so it reaches everyone else too, as the
                   organization roster does it. A disabled control is not
                   focusable, so an `aria-describedby` would never be announced. */}
               <span title={account.is_superuser ? blocked : undefined}>
-                <Button
-                  size="sm"
-                  variant="ghost"
+                <RowAction
                   isDisabled={
                     (account.is_superuser && blocked !== undefined) ||
                     update.isPending
                   }
-                  aria-label={
+                  ariaLabel={
                     account.is_superuser
                       ? `Remove operator access from ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
                       : `Grant operator access to ${accountLabel(account)}`
@@ -166,17 +169,16 @@ export function DeploymentAccountsPage() {
                   }
                 >
                   {account.is_superuser ? "Remove operator" : "Make operator"}
-                </Button>
+                </RowAction>
               </span>
               <span title={account.is_active ? blocked : undefined}>
-                <Button
-                  size="sm"
-                  variant={account.is_active ? "danger-soft" : "ghost"}
+                <RowAction
+                  isDanger={account.is_active}
                   isDisabled={
                     (account.is_active && blocked !== undefined) ||
                     update.isPending
                   }
-                  aria-label={
+                  ariaLabel={
                     account.is_active
                       ? `Deactivate ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
                       : `Reactivate ${accountLabel(account)}`
@@ -193,9 +195,9 @@ export function DeploymentAccountsPage() {
                   }}
                 >
                   {account.is_active ? "Deactivate" : "Reactivate"}
-                </Button>
+                </RowAction>
               </span>
-            </div>
+            </RowActionRow>
           )
         },
       },

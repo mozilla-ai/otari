@@ -16,7 +16,12 @@ import {
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Dot, TableScrollFrame } from "@/shared/components/surface"
+import {
+  Dot,
+  RowAction,
+  RowActionRow,
+  TableScrollFrame,
+} from "@/shared/components/surface"
 import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
@@ -195,14 +200,12 @@ export function WorkspaceMcpServersCard({
       id: "actions",
       header: "",
       cell: (row) => (
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onPress={() => openEdit(row)}>
-            Edit
-          </Button>
-          <Button size="sm" variant="ghost" onPress={() => openDelete(row)}>
+        <RowActionRow>
+          <RowAction onPress={() => openEdit(row)}>Edit</RowAction>
+          <RowAction isDanger onPress={() => openDelete(row)}>
             Delete
-          </Button>
-        </div>
+          </RowAction>
+        </RowActionRow>
       ),
     },
   ]

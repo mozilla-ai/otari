@@ -48,6 +48,8 @@ import { Field } from "@/shared/components/Field"
 import {
   Dot,
   PageIntro,
+  RowAction,
+  RowActionRow,
   Section,
   TableScrollFrame,
 } from "@/shared/components/surface"
@@ -1017,14 +1019,15 @@ export function OrganizationMembersPage() {
           // do the wrong thing on a pending invitation.
           if (member.status === "invited" && member.invitation_id) {
             return (
-              <Button
-                size="sm"
-                variant="danger-soft"
-                isDisabled={!manages}
-                onPress={() => setRevoking(member)}
-              >
-                Revoke
-              </Button>
+              <RowActionRow>
+                <RowAction
+                  isDanger
+                  isDisabled={!manages}
+                  onPress={() => setRevoking(member)}
+                >
+                  Revoke
+                </RowAction>
+              </RowActionRow>
             )
           }
           // Blocking stops this person's keys from making requests without
@@ -1036,20 +1039,17 @@ export function OrganizationMembersPage() {
             ? userByAttribution.get(member.attribution_user_id)
             : undefined
           return (
-            <div className="flex items-center justify-end gap-1.5">
+            <RowActionRow>
               {manages ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
+                <RowAction
                   onPress={() => setEditingMember(memberRowKey(member))}
                 >
                   Edit
-                </Button>
+                </RowAction>
               ) : null}
               {manages && spendRow ? (
-                <Button
-                  size="sm"
-                  variant={spendRow.blocked ? "ghost" : "danger-soft"}
+                <RowAction
+                  isDanger={!spendRow.blocked}
                   isDisabled={updateUser.isPending}
                   onPress={() =>
                     updateUser.mutate({
@@ -1059,15 +1059,14 @@ export function OrganizationMembersPage() {
                   }
                 >
                   {spendRow.blocked ? "Unblock" : "Block"}
-                </Button>
+                </RowAction>
               ) : null}
               <span title={blocked}>
-                <Button
-                  size="sm"
-                  variant="danger-soft"
+                <RowAction
+                  isDanger
                   // See the Role cell: the reason has to be in the name, not only
                   // in the tooltip, to reach anything but a pointer.
-                  aria-label={
+                  ariaLabel={
                     blocked
                       ? `Remove ${memberLabel(member)} (${blocked})`
                       : undefined
@@ -1076,9 +1075,9 @@ export function OrganizationMembersPage() {
                   onPress={() => setRemoving(member)}
                 >
                   Remove
-                </Button>
+                </RowAction>
               </span>
-            </div>
+            </RowActionRow>
           )
         },
       },

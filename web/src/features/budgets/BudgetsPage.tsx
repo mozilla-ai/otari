@@ -24,6 +24,8 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
   PageIntro,
+  RowAction,
+  RowActionRow,
   Section,
   SpendMeter,
   spendState,
@@ -432,37 +434,28 @@ function InlineDelete({
   const [armed, setArmed] = useState(false)
 
   if (!armed) {
-    return (
-      <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
-        Delete
-      </Button>
-    )
+    return <RowAction onPress={() => setArmed(true)}>Delete</RowAction>
   }
+  // Armed, this one keeps its sentence: a budget's deletion has a consequence
+  // the label cannot carry, and a row action that only said "Delete permanently"
+  // would be asking for a decision without the fact behind it. The tinted box is
+  // gone with every other box on the row; the words and the danger ink are what
+  // is left, and they were doing the work anyway.
   return (
-    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-warning bg-warning-subtle p-2 text-right">
-      <span className="max-w-xs text-xs text-warning">
-        Delete <strong>{label}</strong>? Users keep their spend but lose this
-        limit. Cannot be undone.
+    <span className="flex flex-col items-end gap-1 text-right">
+      <span className="max-w-xs text-xs text-muted">
+        Delete <strong className="font-medium">{label}</strong>? Users keep
+        their spend but lose this limit. Cannot be undone.
       </span>
-      <span className="inline-flex gap-1">
-        <Button
-          size="sm"
-          variant="danger"
-          isDisabled={isPending}
-          onPress={onConfirm}
-        >
+      <span className="flex items-center gap-4">
+        <RowAction isDanger isDisabled={isPending} onPress={onConfirm}>
           Delete permanently
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          isDisabled={isPending}
-          onPress={() => setArmed(false)}
-        >
+        </RowAction>
+        <RowAction isDisabled={isPending} onPress={() => setArmed(false)}>
           Cancel
-        </Button>
+        </RowAction>
       </span>
-    </div>
+    </span>
   )
 }
 
@@ -649,10 +642,8 @@ export function BudgetsPage() {
         header: "Actions",
         align: "end",
         cell: (b) => (
-          <div className="flex items-center justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
+          <RowActionRow>
+            <RowAction
               onPress={() =>
                 setHistoryOpen((current) =>
                   current === b.budget_id ? null : b.budget_id,
@@ -660,23 +651,21 @@ export function BudgetsPage() {
               }
             >
               {historyOpen === b.budget_id ? "Hide history" : "History"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+            </RowAction>
+            <RowAction
               onPress={() => {
                 setAddOpen(false)
                 setEditing(b.budget_id)
               }}
             >
               Edit
-            </Button>
+            </RowAction>
             <InlineDelete
               label={budgetLabel(b)}
               isPending={deleteBudget.isPending}
               onConfirm={() => deleteBudget.mutate(b.budget_id)}
             />
-          </div>
+          </RowActionRow>
         ),
       },
     ],

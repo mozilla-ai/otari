@@ -24,18 +24,16 @@ import {
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
+  ConfirmRowAction,
   Dot,
+  RowAction,
+  RowActionRow,
   Section,
   Tab,
   TableScrollFrame,
   TabRow,
 } from "@/shared/components/surface"
-import {
-  ConfirmButton,
-  CopyableValue,
-  EmptyState,
-  ErrorBanner,
-} from "@/shared/components/ui"
+import { CopyableValue, EmptyState, ErrorBanner } from "@/shared/components/ui"
 import { useUrlValue } from "@/shared/helpers/urlState"
 
 /** A row on this page: either a routing policy or a stored/config alias.
@@ -1379,9 +1377,7 @@ export function RoutingPage() {
             routerBackendOf(policy.spec) !== KNN_BACKEND ? (
               <span className="text-muted">—</span>
             ) : (
-              <Button
-                size="sm"
-                variant="outline"
+              <RowAction
                 onPress={() =>
                   setExpanded((current) =>
                     current === rowKeyOf(policy) ? null : rowKeyOf(policy),
@@ -1389,20 +1385,18 @@ export function RoutingPage() {
                 }
               >
                 {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-              </Button>
+              </RowAction>
             )
           return policy.source === "config" ? (
-            <div className="flex items-center justify-end gap-2">
+            <RowActionRow>
               {readiness}
-              <span className="text-xs text-muted">set in config.yml</span>
-            </div>
+              <span className="text-xs text-subtle">set in config.yml</span>
+            </RowActionRow>
           ) : (
-            <div className="flex items-center justify-end gap-2">
+            <RowActionRow>
               {readiness}
               {isEditableInForm(policy.spec) ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
+                <RowAction
                   onPress={() => {
                     // The table stays mounted while the create form is open, so
                     // Edit is still reachable from it. Closing the other panels
@@ -1413,14 +1407,14 @@ export function RoutingPage() {
                   }}
                 >
                   Edit
-                </Button>
+                </RowAction>
               ) : (
-                <span className="text-xs text-muted">
+                <span className="max-w-xs text-xs text-muted">
                   Uses options this form cannot show yet. Edit it through the
                   API so nothing is lost.
                 </span>
               )}
-              <ConfirmButton
+              <ConfirmRowAction
                 confirmLabel="Confirm"
                 isPending={deletePolicy.isPending || deleteAlias.isPending}
                 onConfirm={() =>
@@ -1436,8 +1430,8 @@ export function RoutingPage() {
                 }
               >
                 Delete
-              </ConfirmButton>
-            </div>
+              </ConfirmRowAction>
+            </RowActionRow>
           )
         },
       },
