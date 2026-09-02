@@ -530,7 +530,10 @@ async def blocked_axis(db: AsyncSession, budget: ApplicableBudget) -> str:
         # to name and guessing one would be worse than saying nothing.
         return "budget"
     for name, cap, spent, held in (
-        ("spend", row[0], row[1], row[2]),
+        # "budget" rather than "spend" for the dollar axis: the message a dollar
+        # refusal sends is unchanged, and the two new axes are the ones that had
+        # no signal. See ``budget_service._blocked_axis``.
+        ("budget", row[0], row[1], row[2]),
         ("token", row[3], row[4], row[5]),
         ("request", row[6], row[7], row[8]),
     ):

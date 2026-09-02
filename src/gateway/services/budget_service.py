@@ -211,13 +211,19 @@ def _blocked_axis(
     exactly because there is none, which the strict clause is what catches.
     Returns the first axis with no room, in the order the gate builds its
     clauses; where two are exhausted at once, either answer is true.
+
+    **The dollar axis is called "budget", not "spend".** That keeps the message a
+    dollar refusal has always sent byte for byte, which callers and their tests
+    key on, and the ask this answers was for signal on the two axes that had
+    none. A refusal that changes wording for the case that already worked buys
+    nothing and breaks readers.
     """
     # Widened rather than trusted: these come off a User the session may still
     # hold as the caller assigned it, so ``spend`` can be the float a fixture
     # wrote and ``float + Decimal`` raises. ``to_usd`` at the boundary is the same
     # rule the counters themselves follow.
     axes: tuple[tuple[str, Decimal | int | None, Decimal | int, Decimal | int], ...] = (
-        ("spend", budget.max_budget, to_usd(spend) + to_usd(reserved), to_usd(held)),
+        ("budget", budget.max_budget, to_usd(spend) + to_usd(reserved), to_usd(held)),
         ("token", budget.token_limit, tokens + reserved_tokens, held_tokens),
         ("request", budget.request_limit, requests + reserved_requests, held_requests),
     )

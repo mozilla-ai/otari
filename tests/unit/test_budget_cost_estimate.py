@@ -198,9 +198,10 @@ def test_the_refusal_names_an_axis_already_at_its_cap() -> None:
 
     A user at their cap is refused for a request that holds nothing, so the axis
     has to be found by the gate's strict clause rather than by arithmetic on the
-    hold.
+    hold. The dollar axis stays "budget", so the message a dollar refusal has
+    always sent is unchanged.
     """
-    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0) == "spend"
+    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0) == "budget"
     assert _axis(Budget(budget_id="b", token_limit=1_000), tokens=1_000) == "token"
     assert _axis(Budget(budget_id="b", request_limit=2), requests=2, held_requests=1) == "request"
 
@@ -208,7 +209,7 @@ def test_the_refusal_names_an_axis_already_at_its_cap() -> None:
 def test_the_refusal_names_the_axis_a_hold_would_push_past() -> None:
     budget = Budget(budget_id="b", max_budget=10.0, token_limit=1_000)
 
-    assert _axis(budget, spend=9.0, held=Decimal("2")) == "spend"
+    assert _axis(budget, spend=9.0, held=Decimal("2")) == "budget"
     assert _axis(budget, tokens=900, held_tokens=200) == "token"
 
 
@@ -225,9 +226,16 @@ def test_a_money_counter_read_as_a_float_does_not_raise() -> None:
     This is what made the refusal path a 500 instead of a 403 for a user exactly
     at their cap.
     """
-    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0, reserved=Decimal(0)) == "spend"
+    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0, reserved=Decimal(0)) == "budget"
 
 
 def test_a_top_up_is_not_asked_the_arrival_question() -> None:
-    """Its own hold is what filled the axis, so "already at the cap" is not its test."""
-    assert _axis(Budget(budget_id="b", max_budget=10.0), spend=10.0, new_request=False) == "budget"
+    """Its own hold is what filled the axis, so "already at the cap" is not its test.
+
+    "budget" is also the no-axis-found answer, so this asserts the token axis
+    instead, where the two are distinguishable.
+    """
+    budget = Budget(budget_id="b", max_budget=None, token_limit=1_000)
+
+    assert _axis(budget, tokens=1_000, new_request=True) == "token"
+    assert _axis(budget, tokens=1_000, new_request=False) == "budget"

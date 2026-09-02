@@ -1175,8 +1175,14 @@ async def test_a_refusal_names_the_axis_that_bound(async_db: AsyncSession, tenan
 
 
 @pytest.mark.asyncio
-async def test_a_spent_dollar_cap_still_names_spend(async_db: AsyncSession, tenancy: Fixture) -> None:
-    """The counterpart, so the axis is read rather than always reported as tokens."""
+async def test_a_spent_dollar_cap_still_reads_as_a_budget_refusal(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """The counterpart, so the axis is read rather than always reported as tokens.
+
+    The dollar axis keeps the word it always had, so a caller keying on "budget"
+    is unaffected by the two axes that gained one.
+    """
     cap = await _scoped(
         async_db,
         scope_type="workspace",
@@ -1191,4 +1197,4 @@ async def test_a_spent_dollar_cap_still_names_spend(async_db: AsyncSession, tena
     with pytest.raises(HTTPException) as refusal:
         await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=1, scope=tenancy.scope())
 
-    assert "spend limit" in str(refusal.value.detail)
+    assert "budget limit" in str(refusal.value.detail)
