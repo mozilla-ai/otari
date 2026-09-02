@@ -338,20 +338,21 @@ export function ConfirmRowAction({
 /**
  * A value somebody chose, with the way to unchoose it.
  *
- * One form, implemented three times before this: applied filters, a key's model
- * scope, a budget's users. They were the same thing (a label, a value, a cross)
- * and had drifted apart in shape and in ink, and all three gave the cross a
- * 16px box, which is a target nobody on a touchscreen hits.
+ * Identifier text with a remove control beside it, and no container: no border,
+ * no fill, no shape of its own. Dismissability is a modifier on a kind rather
+ * than a kind, so this wears the identifier kind and adds a control.
  *
- * Square, like everything else. It was a pill because a chip is a pill
- * elsewhere in the world, and the roundness test this product uses is narrower
- * than that: a shape keeps its radius only where the shape itself carries a
- * meaning squareness would destroy. A chip's does not; it is a label with a
- * border.
+ * It shipped as a bordered, filled chip first. That was the pill squared, and
+ * squaring the pill was the wrong move on a pill that had been deleted: the
+ * kinds here are told apart by dot, case and separator, not by boxes, and a
+ * fourth boxed thing would have been the only one in the product. Corrected
+ * before anything else grew a border to match it.
  *
- * The dismiss is a real 24px target holding a 12px glyph. It reads as small and
- * is not, which is the point: the visible cross stays quiet while the thing a
- * finger has to land on is the size a finger needs.
+ * The dismiss is a real 24px target holding a 12px glyph. It reads small and is
+ * not, which is the point: the visible cross stays quiet while the thing a
+ * finger lands on is the size a finger needs. That part came through the
+ * retraction unchanged, as did the one shared component behind three call
+ * sites.
  */
 export function DismissChip({
   label,
@@ -359,7 +360,7 @@ export function DismissChip({
   onDismiss,
   dismissLabel,
 }: {
-  /** The dimension, shown before the value where a chip states both. */
+  /** The dimension, shown before the value and divided from it by a colon. */
   label?: string
   value: ReactNode
   onDismiss: () => void
@@ -367,9 +368,9 @@ export function DismissChip({
   dismissLabel?: string
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 border border-border bg-primary-subtle py-0.5 pr-0.5 pl-2.5 text-xs text-primary-subtle-foreground">
-      {label ? <span className="text-muted">{label}:</span> : null}
-      <span className="font-medium">{value}</span>
+    <span className="inline-flex items-center gap-1.5 font-mono text-[13px] text-foreground">
+      {label ? <span className="text-subtle">{label}:</span> : null}
+      {value}
       <button
         type="button"
         onClick={onDismiss}

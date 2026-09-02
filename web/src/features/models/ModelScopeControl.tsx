@@ -169,7 +169,7 @@ export function ModelScopeControl({
               entries.map((entry) => (
                 <DismissChip
                   key={entry}
-                  value={<span className="font-mono">{entry}</span>}
+                  value={entry}
                   onDismiss={() => removeEntry(entry)}
                   dismissLabel={`Remove ${entry}`}
                 />
