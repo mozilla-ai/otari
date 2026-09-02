@@ -10,6 +10,7 @@ import {
   useOrganizationMemberships,
   useSwitchOrganization,
 } from "@/shared/api/hooks"
+import { ProductMark } from "@/shared/components/ProductMark"
 import { ErrorBanner } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { NAV_TRANSITION, navIndicatorClass } from "./rowStyles"
@@ -140,7 +141,11 @@ export function WorkspaceSwitcher({
               artboard draws: the mark sits in a tile the way a nav row's icon
               sits in its lane, rather than floating at its own size. */}
           <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-surface-subtle">
-            <img src="/favicon.svg" alt="" className="h-5 w-5" />
+            {/* Width only: the mark is 273 by 250, so a height of its own would
+                stretch it. It fills the tile's width and centers on the short
+                axis, which is why the tile is a flex box rather than a square
+                the image is told to fill. */}
+            <ProductMark className="h-auto w-7 text-accent" />
           </span>
           {collapsed ? null : (
             <>
