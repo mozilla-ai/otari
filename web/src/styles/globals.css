@@ -214,6 +214,8 @@
      #cb2526 is danger's existing light ink, already 5.48:1 under white, so it
      darkens no further than contrast asks for. */
   --color-danger-button: #cb2526;
+  --color-danger-button-hover: #ab1f20;
+  --color-danger-button-active: #8e1a1b;
   --color-danger-button-foreground: #ffffff;
 
   /* ── Link & focus ───────────────────────────────────────────────────────
@@ -482,9 +484,22 @@
      an omission: a filled button carries its own ground, so the ink on it and
      the ramp under it do not change with the page behind them. Declared here
      anyway because each block owns the complete set it needs. */
+  /* INTERIM, and the steps are deliberately the rest value.
+     On a dark ground a filled button's own fill IS its boundary, so darkening
+     it walks the button toward the page rather than away from it. Measured on
+     the shipped ramp: rest reads 4.04:1 against the surface, and a
+     house-cadence step takes hover to 3.17 and active to 2.57, which is through
+     the floor rather than near it. Stepping the other way is no better at these
+     hues: one step brighter than danger's dark rest lands back on #f6453f,
+     where white ink fails.
+     So dark can have white ink or a moving fill and not both, and that is a
+     choice about what the product is rather than a value to derive. Until it is
+     made, the fill holds still and the focus ring and the 0.4 disabled state
+     carry the interaction. A button that does not answer the pointer is a
+     visible cost, chosen over one that answers by dissolving into the page. */
   --color-primary-button: #00808a;
-  --color-primary-button-hover: #00747e;
-  --color-primary-button-active: #006e77;
+  --color-primary-button-hover: #00808a;
+  --color-primary-button-active: #00808a;
   --color-primary-button-foreground: #ffffff;
   /* A true step off dark's own danger ink (#f6453f), not light's value: 4.69:1
      under white, and 4.06 and 4.25 against the surface and the canvas it sits
@@ -492,6 +507,8 @@
      hundredths and is the rounded-ratio trap; this one also matches primary's
      4.71 headroom, so the two filled buttons carry the same margin. */
   --color-danger-button: #d43b36;
+  --color-danger-button-hover: #d43b36;
+  --color-danger-button-active: #d43b36;
   --color-danger-button-foreground: #ffffff;
   /* Same role as the light block's, and not simply the accent-on-tint
      pairing for the same reason. The contrast direction inverts here, so
@@ -1294,8 +1311,8 @@ main {
    over-limit fill, none of which should follow a button's ground. */
 .button--danger {
   --button-bg: var(--color-danger-button);
-  --button-bg-hover: var(--color-danger-button);
-  --button-bg-pressed: var(--color-danger-button);
+  --button-bg-hover: var(--color-danger-button-hover);
+  --button-bg-pressed: var(--color-danger-button-active);
   --button-fg: var(--color-danger-button-foreground);
 }
 
