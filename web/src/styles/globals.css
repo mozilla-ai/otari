@@ -1232,6 +1232,105 @@ main {
 }
 
 /* =============================================================
+ * The inside of a menu.
+ *
+ * The popover shell was ours; everything inside it was stock, which is how a
+ * menu ended up being the one surface in the product that had never been
+ * looked at. The headline was a hover that fires and paints nothing:
+ * `--default` resolves to the overlay's own colour (measured `#0f1011` against
+ * a popover background of `rgb(15, 16, 17)`), so the row lit up at 1.000:1 in
+ * both themes. That is the driven-hover lesson as a shipped bug: the state was
+ * working the whole time and had no way to say so.
+ *
+ * The two fills are the rail's, and for the rail's reason: hover is one step
+ * off the ground and transient, selection is a different step and persists, so
+ * they cannot read as one thing. `data-selected` was already on the row and
+ * nothing painted it.
+ *
+ * The 6px inset around the list is what made a menu read as a card sitting in
+ * a card, so it goes and the rows run to the popover's own edge. The rows are
+ * then divided by rules like every other list of repeated things here, on the
+ * faint tier; HeroUI declares that colour already and leaves the width at 0.
+ * ============================================================= */
+.list-box {
+  padding: 0;
+}
+/* HeroUI spaces its rows 4px apart, which a separator cannot cross. */
+.list-box > * + * {
+  margin-top: 0;
+}
+.list-box-item {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-normal);
+}
+.list-box-item + .list-box-item {
+  border-top: 1px solid var(--color-border-subtle);
+}
+.list-box-item[data-hovered="true"],
+.list-box-item[data-focus-visible="true"] {
+  background-color: var(--color-surface-alt);
+}
+.list-box-item[data-selected="true"] {
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+/* =============================================================
+ * The control a menu hangs off.
+ *
+ * The edge is the opaque control border, not the field border: a trigger and
+ * the menu it opens are two surfaces meeting, and the floating-surface rule
+ * above already settles that this is the tier for it. Sharing the field's
+ * weaker edge left the pair reading as one soft shape.
+ *
+ * The shadow goes for the reason every shadow in this product went, and this
+ * one was worse than most: it was declared on light only, so the control was a
+ * different object depending on the theme.
+ *
+ * An open trigger takes the ring. It had none, which meant the one moment a
+ * keyboard user most needs to know where they are was the one moment nothing
+ * said so.
+ * ============================================================= */
+.select__trigger,
+.combo-box__trigger,
+.dropdown__trigger {
+  border-color: var(--color-control-border);
+  box-shadow: none;
+  padding-inline: 11px;
+}
+.select__trigger[data-open="true"],
+.select__trigger[aria-expanded="true"],
+.combo-box__trigger[data-open="true"],
+.dropdown__trigger[data-open="true"] {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.select__indicator {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-subtle);
+}
+/* 6px, not 8: the menu belongs to the control, and the gap was wide enough to
+   read as two unrelated things. Measured rather than derived: the offset is
+   HeroUI's and it moved when the trigger lost 2px of height in a table row, so
+   the correction is against what the page actually renders, which is 4px. */
+.select__popover,
+.combo-box__popover,
+.dropdown__popover {
+  margin-top: 2px;
+}
+
+/* A select inside a table row is the second named dense place, joining the
+   toolbar: a row's controls sit on the row's own pitch, and a 40px trigger in a
+   58px row leaves nothing around it. The place is named here rather than at a
+   call site, which is the whole point of having places. */
+.table__cell .select__trigger {
+  min-height: 38px;
+}
+
+/* =============================================================
+ * HeroUI v3 fixes — narrow, well-justified component patches.
+ * ============================================================= */ /* =============================================================
  * HeroUI v3 fixes — narrow, well-justified component patches.
  * ============================================================= */
 
