@@ -1021,7 +1021,6 @@ export function OrganizationMembersPage() {
             return (
               <RowActionRow>
                 <RowAction
-                  isDanger
                   isDisabled={!manages}
                   onPress={() => setRevoking(member)}
                 >
@@ -1049,7 +1048,6 @@ export function OrganizationMembersPage() {
               ) : null}
               {manages && spendRow ? (
                 <RowAction
-                  isDanger={!spendRow.blocked}
                   isDisabled={updateUser.isPending}
                   onPress={() =>
                     updateUser.mutate({
@@ -1063,7 +1061,6 @@ export function OrganizationMembersPage() {
               ) : null}
               <span title={blocked}>
                 <RowAction
-                  isDanger
                   // See the Role cell: the reason has to be in the name, not only
                   // in the tooltip, to reach anything but a pointer.
                   ariaLabel={

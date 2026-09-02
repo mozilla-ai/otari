@@ -29,6 +29,48 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
+/**
+ * `isDanger` on a row action marks the ARMED state and nothing else.
+ *
+ * Six sites had it at rest on the first pass, which is what a colour with one
+ * job looks like when it is used as a category instead: Remove was red before
+ * anybody touched it, so by the time the ink meant "this click commits" the
+ * reader had stopped seeing it. An action whose confirmation is a dialog stays
+ * muted throughout, because the dialog is where the danger lives.
+ *
+ * A source read rather than a render, for the same reason the dot rule is: what
+ * is being held is which prop a call site may pass unconditionally.
+ */
+describe("row actions", () => {
+  it("never paint danger at rest", () => {
+    const offenders: string[] = []
+    for (const file of walk(SRC)) {
+      if (file.endsWith("surface.tsx")) continue
+      const source = readFileSync(file, "utf8")
+      for (const [index, line] of source.split("\n").entries()) {
+        // A bare `isDanger` or one bound to something other than an armed
+        // flag. `isDanger={armed...}` is the shape that is allowed.
+        const bare = /\bisDanger\b(?!\s*=)/.test(line)
+        const bound = /\bisDanger=\{([^}]*)\}/.exec(line)
+        const armed = bound ? /armed|isArmed|pending/i.test(bound[1]) : false
+        if ((bare || bound) && !armed) {
+          // Inside an armed branch the prop is bare and correct, so the line
+          // alone cannot decide: look for the component's own armed guard
+          // within the few lines above it.
+          const context = source
+            .split("\n")
+            .slice(Math.max(0, index - 12), index)
+            .join(" ")
+          if (!/armed|confirmLabel/i.test(context)) {
+            offenders.push(`${file.slice(SRC.length + 1)}:${index + 1}`)
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+})
+
 describe("status dots", () => {
   it("never take a surface-ramp value", () => {
     // A `<Dot>`'s only prop is its class, and a dot's colour is sometimes

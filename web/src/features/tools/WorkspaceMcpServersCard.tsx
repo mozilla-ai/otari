@@ -202,9 +202,7 @@ export function WorkspaceMcpServersCard({
       cell: (row) => (
         <RowActionRow>
           <RowAction onPress={() => openEdit(row)}>Edit</RowAction>
-          <RowAction isDanger onPress={() => openDelete(row)}>
-            Delete
-          </RowAction>
+          <RowAction onPress={() => openDelete(row)}>Delete</RowAction>
         </RowActionRow>
       ),
     },

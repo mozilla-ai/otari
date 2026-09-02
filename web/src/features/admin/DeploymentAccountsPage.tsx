@@ -173,7 +173,6 @@ export function DeploymentAccountsPage() {
               </span>
               <span title={account.is_active ? blocked : undefined}>
                 <RowAction
-                  isDanger={account.is_active}
                   isDisabled={
                     (account.is_active && blocked !== undefined) ||
                     update.isPending

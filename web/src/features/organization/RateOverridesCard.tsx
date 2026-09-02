@@ -197,7 +197,6 @@ export function RateOverridesCard() {
             Edit
           </RowAction>
           <RowAction
-            isDanger
             isDisabled={!canEdit}
             onPress={() => setPendingDelete(row)}
           >

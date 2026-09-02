@@ -244,10 +244,19 @@ export function Toolbar({
  * A row's action: 13px of muted text, no border, no fill, no box.
  *
  * A row has three or four of these and boxing each one turned the last lane
- * into a control panel, louder than the row it acts on. The destructive one is
- * the same text until it is armed, and takes danger ink only then: the colour
- * marks the state you are about to commit rather than the control that offers
- * it, which is the same rule the spend figure follows.
+ * into a control panel, louder than the row it acts on.
+ *
+ * `isDanger` is for the ARMED state and nothing else, which is worth spelling
+ * out because it was got wrong at six sites on the first pass: a destructive
+ * action at rest is the same muted text as its neighbors, and the ink arrives
+ * only once the next click commits something. A row that paints Remove red
+ * before anybody has touched it spends the colour on a state nothing is in, and
+ * by the time it means something the reader has stopped seeing it. Same rule
+ * the spend figure follows: the colour marks what you are about to do, never
+ * the control that offers it.
+ *
+ * An action whose confirmation is a dialog rather than an inline arm stays
+ * muted throughout: the dialog is where the danger lives.
  *
  * Shared once two pages had spelled it. Pair with `RowActionRow`, which sets the
  * 16px between them.
