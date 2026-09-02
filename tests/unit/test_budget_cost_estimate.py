@@ -250,10 +250,11 @@ def test_an_absent_dollar_amount_removes_that_axis_from_the_answer() -> None:
     token one was actually asked.
     """
     budget = Budget(budget_id="b", max_budget=10.0, token_limit=1_000)
-    spent = {"spend": 10.0, "tokens": 1_000}
 
-    assert _axis(budget, amount=Decimal(0), **spent) == "budget"
-    assert _axis(budget, amount=None, **spent) == "token"
+    # Spelled out rather than unpacked from a dict: `_axis` takes a keyword-only
+    # `new_request`, so a `**kwargs` of floats is a type error against it.
+    assert _axis(budget, amount=Decimal(0), spend=10.0, tokens=1_000) == "budget"
+    assert _axis(budget, amount=None, spend=10.0, tokens=1_000) == "token"
 
 
 def test_an_absent_dollar_amount_with_no_other_cap_names_nothing() -> None:
