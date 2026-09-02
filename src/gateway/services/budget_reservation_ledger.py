@@ -197,7 +197,12 @@ async def grow(
         )
         .values(
             estimate=BudgetReservation.estimate + user_delta,
-            token_estimate=BudgetReservation.token_estimate + (token_delta if user_delta > ZERO else 0),
+            # Gated on the row's own record of whether the per-user leg holds, not
+            # on the dollar delta: a top-up can grow tokens alone (a model priced
+            # at zero, an expanded prompt), and reading ``user_delta > 0`` as "the
+            # user leg grew" would drop exactly that hold.
+            token_estimate=BudgetReservation.token_estimate
+            + case((BudgetReservation.user_reserved, token_delta), else_=0),
         )
         .execution_options(synchronize_session=False)
     )
@@ -209,9 +214,11 @@ async def grow(
         # ``budget_service._cas_reset_user_budget``. The caller's own compensating
         # writes commit this empty transaction along with them.
         return False
-    if scoped_delta > ZERO:
+    if scoped_delta > ZERO or token_delta > 0:
         # In the same transaction as the guarded UPDATE above, so the lines cannot
-        # grow against a row that turned terminal between the two statements.
+        # grow against a row that turned terminal between the two statements. Each
+        # axis grows only by what it was actually given, so a token-only top-up
+        # leaves the dollar amount alone and a dollar-only one leaves the tokens.
         await db.execute(
             update(BudgetReservationScope)
             .where(BudgetReservationScope.reservation_id == reservation_id)

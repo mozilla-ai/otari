@@ -492,12 +492,21 @@ async def reserve_budget(
     if budget is None and not scoped:
         return no_reservation
 
-    # Free models do not consume budget; nothing to reserve on either mechanism.
-    # Reconciliation will add their (zero) cost to spend. Priced at the caller's
-    # organization's rate, so "free" means free at what this request will settle
-    # at rather than at the deployment's list price.
+    # A free model spends no dollars, so the dollar axis is neither held nor
+    # gated: ``usd`` goes to None below and reconciliation adds its (zero) cost to
+    # spend. Priced at the caller's organization's rate, so "free" means free at
+    # what this request will settle at rather than at the deployment's list price.
+    #
+    # It still spends tokens and is still a request, so a budget capping either of
+    # those holds and gates them here as it would for any other request. Only when
+    # nothing caps a count does the whole reservation drop away, which keeps the
+    # hot path for a free model on a dollars-only budget exactly what it was.
+    usd: Decimal | None = held
     if model and await _is_model_free(db, model, pricing_provider=pricing_provider, organization_id=organization_id):
-        return no_reservation
+        budget_caps_counts = budget is not None and (budget.token_limit is not None or budget.request_limit is not None)
+        if not budget_caps_counts and not any(ceiling.caps_counts for ceiling in scoped):
+            return no_reservation
+        usd = None
 
     # Reclaim this user's leaked holds, the same idiom as the period roll above: a
     # hold an earlier request left behind keeps shrinking this user's headroom
@@ -515,7 +524,7 @@ async def reserve_budget(
 
     if scoped:
         refused = await reserve_scoped(
-            db, scoped, held, tokens=held_tokens, requests=held_requests, new_request=new_request
+            db, scoped, usd, tokens=held_tokens, requests=held_requests, new_request=new_request
         )
         if refused is not None:
             record_budget_exceeded()
@@ -535,7 +544,7 @@ async def reserve_budget(
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
-            scoped_estimate=held,
+            scoped_estimate=usd or ZERO,
             token_estimate=held_tokens,
             request_estimate=held_requests,
             ttl_seconds=reservation_ttl_sec,
@@ -549,7 +558,7 @@ async def reserve_budget(
             update(User)
             .where(User.user_id == user_id, User.deleted_at.is_(None))
             .values(
-                reserved=User.reserved + held,
+                reserved=User.reserved + (usd or ZERO),
                 reserved_tokens=User.reserved_tokens + held_tokens,
                 reserved_requests=User.reserved_requests + held_requests,
             )
@@ -559,12 +568,12 @@ async def reserve_budget(
         return await _held_handle(
             db,
             user_id=user_id,
-            estimate=held,
+            estimate=usd or ZERO,
             user_reserved=True,
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
-            scoped_estimate=held if scoped else ZERO,
+            scoped_estimate=(usd or ZERO) if scoped else ZERO,
             token_estimate=held_tokens,
             request_estimate=held_requests,
             ttl_seconds=reservation_ttl_sec,
@@ -585,8 +594,8 @@ async def reserve_budget(
         return clauses
 
     guards: list[Any] = []
-    if budget.max_budget is not None:
-        guards += guards_for(User.spend + User.reserved, held, budget.max_budget)
+    if budget.max_budget is not None and usd is not None:
+        guards += guards_for(User.spend + User.reserved, usd, budget.max_budget)
     if budget.token_limit is not None:
         guards += guards_for(User.current_tokens + User.reserved_tokens, held_tokens, budget.token_limit)
     if budget.request_limit is not None:
@@ -599,7 +608,7 @@ async def reserve_budget(
             *guards,
         )
         .values(
-            reserved=User.reserved + held,
+            reserved=User.reserved + (usd or ZERO),
             reserved_tokens=User.reserved_tokens + held_tokens,
             reserved_requests=User.reserved_requests + held_requests,
         )
@@ -615,7 +624,7 @@ async def reserve_budget(
         await release_scoped(
             db,
             [item.budget_id for item in scoped],
-            held,
+            usd or ZERO,
             tokens=held_tokens,
             requests=held_requests,
         )
@@ -627,12 +636,12 @@ async def reserve_budget(
     return await _held_handle(
         db,
         user_id=user_id,
-        estimate=held,
+        estimate=usd or ZERO,
         user_reserved=True,
         strategy=normalized,
         counts_toward_budget=counts_toward_budget,
         scoped=scoped,
-        scoped_estimate=held if scoped else ZERO,
+        scoped_estimate=(usd or ZERO) if scoped else ZERO,
         token_estimate=held_tokens,
         request_estimate=held_requests,
         ttl_seconds=reservation_ttl_sec,
@@ -848,7 +857,7 @@ async def increase_reservation(
 ) -> None:
     """Grow an existing reservation atomically when the request size increases.
 
-    Used when the billable size grows after the initial reservation — e.g. the
+    Used when the billable size grows after the initial reservation, e.g. the
     content normalizer expands an attachment into extracted prompt text. The
     delta is reserved with the same atomic conditional UPDATE as
     :func:`reserve_budget` (so the budget gate stays effective on the true
@@ -856,9 +865,9 @@ async def increase_reservation(
     releases the full held amount.
 
     Like :func:`reserve_budget`, this raises on budget rejection and does *not*
-    clean up the prior hold — the caller owns refunding ``handle`` on failure
-    (the request routes wrap the whole post-reservation setup in a
-    refund-on-error block). No-op when ``additional_estimate`` is not positive.
+    clean up the prior hold: the caller owns refunding ``handle`` on failure (the
+    request routes wrap the whole post-reservation setup in a refund-on-error
+    block). No-op only when neither the dollar nor the token delta is positive.
 
     The scoped ceilings are grown on exactly the rows the original reservation
     took, not re-resolved: the request scope has not changed, and re-resolving
@@ -868,15 +877,19 @@ async def increase_reservation(
     the same request the original reserve already counted, and holding a second
     one would spend a request cap twice on it.
     """
-    additional = to_usd(additional_estimate)
-    if additional <= ZERO:
+    # Both axes are normalized before either is tested, because they grow
+    # independently: attachments that expand the prompt raise the token estimate
+    # while a model priced at zero leaves the dollar one untouched, and returning
+    # on the dollar delta alone would let those tokens go unheld.
+    additional = max(to_usd(additional_estimate), ZERO)
+    grown_tokens = max(additional_tokens, 0)
+    if additional <= ZERO and grown_tokens == 0:
         return
     # A budget-exempt request never grows a reservation: there is nothing to hold and
     # nothing to gate. Without this, the top-up path would silently re-enter the
     # enforced flow and reserve against the user's budget.
     if not handle.counts_toward_budget:
         return
-    grown_tokens = max(additional_tokens, 0)
     if handle.scoped_budgets:
         refused = await reserve_scoped(
             db, handle.scoped_budgets, additional, tokens=grown_tokens, requests=0, new_request=False

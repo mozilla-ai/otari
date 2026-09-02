@@ -125,6 +125,17 @@ class ApplicableBudget:
     budget_id: str
     scope_type: str
     provider_key_id: str | None
+    # The non-USD caps of the budget this ceiling names, carried so a caller can
+    # tell whether an axis is capped anywhere without reading every budget again.
+    # The reserve path reads them from the row instead, inside its one conditional
+    # UPDATE, so these are not what enforcement is decided on.
+    token_limit: int | None = None
+    request_limit: int | None = None
+
+    @property
+    def caps_counts(self) -> bool:
+        """Whether this ceiling caps tokens or requests as well as dollars."""
+        return self.token_limit is not None or self.request_limit is not None
 
     @property
     def subject(self) -> str:
@@ -302,6 +313,8 @@ async def applicable_budgets(
                 Budget.budget_duration_sec,
                 Budget.reset_alignment,
                 ScopedBudget.period_end,
+                Budget.token_limit,
+                Budget.request_limit,
             )
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
             .where(ident_clause, key_clause)
@@ -313,15 +326,21 @@ async def applicable_budgets(
     now = datetime.now(UTC)
     expired = [
         (budget_id, duration, alignment)
-        for budget_id, _scope_type, _provider, duration, alignment, period_end in rows
+        for budget_id, _scope_type, _provider, duration, alignment, period_end, _tokens, _requests in rows
         if (parsed := _as_utc(period_end)) is not None and now >= parsed
     ]
     if expired:
         await _roll_expired_periods(db, expired, now)
 
     resolved = [
-        ApplicableBudget(budget_id=budget_id, scope_type=scope_type, provider_key_id=provider)
-        for budget_id, scope_type, provider, _duration, _alignment, _period_end in rows
+        ApplicableBudget(
+            budget_id=budget_id,
+            scope_type=scope_type,
+            provider_key_id=provider,
+            token_limit=token_limit,
+            request_limit=request_limit,
+        )
+        for budget_id, scope_type, provider, _duration, _alignment, _period_end, token_limit, request_limit in rows
     ]
     # Most specific first, provider-narrowed before aggregate within a scope, then
     # the id so the order stays total when two ceilings tie on both.
@@ -392,7 +411,7 @@ async def release(
 async def reserve(
     db: AsyncSession,
     budgets: Sequence[ApplicableBudget],
-    amount: Decimal,
+    amount: Decimal | None,
     *,
     tokens: int = 0,
     requests: int = 1,
@@ -415,8 +434,14 @@ async def reserve(
     is asked only whether the delta fits. A top-up is otherwise refused by its
     own hold: on a request cap of one, the reservation it is growing has already
     taken the only slot.
+
+    ``amount=None`` is a request with no dollar amount, which is a free-priced
+    model: the dollar axis is neither held nor gated, because the request cannot
+    spend, while the token and request axes hold and gate as they do for any
+    other request. It still consumes tokens and is still a request.
     """
     taken: list[str] = []
+    usd = amount if amount is not None else ZERO
 
     # Each cap is a column on the budget this ceiling names, read as a correlated
     # subquery so the whole check stays inside the one conditional UPDATE. Reading
@@ -440,20 +465,25 @@ async def reserve(
             fits = and_(committed < cap, fits)
         return or_(cap.is_(None), fits)
 
-    caps = (
-        (ScopedBudget.current_spend + ScopedBudget.reserved_spend, amount, cap_of(Budget.max_budget)),
-        (ScopedBudget.current_tokens + ScopedBudget.reserved_tokens, tokens, cap_of(Budget.token_limit)),
-        (ScopedBudget.current_requests + ScopedBudget.reserved_requests, requests, cap_of(Budget.request_limit)),
-    )
+    # An axis whose amount is None is not part of this request and is not asked.
+    gates = [
+        admits(committed, held, cap)
+        for committed, held, cap in (
+            (ScopedBudget.current_spend + ScopedBudget.reserved_spend, amount, cap_of(Budget.max_budget)),
+            (ScopedBudget.current_tokens + ScopedBudget.reserved_tokens, tokens, cap_of(Budget.token_limit)),
+            (ScopedBudget.current_requests + ScopedBudget.reserved_requests, requests, cap_of(Budget.request_limit)),
+        )
+        if held is not None
+    ]
     for budget in budgets:
         result = await db.execute(
             update(ScopedBudget)
             .where(
                 ScopedBudget.id == budget.budget_id,
-                *(admits(committed, held, cap) for committed, held, cap in caps),
+                *gates,
             )
             .values(
-                reserved_spend=ScopedBudget.reserved_spend + amount,
+                reserved_spend=ScopedBudget.reserved_spend + usd,
                 reserved_tokens=ScopedBudget.reserved_tokens + tokens,
                 reserved_requests=ScopedBudget.reserved_requests + requests,
             )
@@ -461,7 +491,7 @@ async def reserve(
         )
         await db.commit()
         if not getattr(result, "rowcount", 0):
-            await release(db, taken, amount, tokens=tokens, requests=requests)
+            await release(db, taken, usd, tokens=tokens, requests=requests)
             return budget
         taken.append(budget.budget_id)
     return None

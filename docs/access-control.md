@@ -90,8 +90,10 @@ A budget caps up to three things over its period, each set independently and
 each unlimited when left unset: spend in USD (`max_budget`), total tokens
 (`token_limit`), and requests (`request_limit`). A request must have room on
 every axis the budget caps. Spend and tokens are held at an upper bound before
-dispatch and reconciled to the measured figures afterwards, so an over-estimate
-costs the budget nothing; a request counts as one request when it is admitted.
+dispatch and reconciled to the measured figures afterwards; only the unused part
+of an over-estimate is released, and what the request measurably used stays
+charged. A request counts as one request when it is admitted. A model priced at
+zero spends no dollars, and still spends tokens and one request.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests

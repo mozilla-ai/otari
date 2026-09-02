@@ -339,3 +339,81 @@ async def test_a_top_up_grows_the_token_hold_without_counting_a_second_request(a
 
     await async_db.refresh(user)
     assert (user.reserved_tokens, user.reserved_requests) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_free_model_still_spends_a_token_budget(async_db: Any) -> None:
+    """A model priced at zero costs no dollars, but it still consumes tokens.
+
+    The free-model shortcut used to return a reservation holding nothing, which
+    let a client pass a token or request cap by naming a free-priced model.
+    """
+    async_db.add(ModelPricing(model_key="openai:free-model", input_price_per_million=0.0, output_price_per_million=0.0))
+    async_db.add(Budget(budget_id="free-tokens", max_budget=None, token_limit=1_000))
+    async_db.add(User(user_id="free-model-user", budget_id="free-tokens"))
+    await async_db.commit()
+
+    handle = await reserve_budget(
+        async_db, "free-model-user", 5.0, model="openai:free-model", estimated_tokens=400
+    )
+
+    # The dollar axis is not held: the request cannot spend.
+    assert handle.estimate == Decimal(0)
+    assert handle.token_estimate == 400
+
+    await reconcile_reservation(async_db, handle, 0.0, actual_tokens=400)
+
+    user = await get_active_user(async_db, "free-model-user")
+    assert user is not None
+    assert (user.current_tokens, user.reserved_tokens) == (400, 0)
+    assert user.spend == Decimal(0)
+
+    # And the cap binds: three more of these do not fit under 1000.
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(
+            async_db, "free-model-user", 5.0, model="openai:free-model", estimated_tokens=700
+        )
+
+    assert refusal.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_free_model_on_a_dollars_only_budget_still_reserves_nothing(async_db: Any) -> None:
+    """The hot path is unchanged where no count is capped: no hold, no ledger row."""
+    async_db.add(ModelPricing(model_key="openai:free-two", input_price_per_million=0.0, output_price_per_million=0.0))
+    async_db.add(Budget(budget_id="dollars-only", max_budget=10.0))
+    async_db.add(User(user_id="dollars-only-user", budget_id="dollars-only"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "dollars-only-user", 5.0, model="openai:free-two", estimated_tokens=400)
+
+    assert not handle.reserved
+    assert handle.reservation_id is None
+    assert (handle.estimate, handle.token_estimate) == (Decimal(0), 0)
+
+
+@pytest.mark.asyncio
+async def test_a_token_only_top_up_is_held(async_db: Any) -> None:
+    """Attachments can expand the prompt without moving the price, and that still holds.
+
+    ``increase_reservation`` used to return on the dollar delta alone, so the
+    extra tokens were settled against a hold that had never grown to cover them.
+    """
+    async_db.add(Budget(budget_id="token-topup", max_budget=10.0, token_limit=10_000))
+    async_db.add(User(user_id="token-topup-user", budget_id="token-topup"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "token-topup-user", 1.0, estimated_tokens=1_000)
+    await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=500)
+
+    user = await get_active_user(async_db, "token-topup-user")
+    assert user is not None
+    assert user.reserved_tokens == 1_500
+    assert handle.token_estimate == 1_500
+    # The dollar hold is untouched by a delta of zero.
+    assert user.reserved == Decimal("1.0")
+
+    await refund_reservation(async_db, handle)
+
+    await async_db.refresh(user)
+    assert (user.reserved_tokens, user.reserved) == (0, Decimal(0))
