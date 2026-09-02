@@ -640,10 +640,15 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   // window has to say so, or a reader takes the figure for the whole gateway.
   const shareScopeSuffix = [
     // Named, like the counted phrases below it: a bare workspace name among
-    // them reads as a stray token rather than as the scope it states.
+    // them reads as a stray token rather than as the scope it states. An
+    // unnarrowed organization card says so rather than staying silent, since
+    // silence is what a workspace-scoped card looks like and the two figures
+    // are worth very different amounts.
     workspaceFilter !== undefined
       ? `workspace ${workspaceLabel(workspaceFilter)}`
-      : null,
+      : orgWide
+        ? "organization-wide"
+        : null,
     userFilters.length > 0
       ? `${userFilters.length} user${userFilters.length > 1 ? "s" : ""}`
       : null,
@@ -1060,7 +1065,12 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
         title={orgWide ? "Organization usage" : "Usage & analytics"}
         description={
           orgWide
-            ? "Spend, tokens, cache use, and request volume across every workspace in your organization. Group the chart by model, user, key, or source, or narrow to a single workspace."
+            ? // "You can see" rather than "every workspace": an admin does read
+              // every one, but the row is only hidden from a member rather than
+              // refused, so a member reaching this by URL reads this sentence
+              // beside their own workspaces alone. True for both, and the page
+              // does not have to know which one is reading it.
+              "Spend, tokens, cache use, and request volume across the workspaces you can see in your organization. Group the chart by model, user, key, or source, or narrow to a single workspace."
             : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
         }
       />

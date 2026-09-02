@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { OrganizationUsagePage } from "@/features/usage/OrganizationUsagePage"
+import { UsagePage } from "@/features/usage/UsagePage"
 
 export const Route = createFileRoute("/organization/usage")({
-  component: OrganizationUsagePage,
+  component: () => <UsagePage scope="organization" />,
 })

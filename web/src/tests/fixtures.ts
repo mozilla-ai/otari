@@ -103,11 +103,14 @@ const STANDALONE_SURFACES = [
 ]
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
-// HOSTED_SURFACES beside it: the process-global provider page drops and the
-// organization-scoped one takes its place.
+// HOSTED_SURFACES beside it: the process-global provider page drops, the
+// organization-scoped one takes its place, and the organization-wide Usage page
+// appears, being a destination only where "my organization" is narrower than
+// "everything" (otari-ai#1963).
 export const HOSTED_SURFACES = [
   ...STANDALONE_SURFACES.filter((surface) => surface !== "providers"),
   "organization_providers",
+  "organization_usage",
 ]
 
 /** The deployment bootstrap, standalone by default. See useDeployment. */

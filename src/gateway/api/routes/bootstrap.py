@@ -95,9 +95,10 @@ STANDALONE_SURFACES: tuple[str, ...] = (
 )
 
 # The same list for a *hosted* deployment: one control plane serving many
-# organizations, rather than one operator's own gateway. Two rows differ, and
-# both differences are the same fact seen from either side, that a credential
-# here belongs to a tenant rather than to the process.
+# organizations, rather than one operator's own gateway. Three rows differ. The
+# first two are the same fact seen from either side, that a credential here
+# belongs to a tenant rather than to the process; the third is not about
+# credentials at all.
 #
 # ``providers`` drops. It is the deployment-instance surface over
 # ``provider_credentials``, whose primary key is the instance name alone, so an
