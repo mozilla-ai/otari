@@ -1166,7 +1166,7 @@
 }
 @utility text-shell-monogram {
   /* Deliberately off-scale, and one of two documented exceptions, the other
-     being . Two letters in a 26px avatar are recognized, not
+     being `text-mono-title`. Two letters in a 26px avatar are recognized, not
      read, so putting them on the scale would either overflow the avatar or drag
      a real text step down to 9px to suit a monogram. Leave the literal; it is
      not an oversight.
