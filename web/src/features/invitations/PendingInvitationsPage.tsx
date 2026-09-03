@@ -86,7 +86,7 @@ export function PendingInvitationsPage() {
                   <div className="flex items-start gap-3">
                     <FiMail
                       aria-hidden="true"
-                      className="mt-0.5 size-5 shrink-0 text-muted"
+                      className="size-5 shrink-0 text-muted"
                     />
                     <div className="flex flex-col gap-1">
                       <h2 className="text-title">
@@ -104,6 +104,11 @@ export function PendingInvitationsPage() {
                   <div className="flex shrink-0 flex-wrap gap-2">
                     <Button
                       variant="primary"
+                      // The visible label stays "Accept"; this is what
+                      // distinguishes one row's control from the next for a
+                      // screen reader, which does not get the heading beside
+                      // it as part of the button's name.
+                      aria-label={`Accept invitation to ${invitation.organization_name}`}
                       isPending={
                         accepting === invitation.organization_member_id &&
                         accept.isPending
@@ -119,6 +124,7 @@ export function PendingInvitationsPage() {
                     </Button>
                     <Button
                       variant="outline"
+                      aria-label={`Decline invitation to ${invitation.organization_name}`}
                       onPress={() => setDeclining(invitation)}
                     >
                       Decline

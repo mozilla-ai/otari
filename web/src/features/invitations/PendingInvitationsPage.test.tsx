@@ -92,7 +92,11 @@ describe("the invitee's membership inbox", () => {
     renderPage()
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole("button", { name: "Accept" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Accept invitation to Research",
+      }),
+    )
 
     await waitFor(() => {
       expect(
@@ -115,7 +119,11 @@ describe("the invitee's membership inbox", () => {
     renderPage()
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole("button", { name: "Decline" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Decline invitation to Research",
+      }),
+    )
 
     const dialog = await screen.findByRole("alertdialog")
     expect(
@@ -144,7 +152,11 @@ describe("the invitee's membership inbox", () => {
     renderPage()
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole("button", { name: "Accept" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Accept invitation to Research",
+      }),
+    )
 
     await waitFor(() => {
       expect(screen.queryByText("Research")).toBeNull()
@@ -157,7 +169,11 @@ describe("the invitee's membership inbox", () => {
     renderPage()
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole("button", { name: "Accept" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Accept invitation to Research",
+      }),
+    )
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /not found or already used/,
@@ -171,7 +187,9 @@ describe("the invitee's membership inbox", () => {
     renderPage()
 
     expect(await screen.findByText("No invitations waiting")).toBeVisible()
-    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: /^Accept invitation to/ }),
+    ).toBeNull()
   })
 
   it("keeps the two invitations separately actionable", async () => {
@@ -191,7 +209,11 @@ describe("the invitee's membership inbox", () => {
     expect(rows).toHaveLength(2)
 
     const user = userEvent.setup()
-    await user.click(within(rows[1]).getByRole("button", { name: "Accept" }))
+    await user.click(
+      within(rows[1]).getByRole("button", {
+        name: "Accept invitation to Platform",
+      }),
+    )
 
     await waitFor(() => {
       expect(
