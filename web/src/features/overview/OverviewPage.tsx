@@ -802,9 +802,7 @@ function GetStartedStrip() {
       <div className="flex items-start gap-3">
         <Dot className="mt-2.5 bg-accent" />
         <div>
-          <h2 className="font-display text-xl font-semibold text-foreground">
-            Get started with Otari
-          </h2>
+          <h2 className="text-display-sub">Get started with Otari</h2>
           <p className="mt-1 text-sm text-muted">
             Add a provider to begin serving models. Once it is configured, this
             page will show your gateway&rsquo;s traffic, spend, and health.
