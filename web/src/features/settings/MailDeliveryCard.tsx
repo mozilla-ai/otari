@@ -93,7 +93,7 @@ export function MailDeliveryCard() {
           <p className="text-sm font-medium text-foreground">
             Send a test email
           </p>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <p className="mt-1 max-w-3xl text-caption text-muted">
             {loading
               ? "Checking whether this deployment can send mail…"
               : ready

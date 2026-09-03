@@ -37,7 +37,7 @@ export function MaintenanceModeCard() {
               <p className="text-sm font-medium text-foreground">
                 Freeze new dashboard sign-ins
               </p>
-              <p className="mt-1 max-w-3xl text-sm text-muted">
+              <p className="mt-1 max-w-3xl text-caption text-muted">
                 {enabled
                   ? "Nobody can start a new dashboard session. Sessions already open keep working, and the API and management endpoints still answer the master key, so you can turn this back off from here or with your key."
                   : "Turn this on before a redeploy so nobody signs in mid-migration. Sessions already open keep working, and it does not touch the API: keys and completions carry on serving. Keep your master key to hand: it is what lifts the freeze once your own session is gone."}

@@ -1694,6 +1694,30 @@ main {
 .otari-pagination .select__trigger {
   padding-inline-end: 6px;
 }
+
+/* The pager, on a coarse pointer.
+ *
+ * The desktop cluster is deliberately tight: 32px controls already clear the
+ * 24px floor, the four arrows read as one control because they sit together,
+ * and adjacent arrows do OPPOSITE things, so an overlap is the worst kind of
+ * mis-hit there is here. A press that lands wrong pages the wrong way rather
+ * than doing nothing. So no invisible bleed on this cluster at any size: the
+ * gaps are 3 to 4px and the pitch 33 to 35px, and a 40px target would overlap
+ * its neighbour by 7px. Measured before ruling it out.
+ *
+ * A finger is a different instrument, so it gets a different place rather than
+ * a bleed: real controls at 44px with 8px between them, which is the size the
+ * touch floor asks for with the separation that makes it safe. Visible
+ * geometry, so what is pressable is what is drawn. */
+@media (pointer: coarse) {
+  .otari-pagination .button {
+    height: 44px;
+    min-width: 44px;
+  }
+  .otari-pagination__pager {
+    gap: 8px;
+  }
+}
 /* Same for a toolbar's controls, which the min-height above cannot bring down
    on its own for the same reason. */
 .otari-toolbar .input,

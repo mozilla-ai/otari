@@ -271,7 +271,7 @@ function ConfigRow({
           // description here measured 1211px, about 175 characters to the line,
           // roughly twice a readable measure. The row still spans the page; the
           // sentence inside it does not have to.
-          <p className="mt-1 max-w-prose text-sm text-muted">
+          <p className="mt-1 max-w-prose text-caption text-muted">
             {field.description}
           </p>
         ) : null}
@@ -472,7 +472,7 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
           <code className="text-sm font-medium text-foreground">
             master_key
           </code>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <p className="mt-1 max-w-3xl text-caption text-muted">
             {isGenerated
               ? "This gateway uses its first-run generated dashboard key. Regeneration invalidates the current key immediately."
               : "This gateway uses a key managed through OTARI_MASTER_KEY or config.yml. Rotate it in configuration, then restart the gateway."}
@@ -522,7 +522,7 @@ function SecretKeyRow() {
           <code className="text-sm font-medium text-foreground">
             OTARI_SECRET_KEY
           </code>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <p className="mt-1 max-w-3xl text-caption text-muted">
             Generate a new key with <code>uv run otari gen-secret-key</code>,
             then restart with{" "}
             <code>OTARI_SECRET_KEY=&lt;new-key&gt;,&lt;old-key&gt;</code>.

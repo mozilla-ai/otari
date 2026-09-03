@@ -162,7 +162,7 @@ function FieldLabel({
       {field.description ? (
         // Capped for the reason every full-bleed row's prose is: the row
         // spans the page, the sentence does not.
-        <p className="mt-1 max-w-prose text-sm text-muted">
+        <p className="mt-1 max-w-prose text-caption text-muted">
           {field.description}
         </p>
       ) : null}

@@ -109,7 +109,10 @@ export function TablePagination({
 
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted tabular-nums">{summary}</span>
-        <div className="flex items-center gap-1">
+        {/* Named rather than styled here: the four arrows are one cluster, and
+            a coarse pointer needs both bigger controls and wider gaps between
+            them. That is the place's business, not the call site's. */}
+        <div className="otari-pagination__pager flex items-center gap-1">
           <Button
             size="sm"
             variant="outline"
