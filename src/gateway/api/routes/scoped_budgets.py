@@ -47,11 +47,13 @@ class CreateScopedBudgetRequest(BaseModel):
         max_length=255,
         description="Id of the capped identity: an organization, workspace, membership row, or API key",
     )
-    # Absent means every provider; a present value must name a real instance.
-    # Resolution matches `provider_key_id == provider_instance OR IS NULL`, and a
-    # blank string is neither, so it would store, list, and never bind. Refused
-    # rather than folded into null, because null is the *wider* cap and coercing
-    # would silently cap more than the caller asked for.
+    # Absent means every provider. Resolution matches `provider_key_id ==
+    # provider_instance OR IS NULL`, and a blank string is neither, so it would
+    # store, list, and never bind. Refused rather than folded into null, because
+    # null is the *wider* cap and coercing would silently cap more than the
+    # caller asked for. This only refuses the blank/whitespace shape, not an
+    # unresolvable value: unlike `scope_id` and `budget_id` above, a present
+    # `provider_key_id` naming no configured instance is not checked here (#918).
     provider_key_id: str | None = Field(
         default=None,
         min_length=1,
@@ -59,7 +61,8 @@ class CreateScopedBudgetRequest(BaseModel):
         pattern=r"^\S+$",
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
-            "Must name a real instance: a blank value would store a ceiling that never binds"
+            "A blank value would store a ceiling that never binds, so it is refused; this does not check "
+            "that the value names a configured provider instance"
         ),
     )
     budget_id: str = Field(
