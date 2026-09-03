@@ -6585,6 +6585,8 @@ export interface components {
             cache_control?: {
                 [key: string]: unknown;
             } | null;
+            /** Container */
+            container?: string | null;
             /** Context Management */
             context_management?: {
                 [key: string]: unknown;
