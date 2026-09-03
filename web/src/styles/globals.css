@@ -182,6 +182,13 @@
      and 1.22 in dark. Same reason the border tiers are overlays. */
   --color-primary-subtle: rgb(0 152 164 / 0.14); /* selected/soft backgrounds */
   --color-primary-foreground: #08090a; /* text/icons on primary bg */
+  /* Ink for a NON-TEXT GRAPHIC drawn on the accent fill, which is a different
+     floor from the one above and so a different token. `--color-primary-
+     foreground` is near-black because text on the accent is held to 4.5:1 and
+     white reaches only 3.48. A checkmark or an indeterminate dash is a
+     graphical object at 3:1, which 3.48 clears, and white is what reads at
+     16px. Same value in both themes, because the accent is. */
+  --color-accent-glyph: #ffffff;
   /* Text on the subtle fill, which is a different question from text on the
      solid one and does not have the same answer. `--color-primary` itself
      is under AA on `--color-primary-subtle`, so the obvious reading, "the
@@ -493,6 +500,7 @@
   --color-primary-active: #00c1d0;
   --color-primary-subtle: rgb(0 152 164 / 0.18); /* selection / soft fill */
   --color-primary-foreground: #08090a;
+  --color-accent-glyph: #ffffff;
   /* The same four values as the light block, and that is the point rather than
      an omission: a filled button carries its own ground, so the ink on it and
      the ramp under it do not change with the page behind them. Declared here
@@ -686,6 +694,9 @@
   --color-surface-subtle: var(--color-surface-subtle);
   --color-link: var(--color-link);
   --color-link-hover: var(--color-link-hover);
+  /* Declaring it in the theme blocks is not enough to make `text-accent-glyph`
+   * exist; a `--color-*` generates no utility until it is registered here. */
+  --color-accent-glyph: var(--color-accent-glyph);
   /* Attention — warm high-attention accent that pops against the cool UI.
    * Reserved for action-required banners and new/unread indicators; use it
    * sparingly so it keeps its pull. Distinct from --color-warning (caution):

@@ -58,9 +58,18 @@ export function CheckboxVisual({
       // of nearly the same value, which leaves a 16px box on the page ground
       // almost invisible. Checked drops the border entirely so the accent fill
       // is the whole shape.
+      //
+      // The glyph is white rather than `text-accent-foreground`, and that is
+      // not the same call the filled buttons made. A checkmark is a non-text
+      // graphic, held to 3:1, and white on the accent measures 3.48, which
+      // clears it. A button label is text at 4.5, which is why the button
+      // family had to darken its own ground to keep white ink and this box
+      // does not have to. `--accent-foreground` stays where it is: it also
+      // feeds HeroUI's own components on the accent, where the text floor
+      // still applies, so the graphic gets its own token instead.
       className={`flex h-4 w-4 items-center justify-center transition-colors ${
         showChecked
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent text-accent-glyph"
           : "border border-control-border bg-background"
       } group-data-[focus-visible]:otari-focus-ring`}
     >
