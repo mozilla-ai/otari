@@ -77,9 +77,9 @@ describe("OrganizationDomainsPage", () => {
     expect(screen.getByText("Not verified")).toBeInTheDocument()
     // The whole string to paste, not the bare token: an admin has no use for
     // the token on its own and prepending the prefix is what gets fumbled.
-    expect(
-      screen.getByLabelText("TXT record for acme.example"),
-    ).toHaveValue("otari-domain-verification=tok-abc123")
+    expect(screen.getByLabelText("TXT record for acme.example")).toHaveValue(
+      "otari-domain-verification=tok-abc123",
+    )
   })
 
   it("offers no pause control until the claim is proven", async () => {
@@ -200,7 +200,9 @@ describe("OrganizationDomainsPage", () => {
       await screen.findByRole("button", { name: "Verify domain" }),
     )
 
-    expect(await screen.findByText(/No matching TXT record/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/No matching TXT record/),
+    ).toBeInTheDocument()
   })
 
   it("tells a plain member they cannot manage domains, and reads nothing", async () => {
