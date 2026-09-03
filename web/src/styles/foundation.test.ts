@@ -521,6 +521,34 @@ describe("design foundation tokens", () => {
   })
 })
 
+// A comment opener inside a comment. CSS comments do not nest, so `/*` after
+// one has already opened is not an error and nothing fails: the text just
+// runs on to the next `*/` and the file quietly grows a duplicated header.
+// Three of those reached this file from scripted edits and were found by
+// somebody reading the lines next to them, which is not a way of finding
+// things.
+it("has no comment opened inside another comment in globals.css", () => {
+  const offenders: string[] = []
+  let inComment = false
+  for (let i = 0; i < CSS.length - 1; i++) {
+    if (!inComment && CSS[i] === "/" && CSS[i + 1] === "*") {
+      inComment = true
+      i++
+    } else if (inComment && CSS[i] === "*" && CSS[i + 1] === "/") {
+      inComment = false
+      i++
+    } else if (inComment && CSS[i] === "/" && CSS[i + 1] === "*") {
+      offenders.push(
+        `line ${CSS.slice(0, i).split("\n").length}: ${CSS.slice(i, i + 60)}`,
+      )
+      i++
+    }
+  }
+  expect(offenders, "a `/*` inside a comment is a duplicated header").toEqual(
+    [],
+  )
+})
+
 describe("semantic tokens only", () => {
   // Every source file that styles anything, which is the whole of `src` now
   // that there is no bridge tree left to be exempt. This used to be scoped to
