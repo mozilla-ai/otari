@@ -13,10 +13,10 @@ describe("RowAction", () => {
   it("is muted at rest even when it offers a destructive action", () => {
     render(<RowAction onPress={() => undefined}>Remove</RowAction>)
     const action = screen.getByRole("button", { name: "Remove" })
-    // Token checks, not substring: a variant like `hover:text-muted` contains
-    // "text-muted", so a substring assertion would pass for a control that
-    // never carries the ink at rest.
-    expect([...action.classList]).toContain("text-muted")
+    // `text-caption` carries the muted ink itself, which is why the resting
+    // variant no longer names a color: repeating it is what
+    // `foundation.test.ts` bans.
+    expect([...action.classList]).toContain("text-caption")
     expect(action.className).not.toContain("text-danger")
   })
 
@@ -116,7 +116,7 @@ describe("ConfirmRowAction", () => {
   it("offers one muted action at rest", () => {
     setup()
     const trigger = screen.getByRole("button", { name: "Remove" })
-    expect([...trigger.classList]).toContain("text-muted")
+    expect([...trigger.classList]).toContain("text-caption")
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   })
 
@@ -135,7 +135,7 @@ describe("ConfirmRowAction", () => {
     // Cancel is the ordinary way out and stays muted; two danger controls side
     // by side would make the safe one look like the destructive one.
     const cancel = screen.getByRole("button", { name: "Cancel" })
-    expect([...cancel.classList]).toContain("text-muted")
+    expect([...cancel.classList]).toContain("text-caption")
     expect(cancel.className).not.toContain("text-danger")
     // The resting label is gone, so there is no second, unarmed way through.
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull()

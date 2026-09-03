@@ -85,9 +85,7 @@ export function ClientArgsField({
       />
       <FieldMessages>
         <Description
-          className={
-            error ? "text-caption text-danger" : "text-caption text-muted"
-          }
+          className={error ? "text-caption text-danger" : "text-caption"}
         >
           {error ??
             // Unlike the API key, these are stored and returned unencrypted, so say
@@ -200,9 +198,7 @@ export function ProviderComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {description ? (
-        <span className="text-caption text-muted">{description}</span>
-      ) : null}
+      {description ? <span className="text-caption">{description}</span> : null}
     </ComboBox.Root>
   )
 }

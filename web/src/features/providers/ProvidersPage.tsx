@@ -1121,8 +1121,8 @@ export function ProvidersPage() {
             is not set, so provider keys can&rsquo;t be encrypted at rest and
             adding providers from the dashboard is disabled. Set it on the
             server and restart to add providers here. Providers defined in{" "}
-            <span className="text-mono-caption">config.yml</span> keep
-            working without it.
+            <span className="text-mono-caption">config.yml</span> keep working
+            without it.
           </p>
         </Section>
       ) : null}

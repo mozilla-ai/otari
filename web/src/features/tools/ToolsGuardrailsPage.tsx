@@ -164,9 +164,7 @@ function FieldLabel({
       {field.description ? (
         // Capped for the reason every full-bleed row's prose is: the row
         // spans the page, the sentence does not.
-        <p className="mt-1 max-w-prose text-caption text-muted">
-          {field.description}
-        </p>
+        <p className="mt-1 max-w-prose text-caption">{field.description}</p>
       ) : null}
       {help ? <p className="mt-1 text-caption">{help}</p> : null}
     </div>

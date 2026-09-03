@@ -1216,9 +1216,7 @@ function RecentActivity({
       header: "Model",
       isRowHeader: true,
       cell: (entry) => (
-        <span className="text-mono-caption text-foreground">
-          {entry.model}
-        </span>
+        <span className="text-mono-caption text-foreground">{entry.model}</span>
       ),
     },
     {
@@ -1330,9 +1328,7 @@ function RailStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-overline">{label}</dt>
-      <dd className="text-mono-figure font-normal text-foreground">
-        {value}
-      </dd>
+      <dd className="text-mono-figure font-normal text-foreground">{value}</dd>
     </div>
   )
 }

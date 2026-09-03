@@ -306,7 +306,7 @@ export function RowAction({
       aria-label={ariaLabel}
       onClick={onPress}
       className={`text-caption whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-50 ${
-        isDanger ? "text-danger" : "text-muted hover:text-foreground"
+        isDanger ? "text-danger" : "hover:text-foreground"
       }`}
     >
       {children}

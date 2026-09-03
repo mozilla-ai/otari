@@ -28,10 +28,17 @@ export function FieldMessages({
 }) {
   // The role goes on the wrapper, and that is not a style preference. HeroUI
   // merges a component's className through tailwind-merge, which cannot tell a
-  // custom `text-caption` from a text COLOR, so `text-caption text-muted` on a
-  // `Description` loses the caption and keeps only the color: it compiles,
-  // ships, and renders at HeroUI's own 12px. Setting the role here and leaving
-  // the child nothing but its color keeps them out of the same merge group.
+  // custom `text-caption` from a text COLOR, so putting the role and a color
+  // together on a `Description` loses the caption and keeps only the color: it
+  // compiles, ships, and renders at HeroUI's own 12px. Setting the role here
+  // and leaving the child nothing but its color keeps them out of the same
+  // merge group.
+  //
+  // Described rather than spelled out, for the reason `PageIntro`'s docstring
+  // gives about the arbitrary-size rule: `foundation.test.ts` matches a role
+  // beside its own ink against raw file contents and strips block comments
+  // only, so a line comment quoting that pairing keeps this file on the
+  // offender list with nothing visibly wrong in it.
   return (
     <div
       className={`text-caption ${reserve ? "min-h-[var(--text-caption-step--line-height)]" : ""}`}
