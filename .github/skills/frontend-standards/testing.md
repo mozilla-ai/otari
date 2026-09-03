@@ -65,6 +65,15 @@ changes; their timeout is a ceiling, not a sleep. Two habits that follow:
   If the environment genuinely needs more headroom, raise it in one place
   (`configure({ asyncUtilTimeout })` in `src/tests/setup.ts`) and say why.
 
+**Assert a class with `toHaveClass` or `[...el.classList]`, never `className` with
+`toContain`.** A class list is a set of tokens and `toContain` on the string is a substring
+match, so the assertion passes on any longer token that happens to contain the one you named:
+`h-6` passes on `max-h-64`, `text-foreground` on `hover:text-foreground`, `border-l` on
+`first:border-l-0`. Each of those false-passed a real assertion here, including a target-size
+test that would have been satisfied by a button with no height. Negative assertions are the
+exception and stay as substring matches on purpose: `not.toContain("bg-")` rejects more than a
+token check would, which is the safe direction.
+
 **Every test file is self-contained.** Vitest runs files in parallel across workers, so a
 global one file leaves modified is a failure in another file that only reproduces at full
 suite size:
