@@ -690,12 +690,12 @@ describe("ProvidersPage", () => {
     renderPage(<ProvidersPage />)
 
     // Scope by the status pill's row (the provider name repeats in the Type cell).
-    const reachableRow = (await screen.findByText("REACHABLE")).closest("tr")!
+    const reachableRow = (await screen.findByText("Reachable")).closest("tr")!
     expect(within(reachableRow).getAllByText("openai").length).toBeGreaterThan(
       0,
     )
 
-    const unreachablePill = screen.getByText("UNREACHABLE")
+    const unreachablePill = screen.getByText("Unreachable")
     const unreachableRow = unreachablePill.closest("tr")!
     expect(
       within(unreachableRow).getAllByText("anthropic").length,
@@ -762,11 +762,11 @@ describe("ProvidersPage", () => {
     })
     renderPage(<ProvidersPage />)
 
-    const pill = await screen.findByText("NO MODEL DISCOVERY")
+    const pill = await screen.findByText("No model discovery")
     expect(
       within(pill.closest("tr")!).getAllByText("otari").length,
     ).toBeGreaterThan(0)
-    expect(screen.queryByText("UNREACHABLE")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unreachable")).not.toBeInTheDocument()
     // The provider error stays available, alongside why it is not fatal.
     expect(pill).toHaveAttribute("title", expect.stringContaining("404"))
     expect(pill).toHaveAttribute(
@@ -1315,12 +1315,12 @@ describe("ProvidersPage", () => {
     })
     renderPage(<ProvidersPage />)
 
-    const row = (await screen.findByText("REACHABLE")).closest("tr")!
+    const row = (await screen.findByText("Reachable")).closest("tr")!
     expect(within(row).getAllByText("openai").length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole("button", { name: "Re-check all" }))
 
-    expect(await within(row).findByText("UNREACHABLE")).toBeInTheDocument()
+    expect(await within(row).findByText("Unreachable")).toBeInTheDocument()
     expect(
       await screen.findByText("0 of 1 provider reachable"),
     ).toBeInTheDocument()

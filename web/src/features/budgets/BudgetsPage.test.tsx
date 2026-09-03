@@ -220,7 +220,7 @@ describe("BudgetsPage", () => {
     )
     await user.type(screen.getByLabelText("Name (optional)"), "team-free-tier")
     await user.type(screen.getByLabelText("Spending limit (USD)"), "250")
-    await user.click(screen.getByRole("button", { name: "Weekly" }))
+    await user.click(screen.getByRole("radio", { name: "Weekly" }))
     await user.click(screen.getByRole("button", { name: "Create budget" }))
 
     const post = fetchMock.mock.calls.find(
@@ -371,7 +371,7 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.click(screen.getByRole("button", { name: "Custom" }))
+    await user.click(screen.getByRole("radio", { name: "Custom" }))
     await user.click(screen.getByLabelText("Every N days"))
     await user.paste("0.1")
 
@@ -395,7 +395,7 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.click(screen.getByRole("button", { name: "Custom" }))
+    await user.click(screen.getByRole("radio", { name: "Custom" }))
     await user.click(screen.getByLabelText("Every N days"))
     await user.paste("1.5")
 

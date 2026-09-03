@@ -27,6 +27,7 @@ import {
   RowAction,
   RowActionRow,
   Section,
+  Segmented,
   SpendMeter,
   spendState,
   TableScrollFrame,
@@ -80,6 +81,11 @@ function absolute(iso: string | null): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString()
 }
+
+// The segment that opens the custom-days field. A sentinel rather than a number,
+// because "custom" is not a duration and any real one it borrowed would collide
+// with a preset the day someone added it.
+const CUSTOM_PERIOD = "custom"
 
 // ---------- limit + period inputs ----------
 
@@ -138,33 +144,37 @@ function PeriodPicker({
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium text-foreground">Reset period</span>
-      <div className="flex flex-wrap gap-2">
-        {PERIOD_PRESETS.map((preset) => (
-          <Button
-            key={preset.label}
-            size="sm"
-            variant={
-              !custom && value === preset.seconds ? "primary" : "outline"
-            }
-            onPress={() => {
-              setCustom(false)
-              // Keep the (hidden) custom draft in step, so reopening Custom shows
-              // the preset's day count rather than a stale earlier entry.
-              setDraft(daysString(preset.seconds))
-              onChange(preset.seconds)
-            }}
-          >
-            {preset.label}
-          </Button>
-        ))}
-        <Button
-          size="sm"
-          variant={custom ? "primary" : "outline"}
-          onPress={() => setCustom(true)}
-        >
-          Custom
-        </Button>
-      </div>
+      {/* A segmented control rather than a row of buttons. These are the
+          alternatives for one field, not five things to do, and filling the
+          chosen one primary said the opposite: it put the submit button's own
+          treatment on a value, two controls apart from the real submit button
+          wearing the same fill. */}
+      <Segmented
+        label="Reset period"
+        // `String(null)` rather than a blank: "No reset" IS a preset here, and
+        // its seconds are null, so collapsing null to "" would leave the group
+        // with nothing selected on a form that has always opened on it.
+        value={custom ? CUSTOM_PERIOD : String(value)}
+        options={[
+          ...PERIOD_PRESETS.map((preset) => ({
+            value: String(preset.seconds),
+            label: preset.label,
+          })),
+          { value: CUSTOM_PERIOD, label: "Custom" },
+        ]}
+        onChange={(next) => {
+          if (next === CUSTOM_PERIOD) {
+            setCustom(true)
+            return
+          }
+          setCustom(false)
+          // Keep the (hidden) custom draft in step, so reopening Custom shows
+          // the preset's day count rather than a stale earlier entry.
+          const seconds = next === "null" ? null : Number(next)
+          setDraft(daysString(seconds))
+          onChange(seconds)
+        }}
+      />
       {custom ? (
         <div className="flex items-end gap-2">
           <Field

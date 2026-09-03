@@ -83,7 +83,7 @@ export function UserMultiSelect({
       <div>
         <span className="text-sm font-medium text-foreground">{label}</span>
         {description ? (
-          <p className="text-xs text-muted">{description}</p>
+          <p className="text-caption text-muted">{description}</p>
         ) : null}
       </div>
       {value.length > 0 ? (

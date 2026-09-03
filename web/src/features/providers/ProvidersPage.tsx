@@ -615,6 +615,16 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
 // listing (its backend never implemented /v1/models) is not unreachable: only
 // discovery is broken, and it may still serve requests, so it gets the amber
 // warning state rather than the red one (issue #447).
+// A repeated column's words, in their own casing. The uppercase these carried
+// was emphasis applied to every row alike, including the reachable ones, which
+// is the state a column watching for failures wants to draw the eye to least.
+// Same treatment, and same reasoning, as Activity's status column.
+const HEALTH_LABELS = {
+  ok: "Reachable",
+  degraded: "No model discovery",
+  unreachable: "Unreachable",
+} as const
+
 function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   if (!health) {
     return <span className="text-xs text-muted">—</span>
@@ -641,11 +651,7 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
       className={`flex items-center gap-2 font-mono text-[13px] ${styles}`}
     >
       <Dot className={dot} />
-      {health.ok
-        ? "REACHABLE"
-        : degraded
-          ? "NO MODEL DISCOVERY"
-          : "UNREACHABLE"}
+      {HEALTH_LABELS[health.ok ? "ok" : degraded ? "degraded" : "unreachable"]}
     </span>
   )
 }
@@ -948,10 +954,13 @@ export function ProvidersPage() {
       id: "source",
       header: "Source",
       cell: (row) => (
-        <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
-          <Dot
-            className={row.source === "stored" ? "bg-accent" : "bg-text-subtle"}
-          />
+        // A CATEGORY rather than a state: the vocabulary is closed (stored or
+        // config) and a row's answer never changes on its own. Categories carry
+        // no dot, and this one's was worse than decorative: an accent mark in a
+        // column of statuses reads as a state the column does not carry. The
+        // uppercase stays, which is what separates a category from the states
+        // in the column beside it.
+        <span className="font-mono text-[13px] text-muted">
           {row.source === "stored" ? "STORED" : "CONFIG"}
         </span>
       ),
