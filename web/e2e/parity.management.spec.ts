@@ -75,7 +75,9 @@ test.describe("standalone provider setup", () => {
     await expect(provider).toBeVisible()
     // A stored provider is one the dashboard owns, as against one read out of
     // config.yml, which is what decides whether it can be edited here at all.
-    await expect(provider).toContainText("stored")
+    // Uppercase in the source rather than through a `text-transform`, so this is
+    // the text content and the match is case-sensitive.
+    await expect(provider).toContainText("STORED")
 
     // Testing has to come back with a reported outcome, not just stop spinning:
     // an assertion that it merely does not say "Connected." would also pass if the
@@ -143,8 +145,10 @@ test.describe("api keys", () => {
     await page.getByRole("button", { name: "Create key" }).click()
 
     // The secret is shown exactly once, behind an explicit acknowledgement that
-    // Esc deliberately does not dismiss.
-    const reveal = page.getByRole("dialog", { name: "API key created" })
+    // Esc deliberately does not dismiss. A strip with `role="alert"` rather than
+    // a dialog: the modal's focus trap and swallowed Esc went with the redesign,
+    // and the acknowledgement is still the only thing that dismisses it.
+    const reveal = page.getByRole("alert", { name: /API key created/ })
     await expect(reveal).toBeVisible()
     await expect(reveal).toContainText("shown only once")
     await reveal.getByRole("button", { name: /saved this key/i }).click()
