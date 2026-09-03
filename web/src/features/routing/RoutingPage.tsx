@@ -381,9 +381,7 @@ function ModeToggle({
           </Tab>
         ))}
       </TabRow>
-      {hint === undefined ? null : (
-        <span className="text-caption text-muted">{hint}</span>
-      )}
+      {hint === undefined ? null : <span className="text-caption">{hint}</span>}
     </div>
   )
 }
@@ -921,7 +919,7 @@ function PolicyForm({
                 </Button>
               </div>
             ))}
-            <p className="text-caption text-muted">
+            <p className="text-caption">
               {weighted ? (
                 <>
                   The marked model serves a caller who sends{" "}
@@ -1054,7 +1052,7 @@ function PolicyForm({
               <span className="text-sm font-medium text-foreground">
                 Always check
               </span>
-              <p className="text-caption text-muted">
+              <p className="text-caption">
                 Runs on every request through this policy. Callers can add their
                 own guardrails but cannot weaken these.
               </p>
@@ -1215,10 +1213,7 @@ function PolicyForm({
                 + Add guardrails
               </button>
               {guardrails_.configured ? null : (
-                <span
-                  id="guardrails-unavailable"
-                  className="text-caption text-muted"
-                >
+                <span id="guardrails-unavailable" className="text-caption">
                   No guardrails service is configured, so there would be nothing
                   to call.{" "}
                   <Link to="/tools" className="text-link hover:underline">
@@ -1462,9 +1457,7 @@ export function RoutingPage() {
               {row.source.toUpperCase()}
             </span>
             {row.kind === "alias" ? (
-              <span className="text-mono-overline text-subtle">
-                alias
-              </span>
+              <span className="text-mono-overline text-subtle">alias</span>
             ) : null}
           </div>
         ),

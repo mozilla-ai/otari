@@ -644,9 +644,7 @@ function EditKeyForm({
     >
       <h2 className="text-title">
         Edit{" "}
-        <code className="text-mono-title">
-          {apiKey.key_name ?? apiKey.id}
-        </code>
+        <code className="text-mono-title">{apiKey.key_name ?? apiKey.id}</code>
       </h2>
       <ErrorBanner error={update.error} />
       <div className="grid gap-4 sm:grid-cols-2">

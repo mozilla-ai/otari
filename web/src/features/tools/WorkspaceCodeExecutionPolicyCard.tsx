@@ -333,14 +333,14 @@ export function WorkspaceCodeExecutionPolicyCard({
               operator to restore it.
             </p>
           ) : (
-            <p className="text-caption text-muted">
+            <p className="text-caption">
               The image this workspace's code runs in, from the list the
               operator has approved.
             </p>
           )}
         </div>
       ) : (
-        <p className="text-caption text-muted">
+        <p className="text-caption">
           This deployment has approved no sandbox images, so this workspace runs
           whatever the sandbox runs. An operator adds them with
           sandbox_allowed_session_images.
@@ -352,7 +352,7 @@ export function WorkspaceCodeExecutionPolicyCard({
           <legend className="text-xs font-medium text-muted">
             Code-execution tools
           </legend>
-          <p className="text-caption text-muted">
+          <p className="text-caption">
             Which of the tools this deployment's sandbox serves the workspace
             may use. Leaving them all ticked narrows nothing; use Blocked above
             to refuse code execution outright.
@@ -382,7 +382,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         // control that cannot express anything is worse than a sentence
         // saying so. The checkboxes appear on their own the day a backend
         // serves a second kind.
-        <p className="text-caption text-muted">
+        <p className="text-caption">
           This deployment's sandbox serves{" "}
           {availableTools.length === 1 ? availableTools[0] : "no tools"}, so
           there is no tool subset to choose. Use Blocked above to refuse code
