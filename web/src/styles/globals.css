@@ -1202,7 +1202,6 @@ textarea.input {
 }
 
 /* =============================================================
- * Full-bleed sections inside a centered column./* =============================================================
  * Full-bleed sections inside a centered column.
  *
  * `<main>`'s content sits in a centered `max-width` column, which is right for
@@ -1256,7 +1255,7 @@ main {
 
 @layer base {
   :focus-visible {
-    outline: 2px solid var(--color-focus);
+    outline: 2px solid var(--focus-ring-ink, var(--color-focus));
     outline-offset: 2px;
   }
 }
@@ -1276,8 +1275,33 @@ main {
  * would draw an outline and a box-shadow ring at once. Compiled and read before
  * this was renamed; the collision emits cleanly and reports nothing. */
 @utility otari-focus-ring {
-  outline: 2px solid var(--color-focus);
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
   outline-offset: 2px;
+}
+
+/* Ring ink, chosen by the GROUND being ringed rather than by a list of
+   variants. A control whose own fill is an accent or a status color takes the
+   theme's ink; everything else keeps `--color-focus`, which is the fallback in
+   the two rules above and stays the default for the whole product.
+   Naming fills rather than components is the point. A list of variants goes
+   stale silently: the next filled thing someone builds is simply missed, and
+   nothing fails. A fill cannot be missed, because a filled control is filled by
+   using one of these, so it arrives already carrying the right ring.
+   `--focus` as well as `--focus-ring-ink`, because HeroUI does not draw the
+   button's ring as an outline at all: `.button` sets `outline-style: none` in
+   the components layer and paints a box-shadow keyed on `--focus`, offset by
+   2px of `--background`. Setting only ours would recolor every ringed control
+   except the buttons, which are the ones this ruling is mostly about. */
+.button--primary,
+.button--danger,
+.bg-accent,
+.bg-success,
+.bg-warning,
+.bg-danger,
+.bg-info,
+.bg-attention {
+  --focus-ring-ink: var(--color-text);
+  --focus: var(--color-text);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1347,7 +1371,7 @@ main {
   --button-fg: var(--color-primary-button-foreground);
 }
 
-/* An outlined button is an object, so it takes the object edge./* An outlined button is an object, so it takes the object edge. HeroUI gives it
+/* An outlined button is an object, so it takes the object edge. HeroUI gives it
    `--color-border`, the 0.08 divider alpha, which is tuned to separate two
    surfaces of nearly the same value and leaves a button on the page ground with
    no edge to speak of in dark. Select triggers already took the control edge in
@@ -1356,8 +1380,24 @@ main {
   border-color: var(--color-control-border);
 }
 
+/* And an object's edge is drawn INSIDE its box, so the border eats a pixel of
+   the inset that every other variant spends on air. Measured beside each
+   other: an outline sm put its label 13px from the edge where a primary sm put
+   its label at 12, which is a visible step between two controls that sit in
+   the same row. The padding gives the pixel back.
+   Written at both sizes even though only sm renders an outline today, because
+   the rule is about the border rather than about which sizes happen to be in
+   use, and md would acquire the same 1px the first time someone reaches for it.
+   Icon-only is excluded: it has no label to inset and HeroUI zeroes its
+   padding to keep it square. */
+.button--outline.button--sm:not(.button--icon-only) {
+  padding-inline: 11px;
+}
+.button--outline:not(.button--sm):not(.button--icon-only) {
+  padding-inline: 15px;
+}
+
 /* =============================================================
- * The inside of a menu./* =============================================================
  * The inside of a menu.
  *
  * The popover shell was ours; everything inside it was stock, which is how a

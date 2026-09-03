@@ -416,9 +416,25 @@ function StatusMark({ status }: { status: string }) {
   return (
     <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
       <Dot className={dot} />
-      {status.toUpperCase()}
+      {statusLabel(status)}
     </span>
   )
+}
+
+// The column's words, in their own casing. This used to be
+// `status.toUpperCase()` on the raw enum, which was a missing label map rather
+// than a decision to shout: a repeated column carries its labels in the case
+// they are written in, and uppercase emphasis here fell equally on the
+// successes, which is the last thing a column built to surface exceptions
+// wants to draw the eye to. Unknown values still render their slug.
+const STATUS_LABELS: Record<string, string> = {
+  error: "Error",
+  absorbed: "Absorbed",
+  success: "Success",
+}
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status
 }
 
 // Friendly labels for known provenance sources; unknown sources render their slug.

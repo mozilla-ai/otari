@@ -257,7 +257,7 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("842 ms")).toBeInTheDocument()
     expect(within(row).getByText("$0.0123")).toBeInTheDocument()
     // Status is a dot plus an uppercase word now, not a pill.
-    expect(within(row).getByText("SUCCESS")).toBeInTheDocument()
+    expect(within(row).getByText("Success")).toBeInTheDocument()
   })
 
   it("shows the api key column, and an em-dash for master-key rows", async () => {
@@ -398,7 +398,7 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    expect(within(row).getByText("ERROR")).toBeInTheDocument()
+    expect(within(row).getByText("Error")).toBeInTheDocument()
 
     await user.click(row)
     // The dashboard is admin-only, so the stored error text is shown verbatim,
@@ -427,9 +427,13 @@ describe("ActivityPage", () => {
     expect(
       screen.getByText("stream completed without usage data"),
     ).toBeInTheDocument()
-    // Bare heading, no "(code)" suffix; scope to a span so the status filter's
-    // <option>Error</option> does not match.
-    expect(screen.getByText("Error", { selector: "span" })).toBeInTheDocument()
+    // Bare heading, no "(code)" suffix. Scoped to the overline, which is the
+    // heading's own class: a plain span now also matches the status filter's
+    // <option>Error</option> and the row's own status word, which reads "Error"
+    // rather than "ERROR" since it took a label map.
+    expect(
+      screen.getByText("Error", { selector: "span.text-overline" }),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/Error \(/)).not.toBeInTheDocument()
   })
 
