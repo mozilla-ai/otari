@@ -169,6 +169,14 @@ that three times. Hit-test the element's own center with
 `document.elementFromPoint`, or walk its `offsetParent` chain for a clipping
 ancestor, before reporting geometry.
 
+**The screenshot suite does not reach below the fold.** Its captures pass
+`fullPage: true`, but the shell scrolls its content in an inner container rather
+than scrolling the document, so a capture comes back at the viewport size
+(1280x800 for the desktop projects) and anything further down the page is not in
+it. The docs page is the clearest case: its one code fence sits below the fold
+and appears in no screenshot project. Do not read a page's presence in that
+suite as coverage of the whole page.
+
 **Read the reporter, not the exit code, when a command is in a pipeline.** A
 run piped into `tail`, `grep` or `head` exits with that stage's status, so a
 suite with failures reports success and a green shell says nothing about the
