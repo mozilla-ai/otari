@@ -13,7 +13,10 @@ describe("RowAction", () => {
   it("is muted at rest even when it offers a destructive action", () => {
     render(<RowAction onPress={() => undefined}>Remove</RowAction>)
     const action = screen.getByRole("button", { name: "Remove" })
-    expect(action.className).toContain("text-muted")
+    // Token checks, not substring: a variant like `hover:text-muted` contains
+    // "text-muted", so a substring assertion would pass for a control that
+    // never carries the ink at rest.
+    expect([...action.classList]).toContain("text-muted")
     expect(action.className).not.toContain("text-danger")
   })
 
@@ -24,7 +27,7 @@ describe("RowAction", () => {
       </RowAction>,
     )
     const action = screen.getByRole("button", { name: "Remove" })
-    expect(action.className).toContain("text-danger")
+    expect([...action.classList]).toContain("text-danger")
     // Not both: the armed state replaces the resting ink rather than layering
     // over it, so whichever the browser resolved last cannot decide the color.
     expect(action.className).not.toContain("text-muted")
@@ -84,8 +87,8 @@ describe("RowActionRow", () => {
     )
     const lane = screen.getByRole("button", { name: "Edit" })
       .parentElement as HTMLElement
-    expect(lane.className).toContain("gap-4")
-    expect(lane.className).toContain("justify-end")
+    expect([...lane.classList]).toContain("gap-4")
+    expect([...lane.classList]).toContain("justify-end")
   })
 })
 
@@ -113,7 +116,7 @@ describe("ConfirmRowAction", () => {
   it("offers one muted action at rest", () => {
     setup()
     const trigger = screen.getByRole("button", { name: "Remove" })
-    expect(trigger.className).toContain("text-muted")
+    expect([...trigger.classList]).toContain("text-muted")
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   })
 
@@ -128,11 +131,11 @@ describe("ConfirmRowAction", () => {
     await user.click(screen.getByRole("button", { name: "Remove" }))
 
     const confirm = screen.getByRole("button", { name: "Confirm remove" })
-    expect(confirm.className).toContain("text-danger")
+    expect([...confirm.classList]).toContain("text-danger")
     // Cancel is the ordinary way out and stays muted; two danger controls side
     // by side would make the safe one look like the destructive one.
     const cancel = screen.getByRole("button", { name: "Cancel" })
-    expect(cancel.className).toContain("text-muted")
+    expect([...cancel.classList]).toContain("text-muted")
     expect(cancel.className).not.toContain("text-danger")
     // The resting label is gone, so there is no second, unarmed way through.
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull()
