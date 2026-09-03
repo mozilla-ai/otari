@@ -7,7 +7,7 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import engine_from_config, pool
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.engine import Engine
 
 from gateway.core.database import to_sync_url
 
@@ -53,6 +53,19 @@ config.set_main_option("sqlalchemy.url", to_sync_url(database_url))
 # ... etc.
 
 
+def _is_stamp_command() -> bool:
+    """Whether this run is `alembic stamp`, which the check below has to let through.
+
+    Rewriting the version table is how an operator repairs the state that check
+    refuses (`alembic stamp --purge <revision>`), so refusing to run it would
+    take away the fix along with the failure. `config.cmd_opts` is set by the
+    CLI and absent when alembic is driven programmatically, which is the
+    gateway's own path and never a stamp.
+    """
+    cmd = getattr(getattr(config, "cmd_opts", None), "cmd", None)
+    return bool(cmd) and getattr(cmd[0], "__name__", "") == "stamp"
+
+
 def _reject_foreign_history(engine: Engine) -> None:
     """Refuse a database whose stamped history is not this chain's.
 
@@ -69,6 +82,9 @@ def _reject_foreign_history(engine: Engine) -> None:
     inside `begin_transaction`, which is a no-op when a transaction is already
     under way, and the run would then be rolled back when the connection closes.
     """
+    if _is_stamp_command():
+        return
+
     with engine.connect() as connection:
         heads = MigrationContext.configure(connection).get_current_heads()
     if not heads:
@@ -79,11 +95,12 @@ def _reject_foreign_history(engine: Engine) -> None:
     if not foreign:
         return
 
-    target = make_url(config.get_main_option("sqlalchemy.url") or "").render_as_string(hide_password=True)
     msg = (
-        f"{target} is stamped with alembic revision(s) {', '.join(foreign)}, which are not otari's. "
-        "The database holds another application's migration history, or one written by a newer otari "
-        "than this one. Point OTARI_DATABASE_URL at otari's own database."
+        f"{engine.url.render_as_string(hide_password=True)} is stamped with alembic revision(s) "
+        f"{', '.join(foreign)}, which are not otari's. The database holds another application's migration "
+        "history, or one written by a newer otari than this one. Point OTARI_DATABASE_URL at otari's own "
+        "database, or, where this database is otari's and the row is wrong, rewrite it with "
+        "`alembic stamp --purge <revision>`."
     )
     raise CommandError(msg)
 

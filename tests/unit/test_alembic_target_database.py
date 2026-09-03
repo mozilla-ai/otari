@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import create_engine, inspect
 
@@ -48,6 +49,26 @@ def _stamp(db_path: Path, revision: str) -> None:
         connection.close()
 
 
+def _version_rows(db_path: Path) -> list[tuple[str]]:
+    connection = sqlite3.connect(db_path)
+    try:
+        return connection.execute("SELECT version_num FROM alembic_version").fetchall()
+    finally:
+        connection.close()
+
+
+def _run_alembic(args: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Drive the CLI, which is the entry point an operator has."""
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "alembic", "-c", str(_REPO_ROOT / "alembic.ini"), *args],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def test_upgrade_refuses_a_database_stamped_by_another_chain(tmp_path: Path) -> None:
     """The error names the target and the revision, not just the revision.
 
@@ -65,8 +86,31 @@ def test_upgrade_refuses_a_database_stamped_by_another_chain(tmp_path: Path) -> 
     assert _FOREIGN_REVISION in message
     assert "platform.db" in message
     assert "OTARI_DATABASE_URL" in message
-    # Refused before writing: the foreign database still holds only its own row.
-    assert inspect(create_engine(f"sqlite:///{db_path}")).get_table_names() == ["alembic_version"]
+    # Refused before writing: the foreign database still holds only its own table.
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert inspect(engine).get_table_names() == ["alembic_version"]
+    finally:
+        engine.dispose()
+
+
+def test_stamp_still_rewrites_a_foreign_version_table(tmp_path: Path) -> None:
+    """The refusal must not take the repair for it away.
+
+    ``alembic stamp --purge`` is what an operator runs on a version table that
+    holds the wrong row, so a check that refused to run it would leave a
+    database that can only be fixed by hand.
+    """
+    db_path = tmp_path / "platform.db"
+    _stamp(db_path, _FOREIGN_REVISION)
+    env = {key: value for key, value in os.environ.items() if key != "DATABASE_URL"}
+    env["OTARI_DATABASE_URL"] = f"sqlite:///{db_path}"
+
+    result = _run_alembic(["stamp", "head", "--purge"], cwd=tmp_path, env=env)
+
+    assert result.returncode == 0, result.stderr
+    head = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_current_head()
+    assert _version_rows(db_path) == [(head,)]
 
 
 def test_a_bare_alembic_run_ignores_a_foreign_database_url(tmp_path: Path) -> None:
@@ -80,14 +124,7 @@ def test_a_bare_alembic_run_ignores_a_foreign_database_url(tmp_path: Path) -> No
     env = {key: value for key, value in os.environ.items() if key != "OTARI_DATABASE_URL"}
     env["DATABASE_URL"] = f"sqlite:///{foreign}"
 
-    result = subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "alembic", "-c", str(_REPO_ROOT / "alembic.ini"), "current"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run_alembic(["current"], cwd=tmp_path, env=env)
 
     assert result.returncode == 0, result.stderr
     assert not foreign.exists(), "DATABASE_URL selected the database this chain connected to"
