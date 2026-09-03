@@ -986,7 +986,7 @@ function PolicyForm({
                 own guardrails but cannot weaken these.
               </p>
               {guardrails_.configured ? null : (
-                <p className="mt-1 text-xs text-warning">
+                <p className="mt-1 text-caption text-warning">
                   No guardrails service is configured, so these cannot run. With
                   `if the service is down` set to block, every request through
                   this policy is refused until one is configured.{" "}
@@ -1144,7 +1144,7 @@ function PolicyForm({
               {guardrails_.configured ? null : (
                 <span
                   id="guardrails-unavailable"
-                  className="text-xs text-muted"
+                  className="text-caption text-muted"
                 >
                   No guardrails service is configured, so there would be nothing
                   to call.{" "}
