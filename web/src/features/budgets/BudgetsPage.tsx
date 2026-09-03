@@ -646,7 +646,7 @@ function DeploymentBudgetsPage() {
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
-              <code className="font-mono text-caption" title={b.budget_id}>
+              <code className="text-mono-micro" title={b.budget_id}>
                 {shortId(b.budget_id)}
               </code>
             </CopyableValue>
