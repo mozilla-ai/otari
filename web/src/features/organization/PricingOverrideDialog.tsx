@@ -53,7 +53,7 @@ function RateField({
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input inputMode="decimal" placeholder="0.00" />
       {description ? (
-        <span className="text-xs text-muted">{description}</span>
+        <span className="text-caption text-muted">{description}</span>
       ) : null}
     </TextField>
   )

@@ -215,7 +215,7 @@ function InFlightControl({
         <Popover.Dialog>
           <div className="flex w-80 flex-col gap-2">
             <Popover.Heading className="text-title">In flight</Popover.Heading>
-            <p className="text-xs text-muted">
+            <p className="text-caption text-muted">
               Running right now, across the whole gateway; longest-running
               first. Not narrowed by the filters above.
             </p>
@@ -248,7 +248,7 @@ function InFlightControl({
             {/* Only when the endpoint's cap actually bit, which takes more
                 concurrency than a live list can usefully show anyway. */}
             {hidden > 0 ? (
-              <p className="text-xs text-muted">
+              <p className="text-caption text-muted">
                 {hidden.toLocaleString()} further{" "}
                 {hidden === 1 ? "request is" : "requests are"} in flight beyond
                 the {shown.length.toLocaleString()} listed.

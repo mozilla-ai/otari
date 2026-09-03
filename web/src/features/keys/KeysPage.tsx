@@ -184,7 +184,7 @@ function RevealSecretStrip({
           {snippets === undefined ? (
             <MissingGatewayAddressNotice />
           ) : (
-            <p className="text-xs text-muted">
+            <p className="text-caption text-muted">
               Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
               the Models page.
             </p>
@@ -263,7 +263,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
   const id = userId.trim()
   if (id === "") {
     return (
-      <p className="text-xs text-muted">
+      <p className="text-caption text-muted">
         Choose an owner above to see the models this key can inherit.
       </p>
     )
@@ -271,7 +271,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
   const owner = users.find((u) => u.user_id === id)
   if (!owner) {
     return (
-      <p className="text-xs text-muted">
+      <p className="text-caption text-muted">
         New user <code>{id}</code> starts unrestricted, so this key may allow
         any model.
       </p>
@@ -283,7 +283,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
       ? owner.allowed_models.join(", ")
       : null
   return (
-    <p className="text-xs text-muted">
+    <p className="text-caption text-muted">
       Owner <code>{id}</code> allows{" "}
       <span className="font-medium text-foreground">{text.toLowerCase()}</span>
       {entries ? (

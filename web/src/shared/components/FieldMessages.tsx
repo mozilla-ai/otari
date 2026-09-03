@@ -40,3 +40,48 @@ export function FieldMessages({
     </div>
   )
 }
+
+/**
+ * The label and description rungs of a control that is not a HeroUI field.
+ *
+ * HeroUI's `Label` and `Description` cover a `TextField`, and the migrated
+ * paragraphs cover text beside a heading, but a third construct kept being
+ * hand-written for everything else: a segmented group, a multi-select, a
+ * scope picker. Written out each time, it was a `text-sm` label over a
+ * `text-xs` description, which is how the size drifted below the caption in
+ * eight files at once while both of the other two constructs were being
+ * corrected. This exists so the next one cannot be born at the wrong size.
+ *
+ * The label rung is measured against HeroUI's own: both render 14px/20px at
+ * weight 400 with the same tracking, so this matches the field label rather
+ * than approximating it. (The 400 is deliberate upstream in the type scale;
+ * `font-medium` is written at both and resolves to 400 there.)
+ *
+ * The description rung goes through `FieldMessages`, so it takes the caption
+ * role and the reserved line on the same terms a field's does. With no
+ * description there is no reserve: an empty line under a control that will
+ * never say anything is space held for nothing.
+ */
+export function ControlField({
+  label,
+  description,
+  reserve,
+  children,
+}: {
+  label: ReactNode
+  description?: ReactNode
+  reserve?: boolean
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      {description ? (
+        <FieldMessages reserve={reserve}>
+          <p className="text-muted">{description}</p>
+        </FieldMessages>
+      ) : null}
+      {children}
+    </div>
+  )
+}

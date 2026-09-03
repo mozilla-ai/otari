@@ -126,7 +126,7 @@ export function ModelComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {hint ? <span className="text-xs text-muted">{hint}</span> : null}
+      {hint ? <span className="text-caption text-muted">{hint}</span> : null}
     </ComboBox.Root>
   )
 }

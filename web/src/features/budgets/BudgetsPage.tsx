@@ -204,7 +204,7 @@ function PeriodPicker({
           />
         </div>
       ) : null}
-      <span className="text-xs text-muted">
+      <span className="text-caption text-muted">
         Spend returns to zero each period. A user&rsquo;s clock starts when the
         budget is assigned to them.
       </span>

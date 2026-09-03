@@ -5,6 +5,7 @@ import {
   useDiscoverableModels,
   useProviders,
 } from "@/shared/api/hooks"
+import { ControlField } from "@/shared/components/FieldMessages"
 import { DismissChip, Tab, TabRow } from "@/shared/components/surface"
 
 // The per-key model access-list is a tri-state:
@@ -136,13 +137,13 @@ export function ModelScopeControl({
 
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <span className="text-sm font-medium text-foreground">{title}</span>
-        <p className="text-xs text-muted">
-          {description ??
-            "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."}
-        </p>
-      </div>
+      <ControlField
+        label={title}
+        description={
+          description ??
+          "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."
+        }
+      />
       {/* No track: a tab row is bare, and the selected segment's own fill is
           what marks it. A track plus a fill was two ways of saying one thing. */}
       <TabRow>

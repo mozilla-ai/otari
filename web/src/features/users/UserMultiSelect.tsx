@@ -3,6 +3,7 @@ import { type ReactNode, useMemo, useState } from "react"
 
 import type { User } from "@/client"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import { ControlField } from "@/shared/components/FieldMessages"
 import { DismissChip } from "@/shared/components/surface"
 
 interface Option {
@@ -80,12 +81,7 @@ export function UserMultiSelect({
 
   return (
     <div className="flex flex-col gap-2">
-      <div>
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        {description ? (
-          <p className="text-caption text-muted">{description}</p>
-        ) : null}
-      </div>
+      <ControlField label={label} description={description} />
       {value.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {value.map((id) => (

@@ -23,6 +23,7 @@ import {
 } from "@/shared/api/hooks"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
+import { ControlField } from "@/shared/components/FieldMessages"
 import {
   ConfirmRowAction,
   Dot,
@@ -310,14 +311,10 @@ function ScopePicker({
 
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <span className="text-sm font-medium text-foreground">Applies to</span>
-        <p className="text-xs text-muted">
-          A global policy resolves for every caller. A user-scoped one resolves
-          only for that user, and takes precedence over a global policy of the
-          same name.
-        </p>
-      </div>
+      <ControlField
+        label="Applies to"
+        description="A global policy resolves for every caller. A user-scoped one resolves only for that user, and takes precedence over a global policy of the same name."
+      />
       <TabRow>
         {modeButton(false, "Every caller")}
         {modeButton(true, "One user")}
@@ -372,7 +369,7 @@ function ModeToggle({
         ))}
       </TabRow>
       {hint === undefined ? null : (
-        <span className="text-xs text-muted">{hint}</span>
+        <span className="text-caption text-muted">{hint}</span>
       )}
     </div>
   )
@@ -707,7 +704,7 @@ function PolicyForm({
         </div>
 
         {editing ? (
-          <p className="text-xs text-muted">
+          <p className="text-caption text-muted">
             Who this applies to is the other half of the key. It cannot be
             changed here: delete and recreate to move it between scopes.
           </p>
@@ -718,16 +715,10 @@ function PolicyForm({
         {/* Conditional tier-down */}
         {conditions.length > 0 ? (
           <div className="flex flex-col gap-3 border border-control-border p-3">
-            <div>
-              <span className="text-sm font-medium text-foreground">
-                Instead, when the budget fills up
-              </span>
-              <p className="text-xs text-muted">
-                Checked before the model above. A threshold must be under 100:
-                the budget gate refuses a request before selection once the cap
-                is reached, so a rule at 100 could never fire.
-              </p>
-            </div>
+            <ControlField
+              label="Instead, when the budget fills up"
+              description="Checked before the model above. A threshold must be under 100: the budget gate refuses a request before selection once the cap is reached, so a rule at 100 could never fire."
+            />
             {conditions.map((condition, index) => (
               <div key={index} className="flex flex-wrap items-end gap-3">
                 <Field
@@ -780,18 +771,18 @@ function PolicyForm({
               whether a share sits next to each entry. */}
         {candidates.length > 0 ? (
           <div className="flex flex-col gap-3 border border-control-border p-3">
-            <div>
-              <span className="text-sm font-medium text-foreground">
-                {weighted
+            <ControlField
+              label={
+                weighted
                   ? "Split traffic between"
-                  : "The router chooses between"}
-              </span>
-              <p className="text-xs text-muted">
-                {weighted
+                  : "The router chooses between"
+              }
+              description={
+                weighted
                   ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
-                  : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."}
-              </p>
-            </div>
+                  : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
+              }
+            />
             {candidates.map((entry, index) => (
               <div key={index} className="flex flex-wrap items-end gap-3">
                 <div className="min-w-56 flex-1">
@@ -857,7 +848,7 @@ function PolicyForm({
                 </Button>
               </div>
             ))}
-            <p className="text-xs text-muted">
+            <p className="text-caption text-muted">
               {weighted ? (
                 <>
                   The marked model serves a caller who sends{" "}
@@ -933,16 +924,10 @@ function PolicyForm({
         {/* Failure chain */}
         {chain.length > 0 ? (
           <div className="flex flex-col gap-3 border border-control-border p-3">
-            <div>
-              <span className="text-sm font-medium text-foreground">
-                If that fails, try
-              </span>
-              <p className="text-xs text-muted">
-                Tried in order after a retryable failure. Not tried once tokens
-                have started streaming, or after a 400/401/403, which every
-                provider would reject the same way.
-              </p>
-            </div>
+            <ControlField
+              label="If that fails, try"
+              description="Tried in order after a retryable failure. Not tried once tokens have started streaming, or after a 400/401/403, which every provider would reject the same way."
+            />
             {chain.map((entry, index) => (
               <div key={index} className="flex flex-wrap items-end gap-3">
                 <div className="min-w-56 flex-1">
@@ -996,7 +981,7 @@ function PolicyForm({
               <span className="text-sm font-medium text-foreground">
                 Always check
               </span>
-              <p className="text-xs text-muted">
+              <p className="text-caption text-muted">
                 Runs on every request through this policy. Callers can add their
                 own guardrails but cannot weaken these.
               </p>
