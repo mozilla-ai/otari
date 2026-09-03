@@ -105,8 +105,15 @@ describe("formatRelative", () => {
   const now = Date.parse("2026-01-01T12:00:00Z")
 
   it("describes past timestamps", () => {
-    expect(formatRelative("2026-01-01T11:59:30Z", now)).toContain("seconds ago")
-    expect(formatRelative("2026-01-01T10:00:00Z", now)).toContain("hours ago")
+    // Compact is the product's voice: "30s ago", not "30 seconds ago". The
+    // difference is 10px of table lane, which is why the copy is the fix rather
+    // than the column width.
+    expect(formatRelative("2026-01-01T11:59:30Z", now)).toBe("30s ago")
+    expect(formatRelative("2026-01-01T10:00:00Z", now)).toBe("2h ago")
+    expect(formatRelative("2025-12-30T12:00:00Z", now)).toBe("2d ago")
+    // A clock a little ahead of the server reads as the present rather than as
+    // a request that has not happened yet.
+    expect(formatRelative("2026-01-01T12:00:05Z", now)).toBe("just now")
   })
 
   it("returns 'never' for missing timestamps", () => {

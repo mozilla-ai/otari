@@ -1,21 +1,25 @@
-import { Chip } from "@heroui/react"
 import { FiArrowDown, FiArrowUp } from "react-icons/fi"
 
 import { formatPct } from "@/shared/helpers/format"
 
-// Period-over-period change as a pill, from the "Trend chips" design canvas.
+// Period-over-period change, as an arrow and a number on the page ground.
 //
-// It is built on HeroUI's own Chip rather than a hand-rolled <span>: v3 already
-// ships the shape, the four fill treatments (primary/secondary/tertiary/soft),
-// and the three sizes the canvas draws. `globals.css` aliases the status bases
-// the chip's CSS reads (`--success`, `--danger`, `--default`) onto our tokens;
-// the `-soft` fills and inks on top of those are HeroUI's own derivations from
-// `themes/default/variables.css`, so a HeroUI bump can move them without a
-// token change here. Either way nothing below names a color, which is what
-// makes this theme-aware for free. What this adds is the part a generic chip
-// cannot know: which way the arrow points, which direction is the *good* one
-// for the metric, and tabular figures that keep a column of chips from
-// changing width as it ticks.
+// It was a HeroUI `Chip` with a tinted fill and a rounded shape until the
+// divided-surface direction removed both from the product: a pill is a small
+// card, and a tint on a flat plane reads as a raised object. The name is kept
+// because every call site says `TrendChip` and it is still the same idea; only
+// the drawing changed.
+//
+// The color rule is deliberately asymmetric and is not "green for good, red for
+// bad". A delta that is bad for its metric paints `danger`; a delta that is
+// good, and one whose metric has no good direction, both paint `muted`. Good
+// news does not need a color, because the number beside it is already the news;
+// what a color buys is catching an eye that was not looking, and only one of
+// the two directions is worth that.
+//
+// What this adds over a bare span is the part a generic one cannot know: which
+// way the arrow points, which direction is the *good* one for the metric, and
+// tabular figures that keep a column of these from changing width as it ticks.
 
 // Which way is up for the metric being described. Spend, latency, and error rate
 // improve by falling, so a rise on those reads as danger even though it is a
@@ -24,18 +28,16 @@ import { formatPct } from "@/shared/helpers/format"
 // spend green would be worse than no color at all.
 export type TrendPolarity = "up-is-good" | "down-is-good" | "neutral"
 
-// The canvas' four treatments, loudest first: `primary` is a solid status fill,
-// `secondary` status ink on the neutral chrome fill, `tertiary` ink alone, and
-// `soft` status ink on a tint of itself. `soft` is the default because a trend
-// is a supporting detail beside a headline number, not the headline.
-export type TrendVariant = "primary" | "secondary" | "tertiary" | "soft"
-
 export type TrendSize = "sm" | "md" | "lg"
 
 export type TrendDirection = "up" | "down" | "flat"
 
 export type TrendState = {
   direction: TrendDirection
+  // Kept as three values even though only `danger` is drawn in color, because
+  // this is what the metric's polarity *means* and it is what `announce` reads
+  // to say "better" or "worse". Collapsing it to what is painted would make the
+  // screen-reader phrase depend on a styling decision.
   color: "success" | "danger" | "default"
 }
 
@@ -99,7 +101,6 @@ export function TrendChip({
   // Nothing renders, so a call site can hand the value straight over.
   fraction,
   polarity = "neutral",
-  variant = "soft",
   size = "sm",
   // Replaces the formatted percentage when the change reads better as an
   // absolute ("+$1,234"). `fraction` still decides the arrow, the color and the
@@ -114,15 +115,13 @@ export function TrendChip({
   // not a node: it shares one line inside a pill, which arbitrary JSX would
   // break.
   caption,
-  // Layout and position at the call site (`ml-auto` in a tile's value row,
+  // Layout and position at the call site (`ml-auto` in a value row,
   // `justify-self-end` in a grid cell), which is what className is for here. Not
-  // for restyling the chip: the fill and the ink come from `variant` and the
-  // metric's own polarity.
+  // for restyling: the ink comes from the metric's own polarity.
   className,
 }: {
   fraction: number | null | undefined
   polarity?: TrendPolarity
-  variant?: TrendVariant
   size?: TrendSize
   text?: string
   caption?: string
@@ -138,22 +137,25 @@ export function TrendChip({
     text ??
     `${direction === "up" ? "+" : ""}${formatPct(direction === "flat" ? 0 : fraction)}`
   return (
-    <Chip variant={variant} color={color} size={size} className={className}>
+    <span
+      className={`inline-flex items-center gap-1 text-xs ${
+        color === "danger" ? "text-danger" : "text-muted"
+      }${className ? ` ${className}` : ""}`}
+    >
       {direction === "flat" ? null : (
         <Arrow className={`${ARROW_SIZE[size]} shrink-0`} aria-hidden="true" />
       )}
-      {/* The arrow is decoration a screen reader never sees, and `polarity`
-          puts the good/bad distinction in hue alone: a -2.1% that is an
+      {/* The arrow is decoration a screen reader never sees, and the judgment
+          lives in hue alone for a sighted reader: a -2.1% that is an
           improvement and a -2.1% that is a regression print the same text and
-          draw the same arrow, and differ only in green vs red. So `announce`
-          says the judgment as well as the direction. It sits outside
-          `Chip.Label` so it does not join the visible label's text, and
-          `sr-only` is rendered (clipped) rather than hidden, so `select-none`
-          keeps it out of a drag selection over the chip, as in ModelsPage. */}
+          draw the same arrow. So `announce` says the judgment as well as the
+          direction. It sits outside the visible span so it does not join that
+          text, and `sr-only` is rendered (clipped) rather than hidden, so
+          `select-none` keeps it out of a drag selection, as in ModelsPage. */}
       <span className="sr-only select-none">{announce(state)}</span>
-      <Chip.Label className="tabular-nums">
+      <span className="tabular-nums">
         {caption ? `${printed} ${caption}` : printed}
-      </Chip.Label>
-    </Chip>
+      </span>
+    </span>
   )
 }

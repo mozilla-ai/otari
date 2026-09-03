@@ -14,39 +14,55 @@
  * a row with a longer label that wraps grows instead of squashing, and so a row
  * is a comfortable touch target on the mobile drawer without a second rule.
  *
- * **Hover and selection move in opposite directions off the rail.** The rail
- * itself is `--color-background-muted`, and every state is one or two steps
- * along the neutral ramp from there. A transient pointer state presses *into*
- * the chrome, a persistent selection lifts *out* of it, which is what lets each
- * step stay this subtle and still be tellable apart: hover and selection are
- * both one step off the rail, so if they moved the same way they would be
- * neighbors on the ramp and read as the same fill.
+ * **Hover and selection are steps off the rail, and press no longer is.** Every
+ * state is one or two steps along the neutral ramp from whatever the rail is.
+ * Hover and selection deliberately move by different amounts rather than in the
+ * same direction by different degrees, so they cannot read as one fill.
  *
- * | state            | light                | dark                 |
- * | ---------------- | -------------------- | -------------------- |
- * | resting          | no fill              | no fill              |
- * | hover / focused  | `surface-subtle`     | `surface-subtle`     |
- * | pressed          | `border`             | `border`             |
- * | selected         | `surface-alt`        | `surface`            |
- * | selected + hover | `surface`            | `background`         |
+ * | state            | light                   | dark                    |
+ * | ---------------- | ----------------------- | ----------------------- |
+ * | resting          | no fill                 | no fill                 |
+ * | hover            | `surface-alt`           | `surface-alt`           |
+ * | focused          | no fill (the ring only) | no fill (the ring only) |
+ * | pressed          | `background`            | `background`            |
+ * | selected         | `surface-subtle` + edge | `surface-subtle` + edge |
+ * | selected + hover | `surface-subtle` (none) | `surface-subtle` (none) |
  *
- * The first three rows need no `dark:` override because the ramp is a mirror
- * image per theme: `surface-subtle` and then `border` sit one step and then two
- * steps *below* the rail in light, one and two *above* it in dark, and either
- * direction is away from the chrome. Selection is the pair that does need one.
- * `surface-alt` (that is `--color-surface-muted`) is lighter than the rail in
- * light mode, but in dark the two are within a couple of units of lightness, so
- * the chip would be invisible; `dark:bg-surface` is the same lift read the other
- * way, cards sitting below chrome in the dark stack (fields, chrome, cards,
- * body, deepest last). Selected + hover then takes the one further step each
- * theme has left in that direction: pure white in light, the body ground in
- * dark. This is the navigation design's ramp, not an invention, and the selected
- * row is a lifted chip rather than a tinted one, which is why it is no longer
- * `bg-primary-subtle`.
+ * No `dark:` override is needed for any of them, because the surface family is
+ * staggered one rung above the background family in both themes. An earlier
+ * ladder put `surface` *below* chrome in dark and needed `dark:bg-surface` to
+ * produce a lift; under the current mapping that override resolves to the
+ * rail's own value and erases the selection, which is why it is gone.
  *
- * A selected row deliberately has no pressed state. It is the current page, so
- * the press has nowhere to go; it keeps answering the pointer with the hover
- * fill and stops there.
+ * **The pressed fill currently does nothing, and that is a known open item
+ * rather than an oversight here.** The rail was `--color-background-muted`, one
+ * rung above the canvas, and a press was the canvas showing through it. The
+ * shell is flat now: the rail *is* `--color-background`, so `active:bg-background`
+ * paints the rail's own value. Measured on the running page as L* from the rail:
+ *
+ * |          | dark  | light |
+ * | -------- | ----- | ----- |
+ * | hover    | +9.83 | -5.18 |
+ * | selected | +6.77 | -2.41 |
+ * | pressed  |  0.00 |  0.00 |
+ *
+ * Hover and selection still read, and gained contrast from the rail dropping a
+ * rung. Press has nowhere below the ground to go, so restoring it means picking
+ * a different direction for it, which is a design decision and not one to make
+ * from inside this file. The classes are left in place rather than deleted so
+ * the state has somewhere to land when that is decided.
+ *
+ * The selected row is a lifted chip rather than a tinted one, which is why it
+ * is no longer `bg-primary-subtle`.
+ *
+ * A selected row answers the pointer with neither hover nor press. It is the
+ * current page, so clicking it is a no-op and there is nothing for an
+ * affordance to promise. This is a CHANGE from the earlier rule, which kept the
+ * hover fill: `ROW_RESTING` gives a hovered row `hover:text-foreground` as well
+ * as a fill, so a selected row that also took the hover fill became
+ * indistinguishable from a hovered resting one - and losing "is the row under
+ * my pointer the page I am on" costs more than losing a hover response on a row
+ * that does nothing when clicked.
  *
  * **A nested child is indented with padding, not a narrower box.** `3.125rem`
  * clears the parent's icon lane (0.75rem padding + 1rem icon + 0.75rem gap) and
@@ -72,28 +88,31 @@ export const NAV_TRANSITION =
   "transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none"
 
 /**
- * The keyboard ring: 2px of `--color-focus` at 2px of offset, on every row
- * whatever else it is wearing, which is why it lives in the base and not in one
- * of the state constants below.
+ * The keyboard ring, on every row whatever else it is wearing, which is why it
+ * lives in the base and not in one of the state constants below.
  *
- * An `outline` rather than the `ring-2 ring-focus` HeroUI draws on its own
- * focusable components, for one reason: a ring is box-shadow, so its offset is
- * an opaque band that has to be told the color of the ground behind it, and
- * these rows sit on two grounds (the rail, and `--color-surface` inside a
- * collapsed group's flyout). Any single `ring-offset-*` color is wrong on one of
- * them, while an outline's offset is transparent and shows whatever is actually
- * there. `ring-offset-transparent` is not the way out of that: box-shadow layers
- * composite, so a transparent offset band over the ring paints the ring's color
- * rather than the ground.
+ * The ring itself is `focus-ring`, defined once in globals.css. Its values are
+ * not spelled here and must not be: nine call sites used to spell their own and
+ * they disagreed about which token a ring comes from. What is still spelled
+ * here is why this row cannot use the base rule instead.
  *
- * The last three utilities are for the rows that are HeroUI `Button`s. `.button`
- * carries `outline-none`, which leaves `--tw-outline-style: none` for
- * `outline-2` to read, so the style has to be named back; and it draws its own
- * `focus-ring` off `data-focus-visible`, which would otherwise sit inside this
- * outline as a second mark. Both are in the components layer, so a utility wins.
+ * It is an outline and not the box-shadow ring HeroUI draws on its own
+ * focusable components, for one reason: a shadow ring's offset is an opaque
+ * band that has to be told the color of the ground behind it, and these rows
+ * sit on two grounds (the rail, and `--color-surface` inside a collapsed
+ * group's flyout). Any single offset color is wrong on one of them, while an
+ * outline's offset is transparent and shows whatever is actually there. A
+ * transparent offset band is not the way out of that: box-shadow layers
+ * composite, so it would paint the ring's color rather than the ground.
+ *
+ * The two suppressions are for the rows that are HeroUI `Button`s, which draw
+ * their own inner ring off `data-focus-visible`; without them it sits inside
+ * this outline as a second mark. Both are in the components layer, so a utility
+ * wins. `.button` also carries `outline-none` there, which is why the ring has
+ * to arrive as a utility at all rather than from the base rule.
  */
 const ROW_FOCUS =
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus focus-visible:outline-solid focus-visible:ring-0 focus-visible:ring-offset-0"
+  "focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0"
 
 /**
  * `font-sans` is load-bearing, not decoration. A group's row is a
@@ -117,7 +136,23 @@ const ROW_FOCUS =
  * it would also outrank `status-disabled`'s `--cursor-disabled` on the account
  * control, so a disabled row would promise a click.
  */
-const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
+// The 2px selection edge is reserved on every row here, and *colored* by the
+// two state constants below: `border-transparent` on a resting row,
+// `border-foreground` on the selected one. Reserving the width is what keeps
+// the indent honest, since the selected state used to add `border-l-2` *and*
+// subtract 2px of left padding to compensate, and on a nested row that padding
+// override collided with the child's own `pl-[3.125rem]`, so selecting a child
+// dropped it back to its parent's lane. A border every row already carries
+// cannot move anything.
+//
+// The color cannot live here alongside the width, which is the trap this
+// replaces and it is invisible in the source: `border-transparent` and
+// `border-foreground` are both `border-color` utilities at equal specificity,
+// so the class attribute's order decides nothing and Tailwind's emitted order
+// does. It emits `border-transparent` last, so a row carrying both measured
+// `rgba(0, 0, 0, 0)` on the page while reading as correct in the JSX. Exactly
+// one border-color utility reaches a row now.
+const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg border-l-2 px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 
 /**
  * `data-pressed` alongside `active` because a rail row is three different
@@ -128,26 +163,71 @@ const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-s
  * press can arrive without a hover, from touch or from Space on a focused row.
  */
 const ROW_PRESSED =
-  "active:bg-border active:text-foreground data-[pressed]:bg-border data-[pressed]:text-foreground"
+  "active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground"
 
-const ROW_RESTING = `text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:bg-surface-subtle focus-visible:text-foreground ${ROW_PRESSED}`
+/**
+ * Focus takes the ring and nothing else. It used to take `bg-surface-subtle` as
+ * well, the same fill as hover, which cost two things. A row that can be
+ * selected cannot also spend the fill channel on focus: the central ring exists
+ * so focus never has to borrow another state's paint. And because a fill
+ * outlives the click that put focus on the row while a pointer's hover does not
+ * outlive the pointer, a group trigger clicked open kept a fill afterwards and
+ * read as selected when it was only focused.
+ */
+const ROW_RESTING = `border-transparent text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground ${ROW_PRESSED}`
 
-const ROW_SELECTED =
-  "bg-surface-alt text-foreground hover:bg-surface dark:bg-surface dark:hover:bg-background"
+/**
+ * The selected row, and the two things that make it unmistakable.
+ *
+ * Its fill and hover's have swapped. Selection had `surface-alt` and hover had
+ * `surface-subtle`, and `surface-subtle` is the louder of the two on both
+ * themes (lighter on dark, darker on light), so the transient state was
+ * shouting over the permanent one and moving the pointer made any row look more
+ * current than the row that actually was. Selection takes the louder rung now,
+ * which also realigns with the mapping table, where an active control's fill is
+ * `surface-subtle`.
+ *
+ * The 2px left edge is what a hover can never borrow. Two adjacent rungs of one
+ * ramp are a fragile way to carry "which page am I on", so the state also gets a
+ * structural channel, in the rules-not-fills vocabulary the rest of the redesign
+ * is built from. The left padding gives the 2px back so a selected row's label
+ * stays in the same lane as its siblings'.
+ */
+const ROW_SELECTED = "bg-surface-subtle text-foreground border-foreground"
+
+/**
+ * A group whose selected child is visible below it: brightened ink, and neither
+ * of the other two channels.
+ *
+ * Measured before the ruling: the Routing trigger and its Policies child were
+ * byte-identical, fill and edge included, with only the child carrying
+ * `aria-current`. The page said two rows are current and the accessibility tree
+ * said one, and the page was the one that was wrong. The fill and the edge
+ * belong to the row you are actually on; a parent's relationship to it is
+ * already carried by the open chevron and by the child sitting under it, so ink
+ * is the whole of what this state needs to add.
+ *
+ * It keeps hover and press, unlike the selected row, because clicking it does
+ * something: it collapses the group.
+ */
+const ROW_ANCESTOR = `border-transparent text-foreground hover:bg-surface-alt ${ROW_PRESSED}`
 
 /** The class list for one sidebar row. */
 export function navRowClass({
   isActive = false,
+  ancestor = false,
   collapsed = false,
   nested = false,
 }: {
   isActive?: boolean
+  /** This row is the group holding the selected row, not the selected row. */
+  ancestor?: boolean
   collapsed?: boolean
   nested?: boolean
 } = {}): string {
   return [
     ROW_BASE,
-    isActive ? ROW_SELECTED : ROW_RESTING,
+    isActive ? ROW_SELECTED : ancestor ? ROW_ANCESTOR : ROW_RESTING,
     nested ? "pl-[3.125rem]" : "",
     collapsed ? "min-w-11 justify-center px-0" : "",
   ]

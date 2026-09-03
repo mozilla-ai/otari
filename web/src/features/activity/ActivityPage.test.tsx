@@ -302,7 +302,8 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("1,500")).toBeInTheDocument()
     expect(within(row).getByText("842 ms")).toBeInTheDocument()
     expect(within(row).getByText("$0.0123")).toBeInTheDocument()
-    expect(within(row).getByText("success")).toBeInTheDocument()
+    // Status is a dot plus an uppercase word now, not a pill.
+    expect(within(row).getByText("Success")).toBeInTheDocument()
   })
 
   it("shows the api key column, and an em-dash for master-key rows", async () => {
@@ -443,7 +444,7 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    expect(within(row).getByText("error")).toBeInTheDocument()
+    expect(within(row).getByText("Error")).toBeInTheDocument()
 
     await user.click(row)
     // The dashboard is admin-only, so the stored error text is shown verbatim,
@@ -472,9 +473,13 @@ describe("ActivityPage", () => {
     expect(
       screen.getByText("stream completed without usage data"),
     ).toBeInTheDocument()
-    // Bare heading, no "(code)" suffix; scope to a span so the status filter's
-    // <option>Error</option> does not match.
-    expect(screen.getByText("Error", { selector: "span" })).toBeInTheDocument()
+    // Bare heading, no "(code)" suffix. Scoped to the overline, which is the
+    // heading's own class: a plain span now also matches the status filter's
+    // <option>Error</option> and the row's own status word, which reads "Error"
+    // rather than "ERROR" since it took a label map.
+    expect(
+      screen.getByText("Error", { selector: "span.text-overline" }),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/Error \(/)).not.toBeInTheDocument()
   })
 
@@ -1378,13 +1383,16 @@ describe("ActivityPage", () => {
       toggle.getAttribute("aria-controls")!,
     )!
     expect(toggle).toHaveAttribute("aria-expanded", "false")
-    expect(region.className).toContain("hidden")
+    // classList, not className: `toContain` on the string is a substring match,
+    // so "hidden" would also be satisfied by `overflow-hidden` and "flex" by
+    // `flex-wrap` alone. Both are one edit away from being true here.
+    expect([...region.classList]).toContain("hidden")
 
     await user.click(toggle)
 
     expect(toggle).toHaveAttribute("aria-expanded", "true")
-    expect(region.className).toContain("flex")
-    expect(region.className).not.toContain("hidden")
+    expect([...region.classList]).toContain("flex")
+    expect([...region.classList]).not.toContain("hidden")
   })
 
   it("shows active filters as removable chips and clears one on ✕", async () => {
@@ -1438,6 +1446,39 @@ describe("ActivityPage", () => {
           c.url.includes("/v1/usage/summary") && c.url.includes("start_date="),
       ),
     ).toBe(true)
+  })
+
+  it("rewrites an unrecognized range to the one it actually applied", async () => {
+    mockApi({ rows: [entry()] })
+    // `90d` is a Usage preset and not an Activity one, so a URL copied between
+    // the two pages arrives with a range this page cannot honor. It falls back
+    // to the default window either way; the point here is that the address bar
+    // stops claiming ninety days over a list showing one, which the preset row
+    // reads back: no tab is pressed while the bogus key stands.
+    renderPage(<ActivityPage />, "/activity?range=90d")
+    await screen.findByText("gpt-4o")
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    )
+  })
+
+  it("leaves an unrecognized range alone when explicit bounds are set", async () => {
+    mockApi({ rows: [entry()] })
+    // A drill-down carries its own window, so the range is not being read and
+    // is not lying about anything. Rewriting it here would fight the bounds.
+    renderPage(
+      <ActivityPage />,
+      "/activity?range=90d&start_date=2026-08-01T00:00:00.000Z",
+    )
+    await screen.findByText("gpt-4o")
+
+    expect(
+      screen.queryByRole("button", { name: "24h", pressed: true }),
+    ).not.toBeInTheDocument()
   })
 
   it("gives the histogram an explicit start for the custom-range sentinel", async () => {
@@ -1534,10 +1575,13 @@ describe("ActivityPage", () => {
         ),
       ).toBe(true),
     )
-    // The visible half of the same bug: the preset row still highlights 24h rather
-    // than falling back to the custom sentinel, which highlights nothing.
-    expect(screen.getByRole("button", { name: "24h" }).className).toContain(
-      "button--primary",
+    // The visible half of the same bug: the preset row still marks 24h active
+    // rather than falling back to the custom sentinel, which marks nothing. The
+    // presets are tabs now, so the assertion is on the state a tab reports
+    // rather than on a button variant class.
+    expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     )
   })
 

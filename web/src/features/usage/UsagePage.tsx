@@ -33,15 +33,22 @@ import {
 } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import {
+  EmptyMessage,
+  KpiCell,
+  KpiStrip,
+  Section,
+  Tab,
+  TableScrollFrame,
+  TabRow,
+} from "@/shared/components/surface"
 import { TrendChip } from "@/shared/components/TrendChip"
 import {
   EmptyState,
   ErrorBanner,
   FilterMultiComboBox,
   FilterSelect,
-  PageHeader,
   RefreshButton,
-  StatCard,
 } from "@/shared/components/ui"
 import {
   deltaFraction,
@@ -131,6 +138,16 @@ const GROUP_OPTIONS: { value: "" | UsageGroupBy; label: string }[] = [
   { value: "api_key_id", label: "API key" },
   { value: "source", label: "Source" },
 ]
+
+/**
+ * An option's label as it reads after "By". Lowercased only when it is an
+ * ordinary capitalized word, so "Model" becomes "model" while "API key" is left
+ * alone: a blanket `toLowerCase()` printed "By api key", which is the initialism
+ * spelled as a word.
+ */
+function groupedLabel(label: string): string {
+  return /^[A-Z][a-z]/.test(label) ? label.toLowerCase() : label
+}
 
 // Billed token composition, bottom-up: input side first (fresh, then the two
 // cache buckets), then output. One hue at four lightnesses — the same encoding,
@@ -232,16 +249,20 @@ function BreakdownTable({
         const share = totalCost > 0 ? row.cost / totalCost : 0
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate text-foreground">
+            <span className="truncate font-mono text-[13px] text-foreground">
               {row.is_other
                 ? `Other (${row.requests.toLocaleString()} req)`
                 : row.key === null
                   ? unknownLabel
                   : row.key}
             </span>
-            <span className="h-1 w-full overflow-hidden rounded-full bg-surface-subtle">
+            {/* 140px and square, not a full-width capsule: a share bar is a
+                fixed-length scale a reader compares rows against, and one that
+                stretched with its column made the same share look different in
+                the two tables beside each other. */}
+            <span className="block h-[3px] w-[140px] max-w-full bg-surface-subtle">
               <span
-                className="block h-full rounded-full bg-accent"
+                className="block h-full bg-accent"
                 style={{ width: `${Math.min(100, share * 100)}%` }}
               />
             </span>
@@ -254,7 +275,9 @@ function BreakdownTable({
       header: "Requests",
       align: "end",
       cell: (row) => (
-        <span className="text-muted">{formatNumber(row.requests)}</span>
+        <span className="font-mono text-[13px] text-muted">
+          {formatNumber(row.requests)}
+        </span>
       ),
     },
     {
@@ -262,7 +285,9 @@ function BreakdownTable({
       header: "Tokens",
       align: "end",
       cell: (row) => (
-        <span className="text-muted">{formatTokens(row.tokens)}</span>
+        <span className="font-mono text-[13px] text-muted">
+          {formatTokens(row.tokens)}
+        </span>
       ),
     },
     {
@@ -270,13 +295,18 @@ function BreakdownTable({
       header: "Spend",
       align: "end",
       cell: (row) => (
-        <span className="text-foreground">{formatUsd(row.cost)}</span>
+        <span className="font-mono text-[13px] text-foreground">
+          {formatUsd(row.cost)}
+        </span>
       ),
     },
   ]
 
   return (
-    <div className="flex flex-col gap-2">
+    // `otari-breakdown` is the hook globals.css needs to reach `.table__column`
+    // and `.table__header`, which are HeroUI's DOM and not addressable here.
+    // The frame is what tells that CSS whether the table is scrolled.
+    <TableScrollFrame className="otari-breakdown flex flex-col gap-2">
       <DataTable
         ariaLabel={`Spend by ${dimensionLabel.toLowerCase()}`}
         columns={columns}
@@ -305,7 +335,7 @@ function BreakdownTable({
           Show top {TABLE_TOP_N}
         </Button>
       ) : null}
-    </div>
+    </TableScrollFrame>
   )
 }
 
@@ -334,12 +364,16 @@ function ToolBreakdownTable({
         const share = totalCost > 0 ? row.cost / totalCost : 0
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate text-foreground">
+            <span className="truncate font-mono text-[13px] text-foreground">
               {row.tool.replaceAll("_", " ")}
             </span>
-            <span className="h-1 w-full overflow-hidden rounded-full bg-surface-subtle">
+            {/* 140px and square, not a full-width capsule: a share bar is a
+                fixed-length scale a reader compares rows against, and one that
+                stretched with its column made the same share look different in
+                the two tables beside each other. */}
+            <span className="block h-[3px] w-[140px] max-w-full bg-surface-subtle">
               <span
-                className="block h-full rounded-full bg-accent"
+                className="block h-full bg-accent"
                 style={{ width: `${Math.min(100, share * 100)}%` }}
               />
             </span>
@@ -370,7 +404,9 @@ function ToolBreakdownTable({
       header: "Requests",
       align: "end",
       cell: (row) => (
-        <span className="text-muted">{formatNumber(row.requests)}</span>
+        <span className="font-mono text-[13px] text-muted">
+          {formatNumber(row.requests)}
+        </span>
       ),
     },
     {
@@ -378,20 +414,27 @@ function ToolBreakdownTable({
       header: "Spend",
       align: "end",
       cell: (row) => (
-        <span className="text-foreground">{formatUsd(row.cost)}</span>
+        <span className="font-mono text-[13px] text-foreground">
+          {formatUsd(row.cost)}
+        </span>
       ),
     },
   ]
   return (
-    <DataTable
-      ariaLabel="Spend by gateway-run tool"
-      columns={columns}
-      rows={rows}
-      getRowKey={(row) => row.tool}
-      isLoading={loading}
-      emptyContent="No gateway-run tool calls in this range."
-      onRowAction={onDrill ? (key) => onDrill(String(key)) : undefined}
-    />
+    <TableScrollFrame className="otari-breakdown">
+      <DataTable
+        ariaLabel="Spend by gateway-run tool"
+        columns={columns}
+        rows={rows}
+        getRowKey={(row) => row.tool}
+        isLoading={loading}
+        emptyContent="No gateway-run tool calls in this range."
+        // Undefined rather than a no-op handler when there is nothing to
+        // drill into: a row that reports itself as actionable and then does
+        // nothing is worse than one that never claimed to be.
+        onRowAction={onDrill ? (key) => onDrill(String(key)) : undefined}
+      />
+    </TableScrollFrame>
   )
 }
 
@@ -1060,20 +1103,27 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     visibleSecondary.find((d) => d.key === secondaryDim) ?? visibleSecondary[0]
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title={orgWide ? "Organization usage" : "Usage & analytics"}
-        description={
-          orgWide
-            ? // "You can see" rather than "every workspace": an admin does read
-              // every one, but the row is only hidden from a member rather than
-              // refused, so a member reaching this by URL reads this sentence
-              // beside their own workspaces alone. True for both, and the page
-              // does not have to know which one is reading it.
-              "Spend, tokens, cache use, and request volume across the workspaces you can see in your organization. Group the chart by model, user, key, or source, or narrow to a single workspace."
-            : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
-        }
-      />
+    <div className="flex flex-col">
+      <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-display">Usage &amp; analytics</h1>
+          <p className="mt-1 max-w-[620px] text-sm text-muted">
+            Spend, tokens, cache use, and request volume over time. Group the
+            chart by model, user, key, or source, and click a breakdown row to
+            drill into the request log.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-overline">
+            {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
+          </span>
+          <RefreshButton
+            onRefresh={refresh}
+            isFetching={summary.isFetching}
+            updatedAt={summary.dataUpdatedAt}
+          />
+        </div>
+      </header>
 
       <ErrorBanner
         error={
@@ -1089,29 +1139,18 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       <FilterChips
         chips={filterChips}
         onClearAll={clearEntityFilters}
-        start={USAGE_PRESETS.map((p) => (
-          <Button
-            key={p.key}
-            size="sm"
-            variant={
-              !customMode && preset.key === p.key ? "primary" : "outline"
-            }
-            onPress={() => pickPreset(p)}
-          >
-            {p.label}
-          </Button>
-        ))}
-        end={
-          <>
-            <span className="text-caption">
-              Showing {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
-            </span>
-            <RefreshButton
-              onRefresh={refresh}
-              isFetching={summary.isFetching}
-              updatedAt={summary.dataUpdatedAt}
-            />
-          </>
+        start={
+          <TabRow>
+            {USAGE_PRESETS.map((p) => (
+              <Tab
+                key={p.key}
+                isActive={!customMode && preset.key === p.key}
+                onPress={() => pickPreset(p)}
+              >
+                {p.label}
+              </Tab>
+            ))}
+          </TabRow>
         }
       >
         {orgWide ? (
@@ -1163,95 +1202,98 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
           {/* KPI tiles. Cache tells one story (hit rate + volumes) instead of
               three raw counters; tokens are the billed total, matching the
               chart's composition and the Activity page. */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-            <StatCard
+          <KpiStrip empty={false}>
+            <KpiCell
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
+              subline={
+                totals?.unpriced_requests
+                  ? `${formatNumber(totals.unpriced_requests)} unpriced`
+                  : undefined
+              }
               // Spend falling is the improvement, so a rise paints danger while
               // the arrow keeps telling the truth about which way it went.
-              trend={
+              delta={
                 costDelta !== null ? (
                   <TrendChip
                     fraction={costDelta}
                     polarity="down-is-good"
                     caption="vs prev"
                   />
-                ) : null
+                ) : undefined
               }
-              hint={
-                totals?.unpriced_requests
-                  ? `${formatNumber(totals.unpriced_requests)} unpriced`
-                  : null
-              }
-              chart={
+              graphic={
                 hasTrend ? (
                   <Sparkline
                     values={series.map((p) => p.cost)}
                     ariaLabel="Spend trend over the selected window"
+                    height={40}
                   />
                 ) : undefined
               }
             />
-            <StatCard
+            <KpiCell
               label="Requests"
               value={totals ? formatNumber(totals.request_count) : "—"}
-              // Volume, so `neutral`: more traffic through the gateway is
+              subline={totals ? `${formatPct(errorRate)} errors` : undefined}
+              // Volume, so no polarity: more traffic through the gateway is
               // neither a win nor a regression on its own, and the error rate
               // beside it is what carries the judgment.
-              trend={
+              delta={
                 requestDelta !== null ? (
                   <TrendChip fraction={requestDelta} caption="vs prev" />
-                ) : null
+                ) : undefined
               }
-              hint={totals ? `${formatPct(errorRate)} errors` : null}
-              chart={
+              graphic={
                 hasTrend ? (
                   <Sparkline
                     values={series.map((p) => p.requests)}
                     ariaLabel="Request volume trend over the selected window"
+                    height={40}
                   />
                 ) : undefined
               }
             />
-            <StatCard
+            <KpiCell
               label="Tokens (billed)"
               value={
                 billedTotal !== undefined ? formatTokens(billedTotal) : "—"
               }
               // Volume again, for the same reason as Requests.
-              trend={
+              delta={
                 billedDelta !== null ? (
                   <TrendChip fraction={billedDelta} caption="vs prev" />
-                ) : null
+                ) : undefined
               }
-              chart={
+              graphic={
                 hasTrend ? (
                   <Sparkline
                     values={series.map(pointBilled)}
                     ariaLabel="Billed token trend over the selected window"
+                    height={40}
                   />
                 ) : undefined
               }
             />
-            <StatCard
+            <KpiCell
               label="Cache hit rate"
               value={cacheHitRate !== null ? formatPct(cacheHitRate) : "—"}
+              subline={
+                totals
+                  ? `${formatTokens(cache.read)} read · ${formatTokens(cache.write)} written`
+                  : undefined
+              }
               // A higher share of reads served from cache is the win here.
-              trend={
+              delta={
                 cacheDelta !== null ? (
                   <TrendChip
                     fraction={cacheDelta}
                     polarity="up-is-good"
                     caption="vs prev"
                   />
-                ) : null
+                ) : undefined
               }
-              hint={
-                totals
-                  ? `${formatTokens(cache.read)} read · ${formatTokens(cache.write)} written`
-                  : null
-              }
-              chart={
+              graphic={
                 hasTrend && hasComposition ? (
                   <Sparkline
                     values={series.map((p) =>
@@ -1260,34 +1302,43 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                         : 0,
                     )}
                     ariaLabel="Cache hit rate trend over the selected window"
+                    height={40}
                   />
                 ) : undefined
               }
             />
-            <StatCard
+            {/* No sparkline: the summary carries an average latency but no
+                per-bucket series to draw one from. The slot stays reserved so
+                the cell is the same height as the four beside it. */}
+            <KpiCell
               label="Avg latency"
               value={
                 (totals ? formatLatency(totals.avg_latency_ms) : null) ?? "—"
               }
             />
-          </div>
+          </KpiStrip>
 
-          {/* The analytics chart: metric × group-by, brushable. */}
-          <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex gap-1.5">
+          {/* The analytics chart: metric × group-by, brushable. A band of the
+              page between two rules rather than a card, so the plot's own
+              baseline is the only box on it. */}
+          <Section
+            className="border-b border-border py-5"
+            contentClassName="flex flex-col gap-3"
+          >
+            {/* The named dense place: this row's controls sit above a chart
+                and its table, which is the toolbar position. */}
+            <div className="otari-toolbar flex flex-wrap items-center justify-between gap-3">
+              <TabRow>
                 {METRIC_TABS.map((tab) => (
-                  <Button
+                  <Tab
                     key={tab.key}
-                    size="sm"
-                    variant={metric === tab.key ? "primary" : "outline"}
-                    aria-pressed={metric === tab.key}
+                    isActive={metric === tab.key}
                     onPress={() => setMetric(tab.key)}
                   >
                     {tab.label}
-                  </Button>
+                  </Tab>
                 ))}
-              </div>
+              </TabRow>
               <div className="flex items-center gap-2">
                 {customMode ? (
                   <Button
@@ -1312,7 +1363,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                   ).map((o) => ({
                     value: o.value,
                     label: o.value
-                      ? `By ${o.label.toLowerCase()}`
+                      ? `By ${groupedLabel(o.label)}`
                       : "No grouping",
                   }))}
                 />
@@ -1331,9 +1382,9 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 <Spinner size="sm" />
               </div>
             ) : chart.data.length === 0 ? (
-              <div className="flex h-64 items-center justify-center text-sm text-muted">
+              <EmptyMessage minHeight="16rem">
                 No data in this range.
-              </div>
+              </EmptyMessage>
             ) : (
               <figure className="flex flex-col gap-2">
                 <TrendChart
@@ -1396,7 +1447,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 </figcaption>
               </figure>
             )}
-          </div>
+          </Section>
 
           {shareOpen ? (
             <ShareDialog
@@ -1420,25 +1471,23 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               session first since it usually names the work behind a bill.
               Drilling keeps the other active filters, so the log stays scoped
               to them instead of showing every request for the group. */}
-          <div className="grid gap-6 xl:grid-cols-2">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col xl:flex-row xl:items-stretch">
+            <section className="flex min-w-0 flex-1 flex-col pt-5 xl:pr-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
                 <h2 className="text-title">
                   Spend by {activePrimary.label.toLowerCase()}
                 </h2>
-                <div className="inline-flex gap-1.5">
+                <TabRow>
                   {dimensions.map((d) => (
-                    <Button
+                    <Tab
                       key={d.key}
-                      size="sm"
-                      variant={primaryDim === d.key ? "primary" : "outline"}
-                      aria-pressed={primaryDim === d.key}
+                      isActive={primaryDim === d.key}
                       onPress={() => setPrimaryDim(d.key)}
                     >
                       {d.label}
-                    </Button>
+                    </Tab>
                   ))}
-                </div>
+                </TabRow>
               </div>
               <BreakdownTable
                 dimensionLabel={activePrimary.label}
@@ -1453,25 +1502,23 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 onDrill={orgWide ? undefined : activePrimary.drill}
                 loading={summary.isLoading}
               />
-            </div>
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            </section>
+            <section className="border-border flex min-w-0 flex-1 flex-col pt-5 xl:border-l xl:pl-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
                 <h2 className="text-title">
                   Spend by {activeSecondary.label.toLowerCase()}
                 </h2>
-                <div className="inline-flex gap-1.5">
+                <TabRow>
                   {visibleSecondary.map((d) => (
-                    <Button
+                    <Tab
                       key={d.key}
-                      size="sm"
-                      variant={secondaryDim === d.key ? "primary" : "outline"}
-                      aria-pressed={secondaryDim === d.key}
+                      isActive={secondaryDim === d.key}
                       onPress={() => setSecondaryDim(d.key)}
                     >
                       {d.label}
-                    </Button>
+                    </Tab>
                   ))}
-                </div>
+                </TabRow>
               </div>
               <BreakdownTable
                 dimensionLabel={activeSecondary.label}
@@ -1486,15 +1533,18 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 onDrill={orgWide ? undefined : activeSecondary.drill}
                 loading={summary.isLoading}
               />
-            </div>
+            </section>
           </div>
 
-          {/* Tools get their own card rather than a tab, and only when the window
+          {/* Tools get their own section rather than a tab, and only when the window
               contains some: on a gateway that runs no tools it would be an empty
               table asking to be explained, and where it does appear it answers a
               question none of the other tables can ("what did search cost me"). */}
           {toolRows.length ? (
-            <div className="rounded-2xl border border-border bg-surface p-4">
+            <Section
+              className="border-t border-border py-5"
+              contentClassName="flex flex-col"
+            >
               <div className="mb-3 flex flex-col gap-1">
                 <h2 className="text-title">Gateway-run tools</h2>
                 <p className="text-caption">
@@ -1509,7 +1559,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 onDrill={orgWide ? undefined : (tool) => drillTo({ tool })}
                 loading={summary.isLoading}
               />
-            </div>
+            </Section>
           ) : null}
         </>
       )}

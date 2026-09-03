@@ -50,7 +50,7 @@ export function ConnectionStatus() {
     <div
       role="alert"
       aria-live="assertive"
-      className="fixed right-4 bottom-4 z-50 flex max-w-sm items-start gap-2.5 rounded-lg border border-danger bg-danger-subtle px-4 py-3 text-sm text-danger shadow-lg"
+      className="fixed right-4 bottom-4 z-50 flex max-w-sm items-start gap-2.5 rounded-lg border border-danger bg-danger-subtle px-4 py-3 text-sm text-danger shadow-elevation-lg"
     >
       <svg
         viewBox="0 0 24 24"

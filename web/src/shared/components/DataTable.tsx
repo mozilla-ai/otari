@@ -15,8 +15,8 @@ import {
 import type { Key, Selection, SortDescriptor } from "react-aria-components"
 import { Checkbox as AriaCheckbox } from "react-aria-components"
 import { createPortal } from "react-dom"
-
 import { CheckboxVisual } from "@/shared/components/ui"
+import { EmptyMessage } from "./surface"
 
 // react-aria's own Checkbox drives table row/all selection through
 // `slot="selection"`. HeroUI's Checkbox splits the control across subcomponents
@@ -422,7 +422,7 @@ export function DataTable<Row extends object>({
             items={isLoading && rows.length === 0 ? [] : rows}
             dependencies={[renderRow]}
             renderEmptyState={() => (
-              <div className="px-4 py-10 text-center text-muted">
+              <EmptyMessage>
                 {isLoading ? (
                   <span className="inline-flex items-center gap-2">
                     {/* Decorative beside its own label: HeroUI's spinner is a
@@ -432,7 +432,7 @@ export function DataTable<Row extends object>({
                 ) : (
                   emptyContent
                 )}
-              </div>
+              </EmptyMessage>
             )}
           >
             {renderRow}

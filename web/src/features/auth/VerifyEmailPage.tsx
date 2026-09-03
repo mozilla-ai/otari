@@ -110,7 +110,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout title="Verify your email">
-      <p role="status" className="text-center text-sm text-muted">
+      <p role="status" className="text-sm text-muted">
         Confirming your address…
       </p>
     </PublicAuthLayout>

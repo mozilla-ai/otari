@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationGuardrail } from "@/client"
@@ -172,8 +172,13 @@ describe("OrganizationGuardrailsCard", () => {
     })
     renderCard()
 
+    // Scoped to the entry's own group rather than a per-box aria-label: the
+    // box is labelled by the workspace name a reader sees, and the group says
+    // which guardrail that name belongs to.
     await userEvent.click(
-      await screen.findByLabelText("prompt-injection: Beta"),
+      within(
+        await screen.findByRole("group", { name: "prompt-injection" }),
+      ).getByLabelText("Beta"),
     )
     await userEvent.click(
       screen.getByRole("button", { name: "Save prompt-injection" }),
