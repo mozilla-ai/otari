@@ -17,6 +17,7 @@
     "e2e:screenshots:update": "pnpm run e2e:screenshots --update-snapshots=changed",
     "e2e:install": "playwright install chromium",
     "client:generate": "openapi-typescript ../docs/public/openapi.json -o src/client/schema.ts",
+    "icons:generate": "node scripts/generate-pwa-icons.mjs",
     "lint": "biome check",
     "lint:fix": "biome check --write"
   },
