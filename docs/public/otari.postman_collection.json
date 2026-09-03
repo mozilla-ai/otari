@@ -2695,6 +2695,98 @@
           }
         },
         {
+          "name": "List Caller Pending Memberships",
+          "request": {
+            "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pending-memberships"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Accept Caller Pending Membership",
+          "request": {
+            "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one that has no invitation left to accept.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pending-memberships",
+                ":organization_member_id",
+                "accept"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships/:organization_member_id/accept",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_member_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Decline Caller Pending Membership",
+          "request": {
+            "description": "Decline an invitation addressed to the caller.\n\nLands the pair where a revoke does: the invitation cancelled and the\nmembership suspended rather than deleted, which is what stops the emailed\nlink from later reviving a declined invitation. A future invite to the same\naddress revives the membership.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pending-memberships",
+                ":organization_member_id",
+                "decline"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships/:organization_member_id/decline",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_member_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Switch Active Organization",
           "request": {
             "body": {

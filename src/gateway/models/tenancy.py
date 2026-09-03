@@ -984,6 +984,44 @@ class AcceptInvitationResultPublic(SQLModel):
     role: str
 
 
+class PendingOrganizationInvitationPublic(SQLModel):
+    """One invitation waiting on the caller, as their own inbox lists it.
+
+    The authenticated counterpart to ``InvitationPreviewPublic``, and wider
+    than it on purpose: that one answers a visitor whose only credential is
+    the token, so it carries nothing it does not strictly need, while this one
+    answers the addressee's own session and can name the ids its accept and
+    decline calls take.
+
+    ``organization_member_id`` is what those two calls address, not
+    ``invitation_id``: the membership is the row that outlives a revoke and a
+    re-invite (each round mints a fresh ``Invitation`` against the same
+    membership), so a client holding a list from a moment ago names something
+    still resolvable rather than a token-shaped id that has since been
+    superseded. ``invitation_id`` rides along for the roster's sake, since
+    ``ActiveOrganizationMemberPublic`` carries the same field.
+    """
+
+    organization_member_id: uuid.UUID
+    invitation_id: uuid.UUID
+    organization_id: uuid.UUID
+    organization_name: str
+    # The address the invitation was actually sent to, read off the invitation
+    # rather than off the caller's identity. The two are the same address at
+    # invite time (an invitation resolves its membership through
+    # ``get_by_email``), but this one is a record of where the link was mailed
+    # and does not follow a later change to the identity's own address.
+    email: str
+    role: str
+    expires_at: datetime
+    created_at: datetime
+
+
+class PendingOrganizationInvitationsPublic(SQLModel):
+    data: list[PendingOrganizationInvitationPublic]
+    count: int
+
+
 class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One organization-member invitation: an emailed accept link.
 
@@ -1278,6 +1316,8 @@ __all__ = [
     "OrganizationPublic",
     "OrganizationUpdate",
     "OrganizationsPublic",
+    "PendingOrganizationInvitationPublic",
+    "PendingOrganizationInvitationsPublic",
     "SwitchActiveOrganizationRequest",
     "User",
     "UserCreate",

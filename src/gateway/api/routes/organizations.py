@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import (
+    AcceptInvitationResultPublic,
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
     ActiveOrganizationMemberPublic,
@@ -47,6 +48,7 @@ from gateway.models.tenancy import (
     OrganizationCreateRequest,
     OrganizationMembershipContextPublic,
     OrganizationPublic,
+    PendingOrganizationInvitationsPublic,
     SwitchActiveOrganizationRequest,
 )
 from gateway.services.tenancy import OrganizationService
@@ -219,6 +221,75 @@ async def remove_active_organization_member(
         organization_member_id=organization_member_id,
     )
     return Message(message="Organization member removed")
+
+
+@router.get("/me/pending-memberships")
+async def list_caller_pending_memberships(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+) -> PendingOrganizationInvitationsPublic:
+    """List the organization invitations still awaiting the caller.
+
+    The invitee's side of the invitation flow, where ``/me/member-invitations``
+    is the admin's. Not to be confused with ``GET /me/memberships``, which
+    lists the organizations the caller is already an active member of and
+    deliberately omits an ``invited`` one.
+
+    Takes no token, unlike ``/v1/invitations/*``: those are public because the
+    recipient of an emailed link holds nothing else to prove anything with,
+    while this caller is authenticated as the addressee and the membership's
+    own ``user_id`` is what scopes the answer. An invitation whose deadline has
+    passed is omitted rather than listed as unactionable.
+    """
+    return await service.list_pending_organization_invitations_for_user(
+        user=current_identity,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.post("/me/pending-memberships/{organization_member_id}/accept")
+async def accept_caller_pending_membership(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    organization_member_id: uuid.UUID,
+) -> AcceptInvitationResultPublic:
+    """Accept an invitation addressed to the caller, resolving it to an active membership.
+
+    Does the same work as ``POST /v1/invitations/accept``, including the
+    workspace assignments parked at invite time, and answers the same shape.
+    Addressed by membership id rather than by token: the caller is already the
+    addressee, so a token would add nothing their session does not carry.
+
+    Answers 404 for a membership that is not the caller's own, whether or not
+    it exists, and for one that has no invitation left to accept.
+    """
+    return await service.accept_pending_membership_for_user(
+        user=current_identity,
+        organization_member_id=organization_member_id,
+    )
+
+
+@router.post("/me/pending-memberships/{organization_member_id}/decline")
+async def decline_caller_pending_membership(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    organization_member_id: uuid.UUID,
+) -> Message:
+    """Decline an invitation addressed to the caller.
+
+    Lands the pair where a revoke does: the invitation cancelled and the
+    membership suspended rather than deleted, which is what stops the emailed
+    link from later reviving a declined invitation. A future invite to the same
+    address revives the membership.
+    """
+    await service.decline_pending_membership_for_user(
+        user=current_identity,
+        organization_member_id=organization_member_id,
+    )
+    return Message(message="Invitation declined")
 
 
 @router.post("/me/member-invitations", status_code=status.HTTP_201_CREATED)

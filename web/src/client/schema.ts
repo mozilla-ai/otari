@@ -1968,6 +1968,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations/me/pending-memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Caller Pending Memberships
+         * @description List the organization invitations still awaiting the caller.
+         *
+         *     The invitee's side of the invitation flow, where ``/me/member-invitations``
+         *     is the admin's. Not to be confused with ``GET /me/memberships``, which
+         *     lists the organizations the caller is already an active member of and
+         *     deliberately omits an ``invited`` one.
+         *
+         *     Takes no token, unlike ``/v1/invitations/*``: those are public because the
+         *     recipient of an emailed link holds nothing else to prove anything with,
+         *     while this caller is authenticated as the addressee and the membership's
+         *     own ``user_id`` is what scopes the answer. An invitation whose deadline has
+         *     passed is omitted rather than listed as unactionable.
+         */
+        get: operations["list_caller_pending_memberships_v1_organizations_me_pending_memberships_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Caller Pending Membership
+         * @description Accept an invitation addressed to the caller, resolving it to an active membership.
+         *
+         *     Does the same work as ``POST /v1/invitations/accept``, including the
+         *     workspace assignments parked at invite time, and answers the same shape.
+         *     Addressed by membership id rather than by token: the caller is already the
+         *     addressee, so a token would add nothing their session does not carry.
+         *
+         *     Answers 404 for a membership that is not the caller's own, whether or not
+         *     it exists, and for one that has no invitation left to accept.
+         */
+        post: operations["accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Caller Pending Membership
+         * @description Decline an invitation addressed to the caller.
+         *
+         *     Lands the pair where a revoke does: the invitation cancelled and the
+         *     membership suspended rather than deleted, which is what stops the emailed
+         *     link from later reviving a declined invitation. A future invite to the same
+         *     address revives the membership.
+         */
+        post: operations["decline_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__decline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/pricing": {
         parameters: {
             query?: never;
@@ -7686,6 +7770,64 @@ export interface components {
             master_key_sign_in_retired: boolean;
         };
         /**
+         * PendingOrganizationInvitationPublic
+         * @description One invitation waiting on the caller, as their own inbox lists it.
+         *
+         *     The authenticated counterpart to ``InvitationPreviewPublic``, and wider
+         *     than it on purpose: that one answers a visitor whose only credential is
+         *     the token, so it carries nothing it does not strictly need, while this one
+         *     answers the addressee's own session and can name the ids its accept and
+         *     decline calls take.
+         *
+         *     ``organization_member_id`` is what those two calls address, not
+         *     ``invitation_id``: the membership is the row that outlives a revoke and a
+         *     re-invite (each round mints a fresh ``Invitation`` against the same
+         *     membership), so a client holding a list from a moment ago names something
+         *     still resolvable rather than a token-shaped id that has since been
+         *     superseded. ``invitation_id`` rides along for the roster's sake, since
+         *     ``ActiveOrganizationMemberPublic`` carries the same field.
+         */
+        PendingOrganizationInvitationPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Invitation Id
+             * Format: uuid
+             */
+            invitation_id: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Organization Member Id
+             * Format: uuid
+             */
+            organization_member_id: string;
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
+        };
+        /** PendingOrganizationInvitationsPublic */
+        PendingOrganizationInvitationsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["PendingOrganizationInvitationPublic"][];
+        };
+        /**
          * PolicyRequest
          * @description Request to create or update a routing policy.
          */
@@ -13369,6 +13511,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_caller_pending_memberships_v1_organizations_me_pending_memberships_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingOrganizationInvitationsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptInvitationResultPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__decline_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
                 };
             };
             /** @description Validation Error */

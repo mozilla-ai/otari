@@ -471,6 +471,13 @@ export type InviteOrganizationMemberResult =
 export type InvitationPreview = Schemas["InvitationPreviewPublic"]
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
 
+// The invitee's side of the same flow: what is waiting on the signed-in
+// identity, rather than what this organization has sent out. Addressed by
+// `organization_member_id`, not by token, because the caller is already the
+// addressee (otari-ai#1999).
+export type PendingOrganizationInvitation =
+  Schemas["PendingOrganizationInvitationPublic"]
+
 // A workspace-level template for a per-member `scoped_budgets` ceiling; see
 // `src/gateway/services/tenancy/workspace_budget_default_service.py`. The DTO
 // name is `WorkspaceMemberBudgetPolicy*` on the wire (kept recognizable

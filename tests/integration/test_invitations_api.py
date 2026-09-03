@@ -4,7 +4,9 @@ The API test client can only ever act as the one operator identity a
 standalone deployment has (owner and superuser), so what a non-manager may not
 do is covered at the service layer instead, alongside the rest of tenancy's
 authorization matrix (test_tenancy_authorization.py), whose own docstring
-explains the same split.
+explains the same split. The invitee-side inbox splits the same way: its rules
+are in test_invitee_membership_inbox.py, because every one of them needs a
+second identity, and what is here is the route wiring.
 """
 
 import logging
@@ -18,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.tenancy import Invitation
+from gateway.models.tenancy import Invitation, Organization, OrganizationMember
 
 
 def _invite(
@@ -454,3 +456,176 @@ def test_revoking_an_unknown_invitation_is_not_found(client: TestClient, master_
         headers=master_key_header,
     )
     assert response.status_code == 404
+
+
+def _operator_user_id(client: TestClient, headers: dict[str, str], db_session: Session) -> uuid.UUID:
+    """The identity behind the master key, read back through its own membership.
+
+    No route reports the caller's ``user_id`` directly; the membership context
+    reports the row that joins them to their organization, and that row is
+    where the id lives.
+    """
+    context = client.get("/v1/organizations/me", headers=headers)
+    assert context.status_code == 200, context.text
+    membership = db_session.get(OrganizationMember, uuid.UUID(context.json()["organization_member_id"]))
+    assert membership is not None
+    return membership.user_id
+
+
+def _invitation_waiting_on(
+    db_session: Session,
+    user_id: uuid.UUID,
+    *,
+    role: str = "member",
+    expires_in: timedelta = timedelta(days=7),
+) -> tuple[Organization, OrganizationMember, Invitation]:
+    """Put a pending invitation in front of ``user_id``, in a second organization.
+
+    Built directly rather than through ``POST /me/member-invitations``, because
+    that route invites *somebody else*: the caller already holds an active
+    membership in the organization it would write to, and
+    ``uq_organization_member_organization_user`` allows them only the one. A
+    second organization is the only place this identity can hold an ``invited``
+    membership at all, which is also the real shape of the case the inbox
+    exists for.
+    """
+    organization = Organization(name="Second", slug=f"second-{uuid.uuid4().hex[:8]}")
+    db_session.add(organization)
+    db_session.flush()
+    membership = OrganizationMember(
+        organization_id=organization.id,
+        user_id=user_id,
+        role=role,
+        status="invited",
+    )
+    db_session.add(membership)
+    db_session.flush()
+    invitation = Invitation(
+        organization_id=organization.id,
+        organization_member_id=membership.id,
+        email="operator@example.com",
+        token_hash=uuid.uuid4().hex,
+        workspace_assignments=[],
+        expires_at=datetime.now(UTC) + expires_in,
+    )
+    db_session.add(invitation)
+    db_session.commit()
+    return organization, membership, invitation
+
+
+def test_the_inbox_lists_an_invitation_waiting_on_the_caller(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    organization, membership, invitation = _invitation_waiting_on(
+        db_session,
+        _operator_user_id(client, master_key_header, db_session),
+        role="admin",
+    )
+
+    response = client.get("/v1/organizations/me/pending-memberships", headers=master_key_header)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["count"] == 1
+    (waiting,) = body["data"]
+    assert waiting["organization_member_id"] == str(membership.id)
+    assert waiting["invitation_id"] == str(invitation.id)
+    assert waiting["organization_id"] == str(organization.id)
+    assert waiting["organization_name"] == "Second"
+    assert waiting["role"] == "admin"
+
+
+def test_the_inbox_is_the_callers_own_and_not_the_roster_it_administers(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """An invitation the caller *sent* is not one waiting on them."""
+    _invite(client, master_key_header, email="someone-else@example.com")
+
+    response = client.get("/v1/organizations/me/pending-memberships", headers=master_key_header)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"data": [], "count": 0}
+
+
+def test_accepting_from_the_inbox_activates_the_membership(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    _, membership, invitation = _invitation_waiting_on(
+        db_session,
+        _operator_user_id(client, master_key_header, db_session),
+    )
+
+    response = client.post(
+        f"/v1/organizations/me/pending-memberships/{membership.id}/accept",
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"organization_name": "Second", "role": "member"}
+
+    db_session.refresh(membership)
+    db_session.refresh(invitation)
+    assert membership.status == "active"
+    assert invitation.status == "accepted"
+    assert client.get("/v1/organizations/me/pending-memberships", headers=master_key_header).json()["count"] == 0
+
+
+def test_declining_from_the_inbox_cancels_and_suspends_the_pair(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    _, membership, invitation = _invitation_waiting_on(
+        db_session,
+        _operator_user_id(client, master_key_header, db_session),
+    )
+
+    response = client.post(
+        f"/v1/organizations/me/pending-memberships/{membership.id}/decline",
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"message": "Invitation declined"}
+
+    db_session.refresh(membership)
+    db_session.refresh(invitation)
+    assert membership.status == "suspended"
+    assert invitation.status == "cancelled"
+    assert client.get("/v1/organizations/me/pending-memberships", headers=master_key_header).json()["count"] == 0
+
+
+def test_a_lapsed_invitation_is_absent_from_the_inbox_over_http(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Expiry is lazy, so a row that never had its token presented still reads `pending`."""
+    _, membership, _ = _invitation_waiting_on(
+        db_session,
+        _operator_user_id(client, master_key_header, db_session),
+        expires_in=timedelta(hours=-1),
+    )
+
+    listed = client.get("/v1/organizations/me/pending-memberships", headers=master_key_header)
+    assert listed.json() == {"data": [], "count": 0}
+
+    refused = client.post(
+        f"/v1/organizations/me/pending-memberships/{membership.id}/accept",
+        headers=master_key_header,
+    )
+    assert refused.status_code == 400, refused.text
+
+
+@pytest.mark.parametrize("action", ["accept", "decline"])
+def test_an_unknown_pending_membership_is_a_404(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    action: str,
+) -> None:
+    response = client.post(
+        f"/v1/organizations/me/pending-memberships/{uuid.uuid4()}/{action}",
+        headers=master_key_header,
+    )
+    assert response.status_code == 404, response.text

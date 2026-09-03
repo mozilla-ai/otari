@@ -7576,6 +7576,81 @@
         "title": "PasswordResponse",
         "type": "object"
       },
+      "PendingOrganizationInvitationPublic": {
+        "description": "One invitation waiting on the caller, as their own inbox lists it.\n\nThe authenticated counterpart to ``InvitationPreviewPublic``, and wider\nthan it on purpose: that one answers a visitor whose only credential is\nthe token, so it carries nothing it does not strictly need, while this one\nanswers the addressee's own session and can name the ids its accept and\ndecline calls take.\n\n``organization_member_id`` is what those two calls address, not\n``invitation_id``: the membership is the row that outlives a revoke and a\nre-invite (each round mints a fresh ``Invitation`` against the same\nmembership), so a client holding a list from a moment ago names something\nstill resolvable rather than a token-shaped id that has since been\nsuperseded. ``invitation_id`` rides along for the roster's sake, since\n``ActiveOrganizationMemberPublic`` carries the same field.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invitation_id": {
+            "format": "uuid",
+            "title": "Invitation Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "organization_member_id": {
+            "format": "uuid",
+            "title": "Organization Member Id",
+            "type": "string"
+          },
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_member_id",
+          "invitation_id",
+          "organization_id",
+          "organization_name",
+          "email",
+          "role",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "PendingOrganizationInvitationPublic",
+        "type": "object"
+      },
+      "PendingOrganizationInvitationsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PendingOrganizationInvitationPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "PendingOrganizationInvitationsPublic",
+        "type": "object"
+      },
       "PolicyRequest": {
         "description": "Request to create or update a routing policy.",
         "properties": {
@@ -19499,6 +19574,179 @@
           }
         ],
         "summary": "List Caller Organization Memberships",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pending-memberships": {
+      "get": {
+        "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
+        "operationId": "list_caller_pending_memberships_v1_organizations_me_pending_memberships_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingOrganizationInvitationsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Caller Pending Memberships",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
+      "post": {
+        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one that has no invitation left to accept.",
+        "operationId": "accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptInvitationResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Accept Caller Pending Membership",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/decline": {
+      "post": {
+        "description": "Decline an invitation addressed to the caller.\n\nLands the pair where a revoke does: the invitation cancelled and the\nmembership suspended rather than deleted, which is what stops the emailed\nlink from later reviving a declined invitation. A future invite to the same\naddress revives the membership.",
+        "operationId": "decline_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Decline Caller Pending Membership",
         "tags": [
           "organizations"
         ]

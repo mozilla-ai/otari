@@ -63,6 +63,8 @@ from gateway.models.tenancy import (
     OrganizationMember,
     OrganizationMembershipContextPublic,
     OrganizationPublic,
+    PendingOrganizationInvitationPublic,
+    PendingOrganizationInvitationsPublic,
     User,
     WorkspaceAssignmentRequest,
     WorkspaceMemberUpdate,
@@ -1013,7 +1015,26 @@ class OrganizationService:
         # no longer pending, so it raises InvitationAlreadyUsedError instead.
         await self.organizations.lock(organization.id)
         invitation, membership, organization = await self._resolve_pending_invitation(token)
+        return await self._resolve_invitation_to_active_membership(invitation, membership, organization)
 
+    async def _resolve_invitation_to_active_membership(
+        self,
+        invitation: Invitation,
+        membership: OrganizationMember,
+        organization: Organization,
+    ) -> AcceptInvitationResultPublic:
+        """Flip a resolved pending invitation and its membership to ``active``, and commit.
+
+        The whole of what accepting does, shared by the two ways to ask for it:
+        the emailed token (``accept_invitation``) and the addressee's own inbox
+        (``accept_pending_membership_for_user``). Split out so the two cannot
+        drift, since the second was added long after the first and every step
+        here (the parked assignments, the attribution row) is one an invitee is
+        equally entitled to whichever way they arrived.
+
+        Callers resolve the invitation and take the organization's lock first;
+        this only writes.
+        """
         membership = await self.members.update_membership(membership, {"status": "active"})
         assignments = [
             WorkspaceAssignmentRequest.model_validate(assignment) for assignment in invitation.workspace_assignments
@@ -1039,6 +1060,185 @@ class OrganizationService:
         await self.db.commit()
 
         return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
+
+    async def list_pending_organization_invitations_for_user(
+        self,
+        *,
+        user: User,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> PendingOrganizationInvitationsPublic:
+        """List the invitations still awaiting the caller: their own inbox.
+
+        The counterpart to ``list_organization_memberships_for_user``, which
+        lists where the caller may already act. An ``invited`` membership is
+        deliberately absent from that list (offering it as a switch destination
+        would be offering a refusal), which left it reachable only through the
+        emailed link; this is where it surfaces instead.
+
+        No token anywhere in this path, unlike ``/v1/invitations/*``. Those
+        routes are public because the recipient of an emailed link holds
+        nothing else, and the token is their whole proof; here the caller is
+        already authenticated as the addressee, and the membership's own
+        ``user_id`` is what scopes the query. A token would add no proof the
+        session does not already carry.
+
+        Only reachable by an identity that can sign in, which an invited
+        address may not be able to yet: an invitation to an address with no
+        identity mints a password-less one, and claiming it is
+        ``POST /v1/auth/signup``. So this serves the case the emailed link
+        serves worst, someone who already has an account and was invited to a
+        second organization, rather than replacing that link.
+        """
+        rows, count = await self.invitations.get_live_pending_for_user_with_context(
+            user.id,
+            now=datetime.now(UTC),
+            skip=skip,
+            limit=limit,
+        )
+        return PendingOrganizationInvitationsPublic(
+            data=[
+                PendingOrganizationInvitationPublic(
+                    organization_member_id=membership.id,
+                    invitation_id=invitation.id,
+                    organization_id=organization.id,
+                    organization_name=organization.name,
+                    email=invitation.email,
+                    role=membership.role,
+                    expires_at=invitation.expires_at,
+                    created_at=invitation.created_at,
+                )
+                for invitation, membership, organization in rows
+            ],
+            count=count,
+        )
+
+    async def _resolve_own_pending_invitation(
+        self,
+        user: User,
+        organization_member_id: uuid.UUID,
+    ) -> tuple[Invitation, OrganizationMember, Organization]:
+        """Look up the caller's own still-acceptable invitation by membership id, or raise why not.
+
+        The session-authenticated analogue of ``_resolve_pending_invitation``,
+        addressed by membership rather than by token, and shared by accept and
+        decline so the two answer identically.
+
+        A membership that is not the caller's collapses into the same
+        ``InvitationNotFoundError`` as one that never existed, which is what
+        that error is for: the ids here are another tenant's roster rows, and a
+        distinguishable 404 would let a caller probe for which of them exist.
+        The caller's own membership in the wrong state collapses into it too,
+        since an ``active`` or ``suspended`` one has no invitation to act on.
+        """
+        membership = await self.members.get(organization_member_id)
+        if membership is None or membership.user_id != user.id or membership.status != "invited":
+            raise InvitationNotFoundError(organization_member_id)
+
+        pending = await self.invitations.get_pending_by_organization_members([membership.id])
+        if not pending:
+            raise InvitationNotFoundError(organization_member_id)
+
+        # At most one is pending per membership by the service-layer invariant
+        # `invite_active_organization_member_for_user` keeps, so this normally
+        # picks the only row. Newest-first rather than trusting that, for the
+        # reason the invite path re-reads timestamps instead of statuses: the
+        # invariant is not a database constraint.
+        now = datetime.now(UTC)
+        live = sorted(
+            (invitation for invitation in pending if invitation.expires_at >= now),
+            key=lambda invitation: (invitation.created_at, invitation.id),
+            reverse=True,
+        )
+        if not live:
+            # Every row here is past its deadline and only ever sat `pending`
+            # because expiry is lazy. Recorded now that a caller has asked, so
+            # the roster stops offering a revoke for a link that is already
+            # dead, the same bookkeeping `_resolve_pending_invitation` does on
+            # the token path.
+            for lapsed in pending:
+                await self.invitations.update_status(lapsed, {"status": "expired"})
+            await self.db.commit()
+            raise InvitationExpiredError
+
+        organization = await self.organizations.get(membership.organization_id)
+        if organization is None:
+            raise InvitationNotFoundError(organization_member_id)
+        return live[0], membership, organization
+
+    async def accept_pending_membership_for_user(
+        self,
+        *,
+        user: User,
+        organization_member_id: uuid.UUID,
+    ) -> AcceptInvitationResultPublic:
+        """Accept an invitation addressed to the caller, from their own inbox.
+
+        Does exactly what the emailed link does (see
+        ``_resolve_invitation_to_active_membership``, which both call), so an
+        invitee who accepts here is not left without the parked workspace
+        assignments or the attribution row that arriving by token would have
+        given them.
+
+        Takes the organization's lock before the resolve it acts on, the same
+        way ``accept_invitation`` does and for the same reason: it serializes
+        against a concurrent accept of the same invitation through the other
+        route, and against the revoke that would otherwise overwrite this
+        accept.
+        """
+        # Resolved once to learn which organization to lock, then again under
+        # it: the first resolve's answer is not yet safe to write against, and
+        # the second is what this acts on. Same two-step as accept_invitation.
+        _, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        await self.organizations.lock(organization.id)
+        invitation, membership, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        return await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+
+    async def decline_pending_membership_for_user(
+        self,
+        *,
+        user: User,
+        organization_member_id: uuid.UUID,
+    ) -> None:
+        """Decline an invitation addressed to the caller.
+
+        Lands the pair exactly where a revoke does: the invitation
+        ``cancelled`` and the membership ``suspended``, not deleted. Suspending
+        is what makes the decline stick, rather than tidier bookkeeping. The
+        emailed link is a separate credential from this call, and leaving the
+        membership ``invited`` would leave that link working, so accepting it
+        later would flip the membership to ``active`` and silently undo the
+        decline; this is the same reasoning
+        ``_cancel_pending_invitation_for_membership`` records for the other
+        paths that suspend. It is not a dead end either: a later invite to the
+        same address revives a suspended membership through the branch
+        re-adding a removed member already uses.
+
+        Deliberately without the ``_validate_membership_update`` rank guard
+        that ``revoke_organization_member_invitation_for_user`` runs. That
+        guard answers "may this actor outrank this target", which is a question
+        about an admin acting on somebody else; here the actor is the target,
+        and declining an invitation addressed to you is yours to do whatever
+        role it offered.
+        """
+        _, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
+        # Locked before the resolve this acts on, matching the accept above:
+        # without it a decline and a concurrent accept of the same invitation
+        # could both pass their pending check and leave the membership in
+        # whichever state committed last, with the other's invitation status
+        # written anyway.
+        await self.organizations.lock(organization.id)
+        _, membership, _ = await self._resolve_own_pending_invitation(user, organization_member_id)
+
+        await self.members.update_membership(membership, {"status": "suspended"})
+        # Every pending row for this membership, not just the one the resolve
+        # picked. At most one is pending by the invite path's invariant, but it
+        # is not a database constraint, and a second live row here would be a
+        # working link to a membership this call just suspended: accepting it
+        # would flip that membership back to `active` and undo the decline.
+        # Reuses the helper written for exactly that hazard.
+        await self._cancel_pending_invitation_for_membership(membership.id)
+        await self.db.commit()
 
     async def revoke_organization_member_invitation_for_user(
         self,

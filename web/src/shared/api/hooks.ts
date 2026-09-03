@@ -62,6 +62,7 @@ import type {
   Passkey,
   PasskeysResponse,
   PasswordResponse,
+  PendingOrganizationInvitation,
   PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
@@ -2277,6 +2278,68 @@ export function useRevokeOrganizationMemberInvitation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// The invitee's own inbox: which organizations are waiting on the signed-in
+// identity. Its own read rather than a field on the memberships list, which is
+// filtered to `active` on the server precisely because an `invited` membership
+// is not somewhere the caller may act yet.
+//
+// Keyed under ORGANIZATIONS so accepting, declining, or switching invalidates
+// it along with the rest of the tenancy cache. Same 404 guard as
+// `useOrganizationMemberships`, for both of its reasons: a gateway older than
+// this bundle does not serve this route, and a hybrid gateway answers 404 for
+// every `/v1/organizations` path by design. Neither is something a retry
+// fixes, and the entry point that reads the count treats a failure as "nothing
+// waiting" rather than showing an error in the chrome.
+export function usePendingOrganizationInvitations() {
+  return useQuery({
+    queryKey: [ORGANIZATIONS, "pending-memberships"],
+    queryFn: () =>
+      fetchAllPaged<PendingOrganizationInvitation>(
+        "/v1/organizations/me/pending-memberships",
+      ),
+    staleTime: 60_000,
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+// Accepting lands a second *active* membership, which is a new row in the
+// switcher, so the whole tenancy prefix goes rather than only the inbox key.
+// Not `invalidateQueries()` with no key, unlike `useSwitchOrganization`:
+// accepting does not move `active_organization_id`, so everything cached for
+// the organization the caller is still acting in stays valid.
+export function useAcceptPendingMembership() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (organizationMemberId: string) =>
+      apiFetch<AcceptInvitationResult>(
+        `/v1/organizations/me/pending-memberships/${organizationMemberId}/accept`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Declining suspends a membership in an organization the caller was never
+// active in, so the only list that changes is the inbox itself.
+export function useDeclinePendingMembership() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (organizationMemberId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/organizations/me/pending-memberships/${organizationMemberId}/decline`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATIONS, "pending-memberships"],
+      })
     },
   })
 }

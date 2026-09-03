@@ -56,6 +56,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // the same: what this matrix is for is how a page renders on a phone and in
   // the dark, which does not depend on which control opens it.
   { route: "/account", name: "account", heading: /account settings/i },
+  // Also reached from chrome rather than a rail (the scope switcher, and only
+  // while something is waiting). Captured in its empty state, which is the one
+  // a seeded deployment has: the operator identity holds no invitation, and
+  // there is no second organization to send it one.
+  { route: "/invitations", name: "invitations", heading: /invitations/i },
   { route: "/docs", name: "docs", heading: /./ },
 ]
 

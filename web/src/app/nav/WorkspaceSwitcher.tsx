@@ -1,13 +1,14 @@
 import { Button, Modal, Popover } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { FiCheck, FiChevronDown, FiPlus } from "react-icons/fi"
+import { FiCheck, FiChevronDown, FiMail, FiPlus } from "react-icons/fi"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import { CreateWorkspaceForm } from "@/features/workspaces/WorkspacesPage"
 import {
   useOrganizationContext,
   useOrganizationMemberships,
+  usePendingOrganizationInvitations,
   useSwitchOrganization,
 } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
@@ -47,6 +48,10 @@ function PlusMark() {
   return <FiPlus aria-hidden="true" className="size-5 shrink-0" />
 }
 
+function MailMark() {
+  return <FiMail aria-hidden="true" className="size-5 shrink-0" />
+}
+
 // The organization and the workspace the shell is looking at, and the control
 // that changes the second. Sits above the nav rather than in it because it
 // scopes the destinations below it rather than being one.
@@ -74,6 +79,10 @@ export function WorkspaceSwitcher({
   const context = useOrganizationContext()
   const navigate = useNavigate()
   const organizations = useOrganizationMemberships()
+  // What is waiting on the caller, as against what they already belong to.
+  // Read here because this is where somebody looks for an organization they
+  // cannot find, and it is the only chrome that names organizations at all.
+  const pendingInvitations = usePendingOrganizationInvitations()
   const switchOrganization = useSwitchOrganization()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -89,6 +98,11 @@ export function WorkspaceSwitcher({
   // a menu item whose only effect is to close the menu reads as broken.
   const organizationRows = organizations.data ?? []
   const switchable = organizationRows.length > 1
+  // Absent rather than shown empty: a permanent row reading "0 invitations"
+  // would be chrome for something that is almost always nothing. A failed or
+  // unserved read (an older gateway, a hybrid one) lands here as "nothing
+  // waiting" too, which is the right way for chrome to fail.
+  const invitationCount = pendingInvitations.data?.length ?? 0
 
   // Both hops optional: the context can answer without an organization (a
   // failed read, or a shape a test supplies), and the switcher is chrome that
@@ -220,6 +234,23 @@ export function WorkspaceSwitcher({
                 <CheckMark />
               </div>
             )}
+            {invitationCount > 0 ? (
+              <button
+                type="button"
+                className={`${MENU_ROW} ${MENU_ROW_RESTING}`}
+                onClick={() => {
+                  setOpen(false)
+                  void navigate({ to: "/invitations" })
+                }}
+              >
+                <MailMark />
+                <span className="min-w-0 flex-1 truncate">
+                  {invitationCount === 1
+                    ? "1 invitation waiting"
+                    : `${invitationCount} invitations waiting`}
+                </span>
+              </button>
+            ) : null}
             <div className={MENU_DIVIDER} />
             <p className={`${MENU_HEADING} min-h-8`}>
               Workspaces ({memberships.length})

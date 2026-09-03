@@ -17,6 +17,7 @@ import type {
   OrganizationGuardrail,
   OrganizationMember,
   OrgProviderKey,
+  PendingOrganizationInvitation,
   PricingResponse,
   ScopedBudget,
   UsageSeriesPoint,
@@ -219,6 +220,28 @@ export function callerOrganizationMembership(
     role: "owner",
     status: "active",
     is_active_organization: true,
+    ...overrides,
+  }
+}
+
+/**
+ * One invitation waiting on the caller, as their own inbox lists it.
+ *
+ * A second organization by default, because that is the case the inbox exists
+ * for: an identity already active somewhere, invited elsewhere.
+ */
+export function pendingOrganizationInvitation(
+  overrides: Partial<PendingOrganizationInvitation> = {},
+): PendingOrganizationInvitation {
+  return {
+    organization_member_id: "44444444-4444-4444-4444-444444444444",
+    invitation_id: "55555555-5555-5555-5555-555555555555",
+    organization_id: "99999999-9999-9999-9999-999999999999",
+    organization_name: "Research",
+    email: "invitee@example.com",
+    role: "member",
+    expires_at: "2026-01-08T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
     ...overrides,
   }
 }
