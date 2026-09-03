@@ -47,10 +47,20 @@ class CreateScopedBudgetRequest(BaseModel):
         max_length=255,
         description="Id of the capped identity: an organization, workspace, membership row, or API key",
     )
+    # Absent means every provider; a present value must name a real instance.
+    # Resolution matches `provider_key_id == provider_instance OR IS NULL`, and a
+    # blank string is neither, so it would store, list, and never bind. Refused
+    # rather than folded into null, because null is the *wider* cap and coercing
+    # would silently cap more than the caller asked for.
     provider_key_id: str | None = Field(
         default=None,
+        min_length=1,
         max_length=255,
-        description="Narrow the cap to one provider instance; null caps spend across every provider",
+        pattern=r"^\S+$",
+        description=(
+            "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
+            "Must name a real instance: a blank value would store a ceiling that never binds"
+        ),
     )
     budget_id: str = Field(
         min_length=1,

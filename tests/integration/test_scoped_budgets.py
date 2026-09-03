@@ -912,6 +912,57 @@ def test_unknown_scope_type_is_refused(client: Any, master_key_header: dict[str,
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_a_blank_provider_narrowing_is_refused(
+    client: Any,
+    master_key_header: dict[str, str],
+    blank: str,
+) -> None:
+    """A ceiling narrowed to nothing would be created, listed, and never enforced.
+
+    ``applicable_budgets`` matches ``provider_key_id == provider_instance OR IS
+    NULL``, and a blank string is neither: it would store as a narrowed row
+    under ``uq_scoped_budgets_scope_with_key`` and bind to no request ever. That
+    is the same permissive-direction failure a scope naming nothing has, so it
+    is refused at the schema rather than normalized, since folding it into null
+    would quietly cap *more* than the caller asked for. Mirrors
+    ``test_organization_budgets.py::test_a_blank_provider_narrowing_is_refused``.
+    """
+    workspace_id = _a_workspace_id(client, master_key_header)
+
+    refused = client.post(
+        "/v1/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": workspace_id,
+            "provider_key_id": blank,
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=1.0),
+        },
+        headers=master_key_header,
+    )
+    assert refused.status_code == 422, refused.text
+
+
+def test_an_omitted_provider_narrowing_still_caps_every_provider(
+    client: Any,
+    master_key_header: dict[str, str],
+) -> None:
+    """The other half of the rule above: absent is the aggregate cap, and stays so."""
+    workspace_id = _a_workspace_id(client, master_key_header)
+
+    created = client.post(
+        "/v1/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": workspace_id,
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=1.0),
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["provider_key_id"] is None
+
+
 @pytest.mark.asyncio
 async def test_token_ceiling_holds_the_estimate_and_records_the_measured_total(
     async_db: AsyncSession, tenancy: Fixture
