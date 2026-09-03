@@ -1387,6 +1387,14 @@ main {
  * is also what makes a reserved line impossible to derive, since the reserve
  * would have to pick one of them.
  *
+ * WHICH TEXT TAKES THIS SIZE, since the same paragraph shape appears in both
+ * roles: caption size for text whose referent is a CONTROL, body size for text
+ * whose referent is a REGION. "Sits under a heading" is the working heuristic
+ * and gets it right almost every time, but the referent decides when the two
+ * disagree, so a card description above exactly one control is still region
+ * text and stays at body size. Twenty-two hand-written paragraphs share the
+ * idiom in this app; six of them describe a control.
+ *
  * Patched here on the component classes rather than at the call sites, and
  * that is not a preference. HeroUI merges a component's `className` through
  * tailwind-merge, which cannot tell a custom `text-caption` from a text COLOR,

@@ -1376,6 +1376,39 @@ describe("ActivityPage", () => {
     ).toBe(true)
   })
 
+  it("rewrites an unrecognized range to the one it actually applied", async () => {
+    mockApi({ rows: [entry()] })
+    // `90d` is a Usage preset and not an Activity one, so a URL copied between
+    // the two pages arrives with a range this page cannot honor. It falls back
+    // to the default window either way; the point here is that the address bar
+    // stops claiming ninety days over a list showing one, which the preset row
+    // reads back: no tab is pressed while the bogus key stands.
+    renderPage(<ActivityPage />, "/activity?range=90d")
+    await screen.findByText("gpt-4o")
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    )
+  })
+
+  it("leaves an unrecognized range alone when explicit bounds are set", async () => {
+    mockApi({ rows: [entry()] })
+    // A drill-down carries its own window, so the range is not being read and
+    // is not lying about anything. Rewriting it here would fight the bounds.
+    renderPage(
+      <ActivityPage />,
+      "/activity?range=90d&start_date=2026-08-01T00:00:00.000Z",
+    )
+    await screen.findByText("gpt-4o")
+
+    expect(
+      screen.queryByRole("button", { name: "24h", pressed: true }),
+    ).not.toBeInTheDocument()
+  })
+
   it("gives the histogram an explicit start for the custom-range sentinel", async () => {
     const { calls } = mockApi({ rows: [entry()] })
     // `?range=custom` has no rolling window of its own, so without an explicit

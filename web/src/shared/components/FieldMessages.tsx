@@ -10,6 +10,11 @@ import type { ReactNode } from "react"
  * costs. It reads the role's line height rather than repeating 19px, so a
  * retune of the caption moves the reserve with it.
  *
+ * The reserve attaches to the caption ROLE, not to supporting text in general.
+ * A region's description never reserves a line, and that is not an opt-out: a
+ * heading's paragraph has no error to make room for, so the question does not
+ * arise for it.
+ *
  * `reserve={false}` is for a field in a table row or a toolbar. Those never
  * speak, and holding a line open under each one would put a band of empty
  * space through every row of a table.

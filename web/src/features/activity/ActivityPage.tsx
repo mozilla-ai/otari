@@ -1189,6 +1189,24 @@ export function ActivityPage() {
     }
   }, [selectionKey, range, startParam, endParam])
 
+  // An unrecognized `range` resolves to the default window (see `resolveWindow`),
+  // so the URL has to be corrected to say what the page is actually showing. The
+  // case that produces it is a Usage-page key: `90d` and `12mo` are presets there
+  // and not here, so a hand-edited or hand-copied URL carries one across and the
+  // address bar then claims ninety days over a list showing one. `patch` replaces
+  // rather than pushes, because this is a correction to the entry rather than a
+  // navigation, and writing the default drops the key entirely, which is the same
+  // URL the page produces when it is opened with no range at all.
+  //
+  // Bounds win over a preset, so a window carried in `start_date`/`end_date` is
+  // left alone: the range is not lying there, it is not being read.
+  const patch = url.patch
+  useEffect(() => {
+    if (startParam || endParam) return
+    if (range === CUSTOM_KEY || findPreset(ACTIVITY_PRESETS, range)) return
+    patch({ range: ACTIVITY_DEFAULT_KEY })
+  }, [range, startParam, endParam, patch])
+
   const priced =
     pricedFilter === "true"
       ? true
