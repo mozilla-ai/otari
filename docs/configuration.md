@@ -396,6 +396,11 @@ Each provider entry in the config file supports:
 | `api_base` | Custom API base URL (optional) |
 | `client_args` | Extra client options: `custom_headers`, `timeout` (optional) |
 
+For an `anthropic` instance, a `timeout` is filled in automatically when
+`client_args` does not set one, so the anthropic SDK's non-streaming
+pre-flight guard does not turn a large `max_tokens` into an opaque 502
+(otari#533). An explicit `client_args.timeout` on the instance is left alone.
+
 ### Vertex AI
 
 Vertex AI requires additional fields instead of a simple API key:

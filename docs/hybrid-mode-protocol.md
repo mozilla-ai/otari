@@ -155,6 +155,17 @@ boto3 client and AWS has two distinct credential shapes:
   client, safe under concurrent load. See
   `src/gateway/services/bedrock_gateway_auth.py`.
 
+Anthropic gets a smaller piece of handling on top of the same generic nesting:
+when a resolved `client_args` carries no `timeout` (neither an
+operator-configured one nor one already present in `extra_params`), a default
+is filled in (otari#533). This exists because the anthropic SDK's own
+non-streaming pre-flight guard raises a bare, status-less error for a large
+`max_tokens` unless the client's timeout differs from the SDK's own default;
+left unset, that turns into an opaque 502. The value filled in is an
+`httpx.Timeout` object rather than a plain number, specifically so it changes
+only the read/write/pool dimensions and leaves `connect` at the SDK's own
+default. See `gateway.services.provider_kwargs.with_anthropic_default_timeout`.
+
 `request_id` groups every `attempt_id` from the same resolve call so the
 platform can attribute spend, render trace timelines, and emit fallback events.
 Otari also surfaces it as the `X-Otari-Request-ID` response header.

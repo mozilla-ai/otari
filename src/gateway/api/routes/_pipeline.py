@@ -503,8 +503,16 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # whole signal here, and its message names the unsupported feature.
     if _is_unsupported_feature_error(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _unsupported_feature_detail(exc))
-    # Defense in depth for otari#533: an operator-supplied timeout equal to the
-    # SDK's own default re-arms this same status-less guard.
+    # Defense in depth for otari#533, not coverage for a config scenario: an
+    # operator-supplied client_args timeout can't reproduce the SDK's own
+    # DEFAULT_TIMEOUT, because config only ever supplies a flat float and a flat
+    # float sets every httpx.Timeout dimension including connect, so it can only
+    # equal DEFAULT_TIMEOUT (connect=5.0, read/write/pool=600) by also setting
+    # connect to 5.0, at which point read/write/pool are 5.0 too, not 600. What
+    # this still catches is a client built without with_anthropic_default_timeout
+    # (any future call path that does not route through get_provider_kwargs or
+    # build_attempt_client_args), which is left at the SDK's real default and can
+    # still trip the guard for a large max_tokens.
     if _is_anthropic_nonstreaming_timeout_guard(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL)
     # The same shape one layer down: a param any-llm forwards that the resolved

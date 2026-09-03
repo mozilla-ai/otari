@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+import anthropic
+import httpx
 import pytest
 import yaml
 from any_llm import AnyLLM, LLMProvider
@@ -17,7 +19,9 @@ from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
     _KEYLESS_PLACEHOLDER_API_KEY,
     _KEYLESS_SELF_HOSTED_PROVIDERS,
+    ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS,
     ANTHROPIC_DEFAULT_TIMEOUT_SECONDS,
+    credential_ladder_exhausted,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     normalize_pricing_key,
@@ -412,10 +416,30 @@ def test_get_provider_kwargs_strips_provider_type_and_models() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _expected_default_anthropic_timeout() -> httpx.Timeout:
+    return httpx.Timeout(ANTHROPIC_DEFAULT_TIMEOUT_SECONDS, connect=ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS)
+
+
+def test_anthropic_default_timeout_constants_track_the_sdks_own_default() -> None:
+    """Pin the two facts the injected timeout depends on not drifting silently.
+
+    ``ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS`` exists to keep the client's
+    connect timeout at whatever the anthropic SDK itself ships as a default; if
+    the SDK ever changes that value, this constant has silently gone stale and
+    the fix for otari#533 quietly stops preserving connect. And the timeout this
+    module builds must stay unequal to the SDK's own ``DEFAULT_TIMEOUT`` (that
+    inequality is exactly what disarms the pre-flight guard), so a future SDK
+    release choosing read/write/pool=601 would silently re-arm the guard we mean
+    to disable.
+    """
+    assert anthropic.DEFAULT_TIMEOUT.connect == ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS
+    assert _expected_default_anthropic_timeout() != anthropic.DEFAULT_TIMEOUT
+
+
 def test_get_provider_kwargs_fills_a_default_anthropic_timeout() -> None:
     config = GatewayConfig(providers={"anthropic": {"api_key": "sk-test"}})
     kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC, instance="anthropic")
-    assert kwargs["client_args"] == {"timeout": ANTHROPIC_DEFAULT_TIMEOUT_SECONDS}
+    assert kwargs["client_args"] == {"timeout": _expected_default_anthropic_timeout()}
 
 
 def test_get_provider_kwargs_preserves_an_operator_configured_anthropic_timeout() -> None:
@@ -437,15 +461,36 @@ def test_with_anthropic_default_timeout_is_a_no_op_for_other_providers() -> None
 
 def test_with_anthropic_default_timeout_fills_a_missing_default() -> None:
     assert with_anthropic_default_timeout(LLMProvider.ANTHROPIC, None) == {
-        "timeout": ANTHROPIC_DEFAULT_TIMEOUT_SECONDS
+        "timeout": _expected_default_anthropic_timeout()
     }
     assert with_anthropic_default_timeout(LLMProvider.ANTHROPIC, {}) == {
-        "timeout": ANTHROPIC_DEFAULT_TIMEOUT_SECONDS
+        "timeout": _expected_default_anthropic_timeout()
     }
 
 
 def test_with_anthropic_default_timeout_never_overrides_an_explicit_value() -> None:
     assert with_anthropic_default_timeout(LLMProvider.ANTHROPIC, {"timeout": 42}) == {"timeout": 42}
+
+
+def test_with_anthropic_default_timeout_keeps_the_sdks_own_connect_timeout() -> None:
+    """The regression otari#799's review caught: a flat float disarms the guard
+    by also raising connect from 5s to 600s. The injected value must disarm the
+    guard (unequal to DEFAULT_TIMEOUT) while leaving connect untouched."""
+    injected = with_anthropic_default_timeout(LLMProvider.ANTHROPIC, None)
+    assert injected is not None
+    timeout = injected["timeout"]
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.connect == anthropic.DEFAULT_TIMEOUT.connect
+    assert timeout != anthropic.DEFAULT_TIMEOUT
+
+
+def test_a_default_anthropic_timeout_does_not_look_like_a_credential() -> None:
+    """``client_args`` is already in ``_NON_CREDENTIAL_KWARGS``, but nothing else
+    pinned that a default-filled Anthropic timeout keeps reporting the ladder as
+    exhausted; this is load-bearing for the organization-key and fallback-rung
+    paths (otari#799 review)."""
+    kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.ANTHROPIC)
+    assert credential_ladder_exhausted(LLMProvider.ANTHROPIC, kwargs) is True
 
 
 # ---------------------------------------------------------------------------

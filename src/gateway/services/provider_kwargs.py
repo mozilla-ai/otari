@@ -33,6 +33,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
@@ -92,9 +93,19 @@ _AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 _NON_CREDENTIAL_KWARGS = frozenset({"client_args"})
 
 # The anthropic SDK's non-streaming pre-flight guard fires for a large max_tokens
-# only while the client's timeout is untouched (otari#533); this is also the
-# guard's own fallback value, so setting it explicitly disables the guard alone.
-ANTHROPIC_DEFAULT_TIMEOUT_SECONDS = 600.0
+# only while the client's timeout compares equal to the SDK's own DEFAULT_TIMEOUT
+# (anthropic._constants.DEFAULT_TIMEOUT == Timeout(connect=5.0, read=600, write=600,
+# pool=600), checked in anthropic/resources/messages/messages.py). A flat float
+# disarms the guard but is not a narrow disarm: the anthropic SDK expands a flat
+# float into httpx.Timeout(timeout=<value>), which sets *every* dimension
+# including connect, so client_args={"timeout": 600.0} silently raises the
+# client's connect timeout from 5s to 600s on every Anthropic request, streaming
+# included (otari#799 review). Building the httpx.Timeout explicitly, with
+# read/write/pool one second above the SDK's own default and connect pinned at
+# the SDK's own default, disarms the guard (unequal to DEFAULT_TIMEOUT on
+# read/write/pool) without touching connect at all.
+ANTHROPIC_DEFAULT_TIMEOUT_SECONDS = 601.0
+ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
 
 
 def with_anthropic_default_timeout(
@@ -106,11 +117,18 @@ def with_anthropic_default_timeout(
     ``client_args`` on the provider config or a platform attempt's
     ``extra_params``) is left untouched; this only fills the gap when nothing
     was configured.
+
+    The injected value is an ``httpx.Timeout``, not a flat float: a flat float
+    would disarm the pre-flight guard by changing the client's *connect*
+    timeout too (see the module-level comment above), which nothing here wants.
     """
     if provider != LLMProvider.ANTHROPIC:
         return client_args
     merged = dict(client_args) if client_args else {}
-    merged.setdefault("timeout", ANTHROPIC_DEFAULT_TIMEOUT_SECONDS)
+    merged.setdefault(
+        "timeout",
+        httpx.Timeout(ANTHROPIC_DEFAULT_TIMEOUT_SECONDS, connect=ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS),
+    )
     return merged
 
 

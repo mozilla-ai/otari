@@ -19,11 +19,14 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
+import anthropic
+import httpx
 import pytest
 from anthropic import APIConnectionError
 from any_llm import acompletion
 
 from gateway.api.routes._platform import ResolvedAttempt, default_attempt_kwargs
+from gateway.services.provider_kwargs import ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS
 
 
 @pytest.mark.asyncio
@@ -126,15 +129,32 @@ async def test_anthropic_default_timeout_reaches_the_real_sdk_client() -> None:
     class _Sentinel(Exception):
         pass
 
+    captured_client_timeout: list[Any] = []
+
+    def fake_client_init(self: Any, *args: Any, **client_kwargs: Any) -> None:
+        # otari#799 review, finding 1: capture the *real* httpx client's timeout
+        # at construction time, before any request goes out, so this proves the
+        # end-to-end value the real SDK ends up with rather than only what our
+        # own dict construction says.
+        real_init(self, *args, **client_kwargs)
+        captured_client_timeout.append(self.timeout)
+
+    real_init = httpx.AsyncClient.__init__
+
     async def fake_send(*_args: Any, **_kwargs: Any) -> Any:
         raise _Sentinel
 
     # any-llm/anthropic wraps a non-HTTP send failure in APIConnectionError after
     # retries; reaching that (rather than the pre-flight ValueError) is what
     # proves the guard was skipped and the request reached the transport layer.
-    with patch("httpx.AsyncClient.send", side_effect=fake_send):
-        with pytest.raises(APIConnectionError):
-            await acompletion(**kwargs)
+    with patch("httpx.AsyncClient.__init__", fake_client_init):
+        with patch("httpx.AsyncClient.send", side_effect=fake_send):
+            with pytest.raises(APIConnectionError):
+                await acompletion(**kwargs)
+
+    assert captured_client_timeout
+    assert all(t.connect == ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS for t in captured_client_timeout)
+    assert all(t != anthropic.DEFAULT_TIMEOUT for t in captured_client_timeout)
 
 
 @pytest.mark.asyncio
@@ -157,7 +177,10 @@ async def test_anthropic_default_timeout_reaches_the_real_sdk_client_in_hybrid_m
         attempt,
         {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 65536, "stream": False},
     )
-    assert kwargs["client_args"]["timeout"] == 600.0
+    # otari#799 review, finding 1: this must not be a flat float, or the SDK
+    # expands it into an httpx.Timeout that also raises connect from 5s to
+    # 600s. connect must stay at the SDK's own default.
+    assert kwargs["client_args"]["timeout"].connect == ANTHROPIC_DEFAULT_CONNECT_TIMEOUT_SECONDS
     assert kwargs["client_args"]["auth_token"] == "operator-supplied-bearer-token"
 
     class _Sentinel(Exception):
