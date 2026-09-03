@@ -32,6 +32,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "organization-members",
     heading: /members/i,
   },
+  // The other way somebody becomes a member. Its own entry rather than folded
+  // into the roster's: the claim table and the record-to-publish card are what
+  // this page is, and neither appears anywhere else.
+  {
+    route: "/organization/domains",
+    name: "organization-domains",
+    heading: /email domains/i,
+  },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },
@@ -108,6 +116,15 @@ test.describe("organization rail", () => {
       page.getByRole("heading", { name: /members/i }).first(),
     ).toBeVisible()
     await captureScreenshot(page, "organization-members")
+  })
+
+  test("organization domains", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/organization/domains")
+    await expect(
+      page.getByRole("heading", { name: /email domains/i }).first(),
+    ).toBeVisible()
+    await captureScreenshot(page, "organization-domains")
   })
 
   test("workspaces", async ({ page }) => {

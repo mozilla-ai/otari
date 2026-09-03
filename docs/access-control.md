@@ -169,6 +169,43 @@ so the membership is addressed by id instead. Declining cancels the invitation
 and suspends the paired membership, which is what stops the emailed link from
 reviving it; a later invitation to the same address revives the membership.
 
+## Email-domain auto-join
+
+An owner or admin can claim an email domain so that colleagues join the
+organization without being invited one at a time. It is the second way somebody
+becomes a member, and unlike an invitation nobody decides about the individual,
+so it is fenced accordingly.
+
+A claim grants nothing on its own. Otari mints a verification token, the admin
+publishes it as a TXT record at the claimed domain's apex, and only a claim whose
+record Otari has found admits anyone:
+
+```text
+otari-domain-verification=<token>
+```
+
+Claiming is not exclusive; proving is. Several organizations may hold an unproven
+claim on one domain and the first to publish the record takes it, which is what
+stops a claim on a domain somebody else owns from locking out its real owner.
+
+Once a domain is proven, anyone signing in with a **verified** address at that
+domain joins as the role the claim names. The rules around that are deliberately
+narrow:
+
+- Only `member` and `viewer` can be handed out. Proving control of a domain is
+  not a decision about a person, so it never confers organization management.
+- An unverified address is skipped, so signing up on an address without reading
+  the mail is not enough.
+- An existing membership is left alone. A suspended one is not revived by
+  signing in, and an established role is not overwritten.
+- The person's active organization is never changed by joining.
+- Public email providers cannot be claimed.
+
+A proof expires. Domains change hands, so a claim stops admitting anyone once its
+proof passes the deployment's TTL, and an admin renews it by verifying again from
+the Email domains page. Nothing re-reads DNS between verifications, so that TTL is
+the window in which a transferred domain still admits people.
+
 ## Related documentation
 
 - [Admin dashboard](dashboard.md)
