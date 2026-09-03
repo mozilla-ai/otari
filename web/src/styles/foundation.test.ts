@@ -677,7 +677,13 @@ describe("headings wear a type role", () => {
         expect(
           literal[1],
           `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, or text-title`,
-        ).toMatch(/\btext-(?:display|heading|title)\b/)
+        )
+          // The three stems name role FAMILIES, and `\b` matches before a
+          // hyphen, so a named sub-step such as `text-display-sub` satisfies
+          // this by design rather than by accident. A role named outside these
+          // stems would be correct and would still fail here, so it has to
+          // arrive with a change to this pattern.
+          .toMatch(/\btext-(?:display|heading|title)\b/)
       } else {
         // No string literal, so the one acceptable shape left is an
         // expression. A heading with no className at all is the bare case

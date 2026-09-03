@@ -759,9 +759,7 @@ function OnboardingPanel({
       <div className="flex items-start gap-3">
         <Dot className="mt-2.5 bg-accent" />
         <div>
-          <h2 className="font-display text-xl font-semibold text-foreground">
-            Welcome to Otari
-          </h2>
+          <h2 className="text-display-sub">Welcome to Otari</h2>
           <p className="mt-1 text-sm text-muted">
             You are signed in. Add a provider to start serving models: three
             quick steps.

@@ -992,6 +992,37 @@
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
+@utility text-display-sub {
+  /* The display face one step under the page title, for a page's announcement
+     moment: the get-started strip on Overview, the first-run panel on
+     Providers, which was ruled the same kind, and the guide's own section
+     heads. Three consumers, which is the bar this file extracts on.
+
+     The slab is the point here, which is exactly what `text-heading` below
+     argues against for itself. The two are not in conflict: an ordinary
+     section head sits under a page title and must not compete with it, while
+     an announcement strip IS the page's moment and has nothing above it to
+     compete with.
+
+     20px, spelled here and NOT read from `--text-xl`, which is 22. That is
+     deliberate and is the one thing not to tidy. `--text-xl` was retuned from
+     20 to 22 to fix a ladder defect the stat tile's own comment argues at
+     length: a value inside a card had been the largest text on the page,
+     larger than the name of the page itself. Pointing this role at that token
+     would put these headings back at 22, two points above the spec that ruled
+     them, and pointing the token back at 20 would reopen the ladder. The two
+     values want different things, so they get different declarations.
+
+     -0.01em rather than the xl step's -0.015em, for the same reason: the
+     tracking was written for this treatment, and the step's belongs to a token
+     this role does not read. */
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
 @utility text-heading {
   /* The body face, not the display face: at 18px a slab serif competes with
      the page title above it instead of sitting under it. */
@@ -2971,12 +3002,12 @@ main {
    guessing which of the middle two outranks the other. */
 .otari-markdown h1,
 .otari-markdown h2 {
-  color: var(--color-text);
-  font-family: var(--font-display);
-  font-size: 20px;
-  line-height: 28px;
-  letter-spacing: -0.01em;
-  font-weight: var(--font-weight-semibold);
+  /* The announcement treatment, through the role rather than spelled again.
+     These values were identical to it and had already stopped tracking the
+     scale once: they stayed at 20px when `--text-xl` was retuned to 22, which
+     is the drift a role exists to stop. Generated markup carries no class, so
+     this reaches the role with `@apply` rather than by wearing it. */
+  @apply text-display-sub;
   margin: 2rem 0 0.75rem;
 }
 .otari-markdown h3,
