@@ -1,4 +1,4 @@
-import { AlertDialog, Button, Card } from "@heroui/react"
+import { AlertDialog, Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 
 import type { PricingRefreshPreview, PricingResponse } from "@/client"
@@ -18,12 +18,12 @@ import {
 } from "@/shared/api/hooks"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import {
-  ErrorBanner,
-  InfoBanner,
-  PageHeader,
-  PageLoading,
-} from "@/shared/components/ui"
-import { formatCost } from "@/shared/helpers/format"
+  PageIntro,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import { ErrorBanner, InfoBanner, PageLoading } from "@/shared/components/ui"
+import { formatCost, formatRelative } from "@/shared/helpers/format"
 
 // The organization's model pricing: what the gateway meters a request at, and
 // where the numbers come from.
@@ -134,34 +134,37 @@ function PricingRefreshSection() {
   }
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Default pricing catalog</h2>
-      <Card>
-        <Card.Content className="flex flex-col gap-4 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-body">genai-prices defaults</div>
-              <p className="mt-1 max-w-3xl text-sm text-muted">
-                Fetch the latest upstream catalog, review the proposed change
-                summary, then accept or reject it. Accepted data is stored as{" "}
-                <code>genai-prices</code>; custom prices remain separate and
-                always take precedence.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              isDisabled={previewRefresh.isPending || isPending}
-              onPress={() => previewRefresh.mutate()}
-            >
-              {previewRefresh.isPending
-                ? "Checking prices…"
-                : "Check for price updates"}
-            </Button>
+    <>
+      <Section
+        aria-labelledby="pricing-catalog-title"
+        className="border-y border-border py-5"
+        contentClassName="flex flex-col gap-4"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="pricing-catalog-title" className="text-title">
+              Default pricing catalog
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted">
+              Fetch the latest upstream catalog, review the proposed change
+              summary, then accept or reject it. Accepted data is stored as{" "}
+              <code>genai-prices</code>; custom prices remain separate and
+              always take precedence.
+            </p>
           </div>
-          <ErrorBanner error={previewRefresh.error} />
-        </Card.Content>
-      </Card>
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={previewRefresh.isPending || isPending}
+            onPress={() => previewRefresh.mutate()}
+          >
+            {previewRefresh.isPending
+              ? "Checking prices…"
+              : "Check for price updates"}
+          </Button>
+        </div>
+        <ErrorBanner error={previewRefresh.error} />
+      </Section>
       <AlertDialog
         isOpen={preview !== undefined}
         onOpenChange={(isOpen) => (!isOpen ? reject() : undefined)}
@@ -183,7 +186,7 @@ function PricingRefreshSection() {
           />
         ) : null}
       </AlertDialog>
-    </section>
+    </>
   )
 }
 
@@ -290,6 +293,27 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
     align: "end",
     cell: (row) => (row.tiers === 0 ? "—" : `${row.tiers} configured`),
   },
+  // The row has carried this since it was built and never rendered it. It earns
+  // the lane now because something has to absorb the width this table does not
+  // use, and the alternative was a gap: when a rate last moved is the question
+  // an operator brings to a price they did not expect.
+  {
+    id: "updatedAt",
+    header: "Updated",
+    align: "end",
+    cell: (row) => (
+      <span className="text-muted">{formatRelative(row.updatedAt)}</span>
+    ),
+  },
+  // Unlabelled and empty, and it is the only lane in either table that is.
+  // Something has to absorb the width a table does not use, and every candidate
+  // that carries data is the wrong one: a date given the slack rendered in a
+  // 985px lane, a value floating alone in a field with a hit area to match, and
+  // handing it to the model key instead threw the rates against the right edge.
+  // A lane with nothing in it can take any width without lying about anything,
+  // which also keeps the rate lanes at the widths the overrides table below
+  // uses, so the two still line up.
+  { id: "spacer", header: "", cell: () => null },
 ]
 
 /**
@@ -310,37 +334,43 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
   if (pricing.isLoading) return <PageLoading label="Loading model prices…" />
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Model prices</h2>
+    <>
+      {/* The group's heading and the rule under it are what introduce the rows,
+          which then sit straight on the page ground. No box: the header rule
+          and the row separators already say where the group starts and ends. */}
+      <Section className="pt-6 pb-3">
+        <h2 className="text-title">Model prices</h2>
+      </Section>
       <ErrorBanner error={pricing.error} />
-      <Card>
-        <Card.Content className="p-0">
-          <DataTable
-            ariaLabel="Model prices"
-            columns={COLUMNS}
-            rows={rows}
-            getRowKey={(row) => row.modelKey}
-            emptyContent={
-              canPrice
-                ? "No model carries a stored price yet. Price one from the Models page."
-                : "No model carries a stored price yet."
-            }
-          />
-        </Card.Content>
-      </Card>
+      <TableScrollFrame className="otari-pricing-table">
+        <DataTable
+          ariaLabel="Model prices"
+          columns={COLUMNS}
+          rows={rows}
+          getRowKey={(row) => row.modelKey}
+          emptyContent={
+            canPrice
+              ? "No model carries a stored price yet. Price one from the Models page."
+              : "No model carries a stored price yet."
+          }
+        />
+      </TableScrollFrame>
+      {/* Where to edit a rate, told only to a caller who can edit one. */}
       {canPrice ? (
-        <p className="text-sm text-muted">
-          A rate is edited beside the model it applies to, on{" "}
-          <Link
-            to="/models"
-            className="font-medium text-link hover:text-link-hover"
-          >
-            Models
-          </Link>
-          .
-        </p>
+        <Section className="pt-3">
+          <p className="text-sm text-muted">
+            A rate is edited beside the model it applies to, on{" "}
+            <Link
+              to="/models"
+              className="font-medium text-link hover:text-link-hover"
+            >
+              Models
+            </Link>
+            .
+          </p>
+        </Section>
       ) : null}
-    </section>
+    </>
   )
 }
 
@@ -353,11 +383,14 @@ export function ModelPricingPage() {
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Model pricing"
-        description="What this gateway meters a request at. The catalog applies to every workspace and every key in the organization; a rate override below applies to this organization ahead of it."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Model pricing">
+        What this gateway meters a request at. The catalog applies to every
+        workspace and every key in the organization; a rate override below
+        applies to this organization ahead of it.
+      </PageIntro>
+      {/* Operator-only: both read `/v1/pricing`'s catalog controls, which an
+          organization admin may see prices through but not administer. */}
       {isOperator ? (
         <>
           <CatalogPolicy />
