@@ -729,15 +729,6 @@ export function Tab({
 }
 
 /**
- * The row a set of `Tab`s sits in.
- *
- * A plain `<div>` with no role, deliberately. `role="group"` needs a `<fieldset>`
- * to be valid and a fieldset drags form semantics and a `<legend>` in with it,
- * and `role="tablist"` would promise a roving-focus contract these do not
- * implement. Each tab is a button with its own name and `aria-pressed`, which is
- * what a screen reader needs; the row is only spacing.
- */
-/**
  * One choice out of a small closed set, as a bounded segmented control.
  *
  * A tab row and this are the same shape doing different jobs, which is why
@@ -812,6 +803,15 @@ export function Segmented({
   )
 }
 
+/**
+ * The row a set of `Tab`s sits in.
+ *
+ * A plain `<div>` with no role, deliberately. `role="group"` needs a `<fieldset>`
+ * to be valid and a fieldset drags form semantics and a `<legend>` in with it,
+ * and `role="tablist"` would promise a roving-focus contract these do not
+ * implement. Each tab is a button with its own name and `aria-pressed`, which is
+ * what a screen reader needs; the row is only spacing.
+ */
 export function TabRow({ children }: { children: ReactNode }) {
   return (
     <div className="inline-flex max-w-full items-center gap-1 overflow-x-auto">

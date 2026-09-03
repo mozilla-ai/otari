@@ -23,6 +23,15 @@ import { Segmented, Tab, TabRow } from "./surface"
  * STRUCTURE that earns those behaviors (real inputs, one shared name) rather
  * than the behaviors themselves. Claiming to have tested arrow keys here would
  * be claiming the opposite of what ran.
+ *
+ * Class assertions here check `classList`, never `className.includes`. A class
+ * list is a set of tokens and a substring match answers a different question:
+ * `first:border-l-0` contains "border-l", `hover:text-foreground` contains
+ * "text-foreground", `max-h-64` contains "h-6". Each of those false-passed a
+ * real assertion in this suite before the switch. Negative assertions are left
+ * as substring matches on purpose, because for a negative that direction is
+ * conservative: `not.toContain("bg-")` rejects more than a token check would,
+ * not less.
  */
 describe("Tab", () => {
   it("is a real button, not a div wearing a role", () => {
