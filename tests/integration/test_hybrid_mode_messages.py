@@ -1142,3 +1142,149 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     error_reports = [r for r in usage_reports if r.get("status") == "error"]
     assert len(error_reports) == 1
     assert error_reports[0]["correlation_id"] == "tool-att-primary"
+
+
+# ---------- container continuity on a shared upstream account ----------
+
+
+def _container_route(monkeypatch: pytest.MonkeyPatch, *, managed: bool, calls: list[str]) -> None:
+    """Wire a single-attempt route whose credential is managed or BYO."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            attempt = _attempt(0, "3f1b6a1e-0000-4000-8000-0000000000c1", "claude-3-5-sonnet-20241022", "sk-upstream")
+            attempt["managed"] = managed
+            return httpx.Response(200, json=_resolve_payload([attempt]))
+        return httpx.Response(
+            200,
+            json={
+                "correlation_id": body["correlation_id"],
+                "status": "completed",
+                "outcome": "success",
+                "cost_usd": "0.010000",
+                "currency": "USD",
+                "usage_status": "reported",
+                "pricing": {"source": "managed"},
+            },
+        )
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        calls.append(str(kwargs.get("container")))
+        return _message_response()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
+
+
+def test_container_is_refused_on_a_managed_credential(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A managed attempt runs on an account many workspaces share, so a
+    caller-chosen container id would address another tenant's state."""
+    calls: list[str] = []
+    _container_route(monkeypatch, managed=True, calls=calls)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "container": "container_01ABC",
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 400, response.text
+    body = response.json()["detail"]
+    assert body["error"]["type"] == "invalid_request_error"
+    assert "container cannot be used on this route" in body["error"]["message"]
+    assert calls == [], "the provider must not be called at all"
+
+
+def test_container_reaches_a_byo_credential(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the workspace's own key the container is already the caller's."""
+    calls: list[str] = []
+    _container_route(monkeypatch, managed=False, calls=calls)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "container": "container_01ABC",
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == ["container_01ABC"]
+
+
+def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Which attempt serves the request is decided during fallback, past the
+    gate, so a managed fallback behind a BYO primary still refuses."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        assert url.endswith("/gateway/provider-keys/resolve")
+        byo = _attempt(0, "3f1b6a1e-0000-4000-8000-0000000000d1", "claude-3-5-sonnet-20241022", "sk-byo")
+        byo["managed"] = False
+        managed = _attempt(1, "3f1b6a1e-0000-4000-8000-0000000000d2", "claude-3-5-sonnet-20241022", "sk-managed")
+        managed["managed"] = True
+        return httpx.Response(200, json=_resolve_payload([byo, managed]))
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "container": "container_01ABC",
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "container cannot be used on this route" in response.json()["detail"]["error"]["message"]
+
+
+def test_a_request_without_a_container_is_untouched_by_the_gate(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate reads a field the overwhelming majority of requests never set."""
+    calls: list[str] = []
+    _container_route(monkeypatch, managed=True, calls=calls)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == ["None"]

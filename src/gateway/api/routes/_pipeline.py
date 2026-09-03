@@ -101,6 +101,7 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
     _web_search_intercept_enabled,
     declares_native_web_search,
+    has_provider_code_execution_tool,
     web_search_max_results_baseline,
 )
 from gateway.core.config import GatewayConfig
@@ -252,6 +253,12 @@ SANDBOX_NOT_CONFIGURED_DETAIL = (
 SANDBOX_MCP_CONFLICT_DETAIL = (
     "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
     "pick one. Multi-backend dispatch is a planned refinement."
+)
+SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL = (
+    "otari_code_execution cannot be combined with a provider-native code-execution tool "
+    "(code_execution, code_interpreter, code_execution_<date>) in the same request; pick one. "
+    "The gateway sandbox and the provider's own are separate environments, and a request "
+    "addressing both has no single place its files and state live."
 )
 WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
     "otari_web_search tool requested but no search backend is configured on this gateway. "
@@ -2401,6 +2408,13 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
             if mcp_servers:
                 raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            # Two sandboxes, one request. Whichever way the gateway resolved it
+            # silently, half the caller's state would live somewhere they cannot
+            # address: the gateway sandbox's session is per-request and never
+            # named on the wire, the provider's is named by a handle the gateway
+            # would then have to route around. Refuse instead of picking.
+            if has_provider_code_execution_tool(tools_after_sandbox):
+                raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_sandbox = True
 
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in

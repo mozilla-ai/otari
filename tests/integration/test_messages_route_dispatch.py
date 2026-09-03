@@ -743,6 +743,77 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     )
 
 
+@pytest.mark.parametrize("native_type", ["code_execution", "code_interpreter", "code_execution_20250825"])
+def test_code_execution_combined_with_a_provider_native_tool_returns_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    native_type: str,
+) -> None:
+    """Two sandboxes in one request have no single home for the caller's state."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    resp = client.post(
+        "/v1/messages",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "tools": [{"type": "otari_code_execution"}, {"type": native_type}],
+        },
+        headers=api_key_header,
+    )
+    assert resp.status_code == 400
+    _assert_anthropic_error(
+        resp.json(),
+        error_type="invalid_request_error",
+        message_substr="cannot be combined with a provider-native code-execution tool",
+    )
+
+
+def test_code_execution_allows_an_unrelated_caller_function(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The conflict keys on the tool ``type``. A caller's own function named
+    ``code_execution`` is theirs to dispatch and never claimed by the gateway."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
+        return _text_response()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch(
+            "gateway.api.routes._pipeline.SandboxBackend",
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=fake_backend),
+                __aexit__=AsyncMock(return_value=None),
+            ),
+        ),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 100,
+                "tools": [
+                    {"type": "otari_code_execution"},
+                    {"type": "function", "function": {"name": "code_execution"}},
+                ],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+
+
 def test_web_search_combined_with_sandbox_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
