@@ -8,6 +8,7 @@ import {
   openNested,
   openOrganization,
   pageHeading,
+  table,
   tableRows,
 } from "./helpers"
 import { PARITY } from "./parity-data"
@@ -165,7 +166,14 @@ test.describe("api keys", () => {
     await expect(key.getByRole("button", { name: "Enable" })).toBeVisible()
 
     await key.getByRole("button", { name: "Delete" }).click()
-    await key.getByRole("button", { name: "Delete permanently" }).click()
+    // Scoped to the table rather than to `key`: arming a row now renders the
+    // confirmation as a strip in its own row beside it, not inside the cell, so
+    // a row-scoped locator cannot see the control it arms. `table` rather than
+    // `tableRows`, because that helper keeps only rows carrying a row header and
+    // the strip is a detail row with none.
+    await table(page, "API keys")
+      .getByRole("button", { name: "Delete permanently" })
+      .click()
     await expect(row(page, "API keys", KEY_NAME)).toHaveCount(0)
   })
 })

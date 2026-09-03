@@ -169,6 +169,14 @@ that three times. Hit-test the element's own center with
 `document.elementFromPoint`, or walk its `offsetParent` chain for a clipping
 ancestor, before reporting geometry.
 
+**Read the reporter, not the exit code, when a command is in a pipeline.** A
+run piped into `tail`, `grep` or `head` exits with that stage's status, so a
+suite with failures reports success and a green shell says nothing about the
+tests. The same shape as the traps above from the other direction: those were
+queries whose empty result read as a clean answer, this is a pipeline whose
+last stage reported one. Check the failure count in the output, or keep the
+command unpiped.
+
 **A typecheck means nothing while any file has conflict markers.** One file
 containing `<<<<<<<` suppresses every semantic diagnostic in the program, so
 `tsc` reports only syntax errors and a clean-looking run mid-rebase proves
