@@ -34,7 +34,10 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   },
   // The other way somebody becomes a member. Its own entry rather than folded
   // into the roster's: the claim table and the record-to-publish card are what
-  // this page is, and neither appears anywhere else.
+  // this page is, and neither appears anywhere else. Captured here only, and not
+  // also by a test in the organization-rail block below: that block's tests do
+  // exactly what `open` does, so a second one would be a duplicate baseline to
+  // keep in step for no extra coverage.
   {
     route: "/organization/domains",
     name: "organization-domains",
@@ -116,15 +119,6 @@ test.describe("organization rail", () => {
       page.getByRole("heading", { name: /members/i }).first(),
     ).toBeVisible()
     await captureScreenshot(page, "organization-members")
-  })
-
-  test("organization domains", async ({ page }) => {
-    await login(page)
-    await gotoRoute(page, "/organization/domains")
-    await expect(
-      page.getByRole("heading", { name: /email domains/i }).first(),
-    ).toBeVisible()
-    await captureScreenshot(page, "organization-domains")
   })
 
   test("workspaces", async ({ page }) => {

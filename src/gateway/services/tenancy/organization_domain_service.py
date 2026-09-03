@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.database import release_session
 from gateway.core.email_domains import (
     email_domain,
     is_public_email_domain,
@@ -126,13 +127,26 @@ class OrganizationDomainService:
 
         domain = self._validated_claim(request.domain)
 
-        # Only a *proven* claim blocks a new one. An unproven claim by anyone
-        # else is no obstacle: it grants nothing, and refusing on it would let
-        # whoever claimed a domain first lock its real owner out for good.
-        if await self.domains.get_verified_by_domain(domain) is not None:
+        # Only a *live* proof blocks a new claim. An unproven claim by anyone
+        # else is no obstacle (it grants nothing, and refusing on it would let
+        # whoever claimed a domain first lock its real owner out for good), and
+        # neither is a proof that has aged out: that claim has stopped admitting
+        # anyone, so treating it as exclusive would be the same permanent
+        # lockout wearing a different hat, for an organization that has by then
+        # walked away from the domain.
+        holder = await self.domains.get_verified_by_domain(domain)
+        if holder is not None and not holder.proof_expired(now=datetime.now(UTC)):
             raise OrganizationDomainAlreadyClaimedError(domain)
         if await self.domains.get_by_domain_and_organization(domain, organization.id) is not None:
             raise OrganizationDomainClaimedHereError(domain)
+        # Counted and inserted without serializing the pair, so two concurrent
+        # creates can both read a count under the ceiling and land on it. That is
+        # accepted rather than locked: the ceiling exists to bound how many names
+        # this deployment will resolve on demand, an overshoot is bounded by how
+        # many requests one organization's admins have in flight at once, and
+        # every later create still refuses. Locking the organization row on a
+        # management write would be a heavier invariant than the value being
+        # protected.
         if await self.domains.count_for_organization(organization.id) >= MAX_ORGANIZATION_DOMAINS:
             raise TooManyOrganizationDomainsError(MAX_ORGANIZATION_DOMAINS)
 
@@ -191,30 +205,57 @@ class OrganizationDomainService:
         double click costs nothing. Once the proof has aged out this runs for
         real again, which is how a claim is renewed.
 
-        Proving a domain **displaces** every unproven claim on it. Those rows
-        were bets on a domain somebody else has now demonstrably controlled, and
-        the partial unique index means none of them could ever be verified;
-        leaving them would strand a row that says "Not verified" forever with no
-        way to act on it.
+        Proving a domain takes it from every rival claim on it, but does not
+        delete them: the partial unique index is what makes the proof exclusive,
+        so a rival is already inert, and removing another tenant's row as a side
+        effect of this call would be a larger action than the one being asked
+        for. A rival that tries to verify gets a refusal naming the conflict, and
+        its own admin can drop it.
+
+        The one row this does rewrite is a previous holder whose proof has aged
+        out. It has to be demoted for the index to admit the new proof at all,
+        and by then it is admitting nobody and has stopped being entitled to the
+        domain. It stays on its organization's page, unproven, to re-verify or
+        remove.
         """
         organization = await self.organizations.get_active_organization_for_user(user)
         await self.organizations.require_active_organization_management_access(user=user, organization=organization)
 
         row = await self._require_domain(organization_domain_id, organization.id)
+        if not row.proof_expired(now=datetime.now(UTC)):
+            return self._to_public(row)
+
+        domain = row.domain
+        expected = f"{DOMAIN_VERIFICATION_TXT_PREFIX}{row.verification_token}"
+
+        # Hand the connection back before going out to DNS. The lookup can take
+        # the full resolver timeout, and holding a pooled connection across it
+        # would make the pool a ceiling on concurrent *DNS* work rather than on
+        # database work, which is the failure mozilla-ai/otari#911 fixed on the
+        # inference path. Everything read above is re-read below, because the
+        # world is allowed to move while this call is out.
+        await release_session(self.db)
+        found = await resolve_txt_records(domain)
+        if expected not in found:
+            raise OrganizationDomainNotVerifiedError(domain)
+
+        # A 404 here is another organization having proven the domain during the
+        # lookup and displaced this row. Rare, honest, and indistinguishable
+        # from the admin having deleted the claim themselves.
+        row = await self._require_domain(organization_domain_id, organization.id)
         now = datetime.now(UTC)
         if not row.proof_expired(now=now):
             return self._to_public(row)
 
-        # Re-checked here rather than only at claim time: another organization
-        # may have proven this domain in the meantime, and the index would
-        # otherwise refuse the write with an error the caller cannot read.
-        holder = await self.domains.get_verified_by_domain(row.domain)
+        holder = await self.domains.get_verified_by_domain(domain)
         if holder is not None and holder.id != row.id:
-            raise OrganizationDomainAlreadyClaimedError(row.domain)
-
-        expected = f"{DOMAIN_VERIFICATION_TXT_PREFIX}{row.verification_token}"
-        if expected not in await resolve_txt_records(row.domain):
-            raise OrganizationDomainNotVerifiedError(row.domain)
+            if not holder.proof_expired(now=now):
+                raise OrganizationDomainAlreadyClaimedError(domain)
+            # Its proof aged out, so it is admitting nobody and is no longer
+            # entitled to the domain. Demoted rather than deleted: the row is
+            # someone's own claim on a domain they did once control, and it
+            # stays on their page to re-verify or remove.
+            await self.domains.clear_verification(holder)
 
         try:
             # The savepoint settles two organizations verifying the same domain
@@ -223,10 +264,7 @@ class OrganizationDomainService:
             async with self.db.begin_nested():
                 verified = await self.domains.mark_verified(row, verified_at=now)
         except IntegrityError as exc:
-            raise OrganizationDomainAlreadyClaimedError(row.domain) from exc
-
-        for beaten in await self.domains.list_rival_unverified(row.domain, winner_id=row.id):
-            await self.domains.delete_domain(beaten)
+            raise OrganizationDomainAlreadyClaimedError(domain) from exc
 
         await self.db.commit()
         await self.db.refresh(verified)

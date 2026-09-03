@@ -73,6 +73,24 @@ def test_an_internationalized_domain_lands_on_one_spelling_from_either_side() ->
     assert normalized_domain("münchen.de") == email_domain("person@münchen.de")
 
 
+def test_two_domains_idna2003_would_have_merged_stay_apart() -> None:
+    """Why this uses the ``idna`` library and not ``str.encode("idna")``.
+
+    The standard library's codec is IDNA2003, whose mapping step folds sharp s
+    to ``ss``. Under it ``fass.de`` and the sharp-s spelling both normalize to
+    ``fass.de``, which are two registrable domains owned by two different
+    people: proving one would admit addresses at the other, and the DNS proof
+    would stop binding to the domain it was taken from.
+    """
+    sharp_s = "fa\u00df.de"
+    assert normalized_domain(sharp_s) == "xn--fa-hia.de"
+    assert normalized_domain("fass.de") == "fass.de"
+    assert normalized_domain(sharp_s) != normalized_domain("fass.de")
+    # And each still matches only its own addresses.
+    assert email_domain(f"person@{sharp_s}") == normalized_domain(sharp_s)
+    assert email_domain("person@fass.de") == normalized_domain("fass.de")
+
+
 def test_an_internationalized_claim_passes_the_shape_check_once_encoded() -> None:
     """The other half: it must also be claimable, not merely consistent."""
     assert is_registrable_domain(normalized_domain("münchen.de"))

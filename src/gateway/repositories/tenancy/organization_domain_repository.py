@@ -51,17 +51,6 @@ class OrganizationDomainRepository(
         )
         return result.scalars().first()
 
-    async def list_rival_unverified(self, domain: str, *, winner_id: uuid.UUID) -> list[OrganizationDomain]:
-        """Return the unproven claims on ``domain`` that a proof has just beaten."""
-        result = await self.db.execute(
-            select(OrganizationDomain).where(
-                col(OrganizationDomain.domain) == domain,
-                col(OrganizationDomain.id) != winner_id,
-                col(OrganizationDomain.verified_at).is_(None),
-            )
-        )
-        return list(result.scalars().all())
-
     async def count_for_organization(self, organization_id: uuid.UUID) -> int:
         """How many domains this organization currently claims."""
         result = await self.db.execute(
@@ -132,6 +121,14 @@ class OrganizationDomainRepository(
     async def mark_verified(self, row: OrganizationDomain, *, verified_at: datetime) -> OrganizationDomain:
         """Stamp a claim as proven."""
         row.verified_at = verified_at
+        self.db.add(row)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row
+
+    async def clear_verification(self, row: OrganizationDomain) -> OrganizationDomain:
+        """Demote a claim back to unproven, freeing the domain for another proof."""
+        row.verified_at = None
         self.db.add(row)
         await self.db.flush()
         await self.db.refresh(row)

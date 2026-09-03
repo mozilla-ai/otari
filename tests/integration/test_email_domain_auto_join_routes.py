@@ -25,9 +25,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.api.routes import auth_session
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DOMAIN_VERIFICATION_TXT_PREFIX, OrganizationMember
+from gateway.services.dashboard_session_service import create_dashboard_session
 from gateway.services.tenancy import organization_domain_service as domain_service
 
 from .webauthn_helpers import SoftwareAuthenticator, challenge_of
@@ -42,23 +44,41 @@ _TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
 
 
 @pytest.fixture
+def mail_configured(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """What ``POST /v1/auth/signup`` needs before it will send anything.
+
+    Both settings, because the route refuses on either alone: the transport
+    decides whether mail can go out and ``public_base_url`` is what the verify
+    link is built from. ORIGIN rather than any old URL, so the same fixture
+    serves the passkey test, whose relying party has to be the host TestClient
+    answers on.
+    """
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
+
+
+@pytest.fixture
 def claiming_organization(
     client: TestClient,
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> str:
-    """A second organization that has claimed and proven ``DOMAIN``. Returns its id."""
+    """A *second* organization that has claimed and proven ``DOMAIN``. Returns its id.
+
+    The operator is switched back to the organization the deployment booted
+    before this returns, and that is load-bearing rather than tidiness.
+    ``POST /v1/organizations/me/members`` adds to whichever organization the
+    caller is pointed at, so leaving the operator in Beta would put Ada straight
+    into the claiming organization and every assertion below would hold with
+    auto-join deleted.
+    """
+    home = _active_organization(client, master_key_header)
     created = client.post("/v1/organizations", json={"name": "Beta"}, headers=master_key_header)
     assert created.status_code == 201, created.text
     beta = str(created.json()["id"])
+    assert beta != home
 
-    switched = client.post(
-        "/v1/organizations/me/switch",
-        json={"organization_id": beta},
-        headers=master_key_header,
-    )
-    assert switched.status_code == 200, switched.text
-
+    _switch_to(client, master_key_header, beta)
     claim = client.post("/v1/organizations/me/domains", json={"domain": DOMAIN}, headers=master_key_header)
     assert claim.status_code == 201, claim.text
     record = claim.json()["verification_record"]
@@ -74,11 +94,36 @@ def claiming_organization(
     )
     assert verified.status_code == 200, verified.text
     assert verified.json()["verified_at"] is not None
+
+    _switch_to(client, master_key_header, home)
+    assert _active_organization(client, master_key_header) == home
     return beta
 
 
-def _rostered_identity(client: TestClient, master_key_header: dict[str, str]) -> str:
-    """Put ADDRESS on the booted organization's roster, which every route requires."""
+def _active_organization(client: TestClient, master_key_header: dict[str, str]) -> str:
+    response = client.get("/v1/organizations/me", headers=master_key_header)
+    assert response.status_code == 200, response.text
+    return str(response.json()["organization"]["id"])
+
+
+def _switch_to(client: TestClient, master_key_header: dict[str, str], organization_id: str) -> None:
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": organization_id},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+
+
+def _rostered_identity(client: TestClient, master_key_header: dict[str, str], *, not_in: str) -> str:
+    """Put ADDRESS on the roster of wherever the operator is pointed.
+
+    ``not_in`` is the claiming organization, and it is asserted rather than
+    assumed: this endpoint adds to the caller's *active* organization, so an
+    operator still switched into the claiming one would seed the very membership
+    these tests exist to observe auto-join creating.
+    """
+    assert _active_organization(client, master_key_header) != not_in
     added = client.post(
         "/v1/organizations/me/members",
         json={"email": ADDRESS, "role": "member"},
@@ -114,6 +159,14 @@ def _memberships(client: TestClient) -> list[dict[str, Any]]:
 
 
 def _assert_joined(client: TestClient, signed_in: Any, *, beta: str, home: str) -> None:
+    """Assert the sign-in is what produced the membership in ``beta``.
+
+    ``home`` is asserted to be a different organization, so a regression that
+    put Ada into the claiming organization by some other route (the fixture
+    leaving the operator switched into it, say) fails here rather than passing
+    vacuously.
+    """
+    assert beta != home
     assert signed_in.status_code == 200, signed_in.text
     joined = {row["organization"]["id"] for row in _memberships(client)}
     assert beta in joined, f"auto-join did not run on this route; memberships were {joined}"
@@ -125,15 +178,13 @@ def _assert_joined(client: TestClient, signed_in: Any, *, beta: str, home: str) 
 def test_a_password_sign_in_joins_the_organization_that_proved_the_domain(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    mail_configured: None,
     claiming_organization: str,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    _rostered_identity(client, master_key_header)
+    home = _active_organization(client, master_key_header)
+    _rostered_identity(client, master_key_header, not_in=claiming_organization)
     _claim_password(client, caplog)
-    home = client.get("/v1/organizations/me", headers=master_key_header).json()["organization"]["id"]
     client.cookies.clear()
 
     signed_in = client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD})
@@ -158,8 +209,8 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
         return OAuthIdentity(provider=provider, email=ADDRESS, full_name="Ada", email_verified=True)
 
     monkeypatch.setattr("gateway.api.routes.auth_oauth.exchange_code", _exchange)
-    _rostered_identity(client, master_key_header)
-    home = client.get("/v1/organizations/me", headers=master_key_header).json()["organization"]["id"]
+    home = _active_organization(client, master_key_header)
+    _rostered_identity(client, master_key_header, not_in=claiming_organization)
     client.cookies.clear()
 
     signed_in = client.post("/v1/auth/oauth/google/callback", json={"code": "the-code"})
@@ -170,16 +221,13 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
 def test_a_passkey_sign_in_joins_the_organization_that_proved_the_domain(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    mail_configured: None,
     claiming_organization: str,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
-    _rostered_identity(client, master_key_header)
+    home = _active_organization(client, master_key_header)
+    _rostered_identity(client, master_key_header, not_in=claiming_organization)
     _claim_password(client, caplog)
-    home = client.get("/v1/organizations/me", headers=master_key_header).json()["organization"]["id"]
     client.cookies.clear()
 
     # Ada registers a passkey against her own session, then signs in with it
@@ -208,10 +256,10 @@ def test_a_passkey_sign_in_joins_the_organization_that_proved_the_domain(
 def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     test_db: Session,
+    mail_configured: None,
     claiming_organization: str,
 ) -> None:
     """The transactional claim, which nothing else exercises.
@@ -220,15 +268,23 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
     row fails after that, the membership has to go with it: a caller who was
     told their sign-in failed must not have quietly gained access to a tenant.
     """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    user_id = _rostered_identity(client, master_key_header)
+    user_id = _rostered_identity(client, master_key_header, not_in=claiming_organization)
     _claim_password(client, caplog)
     client.cookies.clear()
 
-    def _explode(*args: Any, **kwargs: Any) -> Any:
-        raise SQLAlchemyError("the session row could not be written")
+    # Fails the first attempt only, rather than patching and then calling
+    # ``monkeypatch.undo()``: undo is all-or-nothing across the fixture, so it
+    # would also unwind the mail settings and the stubbed resolver this test is
+    # standing on.
+    attempts = {"count": 0}
 
-    monkeypatch.setattr("gateway.api.routes.auth_session.create_dashboard_session", _explode)
+    async def _fails_once(*args: Any, **kwargs: Any) -> Any:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise SQLAlchemyError("the session row could not be written")
+        return await create_dashboard_session(*args, **kwargs)
+
+    monkeypatch.setattr(auth_session, "create_dashboard_session", _fails_once)
     refused = client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD})
     assert refused.status_code == 500, refused.text
 
@@ -244,8 +300,6 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
 
     # And the same sign-in, once it can complete, does create it: the assertion
     # above is about the rollback, not about auto-join being broken here.
-    monkeypatch.undo()
-    monkeypatch.setattr(test_config, "mail_transport", "console")
     healthy = client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD})
     assert healthy.status_code == 200, healthy.text
     assert claiming_organization in {row["organization"]["id"] for row in _memberships(client)}

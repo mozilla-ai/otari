@@ -602,14 +602,19 @@ async def test_an_unproven_claim_does_not_lock_out_the_domains_real_owner(
     assert mine.verified_at is None
 
 
-async def test_proving_a_domain_displaces_the_unproven_claims_on_it(
+async def test_proving_a_domain_takes_it_from_a_rival_without_deleting_their_row(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A beaten claim is removed, not left to sit as un-verifiable forever."""
+    """The index is what makes a proof exclusive, so a rival is already inert.
+
+    Deleting it as a side effect would be a bigger action than the one asked
+    for, and on somebody else's row.
+    """
     squatter = await _organization(async_db, slug="squatter")
     real = await _organization(async_db, slug="real")
     beaten = await _claim(async_db, squatter, domain="contested.example", verified=False)
+    loser = await _identity(async_db, squatter, role="admin", email="admin@squatter.example")
     owner = await _identity(async_db, real, role="admin", email="admin@real.example")
     service = OrganizationDomainService(async_db)
     mine = await service.create_domain_for_user(
@@ -623,11 +628,57 @@ async def test_proving_a_domain_displaces_the_unproven_claims_on_it(
     )
     await service.verify_domain_for_user(user=owner, organization_domain_id=mine.id)
 
-    repository = OrganizationDomainRepository(async_db)
-    assert await repository.get(beaten.id) is None
-    holder = await repository.get_verified_by_domain("contested.example")
+    holder = await OrganizationDomainRepository(async_db).get_verified_by_domain("contested.example")
     assert holder is not None
     assert holder.organization_id == real.id
+    # The rival's row survives, still theirs to see and drop, and answers a
+    # verify attempt with the conflict rather than a constraint error.
+    assert await OrganizationDomainRepository(async_db).get(beaten.id) is not None
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.resolve_txt_records",
+        _resolver({"contested.example": [f"{DOMAIN_VERIFICATION_TXT_PREFIX}{beaten.verification_token}"]}),
+    )
+    with pytest.raises(OrganizationDomainAlreadyClaimedError):
+        await service.verify_domain_for_user(user=loser, organization_domain_id=beaten.id)
+
+
+async def test_a_domain_whose_proof_aged_out_can_be_taken_over(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An abandoned claim must not hold a domain hostage either.
+
+    Same lockout as the unproven-claim one, wearing a different hat: an
+    organization that proved a domain and walked away would otherwise keep it
+    forever, admitting nobody, with its old proof refusing every new claim.
+    """
+    old = await _organization(async_db, slug="oldowner")
+    new = await _organization(async_db, slug="newowner")
+    stale = await _claim(async_db, old, domain="handover.example", verified=True)
+    stale.verified_at = datetime.now(UTC) - DOMAIN_PROOF_TTL - timedelta(days=1)
+    async_db.add(stale)
+    await async_db.flush()
+    successor = await _identity(async_db, new, role="admin", email="admin@newowner.example")
+    service = OrganizationDomainService(async_db)
+
+    mine = await service.create_domain_for_user(
+        user=successor,
+        request=OrganizationDomainCreateRequest(domain="handover.example"),
+    )
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.resolve_txt_records",
+        _resolver({"handover.example": [mine.verification_record]}),
+    )
+    taken = await service.verify_domain_for_user(user=successor, organization_domain_id=mine.id)
+
+    assert taken.verified_at is not None
+    holder = await OrganizationDomainRepository(async_db).get_verified_by_domain("handover.example")
+    assert holder is not None
+    assert holder.organization_id == new.id
+    # The old holder is demoted rather than deleted: the row is theirs, and the
+    # index only needs it to stop being verified.
+    await async_db.refresh(stale)
+    assert stale.verified_at is None
 
 
 async def test_a_proven_domain_cannot_then_be_claimed_by_anyone_else(

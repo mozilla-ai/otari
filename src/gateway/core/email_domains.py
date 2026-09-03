@@ -11,6 +11,8 @@ matches, or match one it should not.
 
 import re
 
+import idna
+
 # Free and consumer providers an organization must never be able to claim: a
 # match there would sweep in unrelated strangers rather than colleagues, and
 # the DNS proof is no defence because nobody claiming these controls them.
@@ -57,14 +59,25 @@ def _ascii(domain: str) -> str:
     is a claim shown as verified and active that admits nobody, with no error
     raised anywhere to explain it.
 
-    A value the codec refuses (an empty label, an over-long one) is returned
-    unchanged rather than raised on. For a claim, ``is_registrable_domain``
-    rejects it a moment later with a message about the domain; for a sign-in it
-    simply matches nothing, which is what an unclaimable domain should do.
+    **IDNA2008 (``idna``), not the standard library's ``str.encode("idna")``.**
+    That codec implements IDNA2003, whose mapping step folds ``ß`` to ``ss`` and
+    final sigma to sigma, so ``faß.de`` and ``fass.de`` both arrive as
+    ``fass.de``. Those are two registrable domains owned by two different
+    people, and collapsing them means proving one admits addresses at the other:
+    the DNS proof would no longer bind to the domain it was taken from, which is
+    the single guarantee this feature rests on. ``uts46=True`` keeps the case
+    folding and normalization a typed claim needs; ``transitional=False`` is
+    what holds ``ß`` apart from ``ss``.
+
+    A value the library refuses (an empty label, a leading hyphen, an over-long
+    label) is returned unchanged rather than raised on. For a claim,
+    ``is_registrable_domain`` rejects it a moment later with a message about the
+    domain; for a sign-in it simply matches nothing, which is what an
+    unclaimable domain should do.
     """
     try:
-        return domain.encode("idna").decode("ascii")
-    except (UnicodeError, ValueError):
+        return idna.encode(domain, uts46=True, transitional=False).decode("ascii")
+    except (idna.IDNAError, UnicodeError):
         return domain
 
 
