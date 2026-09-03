@@ -1056,7 +1056,22 @@ export function KeysPage() {
         ),
       },
     ],
-    [updateKey.isPending, setActive, memberLabels, armed, isDeploymentWide],
+    // `arm`, `triggerRef` and `lastArmed` are listed for correctness, not because
+    // they invalidate: the first two are stable for the component's life, and
+    // `setLastArmed` has a single call site, immediately beside the matching
+    // `setArmed`, so `lastArmed` cannot change on a render where `armed` did not. Naming them
+    // anyway means the cache no longer depends on that invariant holding, which is
+    // the kind of coupling that survives until someone sets one without the other.
+    [
+      updateKey.isPending,
+      setActive,
+      memberLabels,
+      armed,
+      isDeploymentWide,
+      arm,
+      triggerRef,
+      lastArmed,
+    ],
   )
 
   // The armed confirmation, rendered as a strip under its own row rather than
@@ -1111,6 +1126,7 @@ export function KeysPage() {
       deleteKey.isPending,
       deleteKey.mutate,
       regenerate,
+      confirmRef,
     ],
   )
 
