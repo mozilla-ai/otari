@@ -64,6 +64,7 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // ---------- helpers ----------
@@ -249,29 +250,27 @@ function ArmedStrip({
   isPending,
   onConfirm,
   onCancel,
+  confirmRef,
 }: {
   message: ReactNode
   confirmLabel: string
   isPending?: boolean
   onConfirm: () => void
   onCancel: () => void
+  /**
+   * The page's `useConfirmationFocus` Confirm ref. Handed down rather than held
+   * here, because the page owns the armed state and the same hook has to see
+   * both ends of the swap.
+   *
+   * Focus does not actually land here on arm, and that is measured rather than
+   * assumed: unlike the in-place swap this replaced, arming unmounts nothing, so
+   * the row's trigger stays mounted and keeps the caret, and there is no moment
+   * where it falls to the body on the way in. What the hook does earn is the way
+   * back out, since cancelling unmounts this strip from under the focused
+   * Confirm.
+   */
+  confirmRef?: RefObject<HTMLButtonElement | null>
 }) {
-  // Focus on arm is deliberately NOT managed here, and that is a measured
-  // decision rather than an omission.
-  //
-  // Unlike the in-place swap this replaced, arming unmounts nothing: the row's
-  // trigger stays mounted and keeps focus, so there is no moment where focus
-  // falls to <body> on the way in. Moving it onto Confirm was tried twice and
-  // does nothing: a page-level effect fires before the table has added this row
-  // (the ref is still null there), and an effect here runs with the ref set but
-  // leaves focus on the trigger regardless. Both were verified by probing
-  // document.activeElement, not by reading the code.
-  //
-  // The real defect is cancel: this strip unmounts under the focused Confirm
-  // and focus does land on <body>. Fixing that needs a ref on the row action to
-  // return focus to, which `RowAction` does not forward.
-  const confirmRef = useRef<HTMLButtonElement>(null)
-
   return (
     <div className="flex flex-wrap items-center gap-4 bg-background px-8 py-3.5">
       <Dot className="bg-danger" />
@@ -879,6 +878,24 @@ export function KeysPage() {
     id: string
     kind: "regenerate" | "delete"
   } | null>(null)
+  // Which row was armed last, kept after `armed` clears. Cancelling unmounts the
+  // strip that had focus, so the caret has to go back to the action that armed
+  // it, and `useConfirmationFocus` reads its `triggerRef` in an effect that runs
+  // *after* the commit that cleared `armed`. A ref attached on `armed?.id === k.id`
+  // would already have been detached by then and the restore would find null, so
+  // the trigger is identified by a value that outlives the transition.
+  const [lastArmed, setLastArmed] = useState<{
+    id: string
+    kind: "regenerate" | "delete"
+  } | null>(null)
+  const arm = useCallback(
+    (next: { id: string; kind: "regenerate" | "delete" }) => {
+      setLastArmed(next)
+      setArmed(next)
+    },
+    [],
+  )
+  const { triggerRef, confirmRef } = useConfirmationFocus(armed !== null)
 
   // the stable handlers) so DataTable's per-row cache holds across selection
   // clicks; see the DataTable docstring.
@@ -1010,8 +1027,13 @@ export function KeysPage() {
               Edit
             </RowAction>
             <RowAction
+              ref={
+                lastArmed?.id === k.id && lastArmed.kind === "regenerate"
+                  ? triggerRef
+                  : undefined
+              }
               isDanger={armed?.id === k.id && armed.kind === "regenerate"}
-              onPress={() => setArmed({ id: k.id, kind: "regenerate" })}
+              onPress={() => arm({ id: k.id, kind: "regenerate" })}
             >
               Regenerate
             </RowAction>
@@ -1019,8 +1041,13 @@ export function KeysPage() {
               caller can't be broken (and its audit trail erased) in one click. */}
             {k.is_active ? null : (
               <RowAction
+                ref={
+                  lastArmed?.id === k.id && lastArmed.kind === "delete"
+                    ? triggerRef
+                    : undefined
+                }
                 isDanger={armed?.id === k.id && armed.kind === "delete"}
-                onPress={() => setArmed({ id: k.id, kind: "delete" })}
+                onPress={() => arm({ id: k.id, kind: "delete" })}
               >
                 Delete
               </RowAction>
@@ -1040,6 +1067,7 @@ export function KeysPage() {
       if (armed.kind === "regenerate") {
         return (
           <ArmedStrip
+            confirmRef={confirmRef}
             confirmLabel="Regenerate"
             isPending={rotateKey.isPending}
             message={
@@ -1058,6 +1086,7 @@ export function KeysPage() {
       }
       return (
         <ArmedStrip
+          confirmRef={confirmRef}
           confirmLabel="Delete permanently"
           isPending={deleteKey.isPending}
           message={

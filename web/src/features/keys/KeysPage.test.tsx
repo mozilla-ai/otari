@@ -481,11 +481,31 @@ describe("KeysPage", () => {
     expect(document.activeElement).not.toBe(document.body)
   })
 
-  // Cancel is the half that is still broken, and deliberately not asserted as
-  // passing: the strip unmounts under the focused Confirm and focus lands on
-  // <body>. Returning it needs a ref on the row action to return it to, and
-  // `RowAction` forwards none, so the fix is not in this file.
-  it.todo("returns focus to the row action when an armed row is cancelled")
+  it("returns focus to the row action when an armed row is cancelled", async () => {
+    // Cancelling unmounts the strip from under the focused Confirm, which the
+    // browser answers by moving focus to <body>: the keyboard loses its place
+    // on the most destructive control in the row. `useConfirmationFocus` hands
+    // it back, and the trigger is identified by `lastArmed` rather than `armed`
+    // so the ref is still attached when the hook's effect runs.
+    mockApi({ keys: [apiKey()] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    const trigger = within(row).getByRole("button", { name: "Regenerate" })
+    await user.click(trigger)
+    await screen.findByText(/stops working immediately/)
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() =>
+      expect(screen.queryByText(/stops working immediately/)).toBeNull(),
+    )
+
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement).toBe(
+      within(row).getByRole("button", { name: "Regenerate" }),
+    )
+  })
 
   it("confirms Copied when the clipboard API is available", async () => {
     mockApi({ keys: [] })

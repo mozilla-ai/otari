@@ -60,7 +60,7 @@ test.describe("activity log", () => {
     await expect(filterChip(page, "Status", "Error")).toBeVisible()
     await expect(rows(page)).toHaveCount(COUNTS.errors)
     for (const row of await rows(page).all()) {
-      await expect(row).toContainText("error")
+      await expect(row).toContainText("Error")
     }
 
     // Clearing from the chip must restore the full log, not merely blank the
