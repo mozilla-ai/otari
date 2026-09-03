@@ -97,7 +97,10 @@ describe("OrganizationDomainsPage", () => {
   it("shows a verified, enabled claim as active and pausable", async () => {
     mockApi({
       domains: [
-        organizationDomain({ verified_at: "2026-08-25T00:00:00+00:00" }),
+        organizationDomain({
+          verified_at: "2026-08-25T00:00:00+00:00",
+          proof_expires_at: "2099-01-01T00:00:00+00:00",
+        }),
       ],
     })
     renderPage(<OrganizationDomainsPage />)
@@ -113,6 +116,7 @@ describe("OrganizationDomainsPage", () => {
       domains: [
         organizationDomain({
           verified_at: "2026-08-25T00:00:00+00:00",
+          proof_expires_at: "2099-01-01T00:00:00+00:00",
           enabled: false,
         }),
       ],
@@ -121,6 +125,44 @@ describe("OrganizationDomainsPage", () => {
 
     expect(await screen.findByText("Paused")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument()
+  })
+
+  it("shows a claim whose proof has aged out as expired, not as unverified", async () => {
+    // The claim *was* proven, so it is one re-check from working. Calling that
+    // "Not verified" would suggest the admin never published the record.
+    mockApi({
+      domains: [
+        organizationDomain({
+          verified_at: "2026-05-01T00:00:00+00:00",
+          proof_expires_at: "2026-07-30T00:00:00+00:00",
+        }),
+      ],
+    })
+    renderPage(<OrganizationDomainsPage />)
+
+    expect(await screen.findByText("Proof expired")).toBeInTheDocument()
+    expect(screen.queryByText("Active")).toBeNull()
+    // And the card comes back, so there is somewhere to act.
+    expect(
+      screen.getByRole("button", { name: "Re-verify domain" }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/proof has expired/)).toBeInTheDocument()
+  })
+
+  it("leaves a claim whose proof is still current alone", async () => {
+    mockApi({
+      domains: [
+        organizationDomain({
+          verified_at: "2026-08-25T00:00:00+00:00",
+          proof_expires_at: "2099-01-01T00:00:00+00:00",
+        }),
+      ],
+    })
+    renderPage(<OrganizationDomainsPage />)
+
+    expect(await screen.findByText("Active")).toBeInTheDocument()
+    expect(screen.queryByText("Proof expired")).toBeNull()
+    expect(screen.queryByRole("button", { name: /verify/i })).toBeNull()
   })
 
   it("claims a domain at the role the form names", async () => {

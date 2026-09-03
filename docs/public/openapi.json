@@ -6513,6 +6513,18 @@
             "title": "Organization Id",
             "type": "string"
           },
+          "proof_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Expires At"
+          },
           "updated_at": {
             "anyOf": [
               {

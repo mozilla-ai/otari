@@ -43,6 +43,24 @@ import { canManage, membershipLabel } from "./roles"
 // `ORGANIZATION_DOMAIN_ROLES` on the server: publishing a DNS record proves
 // control of a domain, which is not a decision about any one person, so it must
 // never be enough to mint someone who can manage the organization.
+//
+// A proof expires, so "verified" is not a terminal state and the page has three
+// of them rather than two: never proven, proven, and proven-but-stale. The last
+// gets the same card as the first, because the admin's next action is the same.
+
+/**
+ * Whether a claim's DNS proof has aged out.
+ *
+ * `proof_expires_at` is computed by the server from its own TTL, so this reads
+ * the answer rather than holding a second copy of the constant that could drift
+ * from it.
+ */
+function proofExpired(row: OrganizationDomain): boolean {
+  const expiresAt = row.proof_expires_at
+  // Absent as well as null: the field is optional on the wire, and a claim with
+  // no expiry is one with no proof, which the caller handles as "not verified".
+  return expiresAt != null && new Date(expiresAt).getTime() <= Date.now()
+}
 
 /** The roles a claim may hand out. Narrower than `MEMBERSHIP_ROLES` on purpose. */
 const AUTO_JOIN_ROLE_OPTIONS = [
@@ -112,19 +130,34 @@ function ClaimForm({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** The record to publish, shown until the claim is verified and then retired. */
+/** The record to publish, shown while a claim has no proof it can act on. */
 function PendingProof({ row }: { row: OrganizationDomain }) {
   const verify = useVerifyOrganizationDomain()
+  const expired = proofExpired(row)
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
         <div className="flex flex-col gap-1">
-          <h2 className="text-title">Verify {row.domain}</h2>
+          <h2 className="text-title">
+            {expired ? `Re-verify ${row.domain}` : `Verify ${row.domain}`}
+          </h2>
           <p className="text-caption">
-            Publish this as a TXT record at the apex of{" "}
-            <code>{row.domain}</code>, then verify. Until then the claim admits
-            nobody. DNS changes can take a while to propagate, so a first
-            attempt that fails is normal.
+            {expired ? (
+              <>
+                This domain's proof has expired, so the claim has stopped
+                admitting anyone. Domains change hands, so a proof is good for a
+                limited time and is renewed by checking the record again. The
+                record has not changed: it should still be published at the apex
+                of <code>{row.domain}</code>.
+              </>
+            ) : (
+              <>
+                Publish this as a TXT record at the apex of{" "}
+                <code>{row.domain}</code>, then verify. Until then the claim
+                admits nobody. DNS changes can take a while to propagate, so a
+                first attempt that fails is normal.
+              </>
+            )}
           </p>
         </div>
         <ErrorBanner error={verify.error} />
@@ -138,7 +171,7 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
             isPending={verify.isPending}
             onPress={() => verify.mutate(row.id)}
           >
-            Verify domain
+            {expired ? "Re-verify domain" : "Verify domain"}
           </Button>
         </div>
       </Card.Content>
@@ -155,7 +188,11 @@ export function OrganizationDomainsPage() {
   const [adding, setAdding] = useState(false)
 
   const rows = domains.data?.data ?? []
-  const pending = rows.filter((row) => row.verified_at === null)
+  // Both states need the same card: one has never had a proof, the other's has
+  // aged out, and in each case the claim is admitting nobody until it verifies.
+  const pending = rows.filter(
+    (row) => row.verified_at === null || proofExpired(row),
+  )
 
   const columns: DataTableColumn<OrganizationDomain>[] = [
     {
@@ -171,6 +208,12 @@ export function OrganizationDomainsPage() {
         row.verified_at === null ? (
           <Chip size="sm" color="warning">
             Not verified
+          </Chip>
+        ) : proofExpired(row) ? (
+          // Distinct from "Not verified": this domain *was* proven, and the
+          // claim is one re-check from working rather than never having run.
+          <Chip size="sm" color="warning">
+            Proof expired
           </Chip>
         ) : row.enabled ? (
           <Chip size="sm" color="accent">

@@ -181,6 +181,30 @@ class OrganizationDomainAlreadyClaimedError(TenancyConflictError):
         super().__init__(f"'{domain}' is already claimed")
 
 
+class OrganizationDomainClaimedHereError(TenancyConflictError):
+    """This organization already holds a claim on the domain.
+
+    Distinct from ``OrganizationDomainAlreadyClaimedError``, which is about
+    somebody else's proven claim and deliberately says nothing about who: this
+    one is about the caller's own row, which they can already see and act on, so
+    it names the situation plainly.
+    """
+
+    def __init__(self, domain: str):
+        super().__init__(f"'{domain}' is already claimed by this organization")
+
+
+class TooManyOrganizationDomainsError(TenancyValidationError):
+    """The organization is at its claim ceiling.
+
+    A ceiling exists because every unverified claim is a name this deployment
+    will run an outbound DNS query against on demand.
+    """
+
+    def __init__(self, limit: int):
+        super().__init__(f"An organization may claim at most {limit} email domains")
+
+
 class OrganizationDomainNotVerifiedError(TenancyValidationError):
     """The expected TXT record was not found at the claimed domain."""
 
@@ -1166,6 +1190,7 @@ __all__ = [
     "OrganizationGuardrailUnsafeUrlError",
     "OrganizationMemberAlreadyExistsError",
     "OrganizationDomainAlreadyClaimedError",
+    "OrganizationDomainClaimedHereError",
     "OrganizationDomainNotFoundError",
     "OrganizationDomainNotVerifiedError",
     "OrganizationMemberNotFoundError",
@@ -1202,6 +1227,7 @@ __all__ = [
     "TenancyValidationError",
     "PublicEmailDomainError",
     "UnmodifiedPasswordError",
+    "TooManyOrganizationDomainsError",
     "UnregistrableDomainError",
     "VerificationTokenInvalidError",
     "WorkspaceAlreadyExistsError",

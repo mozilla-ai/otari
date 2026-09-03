@@ -14,6 +14,21 @@ Publishing a TXT record at the domain's apex is the check that the claimant
 controls it, and until that lands, ``verified_at`` is null and auto-join skips
 the row entirely.
 
+**Claiming is not exclusive; proving is.** Any number of organizations may hold
+an unproven claim on one domain, and proving it displaces the rest. Making the
+claim itself exclusive is the obvious design and it is a trap: creating an
+organization needs no privilege, so first-come-first-served on claims would let
+anyone permanently lock a domain's real owner out of claiming it, with a 409
+that cannot say who to ask.
+
+**A proof expires.** ``verified_at`` records when the evidence was taken, and
+``DOMAIN_PROOF_TTL`` is how long it is trusted. Domains change hands; a stamp
+kept forever would go on admitting whoever owns the domain next, at a role this
+organization picked. Past the TTL the claim admits nobody until an admin
+re-verifies, which fails closed and needs no background sweeper. Re-checking DNS
+on the sign-in path was the alternative and is worse: a 5s outbound lookup in
+front of somebody waiting to sign in.
+
 **Why auto-join runs at sign-in rather than at signup.** Verifying a domain has
 to sweep in the accounts that already existed, which is the ordinary case: an
 admin claims their company's domain on a deployment their colleagues already
@@ -37,7 +52,9 @@ from gateway.core.email_domains import (
 )
 from gateway.log_config import logger
 from gateway.models.tenancy import (
+    DOMAIN_PROOF_TTL,
     DOMAIN_VERIFICATION_TXT_PREFIX,
+    MAX_ORGANIZATION_DOMAINS,
     OrganizationDomain,
     OrganizationDomainCreateRequest,
     OrganizationDomainPublic,
@@ -51,9 +68,11 @@ from gateway.repositories.tenancy.organization_member_repository import Organiza
 from gateway.services.tenancy.domain_verification import resolve_txt_records
 from gateway.services.tenancy.errors import (
     OrganizationDomainAlreadyClaimedError,
+    OrganizationDomainClaimedHereError,
     OrganizationDomainNotFoundError,
     OrganizationDomainNotVerifiedError,
     PublicEmailDomainError,
+    TooManyOrganizationDomainsError,
     UnregistrableDomainError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -107,26 +126,23 @@ class OrganizationDomainService:
 
         domain = self._validated_claim(request.domain)
 
-        # The pre-check answers the ordinary case (a domain another organization
-        # already holds) with a clean conflict; the caught IntegrityError closes
-        # the race where two admins claim the same domain at once. Both are
-        # needed: the first alone loses the race, the second alone would make a
-        # routine conflict indistinguishable from a bug.
-        if await self.domains.get_by_domain(domain) is not None:
+        # Only a *proven* claim blocks a new one. An unproven claim by anyone
+        # else is no obstacle: it grants nothing, and refusing on it would let
+        # whoever claimed a domain first lock its real owner out for good.
+        if await self.domains.get_verified_by_domain(domain) is not None:
             raise OrganizationDomainAlreadyClaimedError(domain)
+        if await self.domains.get_by_domain_and_organization(domain, organization.id) is not None:
+            raise OrganizationDomainClaimedHereError(domain)
+        if await self.domains.count_for_organization(organization.id) >= MAX_ORGANIZATION_DOMAINS:
+            raise TooManyOrganizationDomainsError(MAX_ORGANIZATION_DOMAINS)
 
-        try:
-            async with self.db.begin_nested():
-                row = await self.domains.create_domain(
-                    organization_id=organization.id,
-                    domain=domain,
-                    default_role=request.default_role,
-                    enabled=request.enabled,
-                    verification_token=secrets.token_hex(_VERIFICATION_TOKEN_BYTES),
-                )
-        except IntegrityError as exc:
-            raise OrganizationDomainAlreadyClaimedError(domain) from exc
-
+        row = await self.domains.create_domain(
+            organization_id=organization.id,
+            domain=domain,
+            default_role=request.default_role,
+            enabled=request.enabled,
+            verification_token=secrets.token_hex(_VERIFICATION_TOKEN_BYTES),
+        )
         await self.db.commit()
         await self.db.refresh(row)
         return self._to_public(row)
@@ -170,22 +186,48 @@ class OrganizationDomainService:
     ) -> OrganizationDomainPublic:
         """Prove control of a claimed domain by finding its TXT record.
 
-        Idempotent: an already-verified claim is returned untouched without a
-        second lookup, so a double click costs nothing and re-verifying cannot
-        move ``verified_at`` forward.
+        Idempotent while the proof is fresh: a claim verified inside
+        ``DOMAIN_PROOF_TTL`` is returned untouched without a second lookup, so a
+        double click costs nothing. Once the proof has aged out this runs for
+        real again, which is how a claim is renewed.
+
+        Proving a domain **displaces** every unproven claim on it. Those rows
+        were bets on a domain somebody else has now demonstrably controlled, and
+        the partial unique index means none of them could ever be verified;
+        leaving them would strand a row that says "Not verified" forever with no
+        way to act on it.
         """
         organization = await self.organizations.get_active_organization_for_user(user)
         await self.organizations.require_active_organization_management_access(user=user, organization=organization)
 
         row = await self._require_domain(organization_domain_id, organization.id)
-        if row.verified_at is not None:
+        now = datetime.now(UTC)
+        if not row.proof_expired(now=now):
             return self._to_public(row)
+
+        # Re-checked here rather than only at claim time: another organization
+        # may have proven this domain in the meantime, and the index would
+        # otherwise refuse the write with an error the caller cannot read.
+        holder = await self.domains.get_verified_by_domain(row.domain)
+        if holder is not None and holder.id != row.id:
+            raise OrganizationDomainAlreadyClaimedError(row.domain)
 
         expected = f"{DOMAIN_VERIFICATION_TXT_PREFIX}{row.verification_token}"
         if expected not in await resolve_txt_records(row.domain):
             raise OrganizationDomainNotVerifiedError(row.domain)
 
-        verified = await self.domains.mark_verified(row, verified_at=datetime.now(UTC))
+        try:
+            # The savepoint settles two organizations verifying the same domain
+            # at once: the partial unique index refuses the loser, and without
+            # it that IntegrityError would poison the whole transaction.
+            async with self.db.begin_nested():
+                verified = await self.domains.mark_verified(row, verified_at=now)
+        except IntegrityError as exc:
+            raise OrganizationDomainAlreadyClaimedError(row.domain) from exc
+
+        for beaten in await self.domains.list_rival_unverified(row.domain, winner_id=row.id):
+            await self.domains.delete_domain(beaten)
+
         await self.db.commit()
         await self.db.refresh(verified)
         return self._to_public(verified)
@@ -221,8 +263,8 @@ class OrganizationDomainService:
         - An unverified address is skipped. Otherwise signing up as
           ``anyone@theircompany.com`` without ever reading the mail would be
           enough to get in.
-        - A claim that is disabled, or whose DNS proof has not landed, is
-          skipped.
+        - A claim that is disabled, whose DNS proof has not landed, or whose
+          proof has aged out past ``DOMAIN_PROOF_TTL``, is skipped.
         - An existing membership is returned untouched. A ``suspended`` row
           means somebody was removed on purpose and must not be re-added by
           their next sign-in, and an established role is never overwritten by
@@ -247,8 +289,11 @@ class OrganizationDomainService:
         if domain is None:
             return None
 
-        claim = await self.domains.get_by_domain(domain)
-        if claim is None or not claim.enabled or claim.verified_at is None:
+        claim = await self.domains.get_verified_by_domain(domain)
+        # A proof that has aged out admits nobody until an admin re-verifies.
+        # Fails closed on purpose: the domain may have changed hands since, and
+        # the cost of being wrong is admitting a stranger to a tenant.
+        if claim is None or not claim.enabled or claim.proof_expired(now=datetime.now(UTC)):
             return None
 
         existing = await self.members.get_by_organization_and_user(claim.organization_id, user.id)
@@ -320,6 +365,7 @@ class OrganizationDomainService:
             enabled=row.enabled,
             verification_record=row.verification_record,
             verified_at=row.verified_at,
+            proof_expires_at=None if row.verified_at is None else row.verified_at + DOMAIN_PROOF_TTL,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

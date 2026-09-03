@@ -45,6 +45,29 @@ PUBLIC_EMAIL_DOMAINS = frozenset(
     }
 )
 
+def _ascii(domain: str) -> str:
+    """Punycode an internationalized domain, or hand back what came in.
+
+    Both normalizers below run this, which is the whole point: a claim and a
+    sign-in have to land on the same spelling. Without it the two disagree
+    exactly where it is hardest to see. ``münchen.de`` fails the ASCII-only
+    shape check, so an admin retypes it as ``xn--mnchen-3ya.de``, which is
+    claimable and provable by DNS; every colleague then signs in at
+    ``münchen.de``, which normalizes to itself and matches nothing. The result
+    is a claim shown as verified and active that admits nobody, with no error
+    raised anywhere to explain it.
+
+    A value the codec refuses (an empty label, an over-long one) is returned
+    unchanged rather than raised on. For a claim, ``is_registrable_domain``
+    rejects it a moment later with a message about the domain; for a sign-in it
+    simply matches nothing, which is what an unclaimable domain should do.
+    """
+    try:
+        return domain.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return domain
+
+
 # A registrable domain: dot-separated labels with an alphabetic TLD. Stricter
 # than `core.addresses`' address pattern on purpose. That one bounds what a
 # person may sign in as and leans permissive; this one bounds what an admin
@@ -60,12 +83,13 @@ def email_domain(email: str) -> str | None:
     Splits on the last ``@``, so plus-addressing and quoted local parts are
     irrelevant. The trailing dot of an RFC-legal absolute form
     (``person@example.com.``) is stripped, because an admin claims the domain
-    without it and the two must match.
+    without it and the two must match, and an internationalized domain is
+    punycoded for the same reason (see ``_ascii``).
     """
     if "@" not in email:
         return None
     domain = email.rsplit("@", 1)[1].strip().lower().rstrip(".")
-    return domain or None
+    return _ascii(domain) or None
 
 
 def normalized_domain(value: str) -> str:
@@ -73,12 +97,13 @@ def normalized_domain(value: str) -> str:
 
     Accepts a bare domain or a whole address, so pasting one's own address into
     the field claims the right thing rather than storing something that matches
-    nobody.
+    nobody. Internationalized domains are punycoded, so ``münchen.de`` and
+    ``xn--mnchen-3ya.de`` are one claim rather than two.
     """
     candidate = value.strip().lower().rstrip(".")
     if "@" in candidate:
         candidate = candidate.rsplit("@", 1)[1]
-    return candidate
+    return _ascii(candidate)
 
 
 def is_registrable_domain(domain: str) -> bool:

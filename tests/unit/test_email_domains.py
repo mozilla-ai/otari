@@ -55,6 +55,37 @@ def test_the_two_normalizers_agree_on_the_forms_an_admin_might_type() -> None:
         assert normalized_domain(typed) == email_domain(signed_in_as)
 
 
+def test_an_internationalized_domain_lands_on_one_spelling_from_either_side() -> None:
+    """The failure this module exists to prevent, in its sharpest form.
+
+    Without punycoding, an admin typing ``münchen.de`` is refused (the shape
+    check is ASCII-only), retypes the punycode, and gets a claim that verifies
+    by DNS and matches nobody: every colleague signs in at ``münchen.de``, which
+    normalized to itself. A verified, active claim admitting nobody, with no
+    error anywhere to explain it.
+    """
+    assert normalized_domain("münchen.de") == "xn--mnchen-3ya.de"
+    assert normalized_domain("MÜNCHEN.de") == "xn--mnchen-3ya.de"
+    # Already-punycoded input is left where it is, so both spellings are one claim.
+    assert normalized_domain("xn--mnchen-3ya.de") == "xn--mnchen-3ya.de"
+    assert email_domain("person@münchen.de") == "xn--mnchen-3ya.de"
+    assert email_domain("person@MÜNCHEN.de.") == "xn--mnchen-3ya.de"
+    assert normalized_domain("münchen.de") == email_domain("person@münchen.de")
+
+
+def test_an_internationalized_claim_passes_the_shape_check_once_encoded() -> None:
+    """The other half: it must also be claimable, not merely consistent."""
+    assert is_registrable_domain(normalized_domain("münchen.de"))
+    assert is_registrable_domain(normalized_domain("bücher.example"))
+
+
+def test_a_domain_the_codec_refuses_is_passed_through_rather_than_raised_on() -> None:
+    """An unencodable value is refused as a claim and matches nothing on sign-in."""
+    assert normalized_domain("a..b") == "a..b"
+    assert not is_registrable_domain(normalized_domain("a..b"))
+    assert email_domain("person@a..b") == "a..b"
+
+
 def test_a_registrable_domain_needs_labels_and_an_alphabetic_tld() -> None:
     assert is_registrable_domain("example.com")
     assert is_registrable_domain("sub.example.co.uk")

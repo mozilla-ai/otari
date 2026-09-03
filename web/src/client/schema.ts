@@ -7346,6 +7346,8 @@ export interface components {
              * Format: uuid
              */
             organization_id: string;
+            /** Proof Expires At */
+            proof_expires_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
             /** Verification Record */

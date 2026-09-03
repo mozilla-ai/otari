@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -20,15 +20,56 @@ class OrganizationDomainRepository(
     def __init__(self, db: AsyncSession):
         super().__init__(db, OrganizationDomain)
 
-    async def get_by_domain(self, domain: str) -> OrganizationDomain | None:
-        """Return the claim on ``domain``, or None.
+    async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None:
+        """Return the one *proven* claim on ``domain``, or None.
 
-        Deployment-wide rather than scoped to an organization, which is what the
-        UNIQUE constraint makes meaningful: this is the sign-in lookup, and at
-        that point there is no organization yet to scope by.
+        Deployment-wide rather than scoped to an organization: this is the
+        sign-in lookup, and at that point there is no organization to scope by.
+        At most one row can match, which is what the partial unique index
+        guarantees; unproven claims are excluded here because they grant
+        nothing and any number of organizations may hold one.
         """
-        result = await self.db.execute(select(OrganizationDomain).where(col(OrganizationDomain.domain) == domain))
+        result = await self.db.execute(
+            select(OrganizationDomain).where(
+                col(OrganizationDomain.domain) == domain,
+                col(OrganizationDomain.verified_at).is_not(None),
+            )
+        )
         return result.scalars().first()
+
+    async def get_by_domain_and_organization(
+        self,
+        domain: str,
+        organization_id: uuid.UUID,
+    ) -> OrganizationDomain | None:
+        """Return this organization's own claim on ``domain``, or None."""
+        result = await self.db.execute(
+            select(OrganizationDomain).where(
+                col(OrganizationDomain.domain) == domain,
+                col(OrganizationDomain.organization_id) == organization_id,
+            )
+        )
+        return result.scalars().first()
+
+    async def list_rival_unverified(self, domain: str, *, winner_id: uuid.UUID) -> list[OrganizationDomain]:
+        """Return the unproven claims on ``domain`` that a proof has just beaten."""
+        result = await self.db.execute(
+            select(OrganizationDomain).where(
+                col(OrganizationDomain.domain) == domain,
+                col(OrganizationDomain.id) != winner_id,
+                col(OrganizationDomain.verified_at).is_(None),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def count_for_organization(self, organization_id: uuid.UUID) -> int:
+        """How many domains this organization currently claims."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(OrganizationDomain)
+            .where(col(OrganizationDomain.organization_id) == organization_id)
+        )
+        return int(result.scalar_one())
 
     async def get_by_id_and_organization(
         self,

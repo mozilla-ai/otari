@@ -10,7 +10,7 @@ a test that reached real DNS would pass or fail on somebody else's zone file.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -18,7 +18,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import (
+    DOMAIN_PROOF_TTL,
     DOMAIN_VERIFICATION_TXT_PREFIX,
+    MAX_ORGANIZATION_DOMAINS,
     Organization,
     OrganizationDomain,
     OrganizationDomainCreateRequest,
@@ -34,9 +36,11 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationDomainAlreadyClaimedError,
+    OrganizationDomainClaimedHereError,
     OrganizationDomainNotFoundError,
     OrganizationDomainNotVerifiedError,
     PublicEmailDomainError,
+    TooManyOrganizationDomainsError,
     UnregistrableDomainError,
 )
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
@@ -568,3 +572,206 @@ def test_an_unknown_claim_is_a_404(client: TestClient, master_key_header: dict[s
         headers=master_key_header,
     )
     assert response.status_code == 404, response.text
+
+
+# =============================================================================
+# Who a claim belongs to when two organizations want it
+# =============================================================================
+
+
+async def test_an_unproven_claim_does_not_lock_out_the_domains_real_owner(
+    async_db: AsyncSession,
+) -> None:
+    """The trap a plain UNIQUE(domain) sets.
+
+    Creating an organization takes no privilege, so making the *claim*
+    exclusive would let anyone claim a domain they do not own and shut its real
+    owner out for good, behind a 409 that deliberately cannot say who to ask.
+    """
+    squatter = await _organization(async_db, slug="squatter")
+    real = await _organization(async_db, slug="real")
+    await _claim(async_db, squatter, domain="contested.example", verified=False)
+    owner = await _identity(async_db, real, role="admin", email="admin@real.example")
+
+    mine = await OrganizationDomainService(async_db).create_domain_for_user(
+        user=owner,
+        request=OrganizationDomainCreateRequest(domain="contested.example"),
+    )
+
+    assert mine.organization_id == real.id
+    assert mine.verified_at is None
+
+
+async def test_proving_a_domain_displaces_the_unproven_claims_on_it(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A beaten claim is removed, not left to sit as un-verifiable forever."""
+    squatter = await _organization(async_db, slug="squatter")
+    real = await _organization(async_db, slug="real")
+    beaten = await _claim(async_db, squatter, domain="contested.example", verified=False)
+    owner = await _identity(async_db, real, role="admin", email="admin@real.example")
+    service = OrganizationDomainService(async_db)
+    mine = await service.create_domain_for_user(
+        user=owner,
+        request=OrganizationDomainCreateRequest(domain="contested.example"),
+    )
+
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.resolve_txt_records",
+        _resolver({"contested.example": [mine.verification_record]}),
+    )
+    await service.verify_domain_for_user(user=owner, organization_domain_id=mine.id)
+
+    repository = OrganizationDomainRepository(async_db)
+    assert await repository.get(beaten.id) is None
+    holder = await repository.get_verified_by_domain("contested.example")
+    assert holder is not None
+    assert holder.organization_id == real.id
+
+
+async def test_a_proven_domain_cannot_then_be_claimed_by_anyone_else(
+    async_db: AsyncSession,
+) -> None:
+    real = await _organization(async_db, slug="real")
+    latecomer = await _organization(async_db, slug="latecomer")
+    await _claim(async_db, real, domain="contested.example", verified=True)
+    admin = await _identity(async_db, latecomer, role="admin", email="admin@latecomer.example")
+
+    with pytest.raises(OrganizationDomainAlreadyClaimedError) as raised:
+        await OrganizationDomainService(async_db).create_domain_for_user(
+            user=admin,
+            request=OrganizationDomainCreateRequest(domain="contested.example"),
+        )
+    assert "real" not in str(raised.value).lower()
+
+
+async def test_verifying_is_refused_once_another_organization_has_proven_the_domain(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The loser of the race gets an answer they can read, not a constraint error."""
+    winner = await _organization(async_db, slug="winner")
+    loser = await _organization(async_db, slug="loser")
+    await _claim(async_db, winner, domain="contested.example", verified=True)
+    mine = await _claim(async_db, loser, domain="contested.example", verified=False)
+    admin = await _identity(async_db, loser, role="admin", email="admin@loser.example")
+
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.resolve_txt_records",
+        _resolver({"contested.example": [f"{DOMAIN_VERIFICATION_TXT_PREFIX}{mine.verification_token}"]}),
+    )
+    with pytest.raises(OrganizationDomainAlreadyClaimedError):
+        await OrganizationDomainService(async_db).verify_domain_for_user(
+            user=admin,
+            organization_domain_id=mine.id,
+        )
+
+
+async def test_the_same_organization_cannot_claim_one_domain_twice(async_db: AsyncSession) -> None:
+    """Named plainly, unlike the cross-tenant refusal: this row is the caller's own."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    service = OrganizationDomainService(async_db)
+    await service.create_domain_for_user(
+        user=admin,
+        request=OrganizationDomainCreateRequest(domain="acme.example"),
+    )
+
+    with pytest.raises(OrganizationDomainClaimedHereError):
+        await service.create_domain_for_user(
+            user=admin,
+            request=OrganizationDomainCreateRequest(domain="acme.example"),
+        )
+
+
+async def test_an_organization_is_capped_on_how_many_domains_it_may_claim(
+    async_db: AsyncSession,
+) -> None:
+    """Every unverified claim is a name this deployment will resolve on demand."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    for index in range(MAX_ORGANIZATION_DOMAINS):
+        await _claim(async_db, organization, domain=f"claim{index}.example", verified=False)
+
+    with pytest.raises(TooManyOrganizationDomainsError):
+        await OrganizationDomainService(async_db).create_domain_for_user(
+            user=admin,
+            request=OrganizationDomainCreateRequest(domain="one-too-many.example"),
+        )
+
+
+# =============================================================================
+# A proof does not last forever
+# =============================================================================
+
+
+async def test_a_proof_that_has_aged_out_admits_nobody(async_db: AsyncSession) -> None:
+    """Domains change hands; a stamp kept forever would admit whoever owns it next."""
+    organization = await _organization(async_db, slug="acme")
+    claim = await _claim(async_db, organization, domain="acme.example")
+    claim.verified_at = datetime.now(UTC) - DOMAIN_PROOF_TTL - timedelta(days=1)
+    async_db.add(claim)
+    await async_db.flush()
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
+
+
+async def test_a_proof_inside_its_window_still_admits(async_db: AsyncSession) -> None:
+    """The other side of the boundary, so the TTL is not passing by refusing everything."""
+    organization = await _organization(async_db, slug="acme")
+    claim = await _claim(async_db, organization, domain="acme.example")
+    claim.verified_at = datetime.now(UTC) - DOMAIN_PROOF_TTL + timedelta(days=1)
+    async_db.add(claim)
+    await async_db.flush()
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+
+
+async def test_re_verifying_an_aged_out_proof_runs_the_lookup_again(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """How a claim is renewed: the short circuit applies to a fresh proof only."""
+    organization = await _organization(async_db, slug="acme")
+    admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
+    claim = await _claim(async_db, organization, domain="acme.example")
+    stale = datetime.now(UTC) - DOMAIN_PROOF_TTL - timedelta(days=1)
+    claim.verified_at = stale
+    async_db.add(claim)
+    await async_db.flush()
+
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.resolve_txt_records",
+        _resolver({"acme.example": [f"{DOMAIN_VERIFICATION_TXT_PREFIX}{claim.verification_token}"]}),
+    )
+    renewed = await OrganizationDomainService(async_db).verify_domain_for_user(
+        user=admin,
+        organization_domain_id=claim.id,
+    )
+
+    assert renewed.verified_at is not None
+    assert renewed.verified_at > stale
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
+
+
+async def test_a_record_pulled_after_verification_stops_mattering_only_at_the_ttl(
+    async_db: AsyncSession,
+) -> None:
+    """Stated so the window is a decision on the record rather than an accident.
+
+    Nothing re-reads DNS between verifications, so a domain that changes hands
+    keeps admitting people until the proof ages out. That is the exposure the
+    TTL bounds, and shortening it is the lever if it is ever judged too long.
+    """
+    organization = await _organization(async_db, slug="acme")
+    claim = await _claim(async_db, organization, domain="acme.example")
+    claim.verified_at = datetime.now(UTC) - DOMAIN_PROOF_TTL + timedelta(minutes=1)
+    async_db.add(claim)
+    await async_db.flush()
+    newcomer = await _identity(async_db, organization, role=None, email="new@acme.example")
+
+    assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None

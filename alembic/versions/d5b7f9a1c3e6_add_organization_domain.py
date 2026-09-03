@@ -9,13 +9,17 @@ migrations (``b7d2f4a1c9e0`` then ``a3e9f2c1d8b4``, which added verification
 later). Nothing here has ever shipped without the proof, and a claim without one
 grants nothing, so there is no state worth reproducing the split for.
 
-``UNIQUE(domain)`` is deployment-wide and not per organization. Auto-join
-resolves an address to exactly one organization, and two organizations holding
-the same claim has no defensible answer; the constraint is also what settles the
-race between two admins claiming a domain at once.
+Uniqueness is **partial**, over verified rows alone. Auto-join has to resolve an
+address to exactly one organization, so two *proven* claims on a domain has no
+defensible answer, and the index is what settles the race between two
+organizations verifying at once. Unproven claims are deliberately not unique: a
+plain ``UNIQUE(domain)`` would make claiming first-come-first-served, so anyone
+who can create an organization could permanently lock the domain's real owner
+out of ever claiming it.
 
-No index on ``domain`` beyond that constraint's own: the sign-in lookup is an
-equality match on it, which the unique index already serves.
+``domain`` carries a plain index of its own for that reason: the partial unique
+one covers only verified rows, and both the claim conflict check and the
+displacement sweep on verify read unverified ones.
 
 Revision ID: d5b7f9a1c3e6
 Revises: c9f2a6b4e8d7
@@ -32,6 +36,8 @@ down_revision: str | Sequence[str] | None = "c9f2a6b4e8d7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+_VERIFIED_DOMAIN = "uq_organization_domain_verified_domain"
+
 
 def upgrade() -> None:
     op.create_table(
@@ -47,7 +53,6 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["organization_id"], ["organization.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("domain", name="uq_organization_domain_domain"),
     )
     op.create_index(
         op.f("ix_organization_domain_organization_id"),
@@ -55,8 +60,24 @@ def upgrade() -> None:
         ["organization_id"],
         unique=False,
     )
+    op.create_index(
+        op.f("ix_organization_domain_domain"),
+        "organization_domain",
+        ["domain"],
+        unique=False,
+    )
+    op.create_index(
+        _VERIFIED_DOMAIN,
+        "organization_domain",
+        ["domain"],
+        unique=True,
+        postgresql_where=sa.text("verified_at IS NOT NULL"),
+        sqlite_where=sa.text("verified_at IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(_VERIFIED_DOMAIN, table_name="organization_domain")
+    op.drop_index(op.f("ix_organization_domain_domain"), table_name="organization_domain")
     op.drop_index(op.f("ix_organization_domain_organization_id"), table_name="organization_domain")
     op.drop_table("organization_domain")

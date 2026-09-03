@@ -526,6 +526,7 @@ export function organizationDomain(
     // Unverified by default: a claim lands inert, and a fixture that arrived
     // already proven would let a test about the pending state pass by accident.
     verified_at: null,
+    proof_expires_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
     ...overrides,
