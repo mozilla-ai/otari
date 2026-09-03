@@ -248,7 +248,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
             changed afterwards on the Workspaces page.
           </span>
           {workspaceIds.length === 0 ? (
-            <span className="text-xs text-warning">
+            <span className="text-caption text-warning">
               With none selected they join the organization but no workspace,
               and will see nothing until someone assigns them one.
             </span>

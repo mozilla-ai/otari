@@ -868,14 +868,14 @@ function PolicyForm({
               )}
             </p>
             {candidates.length < 2 ? (
-              <p className="text-xs text-danger">
+              <p className="text-caption text-danger">
                 Name at least two models.{" "}
                 {weighted ? "Splitting traffic one way" : "Ranking one"} is not
                 a routing decision.
               </p>
             ) : null}
             {duplicateCandidate ? (
-              <p className="text-xs text-danger">
+              <p className="text-caption text-danger">
                 Name each model once.{" "}
                 {weighted
                   ? "A model listed twice has one share, not two, so the split saved would not be the one shown."
@@ -883,12 +883,12 @@ function PolicyForm({
               </p>
             ) : null}
             {weighted && !weightsWellFormed ? (
-              <p className="text-xs text-danger">
+              <p className="text-caption text-danger">
                 Every share is a number of zero or more. Use 0 to drain a model
                 without removing it.
               </p>
             ) : weighted && !splitReady ? (
-              <p className="text-xs text-danger">
+              <p className="text-caption text-danger">
                 Give at least one model a share above zero, or this policy can
                 never send traffic anywhere but its marked model.
               </p>
@@ -1049,7 +1049,7 @@ function PolicyForm({
                 </div>
                 {guardrail.mode === "block" &&
                 (guardrail.on_unavailable ?? "block") === "block" ? (
-                  <div className="text-xs text-warning">
+                  <div className="text-caption text-warning">
                     With both set to block, a guardrails-service outage rejects
                     every request through this policy, ahead of any fallback
                     above.

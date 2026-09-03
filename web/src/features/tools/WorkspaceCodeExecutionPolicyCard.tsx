@@ -327,7 +327,7 @@ export function WorkspaceCodeExecutionPolicyCard({
             disabled={busy}
           />
           {withdrawnImage ? (
-            <p className="text-xs text-warning">
+            <p className="text-caption text-warning">
               This workspace is pinned to an image the operator no longer
               approves, so its requests are refused. Pick another, or ask an
               operator to restore it.
@@ -368,7 +368,7 @@ export function WorkspaceCodeExecutionPolicyCard({
             </Checkbox>
           ))}
           {staleTools.length > 0 ? (
-            <p className="text-xs text-warning">
+            <p className="text-caption text-warning">
               This workspace's policy names {staleTools.join(", ")}, which this
               deployment's sandbox no longer serves, so its requests are
               refused. Untick it and pick what should be allowed, or set the

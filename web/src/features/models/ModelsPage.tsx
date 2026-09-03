@@ -772,7 +772,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           </Button>
         </div>
         {setPricing.error ? (
-          <span className="text-xs text-danger">
+          <span className="text-caption text-danger">
             {errorMessage(setPricing.error)}
           </span>
         ) : null}
@@ -847,7 +847,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           </>
         ) : null}
         {deletePricing.error ? (
-          <span className="text-xs text-danger">
+          <span className="text-caption text-danger">
             {errorMessage(deletePricing.error)}
           </span>
         ) : null}
@@ -1168,7 +1168,7 @@ function InlinePriceForm({
           </span>
         ) : null}
         {setPricing.error || deletePricing.error ? (
-          <span className="text-xs text-danger">
+          <span className="text-caption text-danger">
             {errorMessage(setPricing.error ?? deletePricing.error)}
           </span>
         ) : null}
