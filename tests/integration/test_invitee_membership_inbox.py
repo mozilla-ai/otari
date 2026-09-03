@@ -342,26 +342,72 @@ async def test_an_unknown_membership_id_is_not_found(
             await service.decline_pending_membership_for_user(user=invitee, organization_member_id=uuid.uuid4())
 
 
-async def test_an_already_active_membership_has_no_invitation_left_to_act_on(
+async def test_accepting_twice_answers_the_same_success_rather_than_a_404(
     async_db: AsyncSession,
 ) -> None:
-    """The caller's own membership in the wrong state collapses into the same 404."""
+    """Two clicks before the list refreshes is the ordinary way to reach this.
+
+    Reporting "not found" for an action that succeeded would be worse than
+    saying so twice, and it tells the caller nothing they could not already
+    see: only their own memberships reach the check.
+    """
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
     service = OrganizationService(async_db)
 
-    issued = await _invite(service, admin, email="invitee@example.com")
-    await service.accept_pending_membership_for_user(
+    issued = await _invite(service, admin, email="invitee@example.com", role="admin")
+    first = await service.accept_pending_membership_for_user(
+        user=invitee,
+        organization_member_id=issued.organization_member_id,
+    )
+    second = await service.accept_pending_membership_for_user(
         user=invitee,
         organization_member_id=issued.organization_member_id,
     )
 
+    assert second == first
+    assert second.organization_name == "Inviting"
+    assert second.role == "admin"
+    # The second call is a read: it must not re-run the accept's writes.
+    invitation = await InvitationRepository(async_db).get(issued.invitation_id)
+    assert invitation is not None
+    assert invitation.status == "accepted"
+
+
+async def test_the_idempotent_branch_is_any_active_membership_and_decline_gets_none_of_it(
+    async_db: AsyncSession,
+) -> None:
+    """Where the two calls deliberately part company.
+
+    Accept is a read once the membership is `active`, so it answers for one the
+    caller never had an invitation to (their own ordinary membership) rather
+    than paying a lookup to tell that apart. Decline writes, so it stays
+    narrow: only a membership still `invited` has anything to decline, and an
+    active one collapses into the same 404 as somebody else's.
+    """
+    invitee, home = await _identity_with_a_home(async_db, email="invitee@example.com")
+    service = OrganizationService(async_db)
+    own = await OrganizationMemberRepository(async_db).get_by_organization_and_user(home.id, invitee.id)
+    assert own is not None
+
+    accepted = await service.accept_pending_membership_for_user(
+        user=invitee,
+        organization_member_id=own.id,
+    )
+    assert accepted.organization_name == home.name
+    assert accepted.role == "owner"
+
     with pytest.raises(InvitationNotFoundError):
-        await service.accept_pending_membership_for_user(
+        await service.decline_pending_membership_for_user(
             user=invitee,
-            organization_member_id=issued.organization_member_id,
+            organization_member_id=own.id,
         )
+
+    # Untouched: the accept above resolved to a read, so it wrote nothing.
+    refreshed = await OrganizationMemberRepository(async_db).get(own.id)
+    assert refreshed is not None
+    assert refreshed.status == "active"
 
 
 async def test_a_lapsed_invitation_is_omitted_from_the_inbox_and_refused_on_accept(

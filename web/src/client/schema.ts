@@ -2017,8 +2017,16 @@ export interface paths {
          *     Addressed by membership id rather than by token: the caller is already the
          *     addressee, so a token would add nothing their session does not carry.
          *
+         *     Idempotent for any membership the caller already holds ``active``, which is
+         *     what two clicks before the list refreshes produces: it answers that
+         *     membership's organization and role rather than a 404 for an action that
+         *     worked. Deliberately not narrowed to memberships that got there by
+         *     accepting, which would cost a lookup to tell the two apart and answer a
+         *     caller nothing they cannot already read from ``GET /me/memberships``.
+         *
          *     Answers 404 for a membership that is not the caller's own, whether or not
-         *     it exists, and for one that has no invitation left to accept.
+         *     it exists, and for one of theirs that is neither ``active`` nor holding an
+         *     invitation. An invitation that has lapsed answers 400.
          */
         post: operations["accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post"];
         delete?: never;

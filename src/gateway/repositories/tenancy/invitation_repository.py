@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -91,22 +91,26 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
             col(Invitation.status) == "pending",
             col(Invitation.expires_at) >= now,
         ]
-        joined = (
-            select(Invitation, OrganizationMember, Organization)
-            .join(OrganizationMember, col(Invitation.organization_member_id) == col(OrganizationMember.id))
-            .join(Organization, col(Invitation.organization_id) == col(Organization.id))
-        )
+        # One join set, applied to both statements. Counting over a narrower
+        # one lets a row be counted and not returned, which would end
+        # ``fetchAllPaged``'s walk early on a page it read as short; today
+        # nothing can produce that (there is no organization deletion, and the
+        # foreign key cascades), and keeping the two in step is what stops a
+        # later change from making it reachable.
+        def joined(statement: Select[Any]) -> Select[Any]:
+            return statement.join(
+                OrganizationMember,
+                col(Invitation.organization_member_id) == col(OrganizationMember.id),
+            ).join(Organization, col(Invitation.organization_id) == col(Organization.id))
 
         count_result = await self.db.execute(
-            select(func.count())
-            .select_from(Invitation)
-            .join(OrganizationMember, col(Invitation.organization_member_id) == col(OrganizationMember.id))
-            .where(*conditions)
+            joined(select(func.count()).select_from(Invitation)).where(*conditions)
         )
         count = count_result.scalar_one()
 
         result = await self.db.execute(
-            joined.where(*conditions)
+            joined(select(Invitation, OrganizationMember, Organization))
+            .where(*conditions)
             .order_by(col(Invitation.created_at), col(Invitation.id))
             .offset(skip)
             .limit(limit)

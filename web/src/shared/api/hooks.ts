@@ -2317,7 +2317,9 @@ export function useAcceptPendingMembership() {
   return useMutation({
     mutationFn: (organizationMemberId: string) =>
       apiFetch<AcceptInvitationResult>(
-        `/v1/organizations/me/pending-memberships/${organizationMemberId}/accept`,
+        `/v1/organizations/me/pending-memberships/${encodeURIComponent(
+          organizationMemberId,
+        )}/accept`,
         { method: "POST" },
       ),
     onSuccess: () => {
@@ -2333,7 +2335,9 @@ export function useDeclinePendingMembership() {
   return useMutation({
     mutationFn: (organizationMemberId: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/pending-memberships/${organizationMemberId}/decline`,
+        `/v1/organizations/me/pending-memberships/${encodeURIComponent(
+          organizationMemberId,
+        )}/decline`,
         { method: "POST" },
       ),
     onSuccess: () => {

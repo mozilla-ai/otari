@@ -163,6 +163,12 @@ dashboard expose the link for manual delivery.
 Invitation tokens are bearer credentials. Do not put them in logs or analytics.
 The browser validates and accepts them through the public invitation endpoints.
 
+A signed-in person also sees the invitations addressed to them, and accepts or
+declines one without a token: they are already authenticated as the addressee,
+so the membership is addressed by id instead. Declining cancels the invitation
+and suspends the paired membership, which is what stops the emailed link from
+reviving it; a later invitation to the same address revives the membership.
+
 ## Related documentation
 
 - [Admin dashboard](dashboard.md)

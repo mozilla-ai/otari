@@ -79,6 +79,27 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def get_by_id_and_user(
+        self,
+        organization_member_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> OrganizationMember | None:
+        """Return a membership by id, scoped to the identity that holds it.
+
+        ``get_by_id_and_organization``'s counterpart for the surfaces a caller
+        reaches as the subject of a membership rather than as an administrator
+        of the organization holding it (the invitee's own inbox). The scoping is
+        the boundary either way: another identity's member id resolves to
+        nothing rather than being read and then checked in Python.
+        """
+        result = await self.db.execute(
+            select(OrganizationMember).where(
+                col(OrganizationMember.id) == organization_member_id,
+                col(OrganizationMember.user_id) == user_id,
+            )
+        )
+        return result.scalars().first()
+
     async def get_by_user(self, user_id: uuid.UUID, *, active_only: bool = False) -> list[OrganizationMember]:
         """Return a user's memberships, oldest first."""
         statement = select(OrganizationMember).where(col(OrganizationMember.user_id) == user_id)

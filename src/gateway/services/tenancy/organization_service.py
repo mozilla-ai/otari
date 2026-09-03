@@ -1131,8 +1131,8 @@ class OrganizationService:
         The caller's own membership in the wrong state collapses into it too,
         since an ``active`` or ``suspended`` one has no invitation to act on.
         """
-        membership = await self.members.get(organization_member_id)
-        if membership is None or membership.user_id != user.id or membership.status != "invited":
+        membership = await self.members.get_by_id_and_user(organization_member_id, user.id)
+        if membership is None or membership.status != "invited":
             raise InvitationNotFoundError(organization_member_id)
 
         pending = await self.invitations.get_pending_by_organization_members([membership.id])
@@ -1185,14 +1185,58 @@ class OrganizationService:
         against a concurrent accept of the same invitation through the other
         route, and against the revoke that would otherwise overwrite this
         accept.
+
+        Idempotent for the caller's own membership: accepting one that is
+        already ``active`` answers the success it would have answered rather
+        than a 404. Two clicks before the list refreshes is the ordinary way to
+        reach that, and reporting "not found" for an action that succeeded is
+        worse than saying so twice.
+
+        The branch is any active membership of theirs, not only one that got
+        there by accepting. Telling those apart would cost a lookup for an
+        answer that reveals nothing: the check is already scoped to the
+        caller's own rows, and their role in an organization they are active in
+        is what ``GET /me/memberships`` hands them anyway. A foreign or unknown
+        id still collapses into ``InvitationNotFoundError``.
         """
+        already = await self._accepted_result_if_active(user, organization_member_id)
+        if already is not None:
+            return already
+
         # Resolved once to learn which organization to lock, then again under
         # it: the first resolve's answer is not yet safe to write against, and
         # the second is what this acts on. Same two-step as accept_invitation.
         _, _, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
         await self.organizations.lock(organization.id)
+        # Re-asked under the lock, because the check above raced anything that
+        # was already in flight: the accept this one duplicates may have
+        # committed between them, and without this the loser of that race is
+        # the 404 the check exists to avoid.
+        already = await self._accepted_result_if_active(user, organization_member_id)
+        if already is not None:
+            return already
         invitation, membership, organization = await self._resolve_own_pending_invitation(user, organization_member_id)
         return await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+
+    async def _accepted_result_if_active(
+        self,
+        user: User,
+        organization_member_id: uuid.UUID,
+    ) -> AcceptInvitationResultPublic | None:
+        """The result an accept would have returned, if the caller already holds this membership active.
+
+        ``None`` when there is still something to accept, or when the id names
+        nothing the caller holds: it is the accept path's own resolve that
+        decides which refusal that is, so this stays silent rather than
+        answering for it.
+        """
+        membership = await self.members.get_by_id_and_user(organization_member_id, user.id)
+        if membership is None or membership.status != "active":
+            return None
+        organization = await self.organizations.get(membership.organization_id)
+        if organization is None:
+            return None
+        return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
 
     async def decline_pending_membership_for_user(
         self,
