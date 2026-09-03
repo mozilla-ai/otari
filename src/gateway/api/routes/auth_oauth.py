@@ -63,6 +63,7 @@ from gateway.services.oauth_service import (
     require_configured,
 )
 from gateway.services.tenancy.errors import OAuthNotConfiguredError, TenancyError
+from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix="/v1/auth/oauth", tags=["auth"])
 
@@ -247,6 +248,12 @@ async def callback(
         # One commit for the whole sign-in: the adapter's link and verification
         # stamp are on this same session, so they land with the session row or
         # with neither.
+        # Before the session row and inside the same transaction, so a new
+        # membership and the sign-in that earned it land together or not at all.
+        # Not guarded: the only expected failure is two concurrent sign-ins
+        # racing, which the service settles on its own, and a database that
+        # cannot stage this cannot stage the session row either.
+        await OrganizationDomainService(db).auto_join_for_user(identity)
         token, expires_at = await create_dashboard_session(
             db, config.dashboard_session_ttl_hours, user_id=identity.id
         )

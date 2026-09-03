@@ -60,6 +60,7 @@ from gateway.services.dashboard_session_service import (
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
 from gateway.services.tenancy.errors import PasskeysNotConfiguredError, TenancyError
+from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix="/v1/auth/webauthn", tags=["auth"])
 
@@ -248,6 +249,8 @@ async def authenticate_passkey(
     except TenancyError:
         record_auth_failure("invalid_passkey")
         raise
+    # Same transaction as the session row; see the note in ``auth_session``.
+    await OrganizationDomainService(db).auto_join_for_user(identity)
     token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
     await _commit(db, "persist a dashboard session on a passkey sign-in")
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
