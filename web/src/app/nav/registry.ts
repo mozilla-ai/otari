@@ -1,5 +1,6 @@
 import {
   FiActivity,
+  FiAtSign,
   FiBarChart2,
   FiBox,
   FiCode,
@@ -302,6 +303,14 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Members & roles",
         surface: "organizations",
         icon: FiUsers,
+      },
+      // Beside the roster because it is the other way somebody becomes a
+      // member: added by hand there, or by proving a domain here.
+      {
+        to: "/organization/domains",
+        label: "Email domains",
+        surface: "organizations",
+        icon: FiAtSign,
       },
       // The organization's own upstream credentials, which is a different table
       // from the workspace rail's `/providers`: over there a credential belongs

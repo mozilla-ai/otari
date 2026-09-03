@@ -318,6 +318,15 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 
+// An organization's email-domain claims. A claim is inert until its DNS TXT
+// record is found, so `verified_at` is the field the UI branches on and
+// `verification_record` is the whole string an admin publishes.
+export type OrganizationDomain = Schemas["OrganizationDomainPublic"]
+export type CreateOrganizationDomainRequest =
+  Schemas["OrganizationDomainCreateRequest"]
+export type UpdateOrganizationDomainRequest =
+  Schemas["OrganizationDomainUpdateRequest"]
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------

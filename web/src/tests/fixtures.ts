@@ -16,6 +16,7 @@ import type {
   OrganizationContext,
   OrganizationGuardrail,
   OrganizationMember,
+  OrganizationDomain,
   OrgProviderKey,
   PendingOrganizationInvitation,
   PricingResponse,
@@ -508,6 +509,25 @@ export function organizationGuardrail(
     workspace_ids: [],
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: "2026-08-24T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function organizationDomain(
+  overrides: Partial<OrganizationDomain> = {},
+): OrganizationDomain {
+  return {
+    id: "77777777-7777-7777-7777-777777777777",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    domain: "acme.example",
+    default_role: "member",
+    enabled: true,
+    verification_record: "otari-domain-verification=tok-abc123",
+    // Unverified by default: a claim lands inert, and a fixture that arrived
+    // already proven would let a test about the pending state pass by accident.
+    verified_at: null,
+    created_at: "2026-08-24T00:00:00+00:00",
+    updated_at: null,
     ...overrides,
   }
 }

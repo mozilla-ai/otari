@@ -62,7 +62,12 @@ describe("a build that replaces the nav-item module", () => {
   it("leaves every section no contribution names alone", () => {
     expect(
       section(ORG_NAV_SECTIONS, "org-people")?.items.map((item) => item.label),
-    ).toEqual(["Workspaces", "Members & roles", "Providers"])
+    ).toEqual([
+      "Workspaces",
+      "Members & roles",
+      "Email domains",
+      "Providers",
+    ])
     expect(
       section(NAV_SECTIONS, "gateway")?.items.map((item) => item.label),
     ).toEqual(["Models", "Routing", "Tools"])

@@ -549,6 +549,7 @@ describe("AppShell surface gating", () => {
     ).toEqual([
       "Workspaces",
       "Members & roles",
+      "Email domains",
       "Spend & budgets",
       "Model pricing",
       "Org settings",

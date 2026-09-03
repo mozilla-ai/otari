@@ -70,6 +70,7 @@ describe("nav registry", () => {
       "Usage",
       "Workspaces",
       "Members & roles",
+      "Email domains",
       "Providers",
       "Spend & budgets",
       "Model pricing",
@@ -145,6 +146,7 @@ describe("nav registry", () => {
     expect(tenancy?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
+      ["Email domains", "organizations"],
       ["Providers", "organization_providers"],
     ])
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")

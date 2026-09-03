@@ -18,6 +18,7 @@ import type {
   CreateKeyRequest,
   CreateKeyResponse,
   CreateOrganizationBudget,
+  CreateOrganizationDomainRequest,
   CreateOrganizationGuardrailRequest,
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
@@ -54,6 +55,7 @@ import type {
   Organization,
   OrganizationBudget,
   OrganizationContext,
+  OrganizationDomain,
   OrganizationGuardrail,
   OrganizationMember,
   OrganizationPricingOverride,
@@ -99,6 +101,7 @@ import type {
   UpdateDeploymentUserRequest,
   UpdateKeyRequest,
   UpdateOrganizationBudget,
+  UpdateOrganizationDomainRequest,
   UpdateOrganizationGuardrailRequest,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationPricingOverride,
@@ -199,6 +202,9 @@ const ORGANIZATION_GUARDRAILS = "organization-guardrails"
 // reason the two above have one: this is read by one page, and a credential
 // edit has no business refetching the organization context every page reads.
 const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
+// The organization's email-domain claims. Its own key for the same reason:
+// one page reads it, and claiming a domain has no bearing on anything else.
+const ORGANIZATION_DOMAINS = "organization-domains"
 const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make
@@ -2953,6 +2959,85 @@ export function useDeleteOrgProviderKey() {
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+// An organization's email-domain claims.
+//
+// Every mutation invalidates the whole list rather than patching its row.
+// Verifying is the reason: it is the one call whose answer the server decides
+// (the TXT lookup either finds the record or does not), so a cache patched from
+// the request body would show a claim as verified that is not.
+
+export function useOrganizationDomains(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_DOMAINS],
+    queryFn: () =>
+      apiFetch<{ data: OrganizationDomain[]; count: number }>(
+        "/v1/organizations/me/domains",
+      ),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+function invalidateOrganizationDomains(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_DOMAINS] })
+}
+
+export function useCreateOrganizationDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationDomainRequest) =>
+      apiFetch<OrganizationDomain>("/v1/organizations/me/domains", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationDomains(queryClient),
+  })
+}
+
+export function useUpdateOrganizationDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      domainId,
+      body,
+    }: {
+      domainId: string
+      body: UpdateOrganizationDomainRequest
+    }) =>
+      apiFetch<OrganizationDomain>(
+        `/v1/organizations/me/domains/${encodeURIComponent(domainId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => invalidateOrganizationDomains(queryClient),
+  })
+}
+
+export function useVerifyOrganizationDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (domainId: string) =>
+      apiFetch<OrganizationDomain>(
+        `/v1/organizations/me/domains/${encodeURIComponent(domainId)}/verify`,
+        { method: "POST" },
+      ),
+    onSuccess: () => invalidateOrganizationDomains(queryClient),
+  })
+}
+
+export function useDeleteOrganizationDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (domainId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/organizations/me/domains/${encodeURIComponent(domainId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateOrganizationDomains(queryClient),
   })
 }
 

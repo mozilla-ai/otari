@@ -1688,6 +1688,89 @@ export interface paths {
         patch: operations["update_organization_budget_v1_organizations_me_budgets__budget_id__patch"];
         trace?: never;
     };
+    "/v1/organizations/me/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Active Organization Domains
+         * @description List the caller's organization's email-domain claims. Owners and admins only.
+         */
+        get: operations["list_active_organization_domains_v1_organizations_me_domains_get"];
+        put?: never;
+        /**
+         * Create Active Organization Domain
+         * @description Claim an email domain for the caller's organization. Owners and admins only.
+         *
+         *     The claim lands unverified and does nothing until ``POST
+         *     /me/domains/{id}/verify`` finds the record in ``verification_record``
+         *     published at the domain's apex. A public email provider is refused outright,
+         *     and a domain another organization already claims answers 409 without saying
+         *     who holds it.
+         */
+        post: operations["create_active_organization_domain_v1_organizations_me_domains_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/domains/{organization_domain_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Active Organization Domain
+         * @description Drop an email-domain claim. Owners and admins only.
+         *
+         *     Members who already joined through it keep their membership: they are
+         *     colleagues by then, not an artifact of the claim.
+         */
+        delete: operations["delete_active_organization_domain_v1_organizations_me_domains__organization_domain_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Active Organization Domain
+         * @description Change a claim's auto-join role or enabled flag. Owners and admins only.
+         *
+         *     The domain itself and its verification state are not editable: a different
+         *     domain is a different claim and needs its own proof.
+         */
+        patch: operations["update_active_organization_domain_v1_organizations_me_domains__organization_domain_id__patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/domains/{organization_domain_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Active Organization Domain
+         * @description Prove control of a claimed domain via its DNS TXT record. Owners and admins only.
+         *
+         *     Idempotent, and answers 400 while the record is not visible yet, which is
+         *     the expected answer straight after publishing one.
+         */
+        post: operations["verify_active_organization_domain_v1_organizations_me_domains__organization_domain_id__verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/guardrails": {
         parameters: {
             query?: never;
@@ -7209,6 +7292,80 @@ export interface components {
         OrganizationCreateRequest: {
             /** Name */
             name: string;
+        };
+        /** OrganizationDomainCreateRequest */
+        OrganizationDomainCreateRequest: {
+            /**
+             * Default Role
+             * @default member
+             * @enum {string}
+             */
+            default_role: "member" | "viewer";
+            /** Domain */
+            domain: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
+         * OrganizationDomainPublic
+         * @description A claim as its organization's admins see it.
+         *
+         *     Carries ``verification_record`` (the whole string to publish) rather than
+         *     the raw token: the admin never has a use for the token on its own, and one
+         *     field that can be copied verbatim into a DNS panel is harder to get wrong
+         *     than a prefix they must remember to prepend.
+         */
+        OrganizationDomainPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Default Role
+             * @default member
+             */
+            default_role: string;
+            /** Domain */
+            domain: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Verification Record */
+            verification_record: string;
+            /** Verified At */
+            verified_at?: string | null;
+        };
+        /** OrganizationDomainUpdateRequest */
+        OrganizationDomainUpdateRequest: {
+            /** Default Role */
+            default_role?: ("member" | "viewer") | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /** OrganizationDomainsPublic */
+        OrganizationDomainsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationDomainPublic"][];
         };
         /**
          * OrganizationGuardrailCreate
@@ -12993,6 +13150,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationBudgetPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_active_organization_domains_v1_organizations_me_domains_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainsPublic"];
+                };
+            };
+        };
+    };
+    create_active_organization_domain_v1_organizations_me_domains_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationDomainCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_active_organization_domain_v1_organizations_me_domains__organization_domain_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_active_organization_domain_v1_organizations_me_domains__organization_domain_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationDomainUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_active_organization_domain_v1_organizations_me_domains__organization_domain_id__verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainPublic"];
                 };
             };
             /** @description Validation Error */

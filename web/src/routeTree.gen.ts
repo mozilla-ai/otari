@@ -29,6 +29,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
+import { Route as OrganizationDomainsRouteImport } from './routes/organization.domains'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
@@ -140,6 +141,11 @@ const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
   path: '/',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const OrganizationDomainsRoute = OrganizationDomainsRouteImport.update({
+  id: '/domains',
+  path: '/domains',
+  getParentRoute: () => OrganizationRoute,
+} as any)
 const OrganizationGuardrailsRoute = OrganizationGuardrailsRouteImport.update({
   id: '/guardrails',
   path: '/guardrails',
@@ -212,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -242,6 +249,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -275,6 +283,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -309,6 +318,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -339,6 +349,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -371,6 +382,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -548,6 +560,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationIndexRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/domains': {
+      id: '/organization/domains'
+      path: '/domains'
+      fullPath: '/organization/domains'
+      preLoaderRoute: typeof OrganizationDomainsRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/organization/guardrails': {
       id: '/organization/guardrails'
       path: '/guardrails'
@@ -622,6 +641,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface OrganizationRouteChildren {
+  OrganizationDomainsRoute: typeof OrganizationDomainsRoute
   OrganizationGuardrailsRoute: typeof OrganizationGuardrailsRoute
   OrganizationMembersRoute: typeof OrganizationMembersRoute
   OrganizationPricingRoute: typeof OrganizationPricingRoute
@@ -631,6 +651,7 @@ interface OrganizationRouteChildren {
 }
 
 const OrganizationRouteChildren: OrganizationRouteChildren = {
+  OrganizationDomainsRoute: OrganizationDomainsRoute,
   OrganizationGuardrailsRoute: OrganizationGuardrailsRoute,
   OrganizationMembersRoute: OrganizationMembersRoute,
   OrganizationPricingRoute: OrganizationPricingRoute,
