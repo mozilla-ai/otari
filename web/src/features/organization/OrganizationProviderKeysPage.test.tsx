@@ -88,7 +88,7 @@ describe("OrganizationProviderKeysPage", () => {
     renderPage(<OrganizationProviderKeysPage />)
 
     expect(await screen.findByText("Production")).toBeInTheDocument()
-    expect(screen.getByText("default")).toBeInTheDocument()
+    expect(screen.getByText("DEFAULT")).toBeInTheDocument()
     expect(screen.getByText("Staging")).toBeInTheDocument()
     expect(screen.getByText("anthropic")).toBeInTheDocument()
     expect(screen.getByText("https://proxy.example.com/v1")).toBeInTheDocument()
