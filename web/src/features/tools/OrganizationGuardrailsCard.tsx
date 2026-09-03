@@ -1,4 +1,4 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { OrganizationGuardrail, Workspace } from "@/client"
@@ -11,8 +11,10 @@ import {
   useUpdateOrganizationGuardrail,
   useWorkspaces,
 } from "@/shared/api/hooks"
+import { SettingsGroup } from "@/shared/components/surface"
 import {
   Badge,
+  Checkbox,
   ConfirmButton,
   ErrorBanner,
   errorMessage,
@@ -73,6 +75,7 @@ function WorkspaceScope({
   onEverywhere,
   onToggle,
 }: {
+  /** Names the workspace group, so a box reads as "Beta" inside "prompt-injection". */
   scopeName: string
   everywhere: boolean
   selected: readonly string[]
@@ -94,28 +97,28 @@ function WorkspaceScope({
         disabled={disabled}
       />
       {everywhere ? null : (
-        <div className="flex flex-wrap gap-3">
+        // A named group rather than a per-box aria-label. Each box is labelled
+        // by the workspace name a reader can see, and the group says which
+        // guardrail those names belong to; an aria-label on the box would have
+        // replaced the visible text for assistive tech instead of qualifying it.
+        <fieldset aria-label={scopeName} className="flex flex-wrap gap-3">
           {workspaces.map((workspace) => (
-            <label
-              key={workspace.id}
-              className="flex items-center gap-1 text-sm text-muted"
-            >
-              <input
-                type="checkbox"
-                aria-label={`${scopeName}: ${workspace.name}`}
-                checked={selected.includes(workspace.id)}
-                disabled={disabled}
+            <span key={workspace.id} className="text-sm text-muted">
+              <Checkbox
+                isSelected={selected.includes(workspace.id)}
+                isDisabled={disabled}
                 onChange={() => onToggle(workspace.id)}
-              />
-              {workspace.name}
-            </label>
+              >
+                {workspace.name}
+              </Checkbox>
+            </span>
           ))}
           {workspaces.length === 0 ? (
             <span className="text-xs text-muted">
               No workspaces to choose from yet.
             </span>
           ) : null}
-        </div>
+        </fieldset>
       )}
     </div>
   )
@@ -313,7 +316,7 @@ function GuardrailRow({
         </ConfirmButton>
       </div>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -404,7 +407,7 @@ function AddGuardrailForm({
         />
       </div>
       <WorkspaceScope
-        scopeName="New guardrail"
+        scopeName={profile || "New guardrail"}
         everywhere={everywhere}
         selected={scope}
         workspaces={workspaces}
@@ -436,7 +439,7 @@ function AddGuardrailForm({
         gateway.
       </span>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -459,16 +462,10 @@ export function OrganizationGuardrailsCard({
   const known = workspaces.data ?? []
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Organization guardrails</h2>
-      <p className="text-sm text-muted">
-        Guardrails that run on every request from the workspaces below, whether
-        the caller asked for them or not. They compose with the deployment
-        settings above rather than replacing them: an entry with no endpoint of
-        its own is sent to the guardrails URL set there, and an organization
-        that mandates nothing leaves every request checked exactly as it is
-        today.
-      </p>
+    <SettingsGroup
+      title="Organization guardrails"
+      description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
+    >
       {manages ? null : (
         <InfoBanner>
           Organization guardrails are set by an owner or admin of the
@@ -478,27 +475,23 @@ export function OrganizationGuardrailsCard({
       {manages ? (
         <>
           <ErrorBanner error={guardrails.error ?? workspaces.error} />
-          <Card>
-            <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-              {entries.map((guardrail) => (
-                <GuardrailRow
-                  key={guardrail.id}
-                  guardrail={guardrail}
-                  workspaces={known}
-                  onSaved={onSaved}
-                />
-              ))}
-              {entries.length === 0 && !guardrails.isLoading ? (
-                <p className="py-4 text-sm text-muted">
-                  No organization guardrails, so only the guardrails a caller
-                  asks for run.
-                </p>
-              ) : null}
-              <AddGuardrailForm workspaces={known} onSaved={onSaved} />
-            </Card.Content>
-          </Card>
+          {entries.map((guardrail) => (
+            <GuardrailRow
+              key={guardrail.id}
+              guardrail={guardrail}
+              workspaces={known}
+              onSaved={onSaved}
+            />
+          ))}
+          {entries.length === 0 && !guardrails.isLoading ? (
+            <p className="py-4 text-sm text-muted">
+              No organization guardrails, so only the guardrails a caller asks
+              for run.
+            </p>
+          ) : null}
+          <AddGuardrailForm workspaces={known} onSaved={onSaved} />
         </>
       ) : null}
-    </section>
+    </SettingsGroup>
   )
 }

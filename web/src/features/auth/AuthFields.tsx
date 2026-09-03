@@ -1,4 +1,5 @@
 import { Description, Input, Label, TextField } from "@heroui/react"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 
 /**
  * The three fields the pages in front of a session are built from.
@@ -58,11 +59,13 @@ export function AuthEmailField({
         autoComplete="username"
         className="read-only:bg-surface-alt read-only:text-muted"
       />
-      {description ? (
-        // HeroUI's Description reaches the input as aria-describedby through
-        // the TextField's "description" slot, which a raw span does not.
-        <Description className="text-xs text-muted">{description}</Description>
-      ) : null}
+      <FieldMessages>
+        {description ? (
+          // HeroUI's Description reaches the input as aria-describedby through
+          // the TextField's "description" slot, which a raw span does not.
+          <Description className="text-muted">{description}</Description>
+        ) : null}
+      </FieldMessages>
     </TextField>
   )
 }
@@ -90,9 +93,11 @@ export function AuthPasswordField({
     >
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input autoComplete={autoComplete} />
-      {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
-      ) : null}
+      <FieldMessages>
+        {description ? (
+          <Description className="text-muted">{description}</Description>
+        ) : null}
+      </FieldMessages>
     </TextField>
   )
 }
@@ -118,9 +123,11 @@ export function AuthTextField({
     >
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input autoComplete={autoComplete} />
-      {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
-      ) : null}
+      <FieldMessages>
+        {description ? (
+          <Description className="text-muted">{description}</Description>
+        ) : null}
+      </FieldMessages>
     </TextField>
   )
 }

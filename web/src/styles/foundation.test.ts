@@ -21,6 +21,11 @@ function block(selector: string): string {
   return CSS.slice(start, end)
 }
 
+/** Source with `//` and block comments removed, for rules about written code. */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+}
+
 /** Every custom property *declared* in a block, as name → value. */
 function declarations(text: string): Map<string, string> {
   const found = new Map<string, string>()
@@ -223,6 +228,27 @@ describe("the type scale's two halves", () => {
     }
   })
 
+  // The other half of the declare-vs-register trap, and the half that fails
+  // silently in the opposite direction. A self-referential registration
+  // (`--color-x: var(--color-x)`) exists only to make the utility, and it
+  // resolves to nothing unless a theme block declares a real value. When it
+  // does not, `text-x` is a class that compiles, ships, and paints the
+  // inherited color instead: no error, no warning, no failing check. That is
+  // how `--color-accent-glyph` lost both declarations to a careless edit and
+  // turned a white checkmark black.
+  it("declares a real value for every self-referential @theme key", () => {
+    const theme = declarations(block("@theme"))
+    const undeclared: string[] = []
+    for (const [key, value] of theme) {
+      if (value !== `var(${key})`) continue
+      if (!LIGHT.has(key) || !DARK.has(key)) undeclared.push(key)
+    }
+    expect(
+      undeclared,
+      "registered in @theme but not declared in both theme blocks, so the utility resolves to nothing",
+    ).toEqual([])
+  })
+
   it("registers in @theme only the keys HeroUI does not declare", () => {
     // Tracking is emitted into `.text-xs` and friends only if the key is
     // registered at build time, so these have to be in `@theme`; a value at
@@ -256,6 +282,100 @@ describe("the type scale's two halves", () => {
       contested,
       `@theme registers type values @heroui/styles also declares (${contested.join(", ")}); it loses on source order, so these belong in the unlayered :root block`,
     ).toEqual([])
+  })
+})
+
+describe("the flat surface: no corners, no elevation", () => {
+  // Both halves of the divided-surface direction are one-line token changes
+  // that reach the whole app, and both fail silently if they land in the wrong
+  // place: a squared corner that is still round, or a shadow zeroed in one
+  // theme only, compiles clean and reports nothing.
+
+  // The text between the end of the previous top-level block and the radius
+  // declaration. Enough to tell whether the declaration is unlayered: if a
+  // `@theme` or `@layer` opener sits in there, it is not.
+  const radiusContext = (() => {
+    const decl = CSS.indexOf("--radius: 0px;")
+    // Empty rather than an assertion when the declaration is gone, so the two
+    // tests below fail with their own messages instead of taking the whole
+    // file down at collection time.
+    if (decl === -1) return ""
+    // Comments stripped: the block below this one explains the cascade rule in
+    // prose, and the words `@theme` and `@layer` in a comment are not openers.
+    return CSS.slice(CSS.lastIndexOf("\n}\n", decl), decl).replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    )
+  })()
+
+  it("zeroes the one radius key every corner derives from", () => {
+    // `--radius-xl|2xl|3xl` and `--field-radius` are all `calc(var(--radius) * n)`
+    // in the emitted stylesheet, so this key is the whole radius surface.
+    const declarations = [...CSS.matchAll(/^\s*--radius:\s*([^;]+);/gm)].map(
+      ([, value]) => value.trim(),
+    )
+    expect(
+      declarations,
+      "`--radius` should be declared exactly once, at zero",
+    ).toEqual(["0px"])
+  })
+
+  it("declares the radius unlayered, where it can outrank @heroui/styles", () => {
+    // `@heroui/styles` declares `--radius` inside its own `@layer base`. An
+    // override written in `@theme` is hoisted to the top theme layer, compiles,
+    // emits, and loses on source order. Only an unlayered declaration wins.
+    expect(
+      radiusContext,
+      "the `--radius` declaration is not in a `:root` block",
+    ).toContain(":root {")
+    const opener = radiusContext.match(/^@(theme|layer)\b.*/m)
+    expect(
+      opener?.[0],
+      "the `--radius` declaration sits inside an at-rule block, so @heroui/styles' own value wins on source order",
+    ).toBeUndefined()
+  })
+
+  it("keeps the radius out of the theme blocks", () => {
+    // Same rule as the type metrics above: a corner has no theme axis, so
+    // declaring it twice only creates a way for the two themes to drift.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      const offenders = [...tokens.keys()].filter((name) =>
+        name.startsWith("--radius"),
+      )
+      expect(
+        offenders,
+        `the ${theme} theme block declares radius keys (${offenders.join(", ")}); radius is declared once, unlayered`,
+      ).toEqual([])
+    }
+  })
+
+  it("zeroes every elevation token in both themes", () => {
+    // A shadow *does* have a theme axis, so unlike the radius these are
+    // declared per theme, and that is exactly what makes a half-done change
+    // possible: zeroed on light, still lifting on dark, invisible in whichever
+    // theme you happen to be looking at. `--shadow-elevation-sm|md|lg` and
+    // `--shadow-modal` (the registered utilities), `--surface-shadow` and
+    // `--overlay-shadow` (which HeroUI's card, popover, modal and toast rules
+    // read) all alias these four.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      for (const key of [
+        "--shadow-sm",
+        "--shadow-md",
+        "--shadow-lg",
+        "--shadow-modal",
+      ]) {
+        expect(
+          tokens.get(key),
+          `${theme}'s ${key} still casts; the surface is one plane in both themes`,
+        ).toBe("none")
+      }
+    }
   })
 })
 
@@ -350,6 +470,8 @@ describe("design foundation tokens", () => {
     ["text-link-hover", "ours"],
     ["text-primary-subtle-foreground", "ours"],
     ["bg-code-surface", "ours"],
+    ["border-control-border", "ours"],
+    ["bg-control-thumb", "ours"],
     ["text-accent", "heroui"],
     ["bg-accent", "heroui"],
     ["text-accent-foreground", "heroui"],
@@ -420,6 +542,34 @@ describe("design foundation tokens", () => {
   })
 })
 
+// A comment opener inside a comment. CSS comments do not nest, so `/*` after
+// one has already opened is not an error and nothing fails: the text just
+// runs on to the next `*/` and the file quietly grows a duplicated header.
+// Three of those reached this file from scripted edits and were found by
+// somebody reading the lines next to them, which is not a way of finding
+// things.
+it("has no comment opened inside another comment in globals.css", () => {
+  const offenders: string[] = []
+  let inComment = false
+  for (let i = 0; i < CSS.length - 1; i++) {
+    if (!inComment && CSS[i] === "/" && CSS[i + 1] === "*") {
+      inComment = true
+      i++
+    } else if (inComment && CSS[i] === "*" && CSS[i + 1] === "/") {
+      inComment = false
+      i++
+    } else if (inComment && CSS[i] === "/" && CSS[i + 1] === "*") {
+      offenders.push(
+        `line ${CSS.slice(0, i).split("\n").length}: ${CSS.slice(i, i + 60)}`,
+      )
+      i++
+    }
+  }
+  expect(offenders, "a `/*` inside a comment is a duplicated header").toEqual(
+    [],
+  )
+})
+
 describe("semantic tokens only", () => {
   // Every source file that styles anything, which is the whole of `src` now
   // that there is no bridge tree left to be exempt. This used to be scoped to
@@ -469,6 +619,24 @@ describe("semantic tokens only", () => {
     ).not.toMatch(
       /\b(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|shadow|accent|caret|divide|placeholder)(?:-[tblrsexy])?-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/,
     )
+    // A focus ring is an accessibility floor, and until this rule it was spelled
+    // at nine call sites that did not agree: four drew it from `accent`, two
+    // from `focus`, and the rest left the width and offset to the browser. None
+    // of that fails anything, which is why it drifted. The ring is defined once
+    // now, in `@layer base` for plain elements and as `@utility otari-focus-ring`
+    // the two that have to outrank a HeroUI component rule, so a call site has
+    // nothing left to spell. `ring-0` and `ring-offset-0` are deliberately not
+    // matched: those suppress HeroUI's own inner ring rather than drawing ours.
+    //
+    // Matched against the code with comments removed. `rowStyles.ts` explains
+    // why its rows cannot use the base rule, and that explanation has to be
+    // able to name the thing it is explaining.
+    expect(
+      stripComments(source),
+      "a focus ring is defined once in globals.css; use `otari-focus-ring`, do not spell one here",
+    ).not.toMatch(
+      /\b(?:ring|outline)-(?:accent|primary|focus)\b|\boutline-offset-\d|\b(?:ring|outline)-[1-9]\b/,
+    )
     // `bg-white` / `text-black` are the same problem without a number: a
     // literal that never follows the theme.
     expect(
@@ -490,6 +658,17 @@ describe("the shell chrome's type roles", () => {
     "text-chrome-meta",
     "text-chrome-initials",
   ]
+
+  it("declares text-subtle as a utility, not a color token", () => {
+    // `--color-text-subtle` would generate `text-text-subtle`, and
+    // `--color-subtle` would also mint `bg-subtle` and `border-subtle`. The
+    // utility form is the only one that yields this name and nothing else.
+    expect(CSS).toContain("@utility text-subtle {")
+    expect(
+      declarations(block("@theme")).get("--color-subtle"),
+      "`--color-subtle` in @theme would collide with `@utility text-subtle` in the same layer",
+    ).toBeUndefined()
+  })
 
   it.each(CHROME_ROLES)("declares %s in globals.css", (role) => {
     // The same failure the documented-utilities list guards against: a role

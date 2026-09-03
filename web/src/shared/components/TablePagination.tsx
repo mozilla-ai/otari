@@ -1,7 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import { useEffect, useId, useState } from "react"
 
-import { FilterSelect } from "@/shared/components/ui"
+import { FilterSelect, INPUT_CLASS } from "@/shared/components/ui"
 
 // Shared pager for the dashboard tables: rows-per-page on the left, a truthful
 // "range of total" summary in the middle, and first / prev / type-a-page / next
@@ -86,7 +86,7 @@ export function TablePagination({
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="otari-pagination flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2">
         <label htmlFor={sizeSelectId} className="text-sm text-muted">
           Rows
@@ -109,7 +109,10 @@ export function TablePagination({
 
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted tabular-nums">{summary}</span>
-        <div className="flex items-center gap-1">
+        {/* Named rather than styled here: the four arrows are one cluster, and
+            a coarse pointer needs both bigger controls and wider gaps between
+            them. That is the place's business, not the call site's. */}
+        <div className="otari-pagination__pager flex items-center gap-1">
           <Button
             size="sm"
             variant="outline"
@@ -142,7 +145,11 @@ export function TablePagination({
                 }
               }}
               onBlur={commitPage}
-              className="w-12 rounded-lg border border-border bg-surface-alt px-2 py-1 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
+              // A real field, taking the pagination place's 32px rather than
+              // hard-coding a height. Hand-rolling it is how it escaped the
+              // 40px floor in the first place, which looked like the right
+              // answer and was the right answer for the wrong reason.
+              className={`w-12 text-center tabular-nums ${INPUT_CLASS}`}
             />
             {pageCount != null ? (
               <span className="tabular-nums">

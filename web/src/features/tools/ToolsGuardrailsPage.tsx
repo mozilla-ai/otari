@@ -1,4 +1,4 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { Fragment, useEffect, useRef, useState } from "react"
 import type {
   ManagedTool,
@@ -19,12 +19,12 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/hooks"
+import { Dot, SettingsGroup } from "@/shared/components/surface"
 import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
   INPUT_CLASS,
-  PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
 
@@ -146,7 +146,7 @@ const MESSAGE_CELL = "flex flex-col gap-1 sm:col-span-2 sm:col-start-2"
 
 function SaveError({ message }: { message?: string }) {
   if (!message) return null
-  return <span className="break-words text-xs text-danger">{message}</span>
+  return <span className="break-words text-caption text-danger">{message}</span>
 }
 
 function FieldLabel({
@@ -160,9 +160,13 @@ function FieldLabel({
     <div className="min-w-0 sm:col-start-1">
       <code className="text-sm font-medium text-foreground">{field.key}</code>
       {field.description ? (
-        <p className="mt-1 text-sm text-muted">{field.description}</p>
+        // Capped for the reason every full-bleed row's prose is: the row
+        // spans the page, the sentence does not.
+        <p className="mt-1 max-w-prose text-caption text-muted">
+          {field.description}
+        </p>
       ) : null}
-      {help ? <p className="mt-1 text-xs text-muted">{help}</p> : null}
+      {help ? <p className="mt-1 text-caption text-muted">{help}</p> : null}
     </div>
   )
 }
@@ -537,28 +541,42 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-medium text-foreground">{tool.id}</code>
         {tool.available ? null : (
-          <span className="rounded-full border border-warning bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning">
-            No backend configured
+          // The reason, stated: a subtle dot and a mono fact, because a tool
+          // with no backend is unavailable rather than broken.
+          <span className="flex items-center gap-2 font-mono text-[11px] tracking-[0.1em] text-subtle uppercase">
+            <Dot className="bg-text-subtle" />
+            Unavailable — no backend
           </span>
         )}
       </div>
-      <p className="text-sm text-muted">{tool.description}</p>
+      <p className="max-w-prose text-sm text-muted">{tool.description}</p>
       <div className="flex flex-col gap-1">
         <span className="text-xs font-medium text-foreground">
           Accepted tools[].type
         </span>
-        <div className="flex flex-wrap gap-1.5">
-          {tool.accepted_types.map((type) => (
-            <code
-              key={type}
-              className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs"
-            >
-              {type}
-            </code>
+        <div className="flex flex-wrap items-center gap-x-1.5">
+          {tool.accepted_types.map((type, index) => (
+            // Mono on the page ground with a separator between entries, not a
+            // boxed chip: these are values to read, and the box was the only
+            // thing making a list of type names look like a set of controls.
+            <span key={type} className="flex items-center gap-1.5">
+              {index > 0 ? (
+                <span aria-hidden className="text-subtle">
+                  ·
+                </span>
+              ) : null}
+              <code className="font-mono text-xs text-foreground">{type}</code>
+            </span>
           ))}
         </div>
       </div>
-      <pre className="overflow-x-auto rounded-md border border-border bg-surface p-3 text-xs">
+      {/* Bounded by rules, not by a border. `border-control-border bg-surface`
+          is the floating-surface recipe, which belongs to things that sit above
+          the page (a popover, a menu); applied to a block that is part of the
+          page it makes a card of it, which is the shape this whole direction
+          removes. The rules say where the example starts and stops, and the
+          block scrolls inside them. */}
+      <pre className="overflow-x-auto border-y border-border py-3 text-xs">
         <code>{`POST /v1/chat/completions\n${JSON.stringify(request, null, 2)}`}</code>
       </pre>
     </div>
@@ -696,15 +714,20 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={
-          only
+      <header className="pb-1">
+        <h1 className="text-display">
+          {only
             ? (SERVICES.find((service) => service.key === only)?.label ??
               "Tools & Guardrails")
-            : "Tools & Guardrails"
-        }
-        description="Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist. URLs are validated for shape (http/https) and can be tested for reachability before saving; the network-safety gates for these services live on the Settings page."
-      />
+            : "Tools & Guardrails"}
+        </h1>
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          Configure the built-in tool and guardrail service endpoints without a
+          restart. Changes apply immediately and persist. URLs are validated for
+          shape (http/https) and can be tested for reachability before saving;
+          the network-safety gates for these services live on the Settings page.
+        </p>
+      </header>
 
       <ErrorBanner error={query.error} />
 
@@ -733,47 +756,46 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           return (
             <Fragment key={service.key}>
               <section className="flex flex-col gap-2">
-                {/* Dropped when the page is narrowed to this one service: the
-                    page title already says it, and repeating it reads as two
-                    headings for the same thing. */}
-                {only ? null : <h2 className="text-title">{service.label}</h2>}
-                <p className="text-sm text-muted">{service.blurb}</p>
-                <Card>
-                  <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-                    {service.pricingKey ? (
-                      <ToolPriceRow
-                        pricingKey={service.pricingKey}
-                        configured={
-                          currentRates.get(service.pricingKey) ?? null
-                        }
-                        onSave={(perCall) =>
-                          savePrice(service.pricingKey as string, perCall)
-                        }
-                        saving={pricedTool === service.pricingKey}
-                        saveError={
-                          priceErrors[service.pricingKey] ||
-                          (pricing.error
-                            ? "Could not load the current price. Reload before editing."
-                            : undefined)
-                        }
-                        // Also disabled when the load failed: an errored query leaves
-                        // `configured` null, which renders as "Not priced" and would
-                        // invite an operator to overwrite a rate they cannot see.
-                        disabled={pricing.isLoading || Boolean(pricing.error)}
-                      />
-                    ) : null}
-                    {fields.map((field) => (
-                      <ServiceRow
-                        key={field.key}
-                        field={field}
-                        onSave={(value) => save(field, value)}
-                        saveError={errors[field.key]}
-                        disabled={disabled}
-                      />
-                    ))}
-                    {managed ? <HowToCallCard tool={managed} /> : null}
-                  </Card.Content>
-                </Card>
+                {/* The shared settings list rather than a hand-rolled one, so
+                    this cannot pick a separator tier of its own. The heading is
+                    dropped on a filtered view, where the page title already
+                    names the service and repeating it reads as two headings for
+                    the same thing. */}
+                <SettingsGroup
+                  title={only ? undefined : service.label}
+                  description={service.blurb}
+                >
+                  {service.pricingKey ? (
+                    <ToolPriceRow
+                      pricingKey={service.pricingKey}
+                      configured={currentRates.get(service.pricingKey) ?? null}
+                      onSave={(perCall) =>
+                        savePrice(service.pricingKey as string, perCall)
+                      }
+                      saving={pricedTool === service.pricingKey}
+                      saveError={
+                        priceErrors[service.pricingKey] ||
+                        (pricing.error
+                          ? "Could not load the current price. Reload before editing."
+                          : undefined)
+                      }
+                      // Also disabled when the load failed: an errored query leaves
+                      // `configured` null, which renders as "Not priced" and would
+                      // invite an operator to overwrite a rate they cannot see.
+                      disabled={pricing.isLoading || Boolean(pricing.error)}
+                    />
+                  ) : null}
+                  {fields.map((field) => (
+                    <ServiceRow
+                      key={field.key}
+                      field={field}
+                      onSave={(value) => save(field, value)}
+                      saveError={errors[field.key]}
+                      disabled={disabled}
+                    />
+                  ))}
+                  {managed ? <HowToCallCard tool={managed} /> : null}
+                </SettingsGroup>
               </section>
               {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the

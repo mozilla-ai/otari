@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import { canManageWorkspace } from "@/features/organization/roles"
@@ -9,6 +9,7 @@ import {
   useWorkspaceCodeExecutionPolicy,
 } from "@/shared/api/hooks"
 import { Field } from "@/shared/components/Field"
+import { Dot, Section } from "@/shared/components/surface"
 import {
   Checkbox,
   ErrorBanner,
@@ -232,167 +233,173 @@ export function WorkspaceCodeExecutionPolicyCard({
   }
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">This workspace ({selected.name})</h2>
-      <p className="text-sm text-muted">
-        Whether requests billed to this workspace may use otari_code_execution,
-        and the limits they run under. A workspace policy can only narrow what
-        the deployment above allows; it never grants a sandbox the deployment
-        has not configured.
-      </p>
-      <Card>
-        <Card.Content className="flex flex-col gap-4 px-5 py-4">
-          <ErrorBanner error={query.error} />
-          {policy && !policy.sandbox_configured ? (
-            <InfoBanner tone="warning">
-              This deployment has no sandbox configured, so code execution is
-              unavailable here whatever this workspace's policy says. The
-              sandbox URL is set above.
-            </InfoBanner>
-          ) : null}
+    <Section
+      aria-label={`This workspace (${selected.name})`}
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-2">
+        <h2 className="text-title">This workspace ({selected.name})</h2>
+        <p className="max-w-prose text-sm text-muted">
+          Whether requests billed to this workspace may use
+          otari_code_execution, and the limits they run under. A workspace
+          policy can only narrow what the deployment above allows; it never
+          grants a sandbox the deployment has not configured.
+        </p>
+      </div>
+      <ErrorBanner error={query.error} />
+      {/* A ceiling, not a caution: nothing is broken and nothing on this
+              page can change it, so it reads on the subtle dot. The danger
+              dot is for the things worth acting on. */}
+      {policy && !policy.sandbox_configured ? (
+        <InfoBanner>
+          This deployment has no sandbox configured, so code execution is
+          unavailable here whatever this workspace's policy says. The sandbox
+          URL is set above.
+        </InfoBanner>
+      ) : null}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <FilterSelect
-              label="Code execution"
-              value={stance}
-              onChange={(next) => setStance(next as Stance)}
-              options={[
-                { value: "default", label: "Deployment default" },
-                { value: "allowed", label: "Allowed" },
-                { value: "blocked", label: "Blocked" },
-              ]}
-              disabled={busy}
-            />
-            {policy?.configured === false ? (
-              <Chip size="sm" color="default">
-                No policy set
-              </Chip>
-            ) : null}
-          </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <FilterSelect
+          label="Code execution"
+          value={stance}
+          onChange={(next) => setStance(next as Stance)}
+          options={[
+            { value: "default", label: "Deployment default" },
+            { value: "allowed", label: "Allowed" },
+            { value: "blocked", label: "Blocked" },
+          ]}
+          disabled={busy}
+        />
+        {policy?.configured === false ? (
+          // The absence of a stored row, stated rather than boxed: this
+          // workspace has not departed from the deployment default.
+          <span className="flex items-center gap-2 font-mono text-[13px] text-subtle">
+            <Dot className="bg-text-subtle" />
+            NO POLICY SET
+          </span>
+        ) : null}
+      </div>
 
-          <Field
-            label="Default prompt hint"
-            value={hint}
-            onChange={setHint}
-            placeholder="Leave blank to use the deployment's hint"
-            description="Used only when a request declares otari_code_execution without a hint of its own."
-          />
-          <Field
-            label="Max tool-loop iterations"
-            value={maxIterations}
-            onChange={setMaxIterations}
-            placeholder={`Blank for the request's own limit (max ${MAX_ITERATIONS})`}
-            description="Lowers the number of model-to-tool rounds. It never raises one."
-          />
-          <Field
-            label="Execution timeout (seconds)"
-            value={execTimeout}
-            onChange={setExecTimeout}
-            placeholder={`Blank for the deployment's ${MAX_EXEC_TIMEOUT_S}s`}
-            description="Lowers how long one execution may run. It never raises it."
-          />
+      <Field
+        label="Default prompt hint"
+        value={hint}
+        onChange={setHint}
+        placeholder="Leave blank to use the deployment's hint"
+        description="Used only when a request declares otari_code_execution without a hint of its own."
+      />
+      <Field
+        label="Max tool-loop iterations"
+        value={maxIterations}
+        onChange={setMaxIterations}
+        placeholder={`Blank for the request's own limit (max ${MAX_ITERATIONS})`}
+        description="Lowers the number of model-to-tool rounds. It never raises one."
+      />
+      <Field
+        label="Execution timeout (seconds)"
+        value={execTimeout}
+        onChange={setExecTimeout}
+        placeholder={`Blank for the deployment's ${MAX_EXEC_TIMEOUT_S}s`}
+        description="Lowers how long one execution may run. It never raises it."
+      />
 
-          {allowedImages.length > 0 || withdrawnImage ? (
-            <div className="flex flex-col gap-1">
-              <FilterSelect
-                label="Sandbox image"
-                value={image}
-                onChange={setImage}
-                options={[
-                  { value: DEPLOYMENT_IMAGE, label: "Deployment default" },
-                  ...allowedImages.map((allowed) => ({
-                    value: allowed,
-                    label: allowed,
-                  })),
-                  ...(withdrawnImage
-                    ? [
-                        {
-                          value: withdrawnImage,
-                          label: `${withdrawnImage} (no longer approved)`,
-                        },
-                      ]
-                    : []),
-                ]}
-                disabled={busy}
-              />
-              {withdrawnImage ? (
-                <p className="text-xs text-warning">
-                  This workspace is pinned to an image the operator no longer
-                  approves, so its requests are refused. Pick another, or ask an
-                  operator to restore it.
-                </p>
-              ) : (
-                <p className="text-xs text-muted">
-                  The image this workspace's code runs in, from the list the
-                  operator has approved.
-                </p>
-              )}
-            </div>
+      {allowedImages.length > 0 || withdrawnImage ? (
+        <div className="flex flex-col gap-1">
+          <FilterSelect
+            label="Sandbox image"
+            value={image}
+            onChange={setImage}
+            options={[
+              { value: DEPLOYMENT_IMAGE, label: "Deployment default" },
+              ...allowedImages.map((allowed) => ({
+                value: allowed,
+                label: allowed,
+              })),
+              ...(withdrawnImage
+                ? [
+                    {
+                      value: withdrawnImage,
+                      label: `${withdrawnImage} (no longer approved)`,
+                    },
+                  ]
+                : []),
+            ]}
+            disabled={busy}
+          />
+          {withdrawnImage ? (
+            <p className="text-caption text-warning">
+              This workspace is pinned to an image the operator no longer
+              approves, so its requests are refused. Pick another, or ask an
+              operator to restore it.
+            </p>
           ) : (
-            <p className="text-xs text-muted">
-              This deployment has approved no sandbox images, so this workspace
-              runs whatever the sandbox runs. An operator adds them with
-              sandbox_allowed_session_images.
+            <p className="text-caption text-muted">
+              The image this workspace's code runs in, from the list the
+              operator has approved.
             </p>
           )}
+        </div>
+      ) : (
+        <p className="text-caption text-muted">
+          This deployment has approved no sandbox images, so this workspace runs
+          whatever the sandbox runs. An operator adds them with
+          sandbox_allowed_session_images.
+        </p>
+      )}
 
-          {availableTools.length > 1 || staleTools.length > 0 ? (
-            <fieldset className="flex flex-col gap-2">
-              <legend className="text-xs font-medium text-muted">
-                Code-execution tools
-              </legend>
-              <p className="text-xs text-muted">
-                Which of the tools this deployment's sandbox serves the
-                workspace may use. Leaving them all ticked narrows nothing; use
-                Blocked above to refuse code execution outright.
-              </p>
-              {listedTools.map((tool) => (
-                <Checkbox
-                  key={tool}
-                  isSelected={tools === null || tools.includes(tool)}
-                  isDisabled={busy}
-                  onChange={(isSelected) => toggleTool(tool, isSelected)}
-                >
-                  {staleTools.includes(tool)
-                    ? `${tool} (no longer served)`
-                    : tool}
-                </Checkbox>
-              ))}
-              {staleTools.length > 0 ? (
-                <p className="text-xs text-warning">
-                  This workspace's policy names {staleTools.join(", ")}, which
-                  this deployment's sandbox no longer serves, so its requests
-                  are refused. Untick it and pick what should be allowed, or set
-                  the stance to Deployment default to drop the policy.
-                </p>
-              ) : null}
-            </fieldset>
-          ) : (
-            // With one tool served there is no subset to choose: ticking and
-            // unticking the single box would both mean "narrow nothing", and a
-            // control that cannot express anything is worse than a sentence
-            // saying so. The checkboxes appear on their own the day a backend
-            // serves a second kind.
-            <p className="text-xs text-muted">
-              This deployment's sandbox serves{" "}
-              {availableTools.length === 1 ? availableTools[0] : "no tools"}, so
-              there is no tool subset to choose. Use Blocked above to refuse
-              code execution for this workspace.
-            </p>
-          )}
-
-          {error ? (
-            <p role="alert" className="text-sm text-danger">
-              {error}
+      {availableTools.length > 1 || staleTools.length > 0 ? (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-xs font-medium text-muted">
+            Code-execution tools
+          </legend>
+          <p className="text-caption text-muted">
+            Which of the tools this deployment's sandbox serves the workspace
+            may use. Leaving them all ticked narrows nothing; use Blocked above
+            to refuse code execution outright.
+          </p>
+          {listedTools.map((tool) => (
+            <Checkbox
+              key={tool}
+              isSelected={tools === null || tools.includes(tool)}
+              isDisabled={busy}
+              onChange={(isSelected) => toggleTool(tool, isSelected)}
+            >
+              {staleTools.includes(tool) ? `${tool} (no longer served)` : tool}
+            </Checkbox>
+          ))}
+          {staleTools.length > 0 ? (
+            <p className="text-caption text-warning">
+              This workspace's policy names {staleTools.join(", ")}, which this
+              deployment's sandbox no longer serves, so its requests are
+              refused. Untick it and pick what should be allowed, or set the
+              stance to Deployment default to drop the policy.
             </p>
           ) : null}
-          <div className="flex justify-end">
-            <Button size="sm" isDisabled={busy} onPress={save}>
-              Save
-            </Button>
-          </div>
-        </Card.Content>
-      </Card>
-    </section>
+        </fieldset>
+      ) : (
+        // With one tool served there is no subset to choose: ticking and
+        // unticking the single box would both mean "narrow nothing", and a
+        // control that cannot express anything is worse than a sentence
+        // saying so. The checkboxes appear on their own the day a backend
+        // serves a second kind.
+        <p className="text-caption text-muted">
+          This deployment's sandbox serves{" "}
+          {availableTools.length === 1 ? availableTools[0] : "no tools"}, so
+          there is no tool subset to choose. Use Blocked above to refuse code
+          execution for this workspace.
+        </p>
+      )}
+
+      {error ? (
+        <p role="alert" className="text-caption text-danger">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-end">
+        <Button size="sm" isDisabled={busy} onPress={save}>
+          Save
+        </Button>
+      </div>
+    </Section>
   )
 }

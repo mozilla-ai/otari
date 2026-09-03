@@ -17,13 +17,18 @@ describe("navRowClass", () => {
     expect(resting).not.toMatch(/(?<![\w:-])bg-/)
   })
 
-  it("hovers and focuses a resting row onto the same step off the rail", () => {
-    // One step, not two: the same fill for both means a focused row is never
-    // weaker than a hovered one, which is what the design asks for.
-    for (const variant of ["hover", "focus-visible"]) {
-      expect(resting).toContain(`${variant}:bg-surface-subtle`)
-      expect(resting).toContain(`${variant}:text-foreground`)
-    }
+  it("hovers a resting row one step off the rail, and focuses it with the ring alone", () => {
+    // Hover takes a fill; focus deliberately does not. A row that can be
+    // selected cannot also spend the fill channel on focus, and the ring is
+    // what focus is drawn with everywhere. Both still brighten the ink, so a
+    // focused row is not weaker than a hovered one, it is differently marked.
+    expect(resting).toContain("hover:bg-surface-alt")
+    expect(resting).toContain("hover:text-foreground")
+    expect(resting).toContain("focus-visible:text-foreground")
+    // The regression this replaces: a fill outlives the click that focused the
+    // row where a hover does not outlive the pointer, so a group trigger
+    // clicked open kept the fill and read as selected.
+    expect(resting).not.toContain("focus-visible:bg-")
   })
 
   it("presses a resting row the other way off the rail", () => {
@@ -39,14 +44,56 @@ describe("navRowClass", () => {
     }
   })
 
-  it("lifts a selected row off the rail with one class in both themes", () => {
-    expect(selected).toContain("bg-surface-alt")
+  it("marks a selected row with the quieter fill and an edge hover cannot borrow", () => {
+    // The louder of the two rungs on purpose, which is the swap: selection used
+    // to take `surface-alt` while hover took `surface-subtle`, the louder one,
+    // so the pointer made any row look more current than the current one.
+    expect(selected).toContain("bg-surface-subtle")
     expect(selected).toContain("text-foreground")
+    // Two adjacent rungs are a fragile way to carry "which page am I on", so
+    // the state also gets a structural channel no transient state paints.
+    expect(selected).toContain("border-foreground")
+    // The edge is reserved on every row and only colored when selected, which is
+    // what stops selection moving anything. The compensating `pl-` this
+    // replaces collided with a nested row's own indent, so selecting a child
+    // dropped it back into its parent's lane.
+    expect(resting).toContain("border-l-2")
+    expect(resting).toContain("border-transparent")
+    // Only one border-color utility may reach a row. Carrying both, with the
+    // width in the base and the two colors in the states, compiles clean and
+    // measures transparent on the selected row: they are the same utility at
+    // the same specificity, so Tailwind's emitted order decides, and it emits
+    // `border-transparent` last.
+    expect(selected).not.toContain("border-transparent")
+    expect(selected).not.toMatch(/(?<![\w:-])pl-/)
+  })
+
+  it("keeps a nested row's indent when it is the selected one", () => {
+    const nested = navRowClass({ nested: true })
+    const nestedSelected = navRowClass({ nested: true, isActive: true })
+    for (const row of [nested, nestedSelected]) {
+      expect(row).toContain("pl-[3.125rem]")
+    }
     // No `dark:` override. The surface family sits one rung above the
     // background family in both themes, so `surface-alt` is a step off the
     // rail either way. An override here would resolve to the rail's own value
     // and erase the selection.
     expect(selected).not.toContain("dark:bg-")
+  })
+
+  it("gives the group holding the selected row ink and nothing else", () => {
+    const ancestor = navRowClass({ ancestor: true })
+    expect(ancestor).toContain("text-foreground")
+    // Neither of the two channels that say "this is the row you are on". The
+    // measured bug: an expanded group and its selected child were byte-identical
+    // while only the child carried aria-current, so the page claimed two current
+    // rows and the accessibility tree claimed one.
+    expect(ancestor).not.toMatch(/(?<![\w:-])bg-/)
+    expect(ancestor).toContain("border-transparent")
+    expect(ancestor).not.toContain("border-foreground")
+    // It still answers the pointer, unlike the selected row: clicking it
+    // collapses the group, so there is something for an affordance to promise.
+    expect(ancestor).toContain("hover:bg-surface-alt")
   })
 
   it("does not answer the pointer on a selected row at all", () => {
@@ -72,12 +119,13 @@ describe("navRowClass", () => {
 
   it("rings every row on keyboard focus, whatever else it is wearing", () => {
     for (const row of [resting, selected]) {
-      expect(row).toContain("focus-visible:outline-2")
-      expect(row).toContain("focus-visible:outline-offset-2")
-      expect(row).toContain("focus-visible:outline-focus")
-      // Names the style back and folds HeroUI's own ring away, both of which
-      // only matter on the rows that are HeroUI Buttons.
-      expect(row).toContain("focus-visible:outline-solid")
+      // The ring's values are globals.css's, not this module's, so what is
+      // asserted here is that a row asks for one at utility strength. Spelling
+      // the width, offset and color back would recreate the disagreement that
+      // moving them into one place resolved.
+      expect(row).toContain("focus-visible:otari-focus-ring")
+      // Folds HeroUI's own inner ring away, which only matters on the rows that
+      // are HeroUI Buttons.
       expect(row).toContain("focus-visible:ring-0")
       expect(row).toContain("focus-visible:ring-offset-0")
     }

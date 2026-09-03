@@ -1,7 +1,8 @@
-import { Button, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import { useRouterStatus, useUsers } from "@/shared/api/hooks"
+import { Dot, Meter } from "@/shared/components/surface"
 import { ErrorBanner } from "@/shared/components/ui"
 
 /** Records against the seed count, as a bar plus the plain numbers.
@@ -21,19 +22,27 @@ function Warmth({
   const pct =
     seed === 0 ? 100 : Math.min(100, Math.round((records / seed) * 100))
   return (
-    <div className="flex items-center gap-3">
-      <div className="h-1.5 w-32 overflow-hidden rounded-full bg-surface-alt">
-        <div
-          className={warm ? "h-full bg-accent" : "h-full bg-warning"}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+    <div className="flex items-center gap-4">
+      {/* The share-bar shape, not a progress meter: 3px on the active-control
+          rung with an accent fill. The quantity is in the length and the state
+          is in the word beside it, which is why the fill is the accent whether
+          or not the router is ready. A bar that turned amber while filling said
+          "something is wrong" about a policy that is simply new. */}
+      <Meter
+        fraction={pct / 100}
+        ariaLabel={`${records} of ${seed} examples`}
+      />
       <span className="text-sm text-foreground">
         {records} / {seed} examples
       </span>
-      <Chip size="sm" color={warm ? "accent" : "default"}>
-        {warm ? "routing" : "warming up"}
-      </Chip>
+      <span
+        className={`flex items-center gap-2 font-mono text-[13px] ${
+          warm ? "text-foreground" : "text-subtle"
+        }`}
+      >
+        <Dot className={warm ? "bg-accent" : "bg-text-subtle"} />
+        {warm ? "ROUTING" : "WARMING UP"}
+      </span>
     </div>
   )
 }

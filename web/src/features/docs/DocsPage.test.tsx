@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import userEvent from "@testing-library/user-event"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
+import { describe, expect, it, vi } from "vitest"
 
-import { DocsPage } from "@/features/docs/DocsPage"
+import { DocsPage, markdownComponents } from "@/features/docs/DocsPage"
 
 describe("DocsPage", () => {
   it("renders the bundled dashboard guide, not a link to a separate docs site", () => {
@@ -89,5 +92,96 @@ describe("DocsPage", () => {
     )
     expect(configLink).toHaveAttribute("target", "_blank")
     expect(configLink).toHaveAttribute("rel", "noreferrer")
+  })
+})
+
+/**
+ * The code block's label row, covered here rather than by a page measurement,
+ * and the reason is worth recording: the only fenced blocks in
+ * `docs/dashboard.md` sit in the first-run walkthrough, which this page
+ * deliberately drops (a reader who reached it is already signed in). The guide
+ * as rendered has 72 inline `<code>` elements and no `<pre>` at all, so the row
+ * cannot be seen on the running page however far you scroll. What is asserted
+ * is the real pipeline: the page's own component map, driven by ReactMarkdown
+ * over a fence.
+ */
+describe("DocsPage code blocks", () => {
+  const renderFence = (md: string) =>
+    render(
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents}
+      >
+        {md}
+      </ReactMarkdown>,
+    )
+
+  it("labels a fence with its language and offers a copy control", () => {
+    renderFence("```bash\nuv run otari serve\n```\n")
+    expect(screen.getByText("bash")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument()
+    // The block is the scrollable region, named for AT by its language.
+    expect(
+      screen.getByRole("region", { name: "bash code" }),
+    ).toBeInTheDocument()
+  })
+
+  it("falls back to a neutral label when the fence names no language", () => {
+    // An unlabeled row would be a bar with a control and no subject; "code" is
+    // the honest name for a block whose author did not say what it is.
+    renderFence("```\nplain\n```\n")
+    expect(screen.getByText("code")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Code" })).toBeInTheDocument()
+  })
+
+  it("copies the block's text and says so", async () => {
+    // `userEvent.setup()` installs its own `navigator.clipboard`, so the spy
+    // goes on after setup rather than before it, or it is the one that gets
+    // replaced and the call lands somewhere nothing is watching.
+    const user = userEvent.setup()
+    const writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockResolvedValue(undefined)
+    renderFence("```text\nYour master key: otari-mk-…\n```\n")
+
+    await user.click(screen.getByRole("button", { name: "Copy" }))
+
+    expect(writeText).toHaveBeenCalledWith("Your master key: otari-mk-…\n")
+    expect(
+      await screen.findByRole("button", { name: "Copied" }),
+    ).toBeInTheDocument()
+    writeText.mockRestore()
+  })
+
+  it("keeps the label row out of the block's own scroller", () => {
+    // The invariant behind a check that cannot be made on this page: the label
+    // is a SIBLING of the `<pre>`, so scrolling a wide block horizontally moves
+    // the code and not the row above it. Confirmed once in a browser with a
+    // temporary wide fence (the label stayed at x=312 with the block scrolled
+    // 1812px right, both the language and Copy still on screen); this is what
+    // holds that shape in place, since the guide has no fence to see it on.
+    const { container } = renderFence("```bash\necho hello\n```\n")
+    const block = container.querySelector(".otari-code-block")
+    const label = container.querySelector(".otari-code-label")
+    const pre = container.querySelector("pre")
+    expect(label?.parentElement).toBe(block)
+    expect(pre?.parentElement).toBe(block)
+    expect(pre?.contains(label ?? null)).toBe(false)
+  })
+
+  it("renders no copy control when there is nothing to copy", () => {
+    // An empty fence still produces a block; a control that would put an empty
+    // string on the clipboard is worse than no control.
+    renderFence("```js\n```\n")
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull()
+  })
+
+  it("still renders no fence on the guide itself, loudly", () => {
+    // Pinned so this stops being true noisily rather than quietly: if the guide
+    // grows a fence outside the dropped walkthrough, the row becomes visible on
+    // the page and should be measured there instead of only here.
+    const { container } = render(<DocsPage />)
+    expect(container.querySelectorAll("pre")).toHaveLength(0)
+    expect(container.querySelectorAll("code").length).toBeGreaterThan(0)
   })
 })

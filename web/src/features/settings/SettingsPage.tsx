@@ -1,4 +1,4 @@
-import { AlertDialog, Button, buttonVariants, Card, Input } from "@heroui/react"
+import { AlertDialog, Button, buttonVariants, Input } from "@heroui/react"
 import { useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
@@ -11,11 +11,13 @@ import {
   useStoredProviders,
   useUpdateSettings,
 } from "@/shared/api/hooks"
+import { PageIntro, SettingsGroup, Toolbar } from "@/shared/components/surface"
 import {
+  Checkbox,
   ErrorBanner,
   FilterSelect,
+  INPUT_CLASS,
   InfoBanner,
-  PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
 
@@ -102,7 +104,7 @@ function NumberSetting({
         value={draft}
         disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
-        className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none disabled:opacity-50"
+        className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
       />
       <Button
         size="sm"
@@ -146,7 +148,7 @@ function TextSetting({
         disabled={disabled}
         placeholder="unset"
         onChange={(event) => setDraft(event.target.value)}
-        className="w-56 rounded-md border border-field-border bg-field px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
+        className={`w-56 ${INPUT_CLASS}`}
       />
       <Button
         size="sm"
@@ -194,9 +196,13 @@ function SettingControl({
         <span className="text-sm tabular-nums text-foreground">
           {formatValue(field)}
         </span>
-        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted">
-          startup-only
-        </span>
+        {/* A label, not a chip. The pill it used to be was a bordered capsule
+            next to a value on a surface that no longer has boxes on it, so the
+            shape was doing the work the type should. `text-overline` is exactly
+            that role and already carries the size, weight, tracking, uppercase
+            and muted color, so this is the role rather than a seventh hand-rolled
+            spelling of it. */}
+        <span className="text-overline">startup-only</span>
       </div>
     )
   }
@@ -260,7 +266,14 @@ function ConfigRow({
       <div className="min-w-0">
         <code className="text-sm font-medium text-foreground">{field.key}</code>
         {field.description ? (
-          <p className="mt-1 text-sm text-muted">{field.description}</p>
+          // `max-w-prose` for the reason the page header carries one: these
+          // rows became full-bleed with the rest of the page, and the longest
+          // description here measured 1211px, about 175 characters to the line,
+          // roughly twice a readable measure. The row still spans the page; the
+          // sentence inside it does not have to.
+          <p className="mt-1 max-w-prose text-caption text-muted">
+            {field.description}
+          </p>
         ) : null}
       </div>
       <div className="shrink-0 pt-0.5">
@@ -459,7 +472,7 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
           <code className="text-sm font-medium text-foreground">
             master_key
           </code>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <p className="mt-1 max-w-3xl text-caption text-muted">
             {isGenerated
               ? "This gateway uses its first-run generated dashboard key. Regeneration invalidates the current key immediately."
               : "This gateway uses a key managed through OTARI_MASTER_KEY or config.yml. Rotate it in configuration, then restart the gateway."}
@@ -509,7 +522,7 @@ function SecretKeyRow() {
           <code className="text-sm font-medium text-foreground">
             OTARI_SECRET_KEY
           </code>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <p className="mt-1 max-w-3xl text-caption text-muted">
             Generate a new key with <code>uv run otari gen-secret-key</code>,
             then restart with{" "}
             <code>OTARI_SECRET_KEY=&lt;new-key&gt;,&lt;old-key&gt;</code>.
@@ -563,17 +576,10 @@ function SecurityKeysSection({
   masterKeySource: "configured" | "generated"
 }) {
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-heading">
-        Credential security <span className="font-normal text-muted">(2)</span>
-      </h2>
-      <Card>
-        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-          <MasterKeyRow source={masterKeySource} />
-          <SecretKeyRow />
-        </Card.Content>
-      </Card>
-    </section>
+    <SettingsGroup title="Credential security" count={2}>
+      <MasterKeyRow source={masterKeySource} />
+      <SecretKeyRow />
+    </SettingsGroup>
   )
 }
 
@@ -637,15 +643,16 @@ export function SettingsPage() {
   const groups = groupFields(filtered)
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Settings"
-        description="Every effective gateway setting. Settable fields apply immediately and persist across restarts; startup-only fields are shown for reference and change only via config.yml or environment variables (then a restart)."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Settings">
+        Every effective gateway setting. Settable fields apply immediately and
+        persist across restarts; startup-only fields are shown for reference and
+        change only via config.yml or environment variables (then a restart).
+      </PageIntro>
 
       <ErrorBanner error={settings.error ?? updateSettings.error} />
 
-      <div className="flex flex-wrap items-center gap-3">
+      <Toolbar className="pb-3">
         <input
           ref={searchRef}
           type="search"
@@ -658,19 +665,13 @@ export function SettingsPage() {
           }}
           className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
         />
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input
-            type="checkbox"
-            checked={settableOnly}
-            onChange={(event) => setSettableOnly(event.target.checked)}
-            className="h-4 w-4 accent-accent"
-          />
+        <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only
-        </label>
-      </div>
+        </Checkbox>
+      </Toolbar>
 
       {data ? (
-        <p className="text-xs text-muted">
+        <p className="pb-2 text-xs text-subtle">
           Showing {filtered.length} of {allFields.length} settings
         </p>
       ) : null}
@@ -682,26 +683,20 @@ export function SettingsPage() {
       {settings.isLoading ? <PageLoading /> : null}
 
       {groups.map((group) => (
-        <section key={group.name} className="flex flex-col gap-2">
-          <h2 className="text-heading">
-            {group.name}{" "}
-            <span className="font-normal text-muted">
-              ({group.fields.length})
-            </span>
-          </h2>
-          <Card>
-            <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-              {group.fields.map((field) => (
-                <ConfigRow
-                  key={field.key}
-                  field={field}
-                  patch={patch}
-                  disabled={!data || pending}
-                />
-              ))}
-            </Card.Content>
-          </Card>
-        </section>
+        <SettingsGroup
+          key={group.name}
+          title={group.name}
+          count={group.fields.length}
+        >
+          {group.fields.map((field) => (
+            <ConfigRow
+              key={field.key}
+              field={field}
+              patch={patch}
+              disabled={!data || pending}
+            />
+          ))}
+        </SettingsGroup>
       ))}
 
       {data ? (
@@ -713,7 +708,7 @@ export function SettingsPage() {
       <MaintenanceModeCard />
 
       {data ? (
-        <p className="text-xs text-muted">
+        <p className="pt-6 text-xs text-subtle">
           Mode: {data.mode} · Version {data.version}
           {data.require_pricing ? " · require_pricing on" : ""}
         </p>

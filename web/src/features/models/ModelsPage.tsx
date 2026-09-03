@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/noLabelWithoutControl: every label here wraps MoneyInput, which renders the input and takes its own ariaLabel. The rule cannot see through a component, and it still works on this file's native inputs.
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import {
   type ReactNode,
   useCallback,
@@ -9,6 +9,7 @@ import {
   useState,
 } from "react"
 import type { Selection, SortDescriptor } from "react-aria-components"
+import { FiInfo } from "react-icons/fi"
 import type { DiscoverableProvider, ModelMetadata, PricingTier } from "@/client"
 import { isPricingTier } from "@/client"
 import { currentPricing, providerFromModelKey } from "@/features/models/pricing"
@@ -28,6 +29,8 @@ import {
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
 import { TablePagination } from "@/shared/components/TablePagination"
 import {
   ConfirmButton,
@@ -35,8 +38,7 @@ import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
-  InfoBanner,
-  PageHeader,
+  INPUT_CLASS,
 } from "@/shared/components/ui"
 import {
   formatContext,
@@ -128,6 +130,31 @@ const MODALITY_LABELS: Record<string, string> = {
   pdf: "PDF",
 }
 
+/* Hoisted so the select that sets a filter and the chip that reports it read
+   from one list. Inline arrays meant a chip could name an option the control no
+   longer offers, which is a disagreement nothing would catch. */
+const PRICING_OPTIONS = [
+  { value: "all", label: "Any pricing" },
+  { value: "configured", label: "Custom price" },
+  { value: "default", label: "Default price" },
+  { value: "priced", label: "Priced" },
+  { value: "unpriced", label: "Unpriced" },
+]
+
+const SOURCE_OPTIONS = [
+  { value: "all", label: "Any source" },
+  { value: "discovered", label: "Discovered" },
+  { value: "custom", label: "Custom (not discovered)" },
+]
+
+const CAPABILITY_OPTIONS = [
+  { value: "all", label: "Any capability" },
+  ...MODEL_FILTER_CAPABILITIES.map((entry) => ({
+    value: entry.value,
+    label: entry.label,
+  })),
+]
+
 const CONTEXT_OPTIONS = [
   { value: "0", label: "Any context" },
   { value: "8000", label: "≥ 8K" },
@@ -178,6 +205,9 @@ interface ModelRow {
   cacheWrite1hPrice: number | null
   pricingTiers: PricingTier[]
   source: PriceSource
+  /** What the model accepts and emits, for the Modalities lane. */
+  inputModalities?: string[]
+  outputModalities?: string[]
 }
 
 type EffectiveRates = Pick<
@@ -355,7 +385,7 @@ function MoneyInput({
       aria-label={ariaLabel}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
+      className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
     />
   )
 }
@@ -395,7 +425,7 @@ function PricingTierEditor({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+    <div className="flex flex-col gap-2 border border-control-border p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-medium text-foreground">
@@ -427,7 +457,7 @@ function PricingTierEditor({
               onChange={(event) =>
                 update(tier.id, "minInputTokens", event.target.value)
               }
-              className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
+              className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
@@ -485,25 +515,49 @@ function PricingTierEditor({
   )
 }
 
-function SourceChip({ source }: { source: PriceSource }) {
-  if (source === "configured") {
-    return (
-      <Chip size="sm" color="default">
-        configured
-      </Chip>
-    )
-  }
-  if (source === "default" || source === "alias") {
-    return (
-      <Chip size="sm" color="accent">
-        {source}
-      </Chip>
-    )
-  }
-  if (source === "unknown") {
-    return <span className="text-xs text-muted">rate unknown</span>
-  }
-  return <span className="text-xs text-muted">not priced</span>
+/**
+ * Where a model's price came from, as a dot and a word.
+ *
+ * `configured` is the only affirmative one, and it takes the accent dot with
+ * foreground ink because it is the one that means somebody set this
+ * deliberately. A catalog default or an alias is a fact rather than a decision
+ * and reads muted; an unpriced model is the absence of one and reads subtle.
+ * The accent is the data ink here, not a way to say "look at this".
+ */
+/** One row of a category set: a subtle group label, then its members. */
+function ModalitySet({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[11px] tracking-[0.1em] uppercase">
+      <span className="text-subtle">{label}</span>
+      {values.map((m) => (
+        <span key={m} className="text-muted">
+          {MODALITY_LABELS[m] ?? m}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function SourceMark({ source }: { source: PriceSource }) {
+  const { word, dot, ink } =
+    source === "configured"
+      ? { word: "Custom", dot: "bg-accent", ink: "text-foreground" }
+      : source === "default" || source === "alias"
+        ? { word: source, dot: "bg-text-subtle", ink: "text-muted" }
+        : source === "unknown"
+          ? {
+              word: "rate unknown",
+              dot: "bg-text-subtle",
+              ink: "text-subtle",
+            }
+          : { word: "not priced", dot: "bg-text-subtle", ink: "text-subtle" }
+  return (
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+      <Dot className={dot} />
+      {word.toUpperCase()}
+    </span>
+  )
 }
 
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
@@ -523,22 +577,25 @@ function InfoTooltip({
   const tipId = useId()
   return (
     <span className="group relative inline-flex items-center font-normal normal-case">
+      {/* An icon, not a badge. This was a letter "i" inside a 16px circled div,
+          which put it in the radius conversation it does not belong to: a glyph
+          is not a container, and an icon carries its own shape. The 16px box
+          was also below the touch floor for something whose whole job is to be
+          tapped. Real icon at 14px in a 24px target now. */}
       <button
         type="button"
         aria-label={label}
         aria-describedby={tipId}
-        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
-          tone === "warning"
-            ? "border-warning text-warning"
-            : "border-border text-muted hover:border-accent hover:text-link"
+        className={`inline-flex h-6 w-6 items-center justify-center ${
+          tone === "warning" ? "text-warning" : "text-muted hover:text-link"
         }`}
       >
-        i
+        <FiInfo aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
       <span
         id={tipId}
         role="tooltip"
-        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 shadow-elevation-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 border border-control-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {children}
       </span>
@@ -715,7 +772,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           </Button>
         </div>
         {setPricing.error ? (
-          <span className="text-xs text-danger">
+          <span className="text-caption text-danger">
             {errorMessage(setPricing.error)}
           </span>
         ) : null}
@@ -790,7 +847,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           </>
         ) : null}
         {deletePricing.error ? (
-          <span className="text-xs text-danger">
+          <span className="text-caption text-danger">
             {errorMessage(deletePricing.error)}
           </span>
         ) : null}
@@ -819,119 +876,106 @@ function ModelDetailPanel({
   )
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-5 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-title break-all">{row.model}</h2>
-              {metadata?.deprecated ? (
-                <Chip size="sm" color="danger">
-                  deprecated
-                </Chip>
-              ) : null}
-            </div>
-            <p className="mt-1 text-xs break-all text-muted">
-              Selector:{" "}
-              <CopyableValue value={row.key} label="model id">
-                <code>{row.key}</code>
-              </CopyableValue>
-            </p>
-            {metadata?.family ? (
-              <p className="text-xs text-muted">{metadata.family}</p>
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-5"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-title break-all">{row.model}</h2>
+            {metadata?.deprecated ? (
+              <span className="flex items-center gap-2 font-mono text-[13px] text-danger">
+                <Dot className="bg-danger" />
+                DEPRECATED
+              </span>
             ) : null}
           </div>
-          <button
-            type="button"
-            aria-label="Close model details"
-            onClick={onClose}
-            className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-muted hover:bg-surface-alt hover:text-foreground"
-          >
-            ✕
-          </button>
+          <p className="mt-1 text-xs break-all text-muted">
+            Selector:{" "}
+            <CopyableValue value={row.key} label="model id">
+              <code>{row.key}</code>
+            </CopyableValue>
+          </p>
+          {metadata?.family ? (
+            <p className="text-xs text-muted">{metadata.family}</p>
+          ) : null}
         </div>
+        <button
+          type="button"
+          aria-label="Close model details"
+          onClick={onClose}
+          className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-muted hover:bg-surface-alt hover:text-foreground"
+        >
+          ✕
+        </button>
+      </div>
 
-        {metadata?.description ? (
-          <p className="text-sm text-foreground">{metadata.description}</p>
-        ) : null}
+      {metadata?.description ? (
+        <p className="text-sm text-foreground">{metadata.description}</p>
+      ) : null}
 
-        <PanelSection title="Pricing">
-          <div className="flex items-center gap-2">
-            <SourceChip source={row.source} />
-            {row.isDiscovered ? null : (
-              <span className="text-xs text-muted">not discovered</span>
-            )}
+      <PanelSection title="Pricing">
+        <div className="flex items-center gap-2">
+          <SourceMark source={row.source} />
+          {row.isDiscovered ? null : (
+            <span className="text-xs text-muted">not discovered</span>
+          )}
+        </div>
+        <PanelPriceEditor key={row.key} row={row} />
+      </PanelSection>
+
+      <PanelSection title="Specs">
+        <Spec label="Context window" value={formatContext(row.contextWindow)} />
+        <Spec
+          label="Max output"
+          value={formatContext(metadata?.max_output_tokens ?? null)}
+        />
+        <Spec
+          label="Knowledge cutoff"
+          value={metadata?.knowledge_cutoff ?? "—"}
+        />
+        <Spec
+          label="Released"
+          value={formatReleaseDate(metadata?.release_date)}
+        />
+        <Spec
+          label="Open weights"
+          value={metadata ? (metadata.open_weights ? "Yes" : "No") : "—"}
+        />
+      </PanelSection>
+
+      <PanelSection title="Modalities">
+        {inputModalities.length === 0 && outputModalities.length === 0 ? (
+          <span className="text-sm text-muted">Unknown.</span>
+        ) : (
+          /* A category set, not chips: these are the kinds a model accepts
+               and emits, and a list of kinds is read as a list. Mono uppercase
+               with the group label on the subtle rung, so `In` and `Out` name
+               the two sets without competing with their members. */
+          <div className="flex flex-col gap-2">
+            <ModalitySet label="In" values={inputModalities} />
+            <ModalitySet label="Out" values={outputModalities} />
           </div>
-          <PanelPriceEditor key={row.key} row={row} />
-        </PanelSection>
+        )}
+      </PanelSection>
 
-        <PanelSection title="Specs">
-          <Spec
-            label="Context window"
-            value={formatContext(row.contextWindow)}
-          />
-          <Spec
-            label="Max output"
-            value={formatContext(metadata?.max_output_tokens ?? null)}
-          />
-          <Spec
-            label="Knowledge cutoff"
-            value={metadata?.knowledge_cutoff ?? "—"}
-          />
-          <Spec
-            label="Released"
-            value={formatReleaseDate(metadata?.release_date)}
-          />
-          <Spec
-            label="Open weights"
-            value={metadata ? (metadata.open_weights ? "Yes" : "No") : "—"}
-          />
-        </PanelSection>
-
-        <PanelSection title="Modalities">
-          {inputModalities.length === 0 && outputModalities.length === 0 ? (
-            <span className="text-sm text-muted">Unknown.</span>
-          ) : (
-            <div className="flex flex-col gap-1.5 text-xs text-muted">
-              <div className="flex flex-wrap items-center gap-1">
-                <span>In:</span>
-                {inputModalities.map((m) => (
-                  <Chip key={m} size="sm" color="default">
-                    {MODALITY_LABELS[m] ?? m}
-                  </Chip>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-1">
-                <span>Out:</span>
-                {outputModalities.map((m) => (
-                  <Chip key={m} size="sm" color="default">
-                    {MODALITY_LABELS[m] ?? m}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-          )}
-        </PanelSection>
-
-        <PanelSection title="Capabilities">
-          {activeCaps.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {activeCaps.map(({ key, label }) => (
-                <Chip key={key} size="sm" color="default">
-                  {label}
-                </Chip>
-              ))}
-            </div>
-          ) : (
-            <span className="text-sm text-muted">
-              {metadataAvailable
-                ? "None reported."
-                : "Extended metadata unavailable (models.dev disabled or unreachable)."}
-            </span>
-          )}
-        </PanelSection>
-      </Card.Content>
-    </Card>
+      <PanelSection title="Capabilities">
+        {activeCaps.length > 0 ? (
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 font-mono text-[11px] tracking-[0.1em] text-muted uppercase">
+            {activeCaps.map(({ key, label }) => (
+              <span key={key}>{label}</span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-sm text-muted">
+            {metadataAvailable
+              ? "None reported."
+              : "Extended metadata unavailable (models.dev disabled or unreachable)."}
+          </span>
+        )}
+      </PanelSection>
+    </Section>
   )
 }
 
@@ -952,7 +996,12 @@ function SearchInput({
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
       aria-label={placeholder}
-      className="w-full max-w-xs rounded-md border border-field-border bg-field px-3 py-1.5 text-sm focus:border-accent focus:outline-none"
+      // The product's field, not a fourth spelling of one. It measured 34px
+      // and had a corner radius nothing else had; inside a `Toolbar` it takes
+      // the dense height like the filter selects beside it.
+      // `min-w-0` so it gives way when the row is tight instead of holding its
+      // width and pushing a filter onto a second line.
+      className={`w-full min-w-0 max-w-xs ${INPUT_CLASS}`}
     />
   )
 }
@@ -1119,7 +1168,7 @@ function InlinePriceForm({
           </span>
         ) : null}
         {setPricing.error || deletePricing.error ? (
-          <span className="text-xs text-danger">
+          <span className="text-caption text-danger">
             {errorMessage(setPricing.error ?? deletePricing.error)}
           </span>
         ) : null}
@@ -1148,11 +1197,21 @@ function PriceCell({
   secondaryLabel: string
   onEdit: () => void
 }) {
-  const number = (value: number | null, label: string) => (
+  // Each half gets the same fixed width, so the slash sits in one column all the
+  // way down and the two numbers can be read as two columns rather than as one
+  // ragged string. Without it the pair is right-aligned as a whole, which puts
+  // every row's slash somewhere different and makes the input prices, the half
+  // an operator actually scans, impossible to compare. `min-w` rather than `w`:
+  // an unusually long price pushes its own row wider instead of being clipped.
+  const number = (
+    value: number | null,
+    label: string,
+    align: "text-right" | "text-left",
+  ) => (
     <button
       type="button"
       aria-label={`Edit ${label} price for ${rowKey}`}
-      className="tabular-nums hover:text-link hover:underline"
+      className={`min-w-[7ch] tabular-nums ${align} hover:text-link hover:underline`}
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1163,9 +1222,9 @@ function PriceCell({
   )
   return (
     <span className="inline-flex items-center justify-end gap-1">
-      {number(primary, primaryLabel)}
+      {number(primary, primaryLabel, "text-right")}
       <span className="text-muted">/</span>
-      {number(secondary, secondaryLabel)}
+      {number(secondary, secondaryLabel, "text-left")}
     </span>
   )
 }
@@ -1182,14 +1241,14 @@ function CachingCell({
   const entries = [
     rates.cacheReadPrice == null
       ? null
-      : `R ${formatCost(rates.cacheReadPrice)}`,
+      : { key: "R", value: formatCost(rates.cacheReadPrice) },
     rates.cacheWritePrice == null
       ? null
-      : `W ${formatCost(rates.cacheWritePrice)}`,
+      : { key: "W", value: formatCost(rates.cacheWritePrice) },
     rates.cacheWrite1hPrice == null
       ? null
-      : `1h ${formatCost(rates.cacheWrite1hPrice)}`,
-  ].filter((entry): entry is string => entry !== null)
+      : { key: "1h", value: formatCost(rates.cacheWrite1hPrice) },
+  ].filter((entry): entry is { key: string; value: string } => entry !== null)
   return (
     <button
       type="button"
@@ -1200,7 +1259,24 @@ function CachingCell({
         onEdit()
       }}
     >
-      {entries.length > 0 ? entries.join(" · ") : "Input-rate fallback"}
+      {/* The same fixed-width treatment as the input/output pair next door, for
+          the same reason: joined into one string these read as prose and the
+          read and write prices cannot be compared down the column. */}
+      {entries.length > 0 ? (
+        <span className="inline-flex items-center justify-end">
+          {entries.map((entry, index) => (
+            <span key={entry.key} className="inline-flex items-center gap-1">
+              {index > 0 ? <span className="px-1">·</span> : null}
+              <span className="text-subtle">{entry.key}</span>
+              <span className="min-w-[7ch] text-right tabular-nums">
+                {entry.value}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : (
+        "Input-rate fallback"
+      )}
     </button>
   )
 }
@@ -1223,7 +1299,7 @@ function PricingPolicyCell({
     <button
       type="button"
       aria-label={`Edit pricing policy for ${row.key}`}
-      className="max-w-40 text-right text-xs leading-5 text-muted hover:text-link hover:underline"
+      className="max-w-40 text-left font-mono text-[13px] leading-5 text-muted hover:text-foreground"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1297,6 +1373,27 @@ function ModelTable({
         cell: (row) => <span className="text-muted">{row.provider}</span>,
       },
       {
+        id: "modalities",
+        header: "Modalities",
+        // The category set's one instance in a table, which is why the artboard
+        // puts it here rather than only in the detail panel: this is the form's
+        // rendered specimen. An em dash where the metadata service reported
+        // nothing, because unknown is an absence rather than "none".
+        cell: (row) => {
+          const input = row.inputModalities ?? []
+          const output = row.outputModalities ?? []
+          if (input.length === 0 && output.length === 0) {
+            return <span className="text-muted">—</span>
+          }
+          return (
+            <div className="flex flex-col gap-1">
+              <ModalitySet label="In" values={input} />
+              <ModalitySet label="Out" values={output} />
+            </div>
+          )
+        },
+      },
+      {
         id: "input",
         header: (
           <span className="inline-flex items-center gap-1">
@@ -1344,7 +1441,11 @@ function ModelTable({
         // the overline spec: uppercase costs width, and a wrapped header costs
         // a glance where a misleading one costs a wrong conclusion.
         header: "Pricing policy",
-        align: "end",
+        // Left-aligned, unlike the two numeric lanes before it, because it is a
+        // status rather than a quantity. That adjacency is the one the
+        // separation rule exists for: a right-aligned number and a left-aligned
+        // label land their content on the same pixel, so `globals.css` gives
+        // this lane explicit room on its left.
         cell: (row) => (
           <PricingPolicyCell row={row} onEdit={() => onEditPricing(row.key)} />
         ),
@@ -1359,21 +1460,23 @@ function ModelTable({
   )
 
   return (
-    <DataTable
-      ariaLabel="Models"
-      columns={columns}
-      rows={rows}
-      getRowKey={getModelRowKey}
-      isLoading={isLoading}
-      emptyContent={empty}
-      selectionMode="multiple"
-      selectedKeys={selectedKeys}
-      onSelectionChange={onSelectionChange}
-      sortDescriptor={sortDescriptor}
-      onSortChange={onSortChange}
-      onRowAction={onSelect}
-      rowClassName={rowClassName}
-    />
+    <TableScrollFrame className="otari-models-table">
+      <DataTable
+        ariaLabel="Models"
+        columns={columns}
+        rows={rows}
+        getRowKey={getModelRowKey}
+        isLoading={isLoading}
+        emptyContent={empty}
+        selectionMode="multiple"
+        selectedKeys={selectedKeys}
+        onSelectionChange={onSelectionChange}
+        sortDescriptor={sortDescriptor}
+        onSortChange={onSortChange}
+        onRowAction={onSelect}
+        rowClassName={rowClassName}
+      />
+    </TableScrollFrame>
   )
 }
 
@@ -1404,42 +1507,52 @@ function DiscoveredErrors({
     list.map((provider) => provider.provider).join(", ")
   const one = (list: typeof providers) => list.length === 1
   return (
-    <InfoBanner tone="warning">
-      {unreachable.length > 0 ? (
-        <span className="block">
-          Could not list {names(unreachable)}. Check{" "}
-          {one(unreachable) ? "that provider's" : "those providers'"}{" "}
-          credentials in config.yml; {one(unreachable) ? "its" : "their"} models
-          are missing from the list below.
-        </span>
-      ) : null}
-      {noDiscovery.length > 0 ? (
-        <span className="block">
-          {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer
-          model discovery, so {one(noDiscovery) ? "its" : "their"} models are
-          missing from the list below.{" "}
-          {one(noDiscovery) ? "The provider" : "They"} may still serve requests.
-          Price a model by its selector to meter it here, or declare the model
-          ids {one(noDiscovery) ? "it serves" : "they serve"} under the{" "}
-          <code>models:</code> key in config.yml to list them all.
-          {/* Seeded with the prefix only when it is unambiguous: with several
+    // The Sheet-2 banner form: a square dot and muted prose between rules, no
+    // fill and no radius. Danger rather than caution because an unlistable
+    // provider means models are missing from the table under it, which is a
+    // wrong answer rather than a caveat.
+    <Section
+      className="border-y border-border py-3"
+      contentClassName="flex items-start gap-3 text-sm text-muted"
+    >
+      <Dot className="mt-2 bg-danger" />
+      <div className="flex flex-col gap-1">
+        {unreachable.length > 0 ? (
+          <span className="block">
+            Could not list {names(unreachable)}. Check{" "}
+            {one(unreachable) ? "that provider's" : "those providers'"}{" "}
+            credentials in config.yml; {one(unreachable) ? "its" : "their"}{" "}
+            models are missing from the list below.
+          </span>
+        ) : null}
+        {noDiscovery.length > 0 ? (
+          <span className="block">
+            {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer
+            model discovery, so {one(noDiscovery) ? "its" : "their"} models are
+            missing from the list below.{" "}
+            {one(noDiscovery) ? "The provider" : "They"} may still serve
+            requests. Price a model by its selector to meter it here, or declare
+            the model ids {one(noDiscovery) ? "it serves" : "they serve"} under
+            the <code>models:</code> key in config.yml to list them all.
+            {/* Seeded with the prefix only when it is unambiguous: with several
               providers lacking discovery, guessing one would put the operator on
               the wrong provider without saying so. */}
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onPress={() =>
-              onPriceModel(
-                one(noDiscovery) ? `${noDiscovery[0].provider}:` : "",
-              )
-            }
-          >
-            Price a model
-          </Button>
-        </span>
-      ) : null}
-    </InfoBanner>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              onPress={() =>
+                onPriceModel(
+                  one(noDiscovery) ? `${noDiscovery[0].provider}:` : "",
+                )
+              }
+            >
+              Price a model
+            </Button>
+          </span>
+        ) : null}
+      </div>
+    </Section>
   )
 }
 
@@ -1508,6 +1621,85 @@ export function ModelsPage() {
   }
   const changeFilter = (setter: (value: string) => void) => (value: string) => {
     setter(value)
+    setPage(0)
+  }
+
+  /**
+   * The filters that are set, as chips under the row that sets them.
+   *
+   * Only the ones actually narrowing anything: a chip for "Any pricing" would
+   * be a chip on every load saying nothing. Each carries the option's own label
+   * rather than its value, so a chip reads the way the control that set it did.
+   */
+  const modelFilterChips: FilterChip[] = (
+    [
+      [
+        "pricing",
+        "Pricing",
+        pricingFilter,
+        "all",
+        PRICING_OPTIONS,
+        setPricingFilter,
+      ],
+      [
+        "source",
+        "Source",
+        sourceFilter,
+        "all",
+        SOURCE_OPTIONS,
+        setSourceFilter,
+      ],
+      [
+        "capability",
+        "Capability",
+        capabilityFilter,
+        "all",
+        CAPABILITY_OPTIONS,
+        setCapabilityFilter,
+      ],
+      [
+        "context",
+        "Min context",
+        minContext,
+        "0",
+        CONTEXT_OPTIONS,
+        setMinContext,
+      ],
+      ["maxInput", "Max input price", maxInput, "", PRICE_OPTIONS, setMaxInput],
+      [
+        "compare",
+        "Compare at",
+        comparisonContext,
+        "",
+        PRICE_COMPARISON_OPTIONS,
+        setComparisonContext,
+      ],
+      [
+        "release",
+        "Released",
+        releaseFilter,
+        "all",
+        RELEASE_OPTIONS,
+        setReleaseFilter,
+      ],
+    ] as const
+  )
+    .filter(([, , value, unset]) => value !== unset)
+    .map(([key, label, value, unset, options, setter]) => ({
+      key,
+      label,
+      value: options.find((option) => option.value === value)?.label ?? value,
+      onClear: () => changeFilter(setter as (next: string) => void)(unset),
+    }))
+
+  const clearModelFilters = () => {
+    setPricingFilter("all")
+    setSourceFilter("all")
+    setCapabilityFilter("all")
+    setMinContext("0")
+    setMaxInput("")
+    setComparisonContext("")
+    setReleaseFilter("all")
     setPage(0)
   }
 
@@ -1618,6 +1810,8 @@ export function ModelsPage() {
       contextWindow:
         row.contextWindow ?? metadataByKey[row.key]?.context_window ?? null,
       releaseDate: metadataByKey[row.key]?.release_date ?? null,
+      inputModalities: metadataByKey[row.key]?.input_modalities ?? undefined,
+      outputModalities: metadataByKey[row.key]?.output_modalities ?? undefined,
     }))
     const seen = new Set(out.map((row) => row.key))
     // These rows exist because discovery reaches a model the catalog did not list:
@@ -1644,6 +1838,10 @@ export function ModelsPage() {
           isDiscovered: true,
           contextWindow: metadataByKey[model.key]?.context_window ?? null,
           releaseDate: metadataByKey[model.key]?.release_date ?? null,
+          inputModalities:
+            metadataByKey[model.key]?.input_modalities ?? undefined,
+          outputModalities:
+            metadataByKey[model.key]?.output_modalities ?? undefined,
           inputPrice: null,
           outputPrice: null,
           cacheReadPrice: null,
@@ -1961,10 +2159,13 @@ export function ModelsPage() {
     : null
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Models"
-        description="Every model your providers can serve. Set a price on any model so budgets and usage tracking work."
-      />
+      <header className="pb-1">
+        <h1 className="text-display">Models</h1>
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          Every model your providers can serve. Set a price on any model so
+          budgets and usage tracking work.
+        </p>
+      </header>
 
       <ErrorBanner
         error={
@@ -1978,77 +2179,75 @@ export function ModelsPage() {
         }`}
       >
         <div className="flex min-w-0 flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <SearchInput
-              value={search}
-              onChange={changeSearch}
-              placeholder="Search models…"
-            />
+          {/* Two controls stay inline and the other six move behind "Add
+              filter", which is the pattern Activity already uses. The row had
+              stopped fitting: at 1728 its children measured 1434px in a 1416px
+              container, and at 1512 it was 1259px in 1200px, so it was already
+              wrapping before anybody widened anything. Search and provider are
+              the two somebody reaches for first; the rest are narrowing moves
+              that earn a click. */}
+          <FilterChips
+            chips={modelFilterChips}
+            onClearAll={clearModelFilters}
+            start={
+              <>
+                <SearchInput
+                  value={search}
+                  onChange={changeSearch}
+                  placeholder="Search models…"
+                />
+                <FilterSelect
+                  ariaLabel="Filter by provider"
+                  value={providerFilter}
+                  onChange={changeFilter(setProviderFilter)}
+                  options={providerOptions}
+                />
+              </>
+            }
+          >
             <FilterSelect
-              ariaLabel="Filter by provider"
-              value={providerFilter}
-              onChange={changeFilter(setProviderFilter)}
-              options={providerOptions}
-            />
-            <FilterSelect
-              ariaLabel="Filter by pricing"
+              label="Pricing"
               value={pricingFilter}
               onChange={changeFilter(setPricingFilter)}
-              options={[
-                { value: "all", label: "Any pricing" },
-                { value: "configured", label: "Custom price" },
-                { value: "default", label: "Default price" },
-                { value: "priced", label: "Priced" },
-                { value: "unpriced", label: "Unpriced" },
-              ]}
+              options={PRICING_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Filter by source"
+              label="Source"
               value={sourceFilter}
               onChange={changeFilter(setSourceFilter)}
-              options={[
-                { value: "all", label: "Any source" },
-                { value: "discovered", label: "Discovered" },
-                { value: "custom", label: "Custom (not discovered)" },
-              ]}
+              options={SOURCE_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Filter by capability"
+              label="Capability"
               value={capabilityFilter}
               onChange={changeFilter(setCapabilityFilter)}
-              options={[
-                { value: "all", label: "Any capability" },
-                ...MODEL_FILTER_CAPABILITIES.map((entry) => ({
-                  value: entry.value,
-                  label: entry.label,
-                })),
-              ]}
+              options={CAPABILITY_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Minimum context window"
+              label="Min context"
               value={minContext}
               onChange={changeFilter(setMinContext)}
               options={CONTEXT_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Maximum input price"
+              label="Max input price"
               value={maxInput}
               onChange={changeFilter(setMaxInput)}
               options={PRICE_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Compare prices at context"
+              label="Compare at"
               value={comparisonContext}
               onChange={setComparisonContext}
               options={PRICE_COMPARISON_OPTIONS}
             />
             <FilterSelect
-              ariaLabel="Filter by release date"
+              label="Released"
               value={releaseFilter}
               onChange={changeFilter(setReleaseFilter)}
               options={RELEASE_OPTIONS}
             />
-          </div>
+          </FilterChips>
 
           <DiscoveredErrors
             providers={discoveredErrors}
@@ -2089,26 +2288,25 @@ export function ModelsPage() {
           />
 
           {pricingRow ? (
-            <Card>
-              <Card.Content className="p-0">
-                <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                  <span className="text-sm font-medium text-foreground">
-                    Edit pricing
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onPress={() => setPricingKey(null)}
-                  >
-                    Close
-                  </Button>
-                </div>
-                <InlinePriceForm
-                  row={pricingRow}
-                  onClose={() => setPricingKey(null)}
-                />
-              </Card.Content>
-            </Card>
+            <Section
+              className="border-y border-border"
+              contentClassName="flex flex-col"
+            >
+              <div className="flex items-center justify-between border-b border-border py-2">
+                <h2 className="text-title">Edit pricing</h2>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setPricingKey(null)}
+                >
+                  Close
+                </Button>
+              </div>
+              <InlinePriceForm
+                row={pricingRow}
+                onClose={() => setPricingKey(null)}
+              />
+            </Section>
           ) : null}
 
           <TablePagination

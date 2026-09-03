@@ -316,10 +316,10 @@ describe("ProvidersPage", () => {
 
     // Key off cells unique to each row (the instance name appears in two columns).
     const storedRow = (await screen.findByText("••••4242")).closest("tr")!
-    expect(within(storedRow).getByText("stored")).toBeInTheDocument()
+    expect(within(storedRow).getByText("STORED")).toBeInTheDocument()
 
     const configRow = screen.getByText("OPENAI_API_KEY").closest("tr")!
-    expect(within(configRow).getByText("config")).toBeInTheDocument()
+    expect(within(configRow).getByText("CONFIG")).toBeInTheDocument()
     // The plaintext key is never shown, only the last 4.
     expect(document.body.textContent).not.toContain("sk-")
   })

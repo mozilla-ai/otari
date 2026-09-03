@@ -1,4 +1,5 @@
 import { Description, Input, Label, TextField } from "@heroui/react"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 
 // A masked, never-prefilled secret input. Native password masking protects
 // Firefox users; self-hosted deployments should use HTTPS to avoid browser
@@ -17,12 +18,16 @@ export function SecretField({
   label,
   placeholder,
   description,
+  reserveMessage,
 }: {
   value: string
   onChange: (next: string) => void
   label: string
   placeholder?: string
   description?: string
+  /** See `Field`: holds one caption line open so a message does not move the
+      form. Off for a field in a table row or a toolbar. */
+  reserveMessage?: boolean
 }) {
   return (
     <TextField
@@ -41,9 +46,11 @@ export function SecretField({
         data-1p-ignore
         data-lpignore="true"
       />
-      {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
-      ) : null}
+      <FieldMessages reserve={reserveMessage}>
+        {description ? (
+          <Description className="text-muted">{description}</Description>
+        ) : null}
+      </FieldMessages>
     </TextField>
   )
 }

@@ -114,11 +114,11 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText("https://mcp.example.com/github")).toBeVisible()
     // The token is never returned, so "Stored" is the whole of what a row can
     // say about it.
-    expect(screen.getByText("Stored")).toBeVisible()
+    expect(screen.getByText("STORED")).toBeVisible()
     expect(screen.getByText("2 allowed")).toBeVisible()
     expect(screen.getByText("All")).toBeVisible()
-    expect(screen.getByText("Enabled")).toBeVisible()
-    expect(screen.getByText("Disabled")).toBeVisible()
+    expect(screen.getByText("ENABLED")).toBeVisible()
+    expect(screen.getByText("DISABLED")).toBeVisible()
   })
 
   it("reads an empty allow-list as every tool, the way the gateway does", async () => {

@@ -197,7 +197,7 @@ export function SignupPage({ hash }: { hash: string }) {
         />
 
         {problem ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-caption text-danger">
             {problem}
           </p>
         ) : null}

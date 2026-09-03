@@ -11,6 +11,7 @@ import {
 import { type ReactNode, useMemo, useState } from "react"
 
 import { useProviderCatalog } from "@/shared/api/hooks"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 
 // The two form controls a provider credential needs wherever it is edited, and
 // the parsing that goes with one of them.
@@ -84,14 +85,18 @@ export function ClientArgsField({
         spellCheck={false}
         className="font-mono text-xs"
       />
-      <Description
-        className={error ? "text-xs text-danger" : "text-xs text-muted"}
-      >
-        {error ??
-          // Unlike the API key, these are stored and returned unencrypted, so say
-          // so before someone puts a token in a custom header here.
-          "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Stored in plain text, so keep secrets out."}
-      </Description>
+      <FieldMessages>
+        <Description
+          className={
+            error ? "text-caption text-danger" : "text-caption text-muted"
+          }
+        >
+          {error ??
+            // Unlike the API key, these are stored and returned unencrypted, so say
+            // so before someone puts a token in a custom header here.
+            "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Stored in plain text, so keep secrets out."}
+        </Description>
+      </FieldMessages>
     </TextField>
   )
 }
@@ -198,7 +203,7 @@ export function ProviderComboBox({
         </ListBox>
       </ComboBox.Popover>
       {description ? (
-        <span className="text-xs text-muted">{description}</span>
+        <span className="text-caption text-muted">{description}</span>
       ) : null}
     </ComboBox.Root>
   )

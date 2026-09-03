@@ -169,6 +169,38 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 | Settings page section (header + body) | `SettingsSection` (`shared/components/ui/`, rehomed) |
 | Table row's trailing icon-button cluster | `RowActions` (`shared/components/ui/`, rehomed) |
 
+### The divided surface's own vocabulary
+
+`shared/components/surface.tsx` holds the pieces the pages are built from. They are here rather
+than in a feature because the second page to want one was the proof that it is the system
+rather than that screen's layout, and because a copy per page is how two pages come to disagree
+about what a thing is. Every one of them was extracted after the duplication had already
+started: the settings list was spelled four times on one page at two different heading sizes,
+the page header eight times with the same arbitrary type values.
+
+| Need | Use |
+|---|---|
+| A band of the page: rules to the edge, content in the column | `Section` (or `FULL_BLEED` + `BLEED_INSET` where the band is not a `<section>`) |
+| Page title + description + one action | `PageIntro` |
+| A heading between rules over rows on the page ground | `SettingsGroup` |
+| A row of filter controls above a table | `Toolbar` (its controls take the dense field height; see design-tokens.md) |
+| A table's scroll frame | `TableScrollFrame`, paired with a per-table block in `globals.css` |
+| "There is nothing here" | `EmptyMessage` (`DataTable` already uses it) |
+| A 6px status square | `Dot` |
+| A KPI strip and its cells | `KpiStrip`, `KpiCell` |
+| A spend against its allocation | `SpendMeter` (three states) and `spendState` |
+| A share of something that is not spend | `Meter` |
+| One of a row of segmented choices | `Tab`, `TabRow` |
+
+Two of these carry a rule that is easy to lose at a call site and so is not left to one.
+`SettingsGroup` owns the separator tier, and `Toolbar` owns the dense field height: a call site
+says "this row is a toolbar", never "this control is 38px". Reach for the component rather than
+reproducing what it does.
+
+**A full-bleed row caps the measure of any prose inside it.** The band spans the page; the
+sentence does not. `max-w-prose` is the default answer, and `PageIntro`, `SettingsGroup` and
+`InfoBanner` already carry one, so this is about the prose a page writes itself.
+
 `errorMessage(error)` centralizes turning an `ApiError`/`Error`/unknown into a display string;
 use it rather than reaching into `error.message` yourself.
 
