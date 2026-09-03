@@ -65,6 +65,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
+from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
@@ -154,14 +155,20 @@ def _is_gateway_minted_result(block: Any) -> bool:
     An empty ``content`` list counts as ours: that is what a gateway search with no
     usable hits produces, and a provider reporting no results uses the error shape
     instead.
+
+    The error shape has no ``encrypted_content`` to reason about. The gateway emits
+    only ``max_uses_exceeded``, so that error is treated as gateway-minted while
+    other provider errors are preserved.
     """
     if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
         return False
     hits = block.get("content")
     if not isinstance(hits, list):
-        # The error shape (``web_search_tool_result_error``) is a dict, and only a
-        # provider produces it. Never ours.
-        return False
+        return (
+            isinstance(hits, dict)
+            and hits.get("type") == "web_search_tool_result_error"
+            and hits.get("error_code") == "max_uses_exceeded"
+        )
     return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
 
 
@@ -439,12 +446,15 @@ class _MessagesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
+        if web_search_budget is not None:
+            extra["web_search_budget"] = web_search_budget
         return await anthropic_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -460,12 +470,17 @@ class _MessagesAdapter:
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
+        extra: dict[str, Any] = {}
+        if web_search_budget is not None:
+            extra["web_search_budget"] = web_search_budget
         return anthropic_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
             emit_native_web_search=emit_native_web_search,
+            **extra,
         )
 
     def inject_hints(

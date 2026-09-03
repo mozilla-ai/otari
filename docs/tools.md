@@ -35,6 +35,24 @@ Interception is off by default because enabling it changes who performs searches
 for providers that already support a native search tool. It requires
 `web_search_url`.
 
+### Bounding the searches one request runs
+
+A declaration may carry `max_uses` to cap how many searches Otari runs for that
+request. Because a gateway-run search is billed per successful call, the cap is
+honored on every endpoint (`/v1/messages`, `/v1/chat/completions`,
+`/v1/responses`) and on every declaration shape, including `otari_web_search`.
+A failed search does not count against it, matching what is billed.
+
+`max_uses: 0` is a cap of zero searches, not the absence of a cap, so every
+search is refused. A negative or non-numeric value is a caller mistake and is
+rejected with a 400 rather than guessed at.
+
+Past the cap, the model is told the search was refused and can answer without it.
+An Anthropic-native declaration is answered in its own vocabulary, a
+`web_search_tool_result` carrying `error_code: max_uses_exceeded`; every other
+caller gets the same `[tool error]` string a failed tool produces. A request
+without `max_uses` is bounded only by `max_tool_iterations`.
+
 ### Who may read the settings
 
 `GET /v1/tool-settings` answers any signed-in identity, so a member is told how

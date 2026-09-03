@@ -222,7 +222,7 @@ def test_a_result_with_no_hits_is_treated_as_ours() -> None:
 
 
 def test_a_provider_error_result_is_kept() -> None:
-    """The error shape is a dict, not a hit list, and only a provider produces it."""
+    """An error code the gateway never mints came from the provider and survives."""
     messages: list[dict[str, Any]] = [
         {
             "role": "assistant",
@@ -231,10 +231,32 @@ def test_a_provider_error_result_is_kept() -> None:
                 {
                     "type": "web_search_tool_result",
                     "tool_use_id": "srvtoolu_prov",
-                    "content": {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"},
+                    "content": {"type": "web_search_tool_result_error", "error_code": "unavailable"},
                 },
             ],
         }
     ]
 
     assert _strip_gateway_minted_blocks(messages) == messages
+
+
+def test_a_max_uses_error_result_and_its_call_are_stripped() -> None:
+    """A capped gateway search must not be echoed back to the provider."""
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "srvtoolu_gw", "name": "web_search", "input": {}},
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_gw",
+                    "content": {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"},
+                },
+                {"type": "text", "text": "done"},
+            ],
+        }
+    ]
+
+    assert _strip_gateway_minted_blocks(messages) == [
+        {"role": "assistant", "content": [{"type": "text", "text": "done"}]}
+    ]

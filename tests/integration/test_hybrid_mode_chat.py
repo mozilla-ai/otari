@@ -1,10 +1,11 @@
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Generator
 from typing import Any
 
 import httpx
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
+    ChatCompletionChunk,
     ChatCompletionMessage,
     Choice,
     CompletionUsage,
@@ -1489,6 +1490,147 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     # Both calls were to attempt 1 (rounds 1 and 2 of the tool loop). The
     # second attempt (openai) is never tried because lock-in fired on round 1.
     assert calls == ["anthropic:claude-haiku-4-5", "anthropic:claude-haiku-4-5"]
+
+
+class _CappedSearchBackend:
+    """WebSearchBackend duck-type that counts searches and looks gateway-owned.
+
+    ``take_last_results`` is what marks a pool as the gateway's own search backend
+    rather than an MCP server exposing a tool of the same name.
+    """
+
+    calls = 0
+
+    def __init__(self, **_kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "_CappedSearchBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "web_search", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "web_search"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        return [{"url": "https://a", "title": "A"}]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        type(self).calls += 1
+        return "results"
+
+
+def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``max_uses`` bounds the request, not each attempt of it.
+
+    A tool-loop stream whose swallowed first round runs a search and whose second
+    round dies is still pre-first-chunk, so the plan falls over. Both runs are
+    billed (``ToolUsageTally`` accumulates across attempts), so a cap the next
+    attempt started over on would bill up to ``max_uses`` per candidate.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    _CappedSearchBackend.calls = 0
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="ws-cap-req")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    class _FakeAuthError(Exception):
+        status_code = 401
+
+    def _chunk(payload: dict[str, Any]) -> Any:
+        return ChatCompletionChunk.model_validate(
+            {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "m", **payload}
+        )
+
+    async def fake_loop_acompletion(**kwargs: Any) -> Any:
+        calls.append(kwargs.get("model", ""))
+        # Round 2 of attempt 1 dies. The round-1 tool-call chunks were swallowed,
+        # so nothing has reached the client and the plan may still fall over.
+        if len(calls) == 2:
+            raise _FakeAuthError("simulated upstream 401 on round 2")
+        wants_search = len(calls) in (1, 3)
+
+        async def _stream() -> AsyncIterator[Any]:
+            if wants_search:
+                yield _chunk(
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "web_search",
+                                                "arguments": '{"query": "otari"}',
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    }
+                )
+                yield _chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                yield _chunk({"choices": [{"index": 0, "delta": {"content": "answered"}, "finish_reason": None}]})
+                yield _chunk(
+                    {
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+                    }
+                )
+
+        return _stream()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _CappedSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "tools": [{"type": "otari_web_search", "max_uses": 1}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    # The fallover happened, and the served attempt found the cap already spent.
+    assert calls == [
+        "anthropic:claude-haiku-4-5",
+        "anthropic:claude-haiku-4-5",
+        "openai:gpt-4o-mini",
+        "openai:gpt-4o-mini",
+    ]
+    assert _CappedSearchBackend.calls == 1
 
 
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(

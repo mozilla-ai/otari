@@ -8,6 +8,7 @@ input items shape.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -36,6 +37,7 @@ from gateway.services.tool_format import (
     inject_purpose_hints_responses,
     openai_to_responses_tools,
 )
+from gateway.services.web_search_budget import WebSearchBudget
 
 
 class _FakePool:
@@ -232,6 +234,89 @@ async def test_loop_executes_owned_function_call_and_completes(monkeypatch: pyte
     assert out.status == "completed"
 
 
+class _FakeSearchPool(_FakePool):
+    """A pool that owns ``web_search`` and buffers hits like the real search backend.
+
+    ``take_last_results`` is what marks it as the gateway's own search rather than
+    an MCP server that happens to expose the same tool name.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(tool_names=["web_search"], results={"web_search": "[1] Result\nhttps://a"})
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        return [{"url": "https://a", "title": "A"}]
+
+
+@pytest.mark.asyncio
+async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_ran(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refused search is a tool error, and no ``web_search_call`` claims it happened."""
+    responses = iter(
+        [
+            _response(output=[_function_call("c1", "web_search", '{"query": "first"}')]),
+            _response(output=[_function_call("c2", "web_search", '{"query": "second"}')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+    captured_inputs: list[Any] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        web_search_budget=WebSearchBudget(1),
+    )
+
+    assert pool.calls == [("web_search", {"query": "first"})]
+    refused = next(
+        item
+        for item in captured_inputs[2]
+        if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id") == "c2"
+    )
+    assert refused["output"] == "[tool error] max_uses_exceeded"
+    announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
+    assert len(announced) == 1, "a refused search must not be announced as a completed one"
+    assert announced[0].id == "c1"
+
+
+@pytest.mark.asyncio
+async def test_max_uses_does_not_cap_a_foreign_tool_named_web_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pool with no result buffer is not the search backend, so its tool is the caller's."""
+    responses = iter(
+        [
+            _response(output=[_function_call("c1", "web_search", '{"query": "first"}')]),
+            _response(output=[_function_call("c2", "web_search", '{"query": "second"}')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakePool(tool_names=["web_search"], results={"web_search": "ok"})
+
+    await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        web_search_budget=WebSearchBudget(1),
+    )
+
+    assert pool.calls == [("web_search", {"query": "first"}), ("web_search", {"query": "second"})]
+
+
 @pytest.mark.asyncio
 async def test_loop_replays_and_returns_compaction_from_hidden_iteration(
     monkeypatch: pytest.MonkeyPatch,
@@ -364,6 +449,31 @@ async def test_loop_mixed_calls_executes_owned_and_returns_only_foreign(
         if getattr(item, "type", None) == "function_call"
     ]
     assert remaining_call_ids == ["foreign_id"]
+
+
+@pytest.mark.asyncio
+async def test_loop_mixed_capped_search_hides_refusal_and_returns_foreign_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return _response(
+            output=[
+                _function_call("search_id", "web_search", '{"query": "x"}'),
+                _function_call("foreign_id", "user_tool", "{}"),
+            ],
+        )
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        web_search_budget=WebSearchBudget(0),
+    )
+
+    assert pool.calls == []
+    assert [getattr(item, "call_id", None) for item in out.output or []] == ["foreign_id"]
 
 
 @pytest.mark.asyncio
@@ -619,6 +729,62 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
         "response.output_text.delta",
         "response.completed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_stream_max_uses_announces_only_the_search_that_ran(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused search gets no ``web_search_call`` item on the wire.
+
+    ``synthetic_events`` runs after ``advance_stream_transcript``, so the refusal
+    has to be recorded on the per-iteration state for it to be skipped there.
+    Without that, the stream would announce a search the cap stopped.
+    """
+
+    def _search_round(call_id: str, item_id: str, query: str) -> AsyncIterator[ResponseStreamEvent]:
+        arguments = json.dumps({"query": query})
+        return _async_iter(
+            _output_item_added(0, _function_call(call_id, "web_search", "")),
+            _function_call_args_delta(0, item_id, arguments),
+            _function_call_args_done(0, item_id, "web_search", arguments),
+            _output_item_done(0, _function_call(call_id, "web_search", arguments)),
+            _response_completed(),
+        )
+
+    iter_streams = iter(
+        [
+            _search_round("c1", "fc_1", "first"),
+            _search_round("c2", "fc_2", "second"),
+            _async_iter(_text_delta("msg_1", 0, "done"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            web_search_budget=WebSearchBudget(1),
+        )
+    ]
+
+    assert pool.calls == [("web_search", {"query": "first"})]
+    announced = [
+        event
+        for event in events
+        if event.type == "response.output_item.added"
+        and getattr(event.item, "type", None) == "web_search_call"
+    ]
+    assert len(announced) == 1, "a refused search must not be announced as a completed one"
+    assert announced[0].item.id == "c1"
 
 
 @pytest.mark.asyncio
@@ -922,3 +1088,41 @@ async def test_stream_mixed_batch_hides_runs_and_strips_the_gateway_call(
     assert names == ["user_tool"]
 
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_mixed_capped_search_hides_refusal_and_returns_foreign_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owned = _function_call("call_owned", "web_search", '{"query": "x"}')
+    foreign = _function_call("call_foreign", "user_tool", "{}")
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, owned),
+                _function_call_args_done(0, "fc_owned", "web_search", '{"query": "x"}'),
+                _output_item_added(1, foreign),
+                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _response_completed(output=[owned, foreign]),
+            ),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakeSearchPool()
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            web_search_budget=WebSearchBudget(0),
+        )
+    ]
+
+    completed = next(e for e in events if e.type == "response.completed")
+    assert [getattr(item, "call_id", None) for item in completed.response.output] == ["call_foreign"]
+    assert pool.calls == []

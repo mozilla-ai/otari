@@ -35,6 +35,7 @@ from gateway.services._tool_loop import (
     run_tool_loop,
     run_tool_loop_stream,
 )
+from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
 
 if TYPE_CHECKING:
     from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
@@ -177,7 +178,12 @@ def _execute_split(tool_calls: list[dict[str, Any]], pool: ToolBackend) -> tuple
     return mcp_calls, has_foreign
 
 
-async def _execute_mcp_calls(pool: ToolBackend, mcp_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def _execute_mcp_calls(
+    pool: ToolBackend,
+    mcp_calls: list[dict[str, Any]],
+    *,
+    budget: WebSearchBudget | None = None,
+) -> list[dict[str, Any]]:
     """Run each MCP tool call and return the resulting tool-role messages.
 
     Tool failures (network errors, server errors, schema mismatches, MCP-specific
@@ -187,6 +193,10 @@ async def _execute_mcp_calls(pool: ToolBackend, mcp_calls: list[dict[str, Any]])
     inherit from ``BaseException`` and never reach the ``Exception`` clause.
     That's the standard idiom for "treat tool failures as recoverable, let
     cancellation propagate".
+
+    A search past ``budget`` is refused the same way, as a tool error rather than a
+    native result block: this format has no vocabulary for a server-side tool call,
+    so the plain string is all a caller can be told.
     """
     out: list[dict[str, Any]] = []
     for tc in mcp_calls:
@@ -195,11 +205,18 @@ async def _execute_mcp_calls(pool: ToolBackend, mcp_calls: list[dict[str, Any]])
             args = json.loads(tc["function"]["arguments"] or "{}")
         except json.JSONDecodeError:
             args = {}
+        capped = is_capped_search(budget, pool, name)
+        if capped and budget is not None and budget.exhausted():
+            out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})
+            continue
         try:
             text = await pool.call_tool(name, args)
         except Exception as exc:  # noqa: BLE001 — see docstring
             logger.warning("MCP tool %s execution failed: %s", name, exc)
             text = f"[tool error] {exc}"
+        else:
+            if capped and budget is not None:
+                budget.record(text)
         out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
     return out
 
@@ -253,6 +270,11 @@ class _ChatToolLoopStrategy:
     """
 
     transcript_key = "messages"
+
+    def __init__(self, *, budget: WebSearchBudget | None = None) -> None:
+        # Absent unless the caller capped the searches, which keeps the shared
+        # instance in ``_strategy_for`` free of per-request state.
+        self._budget = budget
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
@@ -308,7 +330,7 @@ class _ChatToolLoopStrategy:
     ) -> list[dict[str, Any]]:
         # ``acc`` is accepted for interface parity and unused: this format has no
         # native vocabulary for a server-side tool call to report on a mixed batch.
-        return await _execute_mcp_calls(pool, owned)
+        return await _execute_mcp_calls(pool, owned, budget=self._budget)
 
     def filter_owned(self, result: ChatCompletion, owned: list[Any], pool: ToolBackend) -> None:
         # Mixed batch: the MCP-owned subset was executed internally so its
@@ -339,7 +361,7 @@ class _ChatToolLoopStrategy:
         acc: Any = None,
     ) -> None:
         transcript.append({"role": "assistant", "tool_calls": owned})
-        transcript.extend(await _execute_mcp_calls(pool, owned))
+        transcript.extend(await _execute_mcp_calls(pool, owned, budget=self._budget))
 
     # ---- streaming hooks ----
 
@@ -458,7 +480,7 @@ class _ChatToolLoopStrategy:
 
     async def finalize_exit(self, state: _ChatStreamState, pool: ToolBackend) -> None:
         if state.mcp_calls:
-            await _execute_mcp_calls(pool, state.mcp_calls)
+            await _execute_mcp_calls(pool, state.mcp_calls, budget=self._budget)
 
     def terminal_events(self, state: _ChatStreamState, acc: None) -> list[ChatCompletionChunk]:
         return [state.pending_terminal] if state.pending_terminal is not None else []
@@ -480,10 +502,21 @@ class _ChatToolLoopStrategy:
         # All-MCP: the terminal chunk was silently dropped so the client
         # doesn't think this iteration's response was the final answer.
         transcript.append({"role": "assistant", "tool_calls": state.mcp_calls})
-        transcript.extend(await _execute_mcp_calls(pool, state.mcp_calls))
+        transcript.extend(await _execute_mcp_calls(pool, state.mcp_calls, budget=self._budget))
 
 
 _CHAT_STRATEGY = _ChatToolLoopStrategy()
+
+
+def _strategy_for(budget: WebSearchBudget | None) -> _ChatToolLoopStrategy:
+    """The shared strategy, or a per-request one when the caller capped searches.
+
+    Only a capped request has anything per-request to hold, so every other request
+    keeps reusing the single module-level instance.
+    """
+    if budget is None:
+        return _CHAT_STRATEGY
+    return _ChatToolLoopStrategy(budget=budget)
 
 
 async def mcp_tool_loop_stream(
@@ -491,6 +524,7 @@ async def mcp_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
+    web_search_budget: WebSearchBudget | None = None,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -512,7 +546,7 @@ async def mcp_tool_loop_stream(
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_CHAT_STRATEGY,
+            strategy=_strategy_for(web_search_budget),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
@@ -528,6 +562,7 @@ async def mcp_tool_loop(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
+    web_search_budget: WebSearchBudget | None = None,
 ) -> ChatCompletion:
     """Non-streaming variant. Accumulates usage across iterations into the returned completion.
 
@@ -536,7 +571,7 @@ async def mcp_tool_loop(
     loop in :mod:`gateway.api.routes.chat` is the consumer.
     """
     return await run_tool_loop(
-        strategy=_CHAT_STRATEGY,
+        strategy=_strategy_for(web_search_budget),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,

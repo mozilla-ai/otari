@@ -17,6 +17,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+from fastapi import HTTPException, status
+
+from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes._tools import (
     _extract_code_execution_tool,
     _extract_web_search_tool,
@@ -346,3 +350,65 @@ def test_strip_gateway_fields_leaves_tool_choice_alone_without_a_declared_name()
         remaining_user_tools=None,
     )
     assert fields["tool_choice"] == {"type": "tool", "name": "my_search"}
+
+
+def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
+    """A web-search tool context carrying ``entry``, with nothing else turned on."""
+    return ToolContext(
+        config=GatewayConfig(),
+        mcp_server_configs=None,
+        use_sandbox=False,
+        sandbox_tool_entry=None,
+        sandbox_url=None,
+        sandbox_auth_token=None,
+        use_web_search=True,
+        web_search_tool_entry=entry,
+        web_search_url="http://search.invalid",
+        web_search_auth_token=None,
+        remaining_user_tools=None,
+        max_tool_iterations=10,
+        tools_header=None,
+    )
+
+
+def test_max_uses_is_read_from_a_native_declaration() -> None:
+    entry = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
+    assert _capped_context(entry).max_web_search_uses == 3
+
+
+def test_max_uses_is_honored_on_a_declaration_with_no_native_response_shape() -> None:
+    """The cap bounds spend, so it does not depend on being able to describe the refusal.
+
+    ``otari_web_search`` and the bare ``web_search`` short form get a plain tool
+    error instead of a ``web_search_tool_result``, but the same number of searches.
+    """
+    for type_value in ("otari_web_search", "web_search"):
+        entry = {"type": type_value, "max_uses": 2}
+        ctx = _capped_context(entry)
+        assert ctx.emit_native_web_search is False
+        assert ctx.max_web_search_uses == 2, type_value
+
+
+def test_no_max_uses_leaves_the_searches_uncapped() -> None:
+    assert _capped_context({"type": "web_search_20250305"}).max_web_search_uses is None
+    assert _capped_context(None).max_web_search_uses is None
+    assert _capped_context({"type": "web_search_20250305", "max_uses": None}).max_web_search_uses is None
+
+
+def test_a_zero_max_uses_caps_the_searches_at_none_rather_than_at_no_limit() -> None:
+    """A spend control must not read a limit of zero as permission to spend freely."""
+    entry = {"type": "web_search_20250305", "max_uses": 0}
+    ctx = _capped_context(entry)
+    assert ctx.max_web_search_uses == 0
+    assert ctx.web_search_budget is not None
+    assert ctx.web_search_budget.exhausted(), "the first search must already be over the cap"
+
+
+def test_a_nonsensical_max_uses_is_rejected_instead_of_becoming_uncapped() -> None:
+    """Malformed spend controls fail closed instead of allowing unlimited searches."""
+    for value in (-1, True, False, "2", 1.5):
+        entry = {"type": "web_search_20250305", "max_uses": value}
+        with pytest.raises(HTTPException) as exc_info:
+            _capped_context(entry)
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST, value
+        assert exc_info.value.detail == "web_search max_uses must be a non-negative integer"

@@ -51,6 +51,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
+from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
@@ -331,15 +332,20 @@ class _ResponsesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> ResponsesResponse:
         # ``emit_native_web_search`` is accepted for interface parity and ignored:
         # this format has no native vocabulary for a server-side tool call, so a
         # gateway-run search stays invisible on the wire (see docs/tools.md).
+        # ``web_search_budget`` is not: the cap bounds what the caller is billed
+        # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
+        if web_search_budget is not None:
+            extra["web_search_budget"] = web_search_budget
         return await responses_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -354,11 +360,16 @@ class _ResponsesAdapter:
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
+        extra: dict[str, Any] = {}
+        if web_search_budget is not None:
+            extra["web_search_budget"] = web_search_budget
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            **extra,
         )
 
     def inject_hints(

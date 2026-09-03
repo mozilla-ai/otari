@@ -43,6 +43,7 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.tool_format import openai_to_responses_tools
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
 
 if TYPE_CHECKING:
     from any_llm.types.responses import Response, ResponseStreamEvent
@@ -83,12 +84,18 @@ def _split_function_calls(
 async def _execute_function_calls(
     pool: ToolBackend,
     items: list[Any],
+    *,
+    budget: WebSearchBudget | None = None,
+    refused_call_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run each owned function_call and return the Responses function_call_output items.
 
     Tool failures convert to a ``[tool error] ...`` string in the output so the
     model can recover. Only cancellation-class exceptions escape; same idiom
-    as :func:`gateway.services.mcp_loop._execute_mcp_calls`.
+    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A search past
+    ``budget`` is refused as one of those errors. When supplied,
+    ``refused_call_ids`` records that decision at its source so no native
+    ``web_search_call`` item claims a search that never ran.
     """
     out: list[dict[str, Any]] = []
     for item in items:
@@ -96,11 +103,22 @@ async def _execute_function_calls(
             args = json.loads(item.arguments or "{}")
         except json.JSONDecodeError:
             args = {}
+        capped = is_capped_search(budget, pool, item.name)
+        if capped and budget is not None and budget.exhausted():
+            if refused_call_ids is not None:
+                refused_call_ids.add(str(item.call_id))
+            out.append(
+                {"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR}
+            )
+            continue
         try:
             text = await pool.call_tool(item.name, args)
         except Exception as exc:  # noqa: BLE001 — see docstring
             logger.warning("MCP tool %s execution failed: %s", item.name, exc)
             text = f"[tool error] {exc}"
+        else:
+            if capped and budget is not None:
+                budget.record(text)
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -195,16 +213,23 @@ def _web_search_call_item(call_id: str, query: str) -> ResponseFunctionWebSearch
     )
 
 
-def _web_search_items_for(owned: list[Any]) -> list[ResponseFunctionWebSearch]:
+def _web_search_items_for(
+    owned: list[Any],
+    refused: set[str] | None = None,
+) -> list[ResponseFunctionWebSearch]:
     """Native items for the gateway-run searches among ``owned``.
 
     Only ``web_search`` maps to a Responses item the gateway can emit honestly. A
     sandbox or MCP call has no native equivalent (``code_interpreter_call`` means
     OpenAI's own interpreter ran, which would be a lie), so those stay invisible.
+    A call the ``max_uses`` cap refused is invisible for the same reason: no search
+    ran, so there is nothing to announce.
     """
     items: list[ResponseFunctionWebSearch] = []
     for item in owned:
         if getattr(item, "name", None) != WEB_SEARCH_TOOL_NAME:
+            continue
+        if refused and (getattr(item, "call_id", "") or "") in refused:
             continue
         try:
             query = str(json.loads(getattr(item, "arguments", "") or "{}").get("query") or "")
@@ -233,11 +258,18 @@ def _replay_items(output: list[Any], owned: list[Any]) -> list[Any]:
     ]
 
 
-async def _execute_stream_owned(state: "_ResponsesStreamState", pool: ToolBackend) -> list[dict[str, Any]]:
+async def _execute_stream_owned(
+    state: "_ResponsesStreamState",
+    pool: ToolBackend,
+    *,
+    budget: WebSearchBudget | None = None,
+) -> list[dict[str, Any]]:
     """Run the stream's gateway-owned function calls, returning their output items.
 
     Shared by the continue path and the mixed-batch exit so both parse the buffered
-    arguments identically.
+    arguments identically. Refusals are recorded on ``state`` because
+    ``synthetic_events`` runs afterwards and must not announce a search that the
+    cap stopped.
     """
     results: list[dict[str, Any]] = []
     for spec in state.owned_specs:
@@ -245,11 +277,21 @@ async def _execute_stream_owned(state: "_ResponsesStreamState", pool: ToolBacken
             args = json.loads(spec.get("arguments") or "{}")
         except json.JSONDecodeError:
             args = {}
+        capped = is_capped_search(budget, pool, spec["name"])
+        if capped and budget is not None and budget.exhausted():
+            state.refused_call_ids.add(str(spec["call_id"]))
+            results.append(
+                {"type": "function_call_output", "call_id": spec["call_id"], "output": MAX_USES_EXCEEDED_ERROR}
+            )
+            continue
         try:
             text = await pool.call_tool(spec["name"], args)
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
             logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
             text = f"[tool error] {exc}"
+        else:
+            if capped and budget is not None:
+                budget.record(text)
         results.append({"type": "function_call_output", "call_id": spec["call_id"], "output": text})
     return results
 
@@ -307,6 +349,9 @@ class _ResponsesStreamState:
         self.compaction_items: dict[int, Any] = {}
         self.deferred_completed: ResponseStreamEvent | None = None
         self.owned_specs: list[dict[str, Any]] = []
+        # ``call_id``s the max_uses cap refused this iteration, so their native
+        # ``web_search_call`` item is not emitted.
+        self.refused_call_ids: set[str] = set()
         # Output items the gateway runs itself. Their events are swallowed: the
         # client can never be sent a ``function_call_output`` for a call the
         # gateway consumed, so showing it the call is a dead end.
@@ -325,6 +370,11 @@ class _ResponsesToolLoopStrategy:
     """
 
     transcript_key = "input_data"
+
+    def __init__(self, *, budget: WebSearchBudget | None = None) -> None:
+        # Absent unless the caller capped the searches, which keeps the shared
+        # instance in ``_strategy_for`` free of per-request state.
+        self._budget = budget
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return _coerce_input_to_list(value)
@@ -376,7 +426,7 @@ class _ResponsesToolLoopStrategy:
     ) -> list[dict[str, Any]]:
         # ``acc`` is accepted for interface parity and unused: this format has no
         # native vocabulary for a server-side tool call to report on a mixed batch.
-        return await _execute_function_calls(pool, owned)
+        return await _execute_function_calls(pool, owned, budget=self._budget)
 
     def filter_owned(self, result: Response, owned: list[Any], pool: ToolBackend) -> None:
         # Mixed batch: the owned subset was executed for its side effects;
@@ -413,10 +463,17 @@ class _ResponsesToolLoopStrategy:
         # compaction item on every continuation.
         output = list(result.output or [])
         transcript.extend(_items_to_dicts(_replay_items(output, owned)))
-        transcript.extend(await _execute_function_calls(pool, owned))
+        refused_call_ids: set[str] = set()
+        outputs = await _execute_function_calls(
+            pool,
+            owned,
+            budget=self._budget,
+            refused_call_ids=refused_call_ids,
+        )
+        transcript.extend(outputs)
         if acc is not None:
             acc["compactions"].extend(_compaction_items(output))
-            acc["searches"].extend(_web_search_items_for(owned))
+            acc["searches"].extend(_web_search_items_for(owned, refused_call_ids))
 
     # ---- streaming hooks ----
 
@@ -565,7 +622,7 @@ class _ResponsesToolLoopStrategy:
         # stream, so run them for their side effects rather than dropping the model's
         # request. Matches the non-streaming loop's mixed-batch handling.
         if state.owned_specs:
-            await _execute_stream_owned(state, pool)
+            await _execute_stream_owned(state, pool, budget=self._budget)
 
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_completed is None:
@@ -608,6 +665,8 @@ class _ResponsesToolLoopStrategy:
         events: list[ResponseStreamEvent] = []
         for spec in state.owned_specs:
             if spec.get("name") != WEB_SEARCH_TOOL_NAME:
+                continue
+            if str(spec.get("call_id")) in state.refused_call_ids:
                 continue
             try:
                 query = str(json.loads(spec.get("arguments") or "{}").get("query") or "")
@@ -653,10 +712,21 @@ class _ResponsesToolLoopStrategy:
                     }
                 )
         transcript.extend(_items_to_dicts(replay_items))
-        transcript.extend(await _execute_stream_owned(state, pool))
+        transcript.extend(await _execute_stream_owned(state, pool, budget=self._budget))
 
 
 _RESPONSES_STRATEGY = _ResponsesToolLoopStrategy()
+
+
+def _strategy_for(budget: WebSearchBudget | None) -> _ResponsesToolLoopStrategy:
+    """The shared strategy, or a per-request one when the caller capped searches.
+
+    Only a capped request has anything per-request to hold, so every other request
+    keeps reusing the single module-level instance.
+    """
+    if budget is None:
+        return _RESPONSES_STRATEGY
+    return _ResponsesToolLoopStrategy(budget=budget)
 
 
 async def responses_tool_loop(
@@ -665,6 +735,7 @@ async def responses_tool_loop(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
+    web_search_budget: WebSearchBudget | None = None,
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
 
@@ -688,7 +759,7 @@ async def responses_tool_loop(
     reasoning items that can't be replayed against another provider.
     """
     return await run_tool_loop(
-        strategy=_RESPONSES_STRATEGY,
+        strategy=_strategy_for(web_search_budget),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -701,6 +772,7 @@ async def responses_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
+    web_search_budget: WebSearchBudget | None = None,
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -721,7 +793,7 @@ async def responses_tool_loop_stream(
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_RESPONSES_STRATEGY,
+            strategy=_strategy_for(web_search_budget),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
