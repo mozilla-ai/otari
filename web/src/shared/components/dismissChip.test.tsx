@@ -32,11 +32,13 @@ describe("DismissChip", () => {
     // 24px on the button, 12px on the mark. Two separate sizes on purpose: the
     // visible cross stays quiet while the thing a finger lands on is the size a
     // finger needs, so neither number may be changed to match the other.
-    expect(dismiss().className).toContain("h-6")
-    expect(dismiss().className).toContain("w-6")
+    // Token checks, not substring: "h-6" is a substring of `max-h-64`, so a
+    // substring assertion here passes for a button with no height at all.
+    expect([...dismiss().classList]).toContain("h-6")
+    expect([...dismiss().classList]).toContain("w-6")
     const glyph = dismiss().querySelector("svg") as SVGElement
-    expect(glyph.getAttribute("class")).toContain("h-3")
-    expect(glyph.getAttribute("class")).toContain("w-3")
+    expect([...glyph.classList]).toContain("h-3")
+    expect([...glyph.classList]).toContain("w-3")
   })
 
   it("hides the mark from assistive tech, which reads the button instead", () => {

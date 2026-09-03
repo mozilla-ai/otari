@@ -56,16 +56,16 @@ describe("PageIntro", () => {
         action={<button type="button">New key</button>}
       />,
     )
-    expect(header(container).className).toContain("flex-col")
-    expect(header(container).className).toContain("sm:flex-row")
-    expect(header(container).className).toContain("sm:items-start")
+    expect([...header(container).classList]).toContain("flex-col")
+    expect([...header(container).classList]).toContain("sm:flex-row")
+    expect([...header(container).classList]).toContain("sm:items-start")
   })
 
   it("describes the page when given a description", () => {
     render(<PageIntro title="API keys">Keys authenticate requests.</PageIntro>)
     const description = screen.getByText("Keys authenticate requests.")
     expect(description.tagName).toBe("P")
-    expect(description.className).toContain("text-muted")
+    expect([...description.classList]).toContain("text-muted")
   })
 
   it("renders no paragraph at all when there is nothing to say", () => {
@@ -79,7 +79,7 @@ describe("PageIntro", () => {
     render(<PageIntro title="API keys">Keys authenticate requests.</PageIntro>)
     const column = screen.getByText("Keys authenticate requests.")
       .parentElement as HTMLElement
-    expect(column.className).toContain("max-w-[620px]")
+    expect([...column.classList]).toContain("max-w-[620px]")
   })
 
   it("narrows the description without dropping what the role already gives it", () => {
@@ -93,9 +93,9 @@ describe("PageIntro", () => {
       </PageIntro>,
     )
     const description = screen.getByText("How to use the gateway.")
-    expect(description.className).toContain("max-w-[560px]")
-    expect(description.className).toContain("text-sm")
-    expect(description.className).toContain("text-muted")
+    expect([...description.classList]).toContain("max-w-[560px]")
+    expect([...description.classList]).toContain("text-sm")
+    expect([...description.classList]).toContain("text-muted")
   })
 
   it("puts the action beside the opening and refuses to let it shrink", () => {
@@ -109,7 +109,7 @@ describe("PageIntro", () => {
     )
     const action = screen.getByRole("button", { name: "New key" })
       .parentElement as HTMLElement
-    expect(action.className).toContain("shrink-0")
+    expect([...action.classList]).toContain("shrink-0")
     expect(action.parentElement).toBe(header(container))
   })
 
