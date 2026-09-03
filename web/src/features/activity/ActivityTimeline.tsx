@@ -383,7 +383,7 @@ export function ActivityTimeline({
               >
                 <div
                   aria-hidden="true"
-                  className="absolute inset-x-0 h-2.5 rounded-full bg-surface-alt"
+                  className="absolute inset-x-0 h-2.5 bg-surface-alt"
                 />
                 <div
                   role="slider"
@@ -396,7 +396,15 @@ export function ActivityTimeline({
                   // Square, and here that is the point rather than
                   // consistency: the window's edges assert two exact instants,
                   // and a rounded end blurs the only thing the shape states.
-                  className="absolute inset-y-0 cursor-grab touch-none bg-accent/40 hover:bg-accent/60 active:cursor-grabbing"
+                  //
+                  // The fill lives on the stripe inside, not here: this element
+                  // is the 44px grab target and the stripe is the 10px drawing,
+                  // and painting both stacked two 40% accents into one 64% one.
+                  // `group` so the stripe's own variants have the ancestor they
+                  // address; without it they matched nothing and the hover was
+                  // dead. No `outline-none`, so the base `:focus-visible` rule
+                  // still rings the element that actually takes focus.
+                  className="group absolute inset-y-0 flex cursor-grab touch-none items-center active:cursor-grabbing"
                   style={{
                     left: `${loPct}%`,
                     width: `${Math.max(2, hiPct - loPct)}%`,
@@ -415,7 +423,7 @@ export function ActivityTimeline({
                   onPointerUp={endPan}
                   onPointerCancel={endPan}
                 >
-                  <div className="h-2.5 w-full rounded-full bg-accent/40 group-hover:bg-accent/60 group-focus-visible:ring-2 group-focus-visible:ring-accent" />
+                  <div className="h-2.5 w-full bg-accent/40 group-hover:bg-accent/60" />
                 </div>
               </div>
             ) : null}
