@@ -248,6 +248,53 @@ retired, and handing new components a v2-flavored API. Most of that repo's primi
 `ResponsiveTabs`, `YesNoButtonGroup`) bind to the shim or to `react-icons`, so they wait on the
 same decision. `SettingsSection` and `RowActions`, which need neither, came across unchanged.
 
+### Declaring a token is not registering it, and the difference is silent
+
+A `--color-*` declared in the two theme blocks and left out of `@theme` still works from the
+stylesheet: `border-color: var(--color-border-subtle)` resolves fine. What it does not do is
+generate a utility. So `border-border-subtle` or `bg-text-subtle` written at a call site is a
+class that does not exist: nothing errors, nothing lints, the build is clean, and the property
+falls back to whatever it inherits. A separator quietly renders on the wrong tier; a status dot
+renders on a surface value at 1.1:1 and is invisible.
+
+All three of the `-subtle` neutrals were in exactly this state and were found one at a time.
+The first two had consumers reaching them through hand-written CSS in `globals.css`, so each
+tier worked everywhere it was used and was unreachable from anywhere else, which is a good
+disguise. Register a token in `@theme` in the same commit that declares it, using the
+self-referential form the neighbors use, so the name is registered once and the two theme
+blocks keep owning the light and dark values:
+
+```css
+@theme {
+  --color-border-subtle: var(--color-border-subtle);
+}
+```
+
+**Absence from the built stylesheet does not prove a token is unregistered.** Tailwind emits
+only the utilities something asks for, so a registered token nothing consumes emits nothing
+either. To check one, put a throwaway consumer in the tree, run `pnpm run build`, grep the
+emitted CSS for the class, and remove the consumer again.
+
+### Two rule tiers, and they are not interchangeable
+
+`--color-border` divides the page: a section from the next section, a table header from its
+rows, a form's fields from the row that commits them. `--color-border-subtle` divides repeated
+things *inside* one section: rows of a table, rows of a settings list. Using the section tier
+for both flattens the hierarchy into a single weight, which was found by eye three separate
+times before the shared components existed. Reach for `SettingsGroup` and the per-table blocks
+rather than spelling a tier at a call site.
+
+### A status dot takes a text-ramp value, never a surface one
+
+The surface family is what sits *behind* content, so its values are tuned to be nearly the
+page: `bg-surface-subtle` on a 6px square measures about 1.1:1 in light and 1.2:1 in dark,
+which is not a quiet dot but no dot. The quiet state of a dot is `bg-text-subtle`, the same
+value the muted status words use, which measures about 6:1 against the page in both themes.
+Fourteen sites had the surface value, because "subtle" was the property being reached for and
+the ramp was incidental. `src/shared/components/dotRamp.test.ts` reads the source for a
+`<Dot>` or a `dot:` carrying a surface or background value, because a rule that lives in a
+class name needs something that reads class names.
+
 ## Rules
 
 - **Add a token, don't scatter a hex.** A one-off hex in a component is a second source of
