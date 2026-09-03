@@ -277,6 +277,12 @@ PATCH /v1/organizations/me/guardrails/{guardrail_id}        # operator surface
 DELETE /v1/organizations/me/guardrails/{guardrail_id}       # operator surface
 POST /v1/organizations/me/member-invitations                # dashboard-only
 DELETE /v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
+# The invitee's side of the same flow, and dashboard-only for the same reason
+# the admin's side above is: it acts as a signed-in person deciding about their
+# own membership, not as a key-holder calling the gateway.
+GET /v1/organizations/me/pending-memberships                # dashboard-only
+POST /v1/organizations/me/pending-memberships/{organization_member_id}/accept # dashboard-only
+POST /v1/organizations/me/pending-memberships/{organization_member_id}/decline # dashboard-only
 # The invitation accept flow is reached by a browser following an emailed
 # link, not by an SDK caller acting as a key-holder inside a workspace.
 POST /v1/invitations/validate                               # accept-flow, not an SDK surface
