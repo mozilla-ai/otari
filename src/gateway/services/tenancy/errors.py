@@ -164,6 +164,53 @@ class OrganizationMemberAlreadyExistsError(TenancyConflictError):
         super().__init__(f"{identifier} is already an active member of this organization")
 
 
+class OrganizationDomainNotFoundError(TenancyNotFoundError):
+    def __init__(self, organization_domain_id: object):
+        super().__init__(f"Organization domain {organization_domain_id} not found")
+
+
+class OrganizationDomainAlreadyClaimedError(TenancyConflictError):
+    """The domain is already claimed, and the message does not say by whom.
+
+    Deliberately silent about the holder. A claim is unique deployment-wide, so
+    a message naming the other organization would let anyone who can create one
+    probe for which domains their neighbours have registered.
+    """
+
+    def __init__(self, domain: str):
+        super().__init__(f"'{domain}' is already claimed")
+
+
+class OrganizationDomainNotVerifiedError(TenancyValidationError):
+    """The expected TXT record was not found at the claimed domain."""
+
+    def __init__(self, domain: str):
+        super().__init__(
+            f"No matching TXT record was found at {domain}. Publish the record shown for this "
+            "domain at its apex and try again; DNS changes can take a while to propagate."
+        )
+
+
+class UnregistrableDomainError(TenancyValidationError):
+    def __init__(self, value: str):
+        super().__init__(f"'{value}' is not a valid email domain")
+
+
+class PublicEmailDomainError(TenancyValidationError):
+    """A free provider cannot be claimed, whoever proves what.
+
+    Separate from ``UnregistrableDomainError`` because the two need different
+    things from the admin: one is a typo to correct, the other is a domain that
+    will never be allowed however it is spelled.
+    """
+
+    def __init__(self, domain: str):
+        super().__init__(
+            f"'{domain}' is a public email provider and cannot be claimed for auto-join. "
+            "Use a domain your organization controls."
+        )
+
+
 class InvitationAlreadyPendingError(TenancyConflictError):
     """The address already has a live, unexpired invitation, so a fresh one is refused rather than piled on.
 
@@ -1118,6 +1165,9 @@ __all__ = [
     "OrganizationGuardrailScopeConflictError",
     "OrganizationGuardrailUnsafeUrlError",
     "OrganizationMemberAlreadyExistsError",
+    "OrganizationDomainAlreadyClaimedError",
+    "OrganizationDomainNotFoundError",
+    "OrganizationDomainNotVerifiedError",
     "OrganizationMemberNotFoundError",
     "OrganizationNameRequiredError",
     "OAuthEmailNotVerifiedError",
@@ -1150,7 +1200,9 @@ __all__ = [
     "TenancyForbiddenError",
     "TenancyNotFoundError",
     "TenancyValidationError",
+    "PublicEmailDomainError",
     "UnmodifiedPasswordError",
+    "UnregistrableDomainError",
     "VerificationTokenInvalidError",
     "WorkspaceAlreadyExistsError",
     "WorkspaceActivationUnavailableError",

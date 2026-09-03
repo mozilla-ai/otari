@@ -6450,6 +6450,161 @@
         "title": "OrganizationCreateRequest",
         "type": "object"
       },
+      "OrganizationDomainCreateRequest": {
+        "properties": {
+          "default_role": {
+            "default": "member",
+            "enum": [
+              "member",
+              "viewer"
+            ],
+            "title": "Default Role",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "title": "OrganizationDomainCreateRequest",
+        "type": "object"
+      },
+      "OrganizationDomainPublic": {
+        "description": "A claim as its organization's admins see it.\n\nCarries ``verification_record`` (the whole string to publish) rather than\nthe raw token: the admin never has a use for the token on its own, and one\nfield that can be copied verbatim into a DNS panel is harder to get wrong\nthan a prefix they must remember to prepend.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_role": {
+            "default": "member",
+            "maxLength": 32,
+            "title": "Default Role",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 255,
+            "title": "Domain",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "verification_record": {
+            "title": "Verification Record",
+            "type": "string"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "organization_id",
+          "domain",
+          "id",
+          "verification_record",
+          "created_at"
+        ],
+        "title": "OrganizationDomainPublic",
+        "type": "object"
+      },
+      "OrganizationDomainUpdateRequest": {
+        "properties": {
+          "default_role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "member",
+                  "viewer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Role"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "title": "OrganizationDomainUpdateRequest",
+        "type": "object"
+      },
+      "OrganizationDomainsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDomainPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationDomainsPublic",
+        "type": "object"
+      },
       "OrganizationGuardrailCreate": {
         "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
         "example": {
@@ -18657,6 +18812,248 @@
         "summary": "Update Organization Budget",
         "tags": [
           "organization-budgets"
+        ]
+      }
+    },
+    "/v1/organizations/me/domains": {
+      "get": {
+        "description": "List the caller's organization's email-domain claims. Owners and admins only.",
+        "operationId": "list_active_organization_domains_v1_organizations_me_domains_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Active Organization Domains",
+        "tags": [
+          "organizations"
+        ]
+      },
+      "post": {
+        "description": "Claim an email domain for the caller's organization. Owners and admins only.\n\nThe claim lands unverified and does nothing until ``POST\n/me/domains/{id}/verify`` finds the record in ``verification_record``\npublished at the domain's apex. A public email provider is refused outright,\nand a domain another organization already claims answers 409 without saying\nwho holds it.",
+        "operationId": "create_active_organization_domain_v1_organizations_me_domains_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationDomainCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/domains/{organization_domain_id}": {
+      "delete": {
+        "description": "Drop an email-domain claim. Owners and admins only.\n\nMembers who already joined through it keep their membership: they are\ncolleagues by then, not an artifact of the claim.",
+        "operationId": "delete_active_organization_domain_v1_organizations_me_domains__organization_domain_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      },
+      "patch": {
+        "description": "Change a claim's auto-join role or enabled flag. Owners and admins only.\n\nThe domain itself and its verification state are not editable: a different\ndomain is a different claim and needs its own proof.",
+        "operationId": "update_active_organization_domain_v1_organizations_me_domains__organization_domain_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationDomainUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/domains/{organization_domain_id}/verify": {
+      "post": {
+        "description": "Prove control of a claimed domain via its DNS TXT record. Owners and admins only.\n\nIdempotent, and answers 400 while the record is not visible yet, which is\nthe expected answer straight after publishing one.",
+        "operationId": "verify_active_organization_domain_v1_organizations_me_domains__organization_domain_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Verify Active Organization Domain",
+        "tags": [
+          "organizations"
         ]
       }
     },

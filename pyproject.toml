@@ -34,6 +34,11 @@ dependencies = [
     "bcrypt>=5.0.0",
     "click>=8.1.0",
     "cryptography>=50.0.0",
+    # DNS lookups for the email-domain ownership proof
+    # (`services.tenancy.domain_verification`). The async resolver specifically:
+    # a claimed domain whose nameservers are gone takes the full timeout, and the
+    # blocking resolver would hold the event loop for it.
+    "dnspython>=2.7.0",
     "fastapi>=0.115.0",
     "genai-prices>=0.1.0",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",

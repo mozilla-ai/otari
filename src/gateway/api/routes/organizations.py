@@ -46,12 +46,16 @@ from gateway.models.tenancy import (
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
     OrganizationCreateRequest,
+    OrganizationDomainCreateRequest,
+    OrganizationDomainPublic,
+    OrganizationDomainsPublic,
+    OrganizationDomainUpdateRequest,
     OrganizationMembershipContextPublic,
     OrganizationPublic,
     PendingOrganizationInvitationsPublic,
     SwitchActiveOrganizationRequest,
 )
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import OrganizationDomainService, OrganizationService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -75,6 +79,14 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
+
+
+def get_organization_domain_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationDomainService:
+    """Build the email-domain service on the request's session."""
+    return OrganizationDomainService(db)
+
+
+OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_organization_domain_service)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -339,3 +351,94 @@ async def revoke_active_organization_member_invitation(
         invitation_id=invitation_id,
     )
     return Message(message="Invitation revoked")
+
+
+
+# =============================================================================
+# Email-domain auto-join
+# =============================================================================
+#
+# Every path here is management-gated in the service rather than by a router
+# dependency, matching the rest of this file. A claim's public form carries the
+# TXT value to publish, which is the secret that completes it, so "who may read
+# this" is the same question as "who may create one".
+
+
+@router.get("/me/domains")
+async def list_active_organization_domains(
+    service: OrganizationDomainServiceDep,
+    current_identity: CurrentIdentity,
+) -> OrganizationDomainsPublic:
+    """List the caller's organization's email-domain claims. Owners and admins only."""
+    return await service.list_domains_for_user(user=current_identity)
+
+
+@router.post("/me/domains", status_code=status.HTTP_201_CREATED)
+async def create_active_organization_domain(
+    service: OrganizationDomainServiceDep,
+    current_identity: CurrentIdentity,
+    body: OrganizationDomainCreateRequest,
+) -> OrganizationDomainPublic:
+    """Claim an email domain for the caller's organization. Owners and admins only.
+
+    The claim lands unverified and does nothing until ``POST
+    /me/domains/{id}/verify`` finds the record in ``verification_record``
+    published at the domain's apex. A public email provider is refused outright,
+    and a domain another organization already claims answers 409 without saying
+    who holds it.
+    """
+    return await service.create_domain_for_user(user=current_identity, request=body)
+
+
+@router.patch("/me/domains/{organization_domain_id}")
+async def update_active_organization_domain(
+    service: OrganizationDomainServiceDep,
+    current_identity: CurrentIdentity,
+    organization_domain_id: uuid.UUID,
+    body: OrganizationDomainUpdateRequest,
+) -> OrganizationDomainPublic:
+    """Change a claim's auto-join role or enabled flag. Owners and admins only.
+
+    The domain itself and its verification state are not editable: a different
+    domain is a different claim and needs its own proof.
+    """
+    return await service.update_domain_for_user(
+        user=current_identity,
+        organization_domain_id=organization_domain_id,
+        request=body,
+    )
+
+
+@router.post("/me/domains/{organization_domain_id}/verify")
+async def verify_active_organization_domain(
+    service: OrganizationDomainServiceDep,
+    current_identity: CurrentIdentity,
+    organization_domain_id: uuid.UUID,
+) -> OrganizationDomainPublic:
+    """Prove control of a claimed domain via its DNS TXT record. Owners and admins only.
+
+    Idempotent, and answers 400 while the record is not visible yet, which is
+    the expected answer straight after publishing one.
+    """
+    return await service.verify_domain_for_user(
+        user=current_identity,
+        organization_domain_id=organization_domain_id,
+    )
+
+
+@router.delete("/me/domains/{organization_domain_id}")
+async def delete_active_organization_domain(
+    service: OrganizationDomainServiceDep,
+    current_identity: CurrentIdentity,
+    organization_domain_id: uuid.UUID,
+) -> Message:
+    """Drop an email-domain claim. Owners and admins only.
+
+    Members who already joined through it keep their membership: they are
+    colleagues by then, not an artifact of the claim.
+    """
+    await service.delete_domain_for_user(
+        user=current_identity,
+        organization_domain_id=organization_domain_id,
+    )
+    return Message(message="Organization email domain removed")

@@ -2461,6 +2461,159 @@
           }
         },
         {
+          "name": "List Active Organization Domains",
+          "request": {
+            "description": "List the caller's organization's email-domain claims. Owners and admins only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains"
+            }
+          }
+        },
+        {
+          "name": "Create Active Organization Domain",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"domain\": \"string\"\n}"
+            },
+            "description": "Claim an email domain for the caller's organization. Owners and admins only.\n\nThe claim lands unverified and does nothing until ``POST\n/me/domains/{id}/verify`` finds the record in ``verification_record``\npublished at the domain's apex. A public email provider is refused outright,\nand a domain another organization already claims answers 409 without saying\nwho holds it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains"
+            }
+          }
+        },
+        {
+          "name": "Update Active Organization Domain",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"default_role\": \"member\",\n  \"enabled\": false\n}"
+            },
+            "description": "Change a claim's auto-join role or enabled flag. Owners and admins only.\n\nThe domain itself and its verification state are not editable: a different\ndomain is a different claim and needs its own proof.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains",
+                ":organization_domain_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_domain_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Active Organization Domain",
+          "request": {
+            "description": "Drop an email-domain claim. Owners and admins only.\n\nMembers who already joined through it keep their membership: they are\ncolleagues by then, not an artifact of the claim.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains",
+                ":organization_domain_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_domain_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Verify Active Organization Domain",
+          "request": {
+            "description": "Prove control of a claimed domain via its DNS TXT record. Owners and admins only.\n\nIdempotent, and answers 400 while the record is not visible yet, which is\nthe expected answer straight after publishing one.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains",
+                ":organization_domain_id",
+                "verify"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id/verify",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_domain_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Invite Active Organization Member",
           "request": {
             "body": {

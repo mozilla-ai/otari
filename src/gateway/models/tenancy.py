@@ -765,6 +765,120 @@ class OrganizationMember(OrganizationMemberBase, PrimaryKeyMixin, CreatedAtMixin
 
 
 # =============================================================================
+# Email-domain auto-join
+# =============================================================================
+
+
+# Roles a domain claim may hand out. Owner and admin are deliberately absent:
+# the claim proves control of a *domain*, which is not the same as a decision
+# about any one person, so a match must never confer management of the
+# organization. Narrower than ORGANIZATION_MEMBER_ROLES for that reason alone,
+# and widening it would make publishing one DNS record enough to mint admins.
+ORGANIZATION_DOMAIN_ROLES = {"member", "viewer"}
+OrganizationDomainRole = Literal["member", "viewer"]
+
+# The TXT record an admin publishes at the claimed domain's apex to prove they
+# control it. The stored token is the secret half; this prefix is what makes the
+# record recognizable among the other TXT records a domain already publishes.
+DOMAIN_VERIFICATION_TXT_PREFIX = "otari-domain-verification="
+
+
+class OrganizationDomainBase(SQLModel):
+    organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
+    # No index=True: the UNIQUE(domain) constraint below already indexes it, and
+    # a second index on the same column would be written on every claim for
+    # nothing. Unique across the deployment, not per organization: the whole
+    # point is that one domain resolves to one organization at sign-in, and two
+    # organizations holding the same claim has no defensible answer.
+    domain: str = Field(max_length=255)
+    default_role: str = Field(default="member", max_length=32)
+    enabled: bool = Field(default=True)
+
+    @field_validator("default_role")
+    @classmethod
+    def validate_default_role(cls, value: str) -> str:
+        return _validate_membership(value, allowed=ORGANIZATION_DOMAIN_ROLES, kind="auto-join role")
+
+
+class OrganizationDomainCreate(OrganizationDomainBase):
+    pass
+
+
+class OrganizationDomainUpdate(SQLModel):
+    default_role: str | None = Field(default=None, max_length=32)
+    enabled: bool | None = Field(default=None)
+
+    @field_validator("default_role")
+    @classmethod
+    def validate_default_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=ORGANIZATION_DOMAIN_ROLES, kind="auto-join role")
+
+
+class OrganizationDomainPublic(OrganizationDomainBase):
+    """A claim as its organization's admins see it.
+
+    Carries ``verification_record`` (the whole string to publish) rather than
+    the raw token: the admin never has a use for the token on its own, and one
+    field that can be copied verbatim into a DNS panel is harder to get wrong
+    than a prefix they must remember to prepend.
+    """
+
+    id: uuid.UUID
+    verification_record: str
+    verified_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class OrganizationDomainsPublic(SQLModel):
+    data: list[OrganizationDomainPublic]
+    count: int
+
+
+class OrganizationDomainCreateRequest(SQLModel):
+    domain: str = Field(min_length=1, max_length=255)
+    default_role: OrganizationDomainRole = "member"
+    enabled: bool = True
+
+
+class OrganizationDomainUpdateRequest(SQLModel):
+    default_role: OrganizationDomainRole | None = None
+    enabled: bool | None = None
+
+
+class OrganizationDomain(OrganizationDomainBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """One organization's claim on an email domain.
+
+    A claim on its own grants nothing. Auto-join reads only rows that are both
+    ``enabled`` and verified, so an organization may name any domain it likes
+    and nothing happens until the DNS proof lands; that is what stops a claim on
+    a domain someone else controls from sweeping up that domain's people.
+
+    Kept after verification rather than collapsed into a boolean on the
+    organization, because the claim stays revocable and re-checkable: the token
+    is the same one the published record has to keep matching.
+    """
+
+    __tablename__ = "organization_domain"
+    __table_args__ = (
+        UniqueConstraint(
+            "domain",
+            name="uq_organization_domain_domain",
+        ),
+    )
+
+    verification_token: str = Field(max_length=64)
+    verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+
+    @property
+    def verification_record(self) -> str:
+        """The exact TXT value to publish at the domain's apex."""
+        return f"{DOMAIN_VERIFICATION_TXT_PREFIX}{self.verification_token}"
+
+
+# =============================================================================
 # Workspaces
 # =============================================================================
 
@@ -1273,11 +1387,13 @@ __all__ = [
     "DeploymentUserPublic",
     "DeploymentUserUpdateRequest",
     "DeploymentUsersPublic",
+    "DOMAIN_VERIFICATION_TXT_PREFIX",
     "INVITATION_STATUSES",
     "MAX_CREDENTIAL_ID_LENGTH",
     "MAX_WEBAUTHN_CREDENTIAL_NAME",
     "MANAGEMENT_ROLES",
     "MAX_WORKSPACE_ASSIGNMENTS",
+    "ORGANIZATION_DOMAIN_ROLES",
     "ORGANIZATION_MEMBER_ROLES",
     "ORGANIZATION_MEMBER_STATUSES",
     "WORKSPACE_MEMBER_ROLES",
@@ -1305,6 +1421,14 @@ __all__ = [
     "Organization",
     "OrganizationCreate",
     "OrganizationCreateRequest",
+    "OrganizationDomain",
+    "OrganizationDomainCreate",
+    "OrganizationDomainCreateRequest",
+    "OrganizationDomainPublic",
+    "OrganizationDomainRole",
+    "OrganizationDomainUpdate",
+    "OrganizationDomainUpdateRequest",
+    "OrganizationDomainsPublic",
     "OrganizationMember",
     "OrganizationMemberCreate",
     "OrganizationMemberPublic",

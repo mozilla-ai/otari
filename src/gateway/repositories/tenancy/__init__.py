@@ -22,6 +22,7 @@ from gateway.repositories.tenancy.org_provider_key_repository import (
     WorkspaceProviderModelRestrictionRepository,
     resolve_active_key,
 )
+from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.repositories.tenancy.organization_member_repository import OrganizationMemberRepository
 from gateway.repositories.tenancy.organization_repository import OrganizationRepository
 from gateway.repositories.tenancy.user_repository import UserRepository, user_alphabetical_order
@@ -31,6 +32,7 @@ __all__ = [
     "Candidate",
     "InvitationRepository",
     "OrgProviderKeyRepository",
+    "OrganizationDomainRepository",
     "OrganizationMemberRepository",
     "OrganizationRepository",
     "UserRepository",
