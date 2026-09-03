@@ -676,14 +676,22 @@ describe("headings wear a type role", () => {
       if (literal) {
         expect(
           literal[1],
-          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, or text-title`,
+          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, text-title, or text-overline`,
         )
-          // The three stems name role FAMILIES, and `\b` matches before a
-          // hyphen, so a named sub-step such as `text-display-sub` satisfies
-          // this by design rather than by accident. A role named outside these
-          // stems would be correct and would still fail here, so it has to
-          // arrive with a change to this pattern.
-          .toMatch(/\btext-(?:display|heading|title)\b/)
+          // The stems name role FAMILIES, and `\b` matches before a hyphen, so
+          // a named sub-step such as `text-display-sub` satisfies this by
+          // design rather than by accident. A role named outside these stems
+          // would be correct and would still fail here, so it has to arrive
+          // with a change to this pattern.
+          //
+          // `text-overline` is a heading role here even though it is not one
+          // of the page's three sizes: the role exists to label the group
+          // beneath it, so heading that group is the thing it is for. The
+          // alternative was demoting the element to a `span`, which would take
+          // the label out of the document outline to satisfy a check. This
+          // list and the ink-pairing list below already differ; they answer
+          // different questions.
+          .toMatch(/\btext-(?:display|heading|title|overline)\b/)
       } else {
         // No string literal, so the one acceptable shape left is an
         // expression. A heading with no className at all is the bare case
@@ -710,8 +718,8 @@ describe("headings wear a type role", () => {
         }
         expect(
           value,
-          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, or text-title`,
-        ).toMatch(/\btext-(?:display|heading|title)\b/)
+          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, text-title, or text-overline`,
+        ).toMatch(/\btext-(?:display|heading|title|overline)\b/)
       }
     }
   })
