@@ -74,10 +74,10 @@ describe("ShareCard", () => {
     // An <img src="/favicon.svg"> would render as nothing once the card is
     // rasterized: that document cannot fetch anything external.
     // Presence selector plus an explicit value check, not
-    // `svg[viewBox="0 0 272 250"]`: jsdom's selector engine does not match a
+    // `svg[viewBox="0 0 273 250"]`: jsdom's selector engine does not match a
     // camelCase SVG attribute by value, so that spelling never matches.
     const mark = [...container.querySelectorAll("svg[viewBox]")].find(
-      (svg) => svg.getAttribute("viewBox") === "0 0 272 250",
+      (svg) => svg.getAttribute("viewBox") === "0 0 273 250",
     )
     expect(mark).toBeDefined()
     expect(mark?.querySelector("path")).not.toBeNull()

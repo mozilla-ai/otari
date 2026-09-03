@@ -54,9 +54,11 @@ export interface ChartPoint {
 // rather than an inline background-color style, per the dashboard's no-inline-
 // styles convention.
 function SeriesMarker({ color }: { color: string }) {
+  // Square, like every other marker in the product. The 1.5 corner it used to
+  // carry was the last rounded thing in a chart legend.
   return (
     <svg aria-hidden="true" viewBox="0 0 8 8" className="h-2 w-2 shrink-0">
-      <rect width="8" height="8" rx="1.5" fill={color} />
+      <rect width="8" height="8" fill={color} />
     </svg>
   )
 }
@@ -100,7 +102,7 @@ export function ChartTooltip({
     rows.length > 1 ? rows.filter((entry) => (entry.value as number) > 0) : rows
   const total = rows.reduce((sum, entry) => sum + (entry.value as number), 0)
   return (
-    <div className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs shadow-sm">
+    <div className="border border-control-border bg-surface px-2.5 py-1.5 text-xs">
       <div className="text-muted">{heading}</div>
       <div className="mt-0.5 flex flex-col gap-0.5">
         {visible.map((entry, index) => (
@@ -180,6 +182,12 @@ export function TrendChart({
   height = 200,
   showYAxis = false,
   showTotal,
+  // Recharts' `interval`: 0 draws every tick, 1 every other, and the default
+  // `"preserveStartEnd"` thins by pixel gap instead, which makes the label
+  // density a function of the window width rather than of the data.
+  xTickInterval,
+  // Recharts' default is 5. A short strip wants fewer.
+  yTickCount,
   onSelectRange,
   window: windowRange,
 }: {
@@ -191,6 +199,8 @@ export function TrendChart({
   height?: number
   showYAxis?: boolean
   showTotal?: boolean
+  xTickInterval?: number
+  yTickCount?: number
   onSelectRange?: (startIndex: number, endIndex: number) => void
   window?: { startIndex: number; endIndex: number } | null
 }) {
@@ -278,13 +288,14 @@ export function TrendChart({
             dataKey="x"
             tickLine={false}
             axisLine={false}
-            interval="preserveStartEnd"
+            interval={xTickInterval ?? "preserveStartEnd"}
             minTickGap={40}
             tickFormatter={formatXTick}
             tick={AXIS_TICK}
           />
           {showYAxis ? (
             <YAxis
+              tickCount={yTickCount}
               width={52}
               tickLine={false}
               axisLine={false}
@@ -313,7 +324,11 @@ export function TrendChart({
               strokeWidth={series.length > 1 ? 1 : 0}
               // Rounded data-ends only when nothing stacks on top; rounding
               // every stacked segment would fake gaps inside a column.
-              radius={series.length > 1 ? 0 : [2, 2, 0, 0]}
+              // Square, always. A single-series chart used to get a 2px top
+              // radius, so Usage's Cost bars were rounded while its Tokens and
+              // Requests bars (which stack two series) were not: one chart, two
+              // shapes, decided by how many series happened to be on screen.
+              radius={0}
               isAnimationActive={false}
             />
           ))}
@@ -368,10 +383,15 @@ export function Sparkline({
 }) {
   const data = values.map((value, index) => ({ index, value }))
   return (
+    // The wrapper carries the accessible name, so the SVG inside must not be a
+    // second stop: recharts gives its `<svg>` `tabIndex={0}` by default, which
+    // put three empty focus stops on the Overview page, each landing a ring on a
+    // decorative line with nothing to do there. A sparkline has no interaction.
     <div role="img" aria-label={ariaLabel} className="w-full">
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
           data={data}
+          tabIndex={-1}
           margin={{ top: 2, right: 2, left: 2, bottom: 2 }}
         >
           <Line

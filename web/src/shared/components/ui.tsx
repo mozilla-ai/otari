@@ -16,8 +16,8 @@ import { Link } from "@tanstack/react-router"
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { Checkbox as AriaCheckbox } from "react-aria-components"
-
 import { ApiError } from "@/shared/api/client"
+import { Dot } from "@/shared/components/surface"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
 import { formatRelative } from "@/shared/helpers/format"
 import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
@@ -54,11 +54,25 @@ export function CheckboxVisual({
       onPointerDown={() => {
         if (!isDisabled) setFlash(!isSelected)
       }}
-      className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
+      // Square, and outlined in the control edge rather than the divider
+      // border: `--color-border` is a 0.06 alpha tuned to separate two surfaces
+      // of nearly the same value, which leaves a 16px box on the page ground
+      // almost invisible. Checked drops the border entirely so the accent fill
+      // is the whole shape.
+      //
+      // The glyph is white rather than `text-accent-foreground`, and that is
+      // not the same call the filled buttons made. A checkmark is a non-text
+      // graphic, held to 3:1, and white on the accent measures 3.48, which
+      // clears it. A button label is text at 4.5, which is why the button
+      // family had to darken its own ground to keep white ink and this box
+      // does not have to. `--accent-foreground` stays where it is: it also
+      // feeds HeroUI's own components on the accent, where the text floor
+      // still applies, so the graphic gets its own token instead.
+      className={`otari-checkbox-box flex h-4 w-4 items-center justify-center transition-colors ${
         showChecked
-          ? "border-accent bg-accent text-accent-foreground"
-          : "border-border bg-surface"
-      } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-accent`}
+          ? "bg-control-indicator text-accent-glyph"
+          : "border border-control-border bg-background"
+      } group-data-[focus-visible]:otari-focus-ring`}
     >
       {isIndeterminate && flash === null ? (
         <svg
@@ -205,7 +219,7 @@ export function StatCard({
       <span className="text-overline">{label}</span>
       <span className="flex flex-wrap items-center gap-2">
         {/* text-xl (22px), deliberately a step *below* the page title's
-            text-display (26px). It used to be text-xl rising to text-2xl at
+            text-display (28px). It used to be text-xl rising to text-2xl at
             `sm`, which made a number inside a card the largest text on the
             page, 4px bigger than the name of the page itself. Fixing that by
             raising the title alone would have left the two agreeing by
@@ -274,10 +288,7 @@ export function StatCard({
         // unlayered, so the hover tint needs the bang to be seen at all.
         className={`${cardClass} transition-colors hover:border-accent!`}
       >
-        <Link
-          to={to}
-          className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        >
+        <Link to={to} className="block rounded-[inherit]">
           {body}
         </Link>
       </Card>
@@ -317,13 +328,22 @@ export function InfoBanner({
   tone?: "info" | "warning"
   children: ReactNode
 }) {
-  const styles =
-    tone === "warning"
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-accent bg-primary-subtle text-primary-subtle-foreground"
+  // A fact stated between rules, not a tinted box. An informational banner here
+  // is almost always a ceiling ("this deployment has no sandbox", "an admin sets
+  // this"), which is a fact about the deployment rather than a problem with it,
+  // so it reads on the muted rung behind a subtle dot. A caution keeps the
+  // danger dot and the same muted prose: the dot says "worth noticing" and the
+  // words say what.
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>
-      {children}
+    <div className="flex items-start gap-3 border-y border-border py-3 text-sm text-muted">
+      <Dot
+        className={`mt-2 ${tone === "warning" ? "bg-danger" : "bg-text-subtle"}`}
+      />
+      {/* Capped for the reason the page header and the settings rows are: a
+          banner is a full-bleed row now, and its sentence would otherwise run
+          the width of the page, which is roughly twice a readable measure on a
+          wide viewport. The rule spans the page; the words do not. */}
+      <div className="min-w-0 max-w-prose">{children}</div>
     </div>
   )
 }
@@ -819,9 +839,29 @@ export function ConfirmButton({
   )
 }
 
-/** The bare text/password input the feature cards use where a HeroUI field is too much. */
+/**
+ * A bare `<input>` dressed as the product's field, for the places that need an
+ * element rather than a HeroUI `TextField` (a grid cell that supplies its own
+ * label, a row whose control sits in a column of its own).
+ *
+ * It used to be its own smaller, rounder thing: `px-2 py-1` on `bg-surface`
+ * with `rounded-md`, which came out 30px against the real field's 38 and was
+ * the last rounded corner in the product. Its docstring said it was for "where
+ * a HeroUI field is too much", and the cards it was written for are gone. So it
+ * is the same field now, in the same tokens at the same height, and the only
+ * thing it still is is an element rather than a component.
+ */
 export const INPUT_CLASS =
-  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
+  // No padding here: `.input` carries it now, so a page cannot spell field
+  // padding again and the pagination place can override it in one selector
+  // rather than fighting a utility. The height is the form floor; a named place
+  // lowers it.
+  // No width either: it was `w-full`, which collided with the `w-12` and `w-28`
+  // call sites. Two width utilities on one element are settled by Tailwind's
+  // emitted order, not by the class string, so which one won was not something
+  // a reader could tell from the call site. Every caller that wants full width
+  // already says so.
+  "input input--primary min-h-10 text-sm"
 
 /**
  * A small status pill for a row that has something to say about itself.
@@ -838,14 +878,20 @@ export function Badge({
   tone: "muted" | "warn"
   children: string
 }) {
-  const className =
-    tone === "warn"
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-border bg-surface text-muted"
+  // The status form, not a pill: a square dot and a word. A `warn` badge says
+  // the row is not doing what its neighbors are, which is what the danger dot
+  // with muted words means everywhere else here; `muted` states a fact about
+  // the row and takes the quiet dot.
+  const dot = tone === "warn" ? "bg-danger" : "bg-text-subtle"
+  const ink = tone === "warn" ? "text-muted" : "text-subtle"
   return (
-    <span
-      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
-    >
+    // Not uppercased and not mono, unlike the status marks it shares a dot
+    // with. Those draw from a fixed vocabulary of one or two words; this one
+    // takes whatever a caller passes, and its callers pass sentences ("Every
+    // workspace, including new ones"). Uppercasing a sentence is shouting, and
+    // mono is for values you copy rather than prose you read.
+    <span className={`flex items-center gap-2 text-xs ${ink}`}>
+      <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${dot}`} />
       {children}
     </span>
   )

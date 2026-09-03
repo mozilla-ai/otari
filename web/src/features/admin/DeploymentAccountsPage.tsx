@@ -1,4 +1,3 @@
-import { Button, Chip } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type { DeploymentUser } from "@/client"
@@ -10,10 +9,16 @@ import {
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import {
+  Dot,
+  PageIntro,
+  RowAction,
+  RowActionRow,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import {
   EmptyState,
   ErrorBanner,
   InfoBanner,
-  PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
@@ -37,25 +42,22 @@ import {
 // is deleting one, because historical attribution resolves through rows that
 // hang off it.
 
-function AccessChip({ account }: { account: DeploymentUser }) {
-  if (account.is_bootstrap_operator) {
-    return (
-      <Chip size="sm" color="accent">
-        Bootstrap operator
-      </Chip>
-    )
-  }
-  if (account.is_superuser) {
-    return (
-      <Chip size="sm" color="accent">
-        Operator
-      </Chip>
-    )
-  }
+/**
+ * The access mark, affirmative: an account that reaches more than the ordinary
+ * carries the accent, and one that does not carries the quiet dot rather than a
+ * second kind of badge. Member is the unmarked state and reads as one.
+ */
+function AccessMark({ account }: { account: DeploymentUser }) {
+  const { dot, ink, word } = account.is_bootstrap_operator
+    ? { dot: "bg-accent", ink: "text-muted", word: "Bootstrap operator" }
+    : account.is_superuser
+      ? { dot: "bg-accent", ink: "text-muted", word: "Operator" }
+      : { dot: "bg-text-subtle", ink: "text-subtle", word: "Member" }
   return (
-    <Chip size="sm" color="default">
-      Member
-    </Chip>
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+      <Dot className={dot} />
+      {word.toUpperCase()}
+    </span>
   )
 }
 
@@ -84,7 +86,12 @@ export function DeploymentAccountsPage() {
                 only whitespace falls back to the email up there, so testing the
                 untrimmed value here would print the same address twice. */}
             {account.full_name?.trim() && account.email ? (
-              <span className="text-caption">{account.email}</span>
+              <span
+                className="truncate text-xs text-muted"
+                title={account.email}
+              >
+                {account.email}
+              </span>
             ) : null}
           </div>
         ),
@@ -114,21 +121,20 @@ export function DeploymentAccountsPage() {
       {
         id: "status",
         header: "Status",
-        cell: (account) =>
-          account.is_active ? (
-            <Chip size="sm" color="accent">
-              Active
-            </Chip>
-          ) : (
-            <Chip size="sm" color="warning">
-              Deactivated
-            </Chip>
-          ),
+        // A deactivated account takes the danger dot with muted words: its
+        // sessions are ended and it cannot sign in, which is worth noticing,
+        // and it is also a state an operator chose rather than a fault.
+        cell: (account) => (
+          <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+            <Dot className={account.is_active ? "bg-success" : "bg-danger"} />
+            {account.is_active ? "ACTIVE" : "DEACTIVATED"}
+          </span>
+        ),
       },
       {
         id: "access",
         header: "Access",
-        cell: (account) => <AccessChip account={account} />,
+        cell: (account) => <AccessMark account={account} />,
       },
       {
         id: "actions",
@@ -137,20 +143,18 @@ export function DeploymentAccountsPage() {
         cell: (account) => {
           const blocked = accountLockoutReason(account)
           return (
-            <div className="flex justify-end gap-2">
+            <RowActionRow>
               {/* `title` reaches a mouse; the reason is folded into the
                   control's own name so it reaches everyone else too, as the
                   organization roster does it. A disabled control is not
                   focusable, so an `aria-describedby` would never be announced. */}
               <span title={account.is_superuser ? blocked : undefined}>
-                <Button
-                  size="sm"
-                  variant="ghost"
+                <RowAction
                   isDisabled={
                     (account.is_superuser && blocked !== undefined) ||
                     update.isPending
                   }
-                  aria-label={
+                  ariaLabel={
                     account.is_superuser
                       ? `Remove operator access from ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
                       : `Grant operator access to ${accountLabel(account)}`
@@ -163,17 +167,15 @@ export function DeploymentAccountsPage() {
                   }
                 >
                   {account.is_superuser ? "Remove operator" : "Make operator"}
-                </Button>
+                </RowAction>
               </span>
               <span title={account.is_active ? blocked : undefined}>
-                <Button
-                  size="sm"
-                  variant={account.is_active ? "danger-soft" : "ghost"}
+                <RowAction
                   isDisabled={
                     (account.is_active && blocked !== undefined) ||
                     update.isPending
                   }
-                  aria-label={
+                  ariaLabel={
                     account.is_active
                       ? `Deactivate ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
                       : `Reactivate ${accountLabel(account)}`
@@ -190,9 +192,9 @@ export function DeploymentAccountsPage() {
                   }}
                 >
                   {account.is_active ? "Deactivate" : "Reactivate"}
-                </Button>
+                </RowAction>
               </span>
-            </div>
+            </RowActionRow>
           )
         },
       },
@@ -213,8 +215,8 @@ export function DeploymentAccountsPage() {
   // the registry already answers.
   if (access.isError) {
     return (
-      <div className="flex flex-col gap-6">
-        <PageHeader title="Accounts" />
+      <div className="flex flex-col">
+        <PageIntro title="Accounts" />
         <ErrorBanner error={access.error} />
       </div>
     )
@@ -226,8 +228,8 @@ export function DeploymentAccountsPage() {
   // URL or whose access was taken away while the page was open.
   if (!granted) {
     return (
-      <div className="flex flex-col gap-6">
-        <PageHeader title="Accounts" />
+      <div className="flex flex-col">
+        <PageIntro title="Accounts" />
         <EmptyState
           title="Accounts is not available to you"
           description="Managing the deployment's accounts is for its operators. Ask one of them if you need access here."
@@ -237,11 +239,12 @@ export function DeploymentAccountsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Accounts"
-        description="Every account on this deployment, across all its organizations. Deactivating one ends its dashboard sessions immediately; operator access is what reaches this page."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Accounts">
+        Every account on this deployment, across all its organizations.
+        Deactivating one ends its dashboard sessions immediately; operator
+        access is what reaches this page.
+      </PageIntro>
 
       <ErrorBanner error={accounts.error ?? update.error} />
 
@@ -251,14 +254,16 @@ export function DeploymentAccountsPage() {
         access here. Everything else on this page applies to them normally.
       </InfoBanner>
 
-      <DataTable
-        ariaLabel="Deployment accounts"
-        columns={columns}
-        rows={rows}
-        getRowKey={(account) => account.id}
-        isLoading={accounts.isLoading}
-        emptyContent="No accounts yet."
-      />
+      <TableScrollFrame className="otari-accounts-table">
+        <DataTable
+          ariaLabel="Deployment accounts"
+          columns={columns}
+          rows={rows}
+          getRowKey={(account) => account.id}
+          isLoading={accounts.isLoading}
+          emptyContent="No accounts yet."
+        />
+      </TableScrollFrame>
 
       <ConfirmDialog
         isOpen={deactivating !== null}

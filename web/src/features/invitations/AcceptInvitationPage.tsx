@@ -29,11 +29,12 @@
  * visitor is offered the dashboard *and* the claim.
  */
 
-import { Button, Card, Link } from "@heroui/react"
+import { Button, Link } from "@heroui/react"
 import { useState } from "react"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import {
+  AuthPageShell,
   goToPublicAuthPage,
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
@@ -82,147 +83,137 @@ export function AcceptInvitationPage() {
     : "#/signup"
 
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <Card className="w-full max-w-md">
-        <Card.Content className="flex flex-col gap-5 p-7">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <img src="/favicon.svg" alt="Otari" className="h-12 w-12" />
-            <h1 className="text-display">Organization invitation</h1>
-          </div>
+    <AuthPageShell>
+      <h1 className="text-display">Organization invitation</h1>
 
-          {token === null ? (
-            <>
-              <ErrorBanner
-                error={
-                  new Error(
-                    "This link is missing its invitation token, so there is nothing to accept.",
-                  )
-                }
-              />
-              {/* A refusal is not a handoff, and this page deliberately offers
+      {token === null ? (
+        <>
+          <ErrorBanner
+            error={
+              new Error(
+                "This link is missing its invitation token, so there is nothing to accept.",
+              )
+            }
+          />
+          {/* A refusal is not a handoff, and this page deliberately offers
                   none here. It still owes a door: with forward navigation on
                   the success branch, Back onto a spent token lands here, and a
                   card whose only other link is the welcome guide strands
                   whoever reads it. */}
-              <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
-            </>
-          ) : accept.isSuccess ? (
-            // Ahead of the preview's own branches, because the preview refuses a
-            // token that has been spent: a refetch after this accept (a
-            // reconnect is enough) would otherwise replace what happened with
-            // "already used" and take the next step away with it.
-            <>
-              {/* No article before the role: two of the three ("a owner", "a
+          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+        </>
+      ) : accept.isSuccess ? (
+        // Ahead of the preview's own branches, because the preview refuses a
+        // token that has been spent: a refetch after this accept (a
+        // reconnect is enough) would otherwise replace what happened with
+        // "already used" and take the next step away with it.
+        <>
+          {/* No article before the role: two of the three ("a owner", "a
                   admin") read wrong, and the roles are the server's words. */}
-              <p className="text-center text-body">
-                You're now a member of{" "}
-                <strong>{accept.data.organization_name}</strong>, with the{" "}
-                <strong>{accept.data.role}</strong> role.
-              </p>
-              {isAuthenticated ? (
-                <>
-                  <p className="text-center text-caption">
-                    You're already signed in, so there is nothing left to set
-                    up.
-                  </p>
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    onPress={() => goToPublicAuthPage("#/")}
-                  >
-                    Go to the dashboard
-                  </Button>
-                  {/* Offered, not assumed: `accept` takes no identity and this
-                      session may belong to someone else in a shared browser, so
-                      the claim stays reachable rather than this ending being the
-                      one with no route to it. */}
-                  {offersClaim && invitedEmail ? (
-                    <PublicAuthLink to={signupHash}>
-                      Not you? Set a password for {invitedEmail}
-                    </PublicAuthLink>
-                  ) : null}
-                </>
-              ) : offersClaim ? (
-                <>
-                  <p className="text-center text-caption">
-                    Next, set your password to sign in.
-                  </p>
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    onPress={() => goToPublicAuthPage(signupHash)}
-                  >
-                    Set your password
-                  </Button>
-                  {/* The other half of the same fork, offered rather than
-                      decided: an address that already has a password has
-                      nothing to claim, and asking the server which case this is
-                      would be the enumeration answer signup withholds. */}
-                  <PublicAuthLink to="#/">
-                    Already have a password? Sign in
-                  </PublicAuthLink>
-                </>
-              ) : (
-                <>
-                  {/* Never "ask an administrator to set your password": there is
-                      no endpoint for that. `PUT /v1/auth/password` only ever
-                      acts on the caller's own identity, so that advice named
-                      something nobody on this deployment can do. */}
-                  <p className="text-center text-caption">
-                    {offersProviderSignIn
-                      ? "Setting a password works by emailing you a link, and this deployment sends no mail. Sign in with one of the providers on the sign-in screen instead."
-                      : "Setting a password works by emailing you a link, and this deployment sends no mail. An operator can turn that on by configuring outgoing mail and a public base URL for this gateway."}
-                  </p>
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    onPress={() => goToPublicAuthPage("#/")}
-                  >
-                    Go to sign in
-                  </Button>
-                </>
-              )}
-            </>
-          ) : preview.isLoading ? (
-            <p className="text-center text-sm text-muted">
-              Checking your invitation…
-            </p>
-          ) : preview.error ? (
+          <p className="text-sm text-foreground">
+            You're now a member of{" "}
+            <strong>{accept.data.organization_name}</strong>, with the{" "}
+            <strong>{accept.data.role}</strong> role.
+          </p>
+          {isAuthenticated ? (
             <>
-              <ErrorBanner error={preview.error} />
-              <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
-            </>
-          ) : preview.data ? (
-            <>
-              <p className="text-center text-body">
-                <strong>{preview.data.organization_name}</strong> has invited{" "}
-                <strong>{preview.data.email}</strong> to join with the{" "}
-                <strong>{preview.data.role}</strong> role.
+              <p className="text-center text-xs text-muted">
+                You're already signed in, so there is nothing left to set up.
               </p>
-              <ErrorBanner error={accept.error} />
               <Button
                 variant="primary"
                 fullWidth
-                isPending={accept.isPending}
-                onPress={() => {
-                  if (token) accept.mutate(token)
-                }}
+                onPress={() => goToPublicAuthPage("#/")}
               >
-                Accept invitation
+                Go to the dashboard
+              </Button>
+              {/* Offered, not assumed: `accept` takes no identity and this
+                      session may belong to someone else in a shared browser, so
+                      the claim stays reachable rather than this ending being the
+                      one with no route to it. */}
+              {offersClaim && invitedEmail ? (
+                <PublicAuthLink to={signupHash}>
+                  Not you? Set a password for {invitedEmail}
+                </PublicAuthLink>
+              ) : null}
+            </>
+          ) : offersClaim ? (
+            <>
+              <p className="text-center text-xs text-muted">
+                Next, set your password to sign in.
+              </p>
+              <Button
+                variant="primary"
+                fullWidth
+                onPress={() => goToPublicAuthPage(signupHash)}
+              >
+                Set your password
+              </Button>
+              {/* The other half of the same fork, offered rather than
+                      decided: an address that already has a password has
+                      nothing to claim, and asking the server which case this is
+                      would be the enumeration answer signup withholds. */}
+              <PublicAuthLink to="#/">
+                Already have a password? Sign in
+              </PublicAuthLink>
+            </>
+          ) : (
+            <>
+              {/* Never "ask an administrator to set your password": there is
+                      no endpoint for that. `PUT /v1/auth/password` only ever
+                      acts on the caller's own identity, so that advice named
+                      something nobody on this deployment can do. */}
+              <p className="text-center text-xs text-muted">
+                {offersProviderSignIn
+                  ? "Setting a password works by emailing you a link, and this deployment sends no mail. Sign in with one of the providers on the sign-in screen instead."
+                  : "Setting a password works by emailing you a link, and this deployment sends no mail. An operator can turn that on by configuring outgoing mail and a public base URL for this gateway."}
+              </p>
+              <Button
+                variant="primary"
+                fullWidth
+                onPress={() => goToPublicAuthPage("#/")}
+              >
+                Go to sign in
               </Button>
             </>
-          ) : null}
+          )}
+        </>
+      ) : preview.isLoading ? (
+        <p className="text-sm text-muted">Checking your invitation…</p>
+      ) : preview.error ? (
+        <>
+          <ErrorBanner error={preview.error} />
+          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+        </>
+      ) : preview.data ? (
+        <>
+          <p className="text-sm text-foreground">
+            <strong>{preview.data.organization_name}</strong> has invited{" "}
+            <strong>{preview.data.email}</strong> to join with the{" "}
+            <strong>{preview.data.role}</strong> role.
+          </p>
+          <ErrorBanner error={accept.error} />
+          <Button
+            variant="primary"
+            fullWidth
+            isPending={accept.isPending}
+            onPress={() => {
+              if (token) accept.mutate(token)
+            }}
+          >
+            Accept invitation
+          </Button>
+        </>
+      ) : null}
 
-          <div className="border-t border-border pt-4 text-center">
-            <Link
-              href="/welcome"
-              className="text-sm font-medium text-link hover:text-link-hover"
-            >
-              New to Otari? Open the welcome guide
-            </Link>
-          </div>
-        </Card.Content>
-      </Card>
-    </div>
+      <div className="border-t border-border pt-5">
+        <Link
+          href="/welcome"
+          className="text-sm font-medium text-link hover:text-link-hover"
+        >
+          New to Otari? Open the welcome guide
+        </Link>
+      </div>
+    </AuthPageShell>
   )
 }

@@ -1,11 +1,12 @@
 import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
-
 import {
   useAliases,
   useDiscoverableModels,
   useProviders,
 } from "@/shared/api/hooks"
+import { ControlField } from "@/shared/components/FieldMessages"
+import { DismissChip, Tab, TabRow } from "@/shared/components/surface"
 
 // The per-key model access-list is a tri-state:
 //   null  -> "any"   (unrestricted, the default)
@@ -117,19 +118,18 @@ export function ModelScopeControl({
     emit("only", next)
   }
 
+  // The shared tab, which is what every segmented choice in the product is now.
+  // The raised-chip treatment this replaced was `bg-surface` plus an elevation
+  // that is `none`, so the selected segment had been reading 1.1:1 against its
+  // own track since the shadows were zeroed.
   const modeButton = (value: Mode, label: string) => (
-    <button
-      type="button"
-      aria-pressed={mode === value}
-      onClick={() => chooseMode(value)}
-      className={
-        mode === value
-          ? "rounded-md bg-surface px-3 py-1.5 text-body shadow-sm"
-          : "rounded-md px-3 py-1.5 text-body text-muted hover:text-foreground"
-      }
+    <Tab
+      key={value}
+      isActive={mode === value}
+      onPress={() => chooseMode(value)}
     >
       {label}
-    </button>
+    </Tab>
   )
 
   const catalogEmpty =
@@ -137,21 +137,23 @@ export function ModelScopeControl({
 
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <span className="text-body">{title}</span>
-        <p className="text-caption">
-          {description ??
-            "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."}
-        </p>
-      </div>
-      <div className="flex w-fit items-center gap-1 rounded-lg bg-surface-alt p-1">
+      <ControlField
+        label={title}
+        description={
+          description ??
+          "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."
+        }
+      />
+      {/* No track: a tab row is bare, and the selected segment's own fill is
+          what marks it. A track plus a fill was two ways of saying one thing. */}
+      <TabRow>
         {modeButton("any", anyLabel)}
         {modeButton("only", "Only selected")}
         {modeButton("block", "Block all")}
-      </div>
+      </TabRow>
 
       {mode === "block" ? (
-        <div className="rounded-lg border border-warning bg-warning-subtle px-3 py-2 text-xs text-warning">
+        <div className="flex items-center gap-2 border-y border-border py-2 text-xs text-muted">
           Blocked from <strong>every</strong> model until you change this
           access.
         </div>
@@ -166,20 +168,12 @@ export function ModelScopeControl({
               </span>
             ) : (
               entries.map((entry) => (
-                <span
+                <DismissChip
                   key={entry}
-                  className="inline-flex items-center gap-1 rounded-full bg-primary-subtle px-2.5 py-1 font-mono text-xs text-primary-subtle-foreground"
-                >
-                  {entry}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${entry}`}
-                    onClick={() => removeEntry(entry)}
-                    className="text-primary-subtle-foreground hover:text-danger"
-                  >
-                    ×
-                  </button>
-                </span>
+                  value={entry}
+                  onDismiss={() => removeEntry(entry)}
+                  dismissLabel={`Remove ${entry}`}
+                />
               ))
             )}
           </div>

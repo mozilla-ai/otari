@@ -272,6 +272,19 @@ function modelOrder(): string[] {
     .filter((text) => text.includes(":"))
 }
 
+/**
+ * Open the filter panel.
+ *
+ * Seven of the nine filters moved behind "Add filter" when the row stopped
+ * fitting, so a test that reaches for one has to open the panel the way a
+ * person does. Idempotent: the toggle reads "Done" once it is open, so calling
+ * this twice in a test does not close it again.
+ */
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  const toggle = screen.queryByRole("button", { name: "Add filter" })
+  if (toggle) await user.click(toggle)
+}
+
 describe("ModelsPage", () => {
   beforeEach(() => {
     // The page persists sort choice in localStorage; start each test clean so
@@ -398,7 +411,9 @@ describe("ModelsPage", () => {
 
     const detail = await selectModel(user, "openai:gpt-4o")
 
-    expect(within(detail).getByText("configured")).toBeInTheDocument()
+    // The price's source is a dot and an uppercase word now. `configured` reads
+    // as CUSTOM, which is what it means: somebody set this deliberately.
+    expect(within(detail).getByText("CUSTOM")).toBeInTheDocument()
     expect(within(detail).getByText("128K")).toBeInTheDocument()
     expect(within(detail).getByText("2023-09")).toBeInTheDocument()
     expect(within(detail).getByText("Tool calling")).toBeInTheDocument()
@@ -474,7 +489,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Filter by pricing", "Custom price")
+    await openFilters(user)
+    await pickOption(user, "Pricing", "Custom price")
 
     expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument()
     expect(
@@ -502,7 +518,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("mistral:large")
 
-    await pickOption(user, "Filter by source", "Custom (not discovered)")
+    await openFilters(user)
+    await pickOption(user, "Source", "Custom (not discovered)")
 
     expect(within(table()).getByText("mistral:large")).toBeInTheDocument()
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument()
@@ -517,7 +534,8 @@ describe("ModelsPage", () => {
 
     // Reasoning is a model-level flag (models.dev), not a provider capability:
     // only claude-sonnet-4 reports it, so the two gpt-4o models drop out.
-    await pickOption(user, "Filter by capability", "Reasoning")
+    await openFilters(user)
+    await pickOption(user, "Capability", "Reasoning")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -544,7 +562,8 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
-    await pickOption(user, "Filter by capability", "Vision")
+    await openFilters(user)
+    await pickOption(user, "Capability", "Vision")
 
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument()
   })
@@ -557,7 +576,8 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o")
 
     // No mock model reports PDF input, so the list empties for a filter reason.
-    await pickOption(user, "Filter by capability", "PDF")
+    await openFilters(user)
+    await pickOption(user, "Capability", "PDF")
 
     expect(
       within(table()).getByText("No models match your filters."),
@@ -571,7 +591,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Minimum context window", "≥ 200K")
+    await openFilters(user)
+    await pickOption(user, "Min context", "≥ 200K")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -870,11 +891,17 @@ describe("ModelsPage", () => {
     // The compact cache-policy cell keeps the table readable while opening the
     // full structured editor on click.
     const row = tableRow("anthropic:claude-sonnet-4")
-    expect(
-      within(row).getByRole("button", {
-        name: "Edit caching price for anthropic:claude-sonnet-4",
-      }),
-    ).toHaveTextContent("R $0.30 · W $3.75")
+    // The read and write prices each sit in a fixed-width box so the column can
+    // be scanned downward, which means the spacing between them is layout and
+    // not text. Asserting the concatenation back would pin the old single-string
+    // cell rather than what a reader sees.
+    const cachingCell = within(row).getByRole("button", {
+      name: "Edit caching price for anthropic:claude-sonnet-4",
+    })
+    expect(cachingCell).toHaveTextContent("R")
+    expect(cachingCell).toHaveTextContent("$0.30")
+    expect(cachingCell).toHaveTextContent("W")
+    expect(cachingCell).toHaveTextContent("$3.75")
 
     const detail = await selectModel(user, "anthropic:claude-sonnet-4")
     expect(within(detail).getByText("Cache read")).toBeInTheDocument()
@@ -903,7 +930,8 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Compare prices at context", "Compare at 200K")
+    await openFilters(user)
+    await pickOption(user, "Compare at", "Compare at 200K")
 
     expect(
       screen.getByRole("columnheader", { name: /at 200K in \/ out \/ 1M/ }),
@@ -1251,7 +1279,7 @@ describe("ModelsPage", () => {
 
     expect(
       within(await selectModel(user, "anthropic:claude-opus-4")).getByText(
-        "rate unknown",
+        "RATE UNKNOWN",
       ),
     ).toBeInTheDocument()
   })
@@ -1265,7 +1293,7 @@ describe("ModelsPage", () => {
 
     expect(
       within(await selectModel(user, "anthropic:claude-opus-4")).getByText(
-        "not priced",
+        "NOT PRICED",
       ),
     ).toBeInTheDocument()
   })
@@ -1357,12 +1385,16 @@ describe("ModelsPage", () => {
       screen.queryByRole("button", {
         name: (name) => name === label || name.endsWith(` ${label}`),
       })
-    expect(filterTrigger("Filter by source")).toBeNull()
-    expect(filterTrigger("Filter by capability")).toBeNull()
-    expect(filterTrigger("Filter by release date")).toBeNull()
+    // The labels are the redesign's: the controls carry a visible `label`
+    // rather than an `ariaLabel` of "Filter by X", so these are the names the
+    // accessible tree now has. Asserting the old ones would pass on the rename
+    // alone and stop testing the withholding.
+    expect(filterTrigger("Source")).toBeNull()
+    expect(filterTrigger("Capability")).toBeNull()
+    expect(filterTrigger("Released")).toBeNull()
     // The ones that read only the catalog stay.
     expect(filterTrigger("Filter by provider")).not.toBeNull()
-    expect(filterTrigger("Filter by pricing")).not.toBeNull()
+    expect(filterTrigger("Pricing")).not.toBeNull()
 
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
     expect(urls.some((url) => url.includes("/v1/settings"))).toBe(false)

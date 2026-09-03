@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { WorkspaceMcpServer } from "@/client"
@@ -16,6 +16,12 @@ import {
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import {
+  Dot,
+  RowAction,
+  RowActionRow,
+  TableScrollFrame,
+} from "@/shared/components/surface"
 import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
@@ -39,12 +45,15 @@ function tokenChip(server: WorkspaceMcpServer) {
   // The token itself is write-only, so this is the only thing the API can say
   // about it, and the only thing worth a column: whether a request to this
   // server will carry a credential.
+  // Affirmative: a server that carries a credential is marked, and one that
+  // does not is the unmarked state rather than a second badge saying so.
   return server.has_token ? (
-    <Chip size="sm" variant="secondary">
-      Stored
-    </Chip>
+    <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+      <Dot className="bg-accent" />
+      STORED
+    </span>
   ) : (
-    <span className="text-muted">None</span>
+    <span className="text-subtle">None</span>
   )
 }
 
@@ -168,9 +177,10 @@ export function WorkspaceMcpServersCard({
       // (`--chip-fg` per `.chip--success`), and it is what the two cards next
       // door already use.
       cell: (row) => (
-        <Chip size="sm" color={row.enabled ? "success" : "default"}>
-          {row.enabled ? "Enabled" : "Disabled"}
-        </Chip>
+        <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+          <Dot className={row.enabled ? "bg-success" : "bg-text-subtle"} />
+          {row.enabled ? "ENABLED" : "DISABLED"}
+        </span>
       ),
     },
   ]
@@ -179,14 +189,10 @@ export function WorkspaceMcpServersCard({
       id: "actions",
       header: "",
       cell: (row) => (
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onPress={() => openEdit(row)}>
-            Edit
-          </Button>
-          <Button size="sm" variant="ghost" onPress={() => openDelete(row)}>
-            Delete
-          </Button>
-        </div>
+        <RowActionRow>
+          <RowAction onPress={() => openEdit(row)}>Edit</RowAction>
+          <RowAction onPress={() => openDelete(row)}>Delete</RowAction>
+        </RowActionRow>
       ),
     })
   }
@@ -202,7 +208,7 @@ export function WorkspaceMcpServersCard({
         ) : null}
       </div>
 
-      <p className="text-sm text-muted">
+      <p className="max-w-prose text-sm text-muted">
         Endpoints that requests billed to {selected.name} can use by naming
         their ids in <code className="font-mono">mcp_server_ids</code>. A
         request may still pass its own servers inline; these are the ones it
@@ -215,25 +221,19 @@ export function WorkspaceMcpServersCard({
 
       <ErrorBanner error={query.error} />
 
-      <Card>
-        <Card.Content className="p-0">
-          <DataTable
-            ariaLabel={`MCP servers for ${selected.name}`}
-            columns={columns}
-            rows={rows}
-            getRowKey={(row) => row.id}
-            isLoading={query.isPending && !query.data}
-            // Deliberately asserts nothing about the workspace: an empty table
-            // is also what a failed request leaves behind, and the banner above
-            // is the only thing that knows which of the two happened.
-            emptyContent={
-              manages
-                ? "No MCP server registered. Add one to let this workspace's requests name it by id."
-                : "No MCP server registered."
-            }
-          />
-        </Card.Content>
-      </Card>
+      <TableScrollFrame className="otari-mcp-table">
+        <DataTable
+          ariaLabel={`MCP servers for ${selected.name}`}
+          columns={columns}
+          rows={rows}
+          getRowKey={(row) => row.id}
+          isLoading={query.isPending && !query.data}
+          // Deliberately asserts nothing about the workspace: an empty table
+          // is also what a failed request leaves behind, and the banner above
+          // is the only thing that knows which of the two happened.
+          emptyContent="No MCP server registered. Add one to let this workspace's requests name it by id."
+        />
+      </TableScrollFrame>
 
       <McpServerDialog
         isOpen={isDialogOpen}

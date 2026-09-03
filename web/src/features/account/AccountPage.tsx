@@ -1,6 +1,6 @@
 import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { PasswordCard } from "@/features/account/PasswordCard"
-import { PageHeader } from "@/shared/components/ui"
+import { PageIntro } from "@/shared/components/surface"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
@@ -19,11 +19,11 @@ export function AccountPage() {
   const { session_type } = useDeployment()
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Account settings"
-        description="How you sign in to this dashboard. Every setting here is yours alone; the gateway's own configuration is on the Settings page."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Account settings">
+        How you sign in to this dashboard. Every setting here is yours alone;
+        the gateway&rsquo;s own configuration is on the Settings page.
+      </PageIntro>
       {session_type === "local_operator" ? (
         <>
           <PasswordCard />
@@ -36,7 +36,7 @@ export function AccountPage() {
         // that failed to load. The enum's third value, "none", cannot reach
         // this branch: only a hybrid gateway reports it, and `App` answers one
         // with the landing page instead of the router.
-        <p className="text-sm text-muted">
+        <p className="max-w-prose text-sm text-muted">
           This deployment's sign-in is managed by the control plane that issued
           your session, so there is nothing to change here.
         </p>

@@ -1,4 +1,4 @@
-import { Button, Card, Input, Label, Link, TextField } from "@heroui/react"
+import { Button, Input, Label, Link, TextField } from "@heroui/react"
 import { useState } from "react"
 import { useAuth } from "@/features/auth/AuthContext"
 import type { SignInCredential } from "@/shared/api/client"
@@ -27,7 +27,7 @@ import {
   oauthProviderLabel,
   renderableOAuthProviders,
 } from "./oauthProviders"
-import { PublicAuthLink } from "./PublicAuthLayout"
+import { AuthPageShell, PublicAuthLink } from "./PublicAuthLayout"
 
 /** Which box an error belongs beside. */
 type CredentialField = "email" | "password" | "masterKey"
@@ -78,30 +78,22 @@ const ERROR_IDS: Record<CredentialField, string> = {
  * keyboard opens, which would re-center the card at the exact moment someone is
  * typing into it.
  */
-const PAGE =
-  "flex min-h-full items-start justify-center px-4 pt-[max(2rem,calc(50vh-17.5rem))] pb-16"
 
 /**
  * The same frame for the unavailable state, whose card is around 351px rather
  * than 537px. Sharing the form's figure would leave this one sitting about
  * 110px high, which is the complaint the computed offset exists to answer.
  */
-const PAGE_FLAT =
-  "flex min-h-full items-start justify-center px-4 pt-[max(2rem,calc(50vh-11.5rem))] pb-16"
+
+/** The column's own stack. The band's padding is on `AuthPageShell`. */
+const CARD = "flex flex-col gap-6"
 
 /**
- * Card padding, on top of the 16px `<Card>` itself contributes. Read on screen
- * the top and bottom are equal: the bottom's smaller figure is completed by the
- * 12px of invisible padding under the 44px row the last footer link sits in.
+ * The same, for the two states with no form in them. Left-aligned like
+ * everything else in the column: centering a paragraph inside a left-pinned
+ * band was the card pattern's habit, not this one's.
  */
-const CARD = "flex flex-col gap-6 px-6 pt-6 pb-3 sm:px-8 sm:pt-8 sm:pb-5"
-
-/**
- * The same card for the unavailable state, which ends in a paragraph rather
- * than a 44px row, so it has no invisible 12px to borrow and pays the padding
- * itself.
- */
-const CARD_FLAT = "flex flex-col gap-6 px-6 py-6 text-center sm:px-8 sm:py-8"
+const CARD_FLAT = "flex flex-col gap-4"
 
 /** The screen's one page-defining line. */
 const HEADING = "text-display"
@@ -114,7 +106,7 @@ const HEADING = "text-display"
  * `bg-surface-muted` is declared nowhere and would compile to nothing at all.
  */
 const CODE_CHIP =
-  "rounded bg-surface-alt px-1 py-px font-mono text-xs whitespace-nowrap text-foreground"
+  "bg-surface-alt px-1 py-px font-mono text-xs whitespace-nowrap text-foreground"
 
 /** Sits on the label row beside a refusal. */
 function AlertIcon() {
@@ -218,7 +210,7 @@ function LabelRow({
         <span
           id={errorId}
           role="alert"
-          className="flex min-w-0 items-center gap-1 text-sm text-danger"
+          className="flex min-w-0 items-center gap-1 text-caption text-danger"
         >
           <AlertIcon />
           <span title={message}>{message}</span>
@@ -581,28 +573,20 @@ export function Login() {
 
   if (signInUnavailable) {
     return (
-      <div className={PAGE_FLAT}>
-        <Card className="w-full max-w-md">
-          <Card.Content className={CARD_FLAT}>
-            {/* Grouped so the mark sits 16px from the heading it belongs to,
-                the way it does on the form. alt="" because the <h1> under it
-                already names the product. */}
-            <div className="flex flex-col items-center gap-4">
-              <img src="/favicon.svg" alt="" className="h-10 w-11" />
-              <h1 className={HEADING}>Otari sign-in is unavailable</h1>
-            </div>
-            <p className="text-sm text-muted">
-              This gateway cannot start a session at the moment, which usually
-              means it cannot reach its database. It reports which credentials
-              it accepts once it recovers, so reload this page to try again.
-            </p>
-            <p className="text-sm text-muted">
-              The management API is unaffected by this screen and still accepts
-              the master key.
-            </p>
-          </Card.Content>
-        </Card>
-      </div>
+      <AuthPageShell>
+        <div className={CARD_FLAT}>
+          <h1 className={HEADING}>Otari sign-in is unavailable</h1>
+          <p className="text-sm text-muted">
+            This gateway cannot start a session at the moment, which usually
+            means it cannot reach its database. It reports which credentials it
+            accepts once it recovers, so reload this page to try again.
+          </p>
+          <p className="text-sm text-muted">
+            The management API is unaffected by this screen and still accepts
+            the master key.
+          </p>
+        </div>
+      </AuthPageShell>
     )
   }
 
@@ -620,318 +604,319 @@ export function Login() {
   // actionable of the two if they ever did collide.
   if (maintenance_mode) {
     return (
-      <div className={PAGE_FLAT}>
-        <Card className="w-full max-w-md">
-          <Card.Content className={CARD_FLAT}>
-            <div className="flex flex-col items-center gap-4">
-              <img src="/favicon.svg" alt="" className="h-10 w-11" />
-              <h1 className={HEADING}>Otari is under maintenance</h1>
-            </div>
-            <p className="text-sm text-muted">
-              This gateway is not starting new dashboard sessions while it is
-              being updated. It should be back shortly, so reload this page to
-              try again.
-            </p>
-            <p className="text-sm text-muted">
-              The API is unaffected by this screen and still serves requests,
-              and the management API still accepts the master key.
-            </p>
-          </Card.Content>
-        </Card>
-      </div>
+      <AuthPageShell>
+        <div className={CARD_FLAT}>
+          <h1 className={HEADING}>Otari is under maintenance</h1>
+          <p className="text-sm text-muted">
+            This gateway is not starting new dashboard sessions while it is
+            being updated. It should be back shortly, so reload this page to try
+            again.
+          </p>
+          <p className="text-sm text-muted">
+            The API is unaffected by this screen and still serves requests, and
+            the management API still accepts the master key.
+          </p>
+        </div>
+      </AuthPageShell>
     )
   }
 
   return (
-    <div className={PAGE}>
-      <Card className="w-full max-w-md">
-        <Card.Content className={CARD}>
-          <div className="flex flex-col items-center gap-4 text-center">
-            {/* Decorative: the <h1> beside it says "Otari Dashboard". */}
-            <img src="/favicon.svg" alt="" className="h-10 w-11" />
-            <div className="flex flex-col gap-1.5">
-              <h1 className={HEADING}>Otari Dashboard</h1>
-              <p className="text-sm text-pretty text-muted">
-                {usesPassword
-                  ? "Sign in to browse models, set pricing, and manage settings."
-                  : "Sign in with your master key to browse models, set pricing, and manage settings."}
-              </p>
-            </div>
-          </div>
+    <AuthPageShell>
+      <div className={CARD}>
+        {/* The mark is on the bar now, so the title stands on its own and the
+              column starts at its left edge like every other column in the
+              product. */}
+        <div className="flex flex-col gap-1.5">
+          <h1 className={HEADING}>Otari Dashboard</h1>
+          <p className="text-sm text-pretty text-muted">
+            {usesPassword
+              ? "Sign in to browse models, set pricing, and manage settings."
+              : "Sign in with your master key to browse models, set pricing, and manage settings."}
+          </p>
+        </div>
 
-          {/* Section boundaries read 24px on screen throughout. A 44px row
+        {/* Section boundaries read 24px on screen throughout. A 44px row
               carries 12px of invisible padding above and below its own text, so
               the column next to one runs at 12px to land on the same 24px: the
               master-key branch has the disclosure's summary row in it, and the
               password branch has no such row and spaces at the full 24px. */}
-          <form
-            className={`flex flex-col ${usesPassword ? "gap-6" : "gap-3"}`}
-            noValidate
-            onSubmit={(event) => {
-              event.preventDefault()
-              void submit()
-            }}
-          >
-            {usesPassword ? (
-              <>
-                <TextField
-                  value={email}
-                  onChange={(next) => {
-                    setEmail(next)
-                    clearError()
-                  }}
-                  type="email"
-                  isRequired
-                  validationBehavior={VALIDATION}
-                  isInvalid={errorField === "email"}
-                  className="flex flex-col gap-2"
-                >
-                  <LabelRow
-                    label="Email"
-                    error={errorField === "email" ? error : null}
-                    errorId={ERROR_IDS.email}
-                  />
-                  {/* 16px, not the 14px HeroUI drops to from `sm:` up: under
+        <form
+          className={`flex flex-col ${usesPassword ? "gap-6" : "gap-3"}`}
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submit()
+          }}
+        >
+          {usesPassword ? (
+            <>
+              <TextField
+                value={email}
+                onChange={(next) => {
+                  setEmail(next)
+                  clearError()
+                }}
+                type="email"
+                isRequired
+                validationBehavior={VALIDATION}
+                isInvalid={errorField === "email"}
+                className="flex flex-col gap-2"
+              >
+                <LabelRow
+                  label="Email"
+                  error={errorField === "email" ? error : null}
+                  errorId={ERROR_IDS.email}
+                />
+                {/* 16px, not the 14px HeroUI drops to from `sm:` up: under
                       16px iOS Safari zooms the page on focus. No autoFocus,
                       which on a page load raises the soft keyboard over half a
                       phone screen and makes a focus ring the resting state. */}
+                <Input
+                  placeholder="you@example.com"
+                  autoComplete="username"
+                  aria-describedby={
+                    errorField === "email" ? ERROR_IDS.email : undefined
+                  }
+                  className="h-10 text-base"
+                />
+              </TextField>
+              <TextField
+                value={password}
+                onChange={(next) => {
+                  setPassword(next)
+                  clearError()
+                }}
+                type="password"
+                isRequired
+                validationBehavior={VALIDATION}
+                isInvalid={errorField === "password"}
+                className="flex flex-col gap-2"
+              >
+                <LabelRow
+                  label="Password"
+                  error={errorField === "password" ? error : null}
+                  errorId={ERROR_IDS.password}
+                />
+                <Input
+                  autoComplete="current-password"
+                  aria-describedby={
+                    errorField === "password" ? ERROR_IDS.password : undefined
+                  }
+                  className="h-10 text-base"
+                />
+              </TextField>
+            </>
+          ) : (
+            <>
+              <TextField
+                value={masterKey}
+                onChange={(next) => {
+                  setMasterKey(next)
+                  clearError()
+                }}
+                type={isKeyVisible ? "text" : "password"}
+                isRequired
+                validationBehavior={VALIDATION}
+                isInvalid={errorField === "masterKey"}
+                className="flex flex-col gap-2"
+              >
+                <LabelRow
+                  label="Master key"
+                  error={errorField === "masterKey" ? error : null}
+                  errorId={ERROR_IDS.masterKey}
+                />
+                <div className="relative">
                   <Input
-                    placeholder="you@example.com"
-                    autoComplete="username"
+                    placeholder="otari-mk-…"
+                    autoComplete="off"
                     aria-describedby={
-                      errorField === "email" ? ERROR_IDS.email : undefined
+                      errorField === "masterKey"
+                        ? ERROR_IDS.masterKey
+                        : undefined
                     }
-                    className="h-11 text-base"
+                    fullWidth
+                    className="h-10 pr-10 font-mono text-base"
                   />
-                </TextField>
-                <TextField
-                  value={password}
-                  onChange={(next) => {
-                    setPassword(next)
-                    clearError()
-                  }}
-                  type="password"
-                  isRequired
-                  validationBehavior={VALIDATION}
-                  isInvalid={errorField === "password"}
-                  className="flex flex-col gap-2"
-                >
-                  <LabelRow
-                    label="Password"
-                    error={errorField === "password" ? error : null}
-                    errorId={ERROR_IDS.password}
-                  />
-                  <Input
-                    autoComplete="current-password"
-                    aria-describedby={
-                      errorField === "password" ? ERROR_IDS.password : undefined
-                    }
-                    className="h-11 text-base"
-                  />
-                </TextField>
-              </>
-            ) : (
-              <>
-                <TextField
-                  value={masterKey}
-                  onChange={(next) => {
-                    setMasterKey(next)
-                    clearError()
-                  }}
-                  type={isKeyVisible ? "text" : "password"}
-                  isRequired
-                  validationBehavior={VALIDATION}
-                  isInvalid={errorField === "masterKey"}
-                  className="flex flex-col gap-2"
-                >
-                  <LabelRow
-                    label="Master key"
-                    error={errorField === "masterKey" ? error : null}
-                    errorId={ERROR_IDS.masterKey}
-                  />
-                  <div className="relative">
-                    <Input
-                      placeholder="otari-mk-…"
-                      autoComplete="off"
-                      aria-describedby={
-                        errorField === "masterKey"
-                          ? ERROR_IDS.masterKey
-                          : undefined
-                      }
-                      fullWidth
-                      className="h-11 pr-11 font-mono text-base"
-                    />
-                    {/* A 40-character key pasted into a masked box cannot be
+                  {/* A 40-character key pasted into a masked box cannot be
                         checked against the one in the logs, which is the whole
                         reason to fail a sign-in twice. The visible target is
                         the 36px slot inside a 44px field; `before` carries the
                         44px touch floor past it, rather than a hover fill the
                         height of the whole field doing it. */}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      isIconOnly
-                      size="sm"
-                      aria-label={
-                        isKeyVisible ? "Hide master key" : "Show master key"
-                      }
-                      onPress={() => setIsKeyVisible((shown) => !shown)}
-                      className="absolute top-1 right-1 h-9 w-9 text-muted before:absolute before:-inset-1"
-                    >
-                      <EyeIcon isCrossedOut={isKeyVisible} />
-                    </Button>
-                  </div>
-                </TextField>
-                <details className="group">
-                  <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-link hover:text-link-hover [&::-webkit-details-marker]:hidden">
-                    <DisclosureCaret />
-                    First run? Where to find your key
-                  </summary>
-                  {/* The 12px tail is what keeps the gap to the button reading
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    isIconOnly
+                    size="sm"
+                    aria-label={
+                      isKeyVisible ? "Hide master key" : "Show master key"
+                    }
+                    onPress={() => setIsKeyVisible((shown) => !shown)}
+                    className="absolute top-1 right-1 h-9 w-9 text-muted before:absolute before:-inset-1"
+                  >
+                    <EyeIcon isCrossedOut={isKeyVisible} />
+                  </Button>
+                </div>
+              </TextField>
+              <details className="group">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-link hover:text-link-hover [&::-webkit-details-marker]:hidden">
+                  <DisclosureCaret />
+                  First run? Where to find your key
+                </summary>
+                {/* The 12px tail is what keeps the gap to the button reading
                       24px once this is open, since the 12px it sits at closed
                       is the summary row's invisible padding doing that job. */}
-                  <p className="pb-3 text-caption">
-                    No <code className={CODE_CHIP}>OTARI_MASTER_KEY</code> set?
-                    Otari printed one to the server logs on startup. Find it
-                    with{" "}
-                    <code className={CODE_CHIP}>
-                      docker logs &lt;container&gt;
-                    </code>
-                    .
-                  </p>
-                </details>
-              </>
-            )}
-            {/* Disabled only while a prior sign-out is still revoking (#557),
+                <p className="pb-3 text-caption">
+                  No <code className={CODE_CHIP}>OTARI_MASTER_KEY</code> set?
+                  Otari printed one to the server logs on startup. Find it with{" "}
+                  <code className={CODE_CHIP}>
+                    docker logs &lt;container&gt;
+                  </code>
+                  .
+                </p>
+              </details>
+            </>
+          )}
+          {/* Disabled only while a prior sign-out is still revoking (#557),
                 or while another credential is already mid-flight. Never for an
                 empty box: see readCredential. */}
-            <Button
-              type="submit"
-              variant="primary"
-              fullWidth
-              isDisabled={
-                isSubmitting ||
-                isSigningOut ||
-                isPasskeyPending ||
-                pendingProvider !== null
-              }
-              className="h-11"
-            >
-              {isSigningOut
-                ? "Finishing sign-out…"
-                : isSubmitting
-                  ? "Signing in…"
-                  : "Sign in"}
-            </Button>
-          </form>
+          <Button
+            type="submit"
+            variant="primary"
+            fullWidth
+            isDisabled={
+              isSubmitting ||
+              isSigningOut ||
+              isPasskeyPending ||
+              pendingProvider !== null
+            }
+            className="h-11"
+          >
+            {isSigningOut
+              ? "Finishing sign-out…"
+              : isSubmitting
+                ? "Signing in…"
+                : "Sign in"}
+          </Button>
+        </form>
 
-          {offersPasskey || oauthProviders.length > 0 ? (
-            <div className="flex flex-col gap-3">
-              {/* A rule with the word on it, rather than a bare divider: these
+        {offersPasskey || oauthProviders.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            {/* A rule with the word on it, rather than a bare divider: these
                   are alternatives to the form above, not a second step of it,
                   and an unlabeled line reads as the latter. One rule for both
                   groups, however many buttons follow it, because they are all
                   the same alternative: another way to prove the same thing. */}
-              <div className="flex items-center gap-3 text-caption" aria-hidden>
-                <span className="h-px flex-1 bg-border" />
-                or
-                <span className="h-px flex-1 bg-border" />
-              </div>
-              {offersPasskey ? (
+            <div
+              className="flex items-center gap-3 text-xs text-muted"
+              aria-hidden
+            >
+              <span className="h-px flex-1 bg-border" />
+              or
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            {offersPasskey ? (
+              <Button
+                type="button"
+                variant="secondary"
+                fullWidth
+                isDisabled={
+                  isSubmitting || isSigningOut || pendingProvider !== null
+                }
+                onPress={() => void submitPasskey()}
+                className="h-11"
+              >
+                {isPasskeyPending
+                  ? "Waiting for your passkey…"
+                  : "Use a passkey"}
+              </Button>
+            ) : null}
+            {oauthProviders.map((provider) => {
+              const Mark = OAUTH_PROVIDER_ICONS[provider]
+              const isRedirecting = pendingProvider === provider
+              return (
                 <Button
+                  key={provider}
                   type="button"
                   variant="secondary"
                   fullWidth
                   isDisabled={
-                    isSubmitting || isSigningOut || pendingProvider !== null
+                    isSubmitting ||
+                    isSigningOut ||
+                    isPasskeyPending ||
+                    pendingProvider !== null
                   }
-                  onPress={() => void submitPasskey()}
+                  onPress={() => void submitOAuth(provider)}
                   className="h-11"
                 >
-                  {isPasskeyPending
-                    ? "Waiting for your passkey…"
-                    : "Use a passkey"}
-                </Button>
-              ) : null}
-              {oauthProviders.map((provider) => {
-                const Mark = OAUTH_PROVIDER_ICONS[provider]
-                const isRedirecting = pendingProvider === provider
-                return (
-                  <Button
-                    key={provider}
-                    type="button"
-                    variant="secondary"
-                    fullWidth
-                    isDisabled={
-                      isSubmitting ||
-                      isSigningOut ||
-                      isPasskeyPending ||
-                      pendingProvider !== null
-                    }
-                    onPress={() => void submitOAuth(provider)}
-                    className="h-11"
-                  >
-                    {/* The mark is decorative: the label beside it already
+                  {/* The mark is decorative: the label beside it already
                         names the provider, so announcing it again would read
                         the button's own text twice. Dropped while redirecting,
                         so the row does not keep a logo beside a label that no
                         longer names a provider to press. */}
-                    {isRedirecting ? null : (
-                      <Mark className="text-xl" aria-hidden />
-                    )}
-                    {isRedirecting
-                      ? "Redirecting…"
-                      : `Sign in with ${oauthProviderLabel(provider)}`}
-                  </Button>
-                )
-              })}
-            </div>
-          ) : null}
+                  {isRedirecting ? null : (
+                    <Mark className="text-xl" aria-hidden />
+                  )}
+                  {isRedirecting
+                    ? "Redirecting…"
+                    : `Sign in with ${oauthProviderLabel(provider)}`}
+                </Button>
+              )
+            })}
+          </div>
+        ) : null}
 
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-center text-caption text-balance">
-              Sent once and exchanged for a session cookie. Never stored in the
-              browser.
-            </p>
-            {/* No rule above these: at 1.38:1 the border was a line nobody
-                could see, separating two things nobody was confusing. The rows
+        {/* Under a rule of its own: what becomes of the credential is a
+                note about the form above rather than a step of it, and the
+                separator is what says so now that no card edge does.
+                Left-aligned with the column, like everything else in it. */}
+        <div className="flex flex-col gap-3 border-t border-border pt-5">
+          <p className="text-xs text-muted">
+            Your{" "}
+            <a
+              href="/welcome"
+              className="font-medium text-link hover:text-link-hover"
+            >
+              master key
+            </a>{" "}
+            is sent once and exchanged for a session cookie. It is never stored
+            in the browser.
+          </p>
+          {/* The rows
                 themselves take no gap, because each is 44px around a 20px line
                 and so already sits 24px from its neighbor's text. */}
-            {/* `text-center` because a link long enough to wrap on a phone
-                (the signup row does at 390px) would otherwise rag left out of
-                the lane the single-line rows sit in. */}
-            <div className="flex flex-col items-center text-center">
-              {/* Deployment-neutral wording (otari#835): "this gateway" read as
+          <div className="flex flex-col">
+            {/* Deployment-neutral wording (otari#835): "this gateway" read as
                   a self-hosted process on a hosted control plane, where the same
                   screen is the sign-in for an invited tenant. */}
-              {offersSignup ? (
-                <PublicAuthLink to="#/signup">
-                  Invited or added by an admin? Set your password
-                </PublicAuthLink>
-              ) : null}
-              {offersRecovery ? (
-                <PublicAuthLink to="#/recover-password">
-                  Forgot your password?
-                </PublicAuthLink>
-              ) : null}
-              {offersRecovery ? (
-                <PublicAuthLink to="#/resend-verification">
-                  Need a new verification link?
-                </PublicAuthLink>
-              ) : null}
-              {/* Not a `PublicAuthLink`: `/welcome` is a page the gateway
+            {offersSignup ? (
+              <PublicAuthLink to="#/signup">
+                Invited or added by an admin? Set your password
+              </PublicAuthLink>
+            ) : null}
+            {offersRecovery ? (
+              <PublicAuthLink to="#/recover-password">
+                Forgot your password?
+              </PublicAuthLink>
+            ) : null}
+            {offersRecovery ? (
+              <PublicAuthLink to="#/resend-verification">
+                Need a new verification link?
+              </PublicAuthLink>
+            ) : null}
+            {/* Not a `PublicAuthLink`: `/welcome` is a page the gateway
                   serves, so this one really is a navigation and not a hash
                   change. Sized to match the links above it. */}
-              <Link
-                href="/welcome"
-                className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
-              >
-                New to Otari? Open the welcome guide
-              </Link>
-            </div>
+            <Link
+              href="/welcome"
+              className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
+            >
+              New to Otari? Open the welcome guide
+            </Link>
           </div>
-        </Card.Content>
-      </Card>
-    </div>
+        </div>
+      </div>
+    </AuthPageShell>
   )
 }
