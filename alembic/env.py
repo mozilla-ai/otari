@@ -3,7 +3,11 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from alembic.util import CommandError
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine import Engine, make_url
 
 from gateway.core.database import to_sync_url
 
@@ -28,11 +32,15 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
-# Get database URL from config (if already set programmatically) or environment variables
-# Priority: Programmatically set URL -> OTARI_DATABASE_URL -> DATABASE_URL -> default
-database_url = config.get_main_option("sqlalchemy.url") or (
-    os.getenv("OTARI_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./otari.db"
-)
+# Get database URL from config (if already set programmatically) or the environment.
+# Priority: Programmatically set URL -> OTARI_DATABASE_URL -> default
+#
+# A bare `DATABASE_URL` is deliberately not read. `otari serve` and `otari
+# migrate` both take that name as `--database-url` and pass the resolved URL on
+# explicitly, so the only invocation this fallback ever served was a bare
+# `alembic upgrade head` in a process holding another application's
+# `DATABASE_URL`, which aims this chain at that application's database.
+database_url = config.get_main_option("sqlalchemy.url") or os.getenv("OTARI_DATABASE_URL") or "sqlite:///./otari.db"
 # Normalized here rather than at each call site so every entry point is covered:
 # `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`
 # reading OTARI_DATABASE_URL. Migrations run on a sync engine, so an async URL
@@ -43,6 +51,41 @@ config.set_main_option("sqlalchemy.url", to_sync_url(database_url))
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+
+def _reject_foreign_history(engine: Engine) -> None:
+    """Refuse a database whose stamped history is not this chain's.
+
+    Otari stamps the default `alembic_version` table, and so does every other
+    Alembic application, so a URL naming someone else's database is accepted as
+    readily as otari's own. Alembic then reports only that it cannot locate the
+    revision it read, which reads as a corrupt database rather than as the URL
+    being wrong, and the next `upgrade` would write otari's schema into that
+    database. Naming the target and the foreign revision is what turns it back
+    into a configuration error.
+
+    On a connection of its own, so that reading the version table leaves no
+    transaction open on the one the migrations run in: Alembic commits its work
+    inside `begin_transaction`, which is a no-op when a transaction is already
+    under way, and the run would then be rolled back when the connection closes.
+    """
+    with engine.connect() as connection:
+        heads = MigrationContext.configure(connection).get_current_heads()
+    if not heads:
+        return
+
+    known = {script.revision for script in ScriptDirectory.from_config(config).walk_revisions()}
+    foreign = sorted(set(heads) - known)
+    if not foreign:
+        return
+
+    target = make_url(config.get_main_option("sqlalchemy.url") or "").render_as_string(hide_password=True)
+    msg = (
+        f"{target} is stamped with alembic revision(s) {', '.join(foreign)}, which are not otari's. "
+        "The database holds another application's migration history, or one written by a newer otari "
+        "than this one. Point OTARI_DATABASE_URL at otari's own database."
+    )
+    raise CommandError(msg)
 
 
 def run_migrations_offline() -> None:
@@ -81,6 +124,8 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+
+    _reject_foreign_history(connectable)
 
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
