@@ -113,12 +113,15 @@ def test_stamp_still_rewrites_a_foreign_version_table(tmp_path: Path) -> None:
     assert _version_rows(db_path) == [(head,)]
 
 
-def test_a_bare_alembic_run_ignores_a_foreign_database_url(tmp_path: Path) -> None:
-    """``DATABASE_URL`` alone does not select a database for this chain.
+def test_a_bare_alembic_run_refuses_a_foreign_database_url(tmp_path: Path) -> None:
+    """``DATABASE_URL`` alone selects nothing, and selecting nothing is an error.
 
     ``otari serve`` and ``otari migrate`` read that name themselves and pass the
     URL on explicitly, so a bare ``alembic`` invocation reading it too only ever
-    picked up the value some other application left in the environment.
+    picked up the value some other application left in the environment. Falling
+    back to the SQLite default instead would be the same wrong-database run with
+    the failure taken out of it: a throwaway file migrated in the working
+    directory, exit 0, and the operator's database untouched.
     """
     foreign = tmp_path / "platform.db"
     env = {key: value for key, value in os.environ.items() if key != "OTARI_DATABASE_URL"}
@@ -126,5 +129,7 @@ def test_a_bare_alembic_run_ignores_a_foreign_database_url(tmp_path: Path) -> No
 
     result = _run_alembic(["current"], cwd=tmp_path, env=env)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode != 0
+    assert "OTARI_DATABASE_URL" in result.stderr
     assert not foreign.exists(), "DATABASE_URL selected the database this chain connected to"
+    assert list(tmp_path.iterdir()) == [], "a default URL migrated a database nobody named"

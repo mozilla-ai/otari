@@ -33,14 +33,26 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Get database URL from config (if already set programmatically) or the environment.
-# Priority: Programmatically set URL -> OTARI_DATABASE_URL -> default
+# Priority: Programmatically set URL -> OTARI_DATABASE_URL, and nothing else.
 #
 # A bare `DATABASE_URL` is deliberately not read. `otari serve` and `otari
 # migrate` both take that name as `--database-url` and pass the resolved URL on
-# explicitly, so the only invocation this fallback ever served was a bare
+# explicitly, so the only invocation that fallback ever served was a bare
 # `alembic upgrade head` in a process holding another application's
 # `DATABASE_URL`, which aims this chain at that application's database.
-database_url = config.get_main_option("sqlalchemy.url") or os.getenv("OTARI_DATABASE_URL") or "sqlite:///./otari.db"
+#
+# Nor is there a default. The `sqlite:///./otari.db` that stood here turned the
+# same run into a silent success: the chain migrated a throwaway file in the
+# working directory, reported "Running upgrade" and exited 0, while the database
+# the operator believed they were migrating went untouched.
+database_url = config.get_main_option("sqlalchemy.url") or os.getenv("OTARI_DATABASE_URL")
+if not database_url:
+    no_url = (
+        "No database URL to migrate. Set OTARI_DATABASE_URL, or go through `otari migrate`, which "
+        "resolves one and passes it on. A bare DATABASE_URL is not read here: it belongs to whichever "
+        "application put it in this environment."
+    )
+    raise CommandError(no_url)
 # Normalized here rather than at each call site so every entry point is covered:
 # `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`
 # reading OTARI_DATABASE_URL. Migrations run on a sync engine, so an async URL
@@ -81,6 +93,15 @@ def _reject_foreign_history(engine: Engine) -> None:
     transaction open on the one the migrations run in: Alembic commits its work
     inside `begin_transaction`, which is a no-op when a transaction is already
     under way, and the run would then be rolled back when the connection closes.
+
+    Scoped to a neighbor that keeps its history in this same `alembic_version`
+    table. One that keeps it anywhere else, under a custom `version_table` or in
+    `django_migrations` or `flyway_schema_history`, leaves nothing here to read
+    and is accepted. Refusing those too would take a positive signal that the
+    database is otari's, and "has tables, none of them otari's" is the shape of a
+    legitimate first migration into a database an edition's own chain populated
+    first. Stamping a version table of otari's own is the structural answer, and
+    it is a migration for every deployment that exists.
     """
     if _is_stamp_command():
         return
@@ -95,12 +116,19 @@ def _reject_foreign_history(engine: Engine) -> None:
     if not foreign:
         return
 
+    # Host and database, not the URL: `render_as_string(hide_password=True)` masks
+    # the password field and not credentials passed as query parameters, which is
+    # how libpq takes `password` and `sslpassword`, and this string is echoed by
+    # `otari migrate`.
+    url = engine.url
+    target = f"{url.host}/{url.database}" if url.host else str(url.database)
     msg = (
-        f"{engine.url.render_as_string(hide_password=True)} is stamped with alembic revision(s) "
-        f"{', '.join(foreign)}, which are not otari's. The database holds another application's migration "
-        "history, or one written by a newer otari than this one. Point OTARI_DATABASE_URL at otari's own "
-        "database, or, where this database is otari's and the row is wrong, rewrite it with "
-        "`alembic stamp --purge <revision>`."
+        f"{target} is stamped with alembic revision(s) {', '.join(foreign)}, which are not otari's. "
+        "The database holds another application's migration history, or one written by a newer otari "
+        "than this one. Point OTARI_DATABASE_URL at otari's own database first. Once it is established "
+        "that this database is otari's and the row is the wrong one, `alembic stamp --purge <revision>` "
+        "rewrites it, replacing whatever the version table holds: run against a neighbor's database it "
+        "destroys that application's history."
     )
     raise CommandError(msg)
 
