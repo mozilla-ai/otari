@@ -72,12 +72,19 @@ export const BLEED_INSET = "mx-auto w-full max-w-[1800px] px-4 md:px-6"
  * files by hand and will not be.
  *
  * The type is `text-display`, and the scale is what moved to meet it. Those
- * eight had each written `text-[28px] leading-[34px] font-semibold`, which is
- * the size the direction draws a page title at and which rendered at weight 550
+ * eight had each spelled 28/34 at semibold as literal utilities, which is the
+ * size the direction draws a page title at and which rendered at weight 550
  * rather than the 600 it asked for, because the weight axis has two values and
  * 600 is not one of them. So the step became 28/34 at the semibold token and
  * every consumer converged on it, rather than nine call sites carrying an
  * arbitrary value that quietly disagreed with the scale.
+ *
+ * Those literals are described here rather than quoted, and that is not
+ * fussiness: `foundation.test.ts`'s whole-tree rule matches `text-[` followed
+ * by a digit against raw file contents and, unlike its sibling sweeps in the
+ * same file, does not strip comments first. A docstring quoting the spelling it
+ * replaced keeps this file on the offender list after every call site in it is
+ * fixed, with nothing visibly wrong to find.
  *
  * `pb-5` rather than a gap on the parent, because a page is a stack of bands
  * that set their own rules and spacing, and a column gap would add air above

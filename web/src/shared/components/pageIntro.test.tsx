@@ -6,8 +6,10 @@ import { PageIntro } from "./surface"
  * The page opening, pinned before eight hand-rolled copies converge on it.
  *
  * Every one of those copies spells this markup out, and they have already
- * drifted: three different bottom paddings, and each carrying
- * `text-[28px] leading-[34px] font-semibold` where the scale now has a step.
+ * drifted: three different bottom paddings, and each spelling 28/34 at semibold
+ * as literal utilities where the scale now has a step. (Described rather than
+ * quoted, for the reason `PageIntro`'s own docstring gives: the whole-tree rule
+ * matches raw file contents and a test file is only excluded from it today.)
  * Converging them is only mechanical while the thing they converge onto is
  * fixed, so the four facts a copy could quietly change (the outline level, the
  * type token, the band's own padding, and the measure) are asserted here
