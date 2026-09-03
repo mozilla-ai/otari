@@ -391,7 +391,7 @@ export function WorkspaceCodeExecutionPolicyCard({
       )}
 
       {error ? (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-caption text-danger">
           {error}
         </p>
       ) : null}

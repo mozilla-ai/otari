@@ -2,6 +2,7 @@ import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 
 import { useSetPassword } from "@/shared/api/hooks"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 import { Section } from "@/shared/components/surface"
 import { ErrorBanner } from "@/shared/components/ui"
 import {
@@ -44,7 +45,9 @@ function PasswordField({
         // slot, so it reaches the input as aria-describedby; a raw span does
         // not, and a policy the field states only to sighted users is a policy
         // half the people typing into it cannot read.
-        <Description className="text-xs text-muted">{description}</Description>
+        <FieldMessages>
+          <Description className="text-muted">{description}</Description>
+        </FieldMessages>
       ) : null}
     </TextField>
   )
@@ -230,10 +233,12 @@ export function PasswordCard() {
                 explanation above it before the operator has asked to
                 type. */}
             <Input placeholder="you@example.com" autoComplete="username" />
-            <Description className="text-xs text-muted">
-              Changing this address later is not supported yet, so pick the one
-              you will keep.
-            </Description>
+            <FieldMessages>
+              <Description className="text-muted">
+                Changing this address later is not supported yet, so pick the
+                one you will keep.
+              </Description>
+            </FieldMessages>
           </TextField>
         )}
 
@@ -258,12 +263,12 @@ export function PasswordCard() {
         />
 
         {problem ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-caption text-danger">
             {problem}
           </p>
         ) : null}
         {unchanged ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-caption text-danger">
             The new password cannot be the one you already use.
           </p>
         ) : null}

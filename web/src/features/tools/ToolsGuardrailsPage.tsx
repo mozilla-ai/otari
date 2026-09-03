@@ -146,7 +146,7 @@ const MESSAGE_CELL = "flex flex-col gap-1 sm:col-span-2 sm:col-start-2"
 
 function SaveError({ message }: { message?: string }) {
   if (!message) return null
-  return <span className="break-words text-xs text-danger">{message}</span>
+  return <span className="break-words text-caption text-danger">{message}</span>
 }
 
 function FieldLabel({
@@ -166,7 +166,7 @@ function FieldLabel({
           {field.description}
         </p>
       ) : null}
-      {help ? <p className="mt-1 text-xs text-muted">{help}</p> : null}
+      {help ? <p className="mt-1 text-caption text-muted">{help}</p> : null}
     </div>
   )
 }

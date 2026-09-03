@@ -10,6 +10,7 @@ import {
   useRenamePasskey,
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 import { Section } from "@/shared/components/surface"
 import { ErrorBanner } from "@/shared/components/ui"
 import { RowActions } from "@/shared/components/ui/RowActions"
@@ -307,10 +308,12 @@ export function PasskeysCard() {
                 placeholder="Work laptop"
                 maxLength={MAX_PASSKEY_NAME_LENGTH}
               />
-              <Description className="text-xs text-muted">
-                Optional. It is only a label, so you can tell this passkey from
-                the others.
-              </Description>
+              <FieldMessages>
+                <Description className="text-muted">
+                  Optional. It is only a label, so you can tell this passkey
+                  from the others.
+                </Description>
+              </FieldMessages>
             </TextField>
             <div className="sm:pb-6">
               <Button

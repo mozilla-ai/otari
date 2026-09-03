@@ -210,7 +210,7 @@ function LabelRow({
         <span
           id={errorId}
           role="alert"
-          className="flex min-w-0 items-center gap-1 text-sm text-danger"
+          className="flex min-w-0 items-center gap-1 text-caption text-danger"
         >
           <AlertIcon />
           <span title={message}>{message}</span>

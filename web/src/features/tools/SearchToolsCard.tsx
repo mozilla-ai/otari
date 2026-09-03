@@ -146,7 +146,7 @@ function StoredToolRow({
         </ConfirmButton>
       </div>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -289,7 +289,7 @@ function AddToolForm({
         <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
       </span>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )

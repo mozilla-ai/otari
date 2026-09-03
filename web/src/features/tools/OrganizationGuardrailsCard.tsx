@@ -316,7 +316,7 @@ function GuardrailRow({
         </ConfirmButton>
       </div>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -439,7 +439,7 @@ function AddGuardrailForm({
         gateway.
       </span>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )

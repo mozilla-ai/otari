@@ -10,6 +10,7 @@ import type { ReactNode } from "react"
 import { useState } from "react"
 
 import type { User } from "@/client"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 
 interface Option {
   id: string
@@ -152,7 +153,9 @@ export function UserComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      <Description className="text-xs text-muted">{creatingHint}</Description>
+      <FieldMessages>
+        <Description className="text-muted">{creatingHint}</Description>
+      </FieldMessages>
     </ComboBox.Root>
   )
 }

@@ -173,6 +173,12 @@
      browser and installed-app chrome. `foundation.test.ts` reads all three
      and fails when they disagree, so change them together.           */
   --color-primary: #0098a4; /* primary CTAs, links, focus rings */
+  /* Byte-identical to `--color-focus` below, which is a collision rather than a
+     relationship: a focused primary control rests in exactly its own hover
+     color. Nothing couples them, and the ink focus ring makes it moot for the
+     filled controls, but the next person to retune either one should know they
+     are moving one literal that two roles happen to sit on. Same class as the
+     button-hover-equals-link collision that was removed from this block. */
   --color-primary-hover: #00848f;
   --color-primary-active: #00717a;
   /* Translucent on purpose, not a hex. An opaque tint tuned to one ground
@@ -519,22 +525,22 @@
      an omission: a filled button carries its own ground, so the ink on it and
      the ramp under it do not change with the page behind them. Declared here
      anyway because each block owns the complete set it needs. */
-  /* INTERIM, and the steps are deliberately the rest value.
-     On a dark ground a filled button's own fill IS its boundary, so darkening
-     it walks the button toward the page rather than away from it. Measured on
-     the shipped ramp: rest reads 4.04:1 against the surface, and a
-     house-cadence step takes hover to 3.17 and active to 2.57, which is through
-     the floor rather than near it. Stepping the other way is no better at these
-     hues: one step brighter than danger's dark rest lands back on #f6453f,
-     where white ink fails.
-     So dark can have white ink or a moving fill and not both, and that is a
-     choice about what the product is rather than a value to derive. Until it is
-     made, the fill holds still and the focus ring and the 0.4 disabled state
-     carry the interaction. A button that does not answer the pointer is a
-     visible cost, chosen over one that answers by dissolving into the page. */
+  /* ONE STEP, AND THE SIZE OF IT IS THE GROUND'S DECISION, not a taste and not
+     an oversight. On a dark ground a filled button's own fill IS its boundary,
+     so every unit the hover darkens is spent out of the boundary it needs to
+     stay a shape. Under white ink there is nothing to spend it out of on the
+     other side either: rest already sits at 4.71 under white, and one step
+     brighter fails AA. That leaves a band of about ΔL 4, and the hover takes
+     3.7 of it. A house-cadence step of 7 is not available here at any hue,
+     which is what the earlier freeze was measuring when it read 3.17 and 2.57
+     against the surface.
+     So there is no active COLOR step in dark, and that is the same constraint
+     rather than a second one: the band is spent. The press transform and the
+     focus ring carry the pressed state instead, and under reduced motion the
+     press answers at the hover value. */
   --color-primary-button: #00808a;
-  --color-primary-button-hover: #00808a;
-  --color-primary-button-active: #00808a;
+  --color-primary-button-hover: #00767f;
+  --color-primary-button-active: #00767f;
   --color-primary-button-foreground: #ffffff;
   /* A true step off dark's own danger ink (#f6453f), not light's value: 4.69:1
      under white, and 4.06 and 4.25 against the surface and the canvas it sits
@@ -542,8 +548,13 @@
      hundredths and is the rounded-ratio trap; this one also matches primary's
      4.71 headroom, so the two filled buttons carry the same margin. */
   --color-danger-button: #d43b36;
-  --color-danger-button-hover: #d43b36;
-  --color-danger-button-active: #d43b36;
+  /* The same 3.7 step as primary above, and it lands on the same two numbers:
+     5.39 under white ink, 3.54 against the surface. That is the ground talking
+     rather than a coincidence worth preserving; both families are pinned by
+     the same two limits, so both arrive in the same place. Active repeats
+     hover for the reason given there. */
+  --color-danger-button-hover: #c43530;
+  --color-danger-button-active: #c43530;
   --color-danger-button-foreground: #ffffff;
   /* Same role as the light block's, and not simply the accent-on-tint
      pairing for the same reason. The contrast direction inverts here, so
@@ -1338,7 +1349,13 @@ main {
  * the member role trigger 150px, 4.5px. Both carry `w-full`, and so will the
  * next one, which is why this is written against that rather than against the
  * two that exist now. HeroUI does the same thing for its own button groups,
- * where a scaling member would pull away from its neighbors. */
+ * where a scaling member would pull away from its neighbors.
+ *
+ * The exclusion is load-bearing rather than tidy, because the ladder runs the
+ * wrong way for displacement: it deepens WITH size, where a larger element
+ * needs LESS relative scale to feel like it moved the same amount. So a wide
+ * button at the lg rung would displace about 12px. None exists today; this is
+ * the flag for the day one does. */
 .button {
   transition-duration: 100ms;
   transition-timing-function: var(--ease-out, ease-out);
@@ -1360,6 +1377,30 @@ main {
   .button--danger {
     --button-bg-pressed: var(--button-bg-hover);
   }
+}
+
+/* Helper text and field errors are ONE role at ONE size, separated by color.
+ *
+ * HeroUI sets `--text-xs` on `.description`, `.error-message` and
+ * `.field-error`, which is 12px: a step below the caption the type scale names
+ * for exactly this ("supporting metadata, helper text"). Two sizes for one job
+ * is also what makes a reserved line impossible to derive, since the reserve
+ * would have to pick one of them.
+ *
+ * Patched here on the component classes rather than at the call sites, and
+ * that is not a preference. HeroUI merges a component's `className` through
+ * tailwind-merge, which cannot tell a custom `text-caption` from a text COLOR,
+ * so `text-caption text-muted` on a `Description` silently loses the caption
+ * and ships at 12px. Measured on the page before this rule existed. Colors are
+ * deliberately left alone: HeroUI already points them at `--muted` and
+ * `--danger`, which is the differentiation the role asks for.
+ * ============================================================= */
+.description,
+.error-message,
+.field-error {
+  font-size: var(--text-caption-step);
+  line-height: var(--text-caption-step--line-height);
+  letter-spacing: var(--text-caption-step--letter-spacing);
 }
 
 /* The checkbox's touch target, which is four times the area of the box it
@@ -1573,6 +1614,19 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* The trailing side is short by the chevron's own optical inset, so the glyph
+     LOOKS the same distance from the edge as the label does on the other side.
+     The rule: trailing = leading minus the trailing glyph's optical inset,
+     measured on the RENDERED SHIPPED ASSET at its rendered size. This one is a
+     filled path rather than a stroke, and it measures 2.41px of inset at 14 and
+     2.06 at 12, so the 17% is a property of this glyph and not a constant to
+     carry to another icon. 12 - 2.41 rounds to 10.
+
+     Which spec owns which half, because two of them were claiming one property:
+     the SIZE LADDER owns the leading padding, and this slot spec owns only the
+     relationship between leading and trailing. Change the ladder and this
+     follows; it does not set the ladder. */
+  padding-inline-end: 10px;
 }
 /* Static, not absolute. An out-of-flow chevron is exactly what let the label
    run underneath it; in flow it takes a lane of its own and the label stops
@@ -1635,6 +1689,10 @@ main {
 .otari-pagination .input,
 .otari-pagination .select__trigger {
   padding-inline: 8px;
+}
+/* The same relationship at the dense leading padding: 8 - 2.06 rounds to 6. */
+.otari-pagination .select__trigger {
+  padding-inline-end: 6px;
 }
 /* Same for a toolbar's controls, which the min-height above cannot bring down
    on its own for the same reason. */

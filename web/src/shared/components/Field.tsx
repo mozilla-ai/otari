@@ -1,5 +1,6 @@
 import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
 import type { ReactNode } from "react"
+import { FieldMessages } from "@/shared/components/FieldMessages"
 
 interface FieldProps {
   label: string
@@ -17,6 +18,9 @@ interface FieldProps {
   isInvalid?: boolean
   /** Shown under the field and announced with it. Needs `isInvalid` to appear. */
   errorMessage?: string
+  /** Holds a caption line open under the field so a message does not move the
+      form. Off for a field in a table row or a toolbar, which never speaks. */
+  reserveMessage?: boolean
 }
 
 // A labeled single-line text input built from HeroUI's TextField primitives.
@@ -32,6 +36,7 @@ export function Field({
   autoFocus,
   isInvalid,
   errorMessage,
+  reserveMessage,
 }: FieldProps) {
   return (
     <TextField
@@ -46,18 +51,23 @@ export function Field({
           ([data-required=true] > .label::after), so adding one renders two. */}
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input type={type} placeholder={placeholder} autoFocus={autoFocus} />
-      {description ? (
-        // HeroUI's Description renders through the TextField's "description" slot,
-        // so it is wired to the input via aria-describedby (a raw span is not).
-        <Description className="text-xs text-muted">{description}</Description>
-      ) : null}
-      {/* Same reasoning one step further: `FieldError` renders through the
-          field's error slot, so the message is announced *on* the input rather
-          than sitting somewhere else in the form as a loose paragraph. It only
-          renders while the field is invalid, which is why `isInvalid` gates it. */}
-      {errorMessage ? (
-        <FieldError className="text-xs text-danger">{errorMessage}</FieldError>
-      ) : null}
+      <FieldMessages reserve={reserveMessage}>
+        {description ? (
+          // HeroUI's Description renders through the TextField's "description"
+          // slot, so it is wired to the input via aria-describedby (a raw span
+          // is not). Nesting it in the reserve does not change that: the slot
+          // is resolved through context, not through DOM position.
+          <Description className="text-muted">{description}</Description>
+        ) : null}
+        {/* Same reasoning one step further: `FieldError` renders through the
+            field's error slot, so the message is announced *on* the input
+            rather than sitting somewhere else in the form as a loose
+            paragraph. It only renders while the field is invalid, which is why
+            `isInvalid` gates it. */}
+        {errorMessage ? (
+          <FieldError className="text-danger">{errorMessage}</FieldError>
+        ) : null}
+      </FieldMessages>
     </TextField>
   )
 }

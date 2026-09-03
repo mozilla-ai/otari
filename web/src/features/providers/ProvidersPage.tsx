@@ -97,7 +97,7 @@ function ConnectionTest({
               ) : null}
             </span>
           ) : (
-            <span className="block max-w-md break-words text-xs text-danger">
+            <span className="block max-w-md break-words text-caption text-danger">
               {test.data.error ?? "Connection failed."}
             </span>
           )
@@ -602,7 +602,7 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
     )
   }
   return (
-    <span className="block max-w-xs break-words text-xs text-danger">
+    <span className="block max-w-xs break-words text-caption text-danger">
       {state.error ?? "Connection failed."}
     </span>
   )
