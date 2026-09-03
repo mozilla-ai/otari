@@ -28,7 +28,6 @@ on:
 jobs:
   test-unit:
     runs-on: ubuntu-latest
-    environment: integration-tests
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,8 +42,6 @@ jobs:
          uv sync --dev --frozen
 
     - name: Run Otari unit tests
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
         uv run pytest tests/unit -v --cov --cov-report=xml -n auto
 
