@@ -36,6 +36,13 @@ dependencies = [
     "cryptography>=50.0.0",
     "fastapi>=0.115.0",
     "genai-prices>=0.1.0",
+    # Pinned retrieval imports transport internals, so constrain both libraries
+    # to the tested minor versions instead of relying on transitive dependencies.
+    "httpcore>=1.0.9,<1.1.0",
+    "httpx>=0.28.1,<0.29.0",
+    # URL policy and pinned retrieval use one explicit UTS #46/STD3 identity.
+    # Keep this direct rather than relying on HTTPX's transitive dependency.
+    "idna>=3.10",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     "mcp>=1.28.1,<2.0.0",
     "opentelemetry-api>=1.39.1",
