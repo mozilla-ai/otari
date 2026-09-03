@@ -496,8 +496,11 @@ describe("ToolsGuardrailsPage how-to-call card", () => {
     mockApi()
     renderWithClient(<ToolsGuardrailsPage />)
 
-    // The code-execution fixture has available: false.
-    expect(await screen.findByText("No backend configured")).toBeInTheDocument()
+    // The code-execution fixture has available: false. The flag is a subtle dot
+    // and a mono fact now: unavailable, not broken.
+    expect(
+      await screen.findByText("Unavailable — no backend"),
+    ).toBeInTheDocument()
   })
 
   it("keeps the editable settings usable when /v1/tools fails", async () => {
