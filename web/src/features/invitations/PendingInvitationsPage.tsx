@@ -16,7 +16,7 @@
  * instead, and only while something is actually waiting.
  */
 
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 import { FiMail } from "react-icons/fi"
 
@@ -28,12 +28,8 @@ import {
   usePendingOrganizationInvitations,
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import {
-  EmptyState,
-  ErrorBanner,
-  PageHeader,
-  PageLoading,
-} from "@/shared/components/ui"
+import { PageIntro, Section } from "@/shared/components/surface"
+import { EmptyState, ErrorBanner, PageLoading } from "@/shared/components/ui"
 import { formatDateTime } from "@/shared/helpers/format"
 
 export function PendingInvitationsPage() {
@@ -55,11 +51,12 @@ export function PendingInvitationsPage() {
   const answered = invitations.data !== undefined
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Invitations"
-        description="Organizations that have invited you. Accepting adds the membership to your organization switcher; declining ends the invitation and stops its emailed link from working."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Invitations">
+        Organizations that have invited you. Accepting adds the membership to
+        your organization switcher; declining ends the invitation and stops its
+        emailed link from working.
+      </PageIntro>
 
       {/* `&& !data` on both guards, so a refetch behind an accept keeps the
           list on screen instead of collapsing to a spinner and back. */}
@@ -78,63 +75,71 @@ export function PendingInvitationsPage() {
       ) : null}
 
       {waiting.length > 0 ? (
-        <ul className="flex flex-col gap-4">
-          {waiting.map((invitation) => (
-            <li key={invitation.organization_member_id}>
-              <Card>
-                <Card.Content className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-start gap-3">
-                    <FiMail
-                      aria-hidden="true"
-                      className="size-5 shrink-0 text-muted"
-                    />
-                    <div className="flex flex-col gap-1">
-                      <h2 className="text-title">
-                        {invitation.organization_name}
-                      </h2>
-                      <p className="text-sm text-muted">
-                        Invited as {membershipLabel(invitation.role)} to{" "}
-                        {invitation.email}
-                      </p>
-                      <p className="text-caption">
-                        Expires {formatDateTime(invitation.expires_at)}
-                      </p>
-                    </div>
+        /* A band divided by row separators rather than a stack of cards: the
+           page is one plane, and an invitation is a row on it. `<ul>`/`<li>`
+           stays, because the list is the structure a screen reader navigates
+           and the visual treatment is not what makes it one. */
+        <Section
+          className="border-y border-border"
+          contentClassName="flex flex-col"
+        >
+          <ul className="flex flex-col divide-y divide-border-subtle">
+            {waiting.map((invitation) => (
+              <li
+                key={invitation.organization_member_id}
+                className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-start gap-3">
+                  <FiMail
+                    aria-hidden="true"
+                    className="mt-0.5 size-5 shrink-0 text-muted"
+                  />
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <h2 className="text-title">
+                      {invitation.organization_name}
+                    </h2>
+                    <p className="text-sm text-muted">
+                      Invited as {membershipLabel(invitation.role)} to{" "}
+                      {invitation.email}
+                    </p>
+                    <p className="text-caption">
+                      Expires {formatDateTime(invitation.expires_at)}
+                    </p>
                   </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button
-                      variant="primary"
-                      // The visible label stays "Accept"; this is what
-                      // distinguishes one row's control from the next for a
-                      // screen reader, which does not get the heading beside
-                      // it as part of the button's name.
-                      aria-label={`Accept invitation to ${invitation.organization_name}`}
-                      isPending={
-                        accepting === invitation.organization_member_id &&
-                        accept.isPending
-                      }
-                      onPress={() => {
-                        setAccepting(invitation.organization_member_id)
-                        accept.mutate(invitation.organization_member_id, {
-                          onSettled: () => setAccepting(undefined),
-                        })
-                      }}
-                    >
-                      Accept
-                    </Button>
-                    <Button
-                      variant="outline"
-                      aria-label={`Decline invitation to ${invitation.organization_name}`}
-                      onPress={() => setDeclining(invitation)}
-                    >
-                      Decline
-                    </Button>
-                  </div>
-                </Card.Content>
-              </Card>
-            </li>
-          ))}
-        </ul>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    variant="primary"
+                    // The visible label stays "Accept"; this is what
+                    // distinguishes one row's control from the next for a
+                    // screen reader, which does not get the heading beside
+                    // it as part of the button's name.
+                    aria-label={`Accept invitation to ${invitation.organization_name}`}
+                    isPending={
+                      accepting === invitation.organization_member_id &&
+                      accept.isPending
+                    }
+                    onPress={() => {
+                      setAccepting(invitation.organization_member_id)
+                      accept.mutate(invitation.organization_member_id, {
+                        onSettled: () => setAccepting(undefined),
+                      })
+                    }}
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    variant="outline"
+                    aria-label={`Decline invitation to ${invitation.organization_name}`}
+                    onPress={() => setDeclining(invitation)}
+                  >
+                    Decline
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Section>
       ) : null}
 
       {/* The accept error belongs under the list rather than in the row: the
