@@ -249,7 +249,7 @@ function BreakdownTable({
         const share = totalCost > 0 ? row.cost / totalCost : 0
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate font-mono text-[13px] text-foreground">
+            <span className="truncate text-mono-caption text-foreground">
               {row.is_other
                 ? `Other (${row.requests.toLocaleString()} req)`
                 : row.key === null
@@ -275,7 +275,7 @@ function BreakdownTable({
       header: "Requests",
       align: "end",
       cell: (row) => (
-        <span className="font-mono text-[13px] text-muted">
+        <span className="text-mono-caption text-muted">
           {formatNumber(row.requests)}
         </span>
       ),
@@ -285,7 +285,7 @@ function BreakdownTable({
       header: "Tokens",
       align: "end",
       cell: (row) => (
-        <span className="font-mono text-[13px] text-muted">
+        <span className="text-mono-caption text-muted">
           {formatTokens(row.tokens)}
         </span>
       ),
@@ -295,7 +295,7 @@ function BreakdownTable({
       header: "Spend",
       align: "end",
       cell: (row) => (
-        <span className="font-mono text-[13px] text-foreground">
+        <span className="text-mono-caption text-foreground">
           {formatUsd(row.cost)}
         </span>
       ),
@@ -364,7 +364,7 @@ function ToolBreakdownTable({
         const share = totalCost > 0 ? row.cost / totalCost : 0
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate font-mono text-[13px] text-foreground">
+            <span className="truncate text-mono-caption text-foreground">
               {row.tool.replaceAll("_", " ")}
             </span>
             {/* 140px and square, not a full-width capsule: a share bar is a
@@ -404,7 +404,7 @@ function ToolBreakdownTable({
       header: "Requests",
       align: "end",
       cell: (row) => (
-        <span className="font-mono text-[13px] text-muted">
+        <span className="text-mono-caption text-muted">
           {formatNumber(row.requests)}
         </span>
       ),
@@ -414,7 +414,7 @@ function ToolBreakdownTable({
       header: "Spend",
       align: "end",
       cell: (row) => (
-        <span className="font-mono text-[13px] text-foreground">
+        <span className="text-mono-caption text-foreground">
           {formatUsd(row.cost)}
         </span>
       ),

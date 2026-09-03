@@ -36,7 +36,7 @@ function Warmth({
         {records} / {seed} examples
       </span>
       <span
-        className={`flex items-center gap-2 font-mono text-[13px] ${
+        className={`flex items-center gap-2 text-mono-caption ${
           warm ? "text-foreground" : "text-subtle"
         }`}
       >

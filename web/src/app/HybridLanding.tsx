@@ -137,7 +137,7 @@ function StatusRow({ label, status }: { label: string; status: Status }) {
       {/* The status form the rest of the product uses: a square dot and a word,
           no pill around them. The border and fill were saying a third time what
           the dot and the ink already say twice. */}
-      <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+      <span className="flex items-center gap-2 text-mono-caption text-muted">
         <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${dot}`} />
         {status.state.toUpperCase()}
       </span>

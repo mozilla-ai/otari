@@ -644,7 +644,7 @@ function EditKeyForm({
     >
       <h2 className="text-title">
         Edit{" "}
-        <code className="font-mono text-[15px]">
+        <code className="text-mono-title">
           {apiKey.key_name ?? apiKey.id}
         </code>
       </h2>
@@ -731,7 +731,7 @@ function StatusMark({ apiKey }: { apiKey: ApiKey }) {
       ? { word: "Expired", dot: "bg-danger", ink: "text-muted" }
       : { word: "Active", dot: "bg-success", ink: "text-muted" }
   return (
-    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
       {word}
     </span>
@@ -783,7 +783,7 @@ function KeyMetaLine({ apiKey }: { apiKey: ApiKey }) {
     })
   }
   return (
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] tracking-[0.1em] uppercase">
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-mono-overline">
       {facts.map((fact) => (
         <span key={fact.key} className={fact.ink} title={fact.title}>
           {fact.text}
@@ -923,7 +923,7 @@ export function KeysPage() {
                 // two apart, so neither needs a chip to say which it is.
                 if (isVirtualUser(k.user_id)) {
                   return (
-                    <span className="font-mono text-[13px] text-subtle">
+                    <span className="text-mono-caption text-subtle">
                       virtual
                     </span>
                   )
@@ -942,7 +942,7 @@ export function KeysPage() {
                   )
                 }
                 return (
-                  <span className="font-mono text-[13px] text-muted">
+                  <span className="text-mono-caption text-muted">
                     {k.user_id ?? "—"}
                   </span>
                 )
@@ -954,7 +954,7 @@ export function KeysPage() {
         id: "key",
         header: "Key",
         cell: (k) => (
-          <code className="font-mono text-[13px] text-muted">
+          <code className="text-mono-caption text-muted">
             {k.key_prefix ? `${k.key_prefix}…` : "—"}
           </code>
         ),
@@ -963,7 +963,7 @@ export function KeysPage() {
         id: "created",
         header: "Created",
         cell: (k) => (
-          <span className="font-mono text-[13px] text-muted">
+          <span className="text-mono-caption text-muted">
             {formatDate(k.created_at)}
           </span>
         ),
@@ -972,7 +972,7 @@ export function KeysPage() {
         id: "last_used",
         header: "Last used",
         cell: (k) => (
-          <span className="font-mono text-[13px] text-muted">
+          <span className="text-mono-caption text-muted">
             {relative(k.last_used_at) ?? "never"}
           </span>
         ),

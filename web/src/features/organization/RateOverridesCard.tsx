@@ -178,7 +178,7 @@ export function RateOverridesCard() {
         // legible without reading the label and without a box around it.
         return (
           <span
-            className={`flex items-center gap-2 font-mono text-[13px] ${status.className}`}
+            className={`flex items-center gap-2 text-mono-caption ${status.className}`}
           >
             <Dot className={STATUS_DOT[overrideStatus(row)]} />
             {status.label.toUpperCase()}

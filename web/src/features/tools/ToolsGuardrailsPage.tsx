@@ -543,7 +543,7 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
         {tool.available ? null : (
           // The reason, stated: a subtle dot and a mono fact, because a tool
           // with no backend is unavailable rather than broken.
-          <span className="flex items-center gap-2 font-mono text-[11px] tracking-[0.1em] text-subtle uppercase">
+          <span className="flex items-center gap-2 text-mono-overline text-subtle">
             <Dot className="bg-text-subtle" />
             Unavailable — no backend
           </span>

@@ -155,7 +155,7 @@ function StatusMark({ status }: { status: string }) {
               word: membershipLabel(status),
             }
   return (
-    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
       {word.toUpperCase()}
     </span>

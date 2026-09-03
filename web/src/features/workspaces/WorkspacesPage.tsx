@@ -145,7 +145,7 @@ function NarrowedDefaults({
         <ul className="flex flex-col gap-1.5">
           {narrowed.map((row) => (
             <li key={row.id} className="flex items-center gap-2">
-              <span className="font-mono text-[13px] text-foreground">
+              <span className="text-mono-caption text-foreground">
                 {row.provider_key_id}
               </span>
               <FilterSelect

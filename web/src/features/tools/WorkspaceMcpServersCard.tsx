@@ -48,7 +48,7 @@ function tokenChip(server: WorkspaceMcpServer) {
   // Affirmative: a server that carries a credential is marked, and one that
   // does not is the unmarked state rather than a second badge saying so.
   return server.has_token ? (
-    <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+    <span className="flex items-center gap-2 text-mono-caption text-muted">
       <Dot className="bg-accent" />
       STORED
     </span>
@@ -177,7 +177,7 @@ export function WorkspaceMcpServersCard({
       // (`--chip-fg` per `.chip--success`), and it is what the two cards next
       // door already use.
       cell: (row) => (
-        <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+        <span className="flex items-center gap-2 text-mono-caption text-muted">
           <Dot className={row.enabled ? "bg-success" : "bg-text-subtle"} />
           {row.enabled ? "ENABLED" : "DISABLED"}
         </span>

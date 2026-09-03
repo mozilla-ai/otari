@@ -530,7 +530,7 @@ function PricingTierEditor({
 function ModalitySet({ label, values }: { label: string; values: string[] }) {
   if (values.length === 0) return null
   return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[11px] tracking-[0.1em] uppercase">
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-mono-overline">
       <span className="text-subtle">{label}</span>
       {values.map((m) => (
         <span key={m} className="text-muted">
@@ -555,7 +555,7 @@ function SourceMark({ source }: { source: PriceSource }) {
             }
           : { word: "not priced", dot: "bg-text-subtle", ink: "text-subtle" }
   return (
-    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
       {word.toUpperCase()}
     </span>
@@ -910,7 +910,7 @@ function ModelDetailPanel({
           <div className="flex items-center gap-2">
             <h2 className="text-title break-all">{row.model}</h2>
             {metadata?.deprecated ? (
-              <span className="flex items-center gap-2 font-mono text-[13px] text-danger">
+              <span className="flex items-center gap-2 text-mono-caption text-danger">
                 <Dot className="bg-danger" />
                 DEPRECATED
               </span>
@@ -990,7 +990,7 @@ function ModelDetailPanel({
 
       <PanelSection title="Capabilities">
         {activeCaps.length > 0 ? (
-          <div className="flex flex-wrap gap-x-4 gap-y-1.5 font-mono text-[11px] tracking-[0.1em] text-muted uppercase">
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-mono-overline text-muted">
             {activeCaps.map(({ key, label }) => (
               <span key={key}>{label}</span>
             ))}
@@ -1357,7 +1357,7 @@ function PricingPolicyCell({
     <button
       type="button"
       aria-label={`Edit pricing policy for ${row.key}`}
-      className="max-w-40 text-left font-mono text-[13px] leading-5 text-muted hover:text-foreground"
+      className="max-w-40 text-left text-mono-caption leading-5 text-muted hover:text-foreground"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()

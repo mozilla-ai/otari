@@ -256,7 +256,7 @@ export function WorkspaceWebSearchCard({
         {config?.configured === false ? (
           // The absence of a stored row, stated rather than boxed: this
           // workspace has not departed from the deployment default.
-          <span className="flex items-center gap-2 font-mono text-[13px] text-subtle">
+          <span className="flex items-center gap-2 text-mono-caption text-subtle">
             <Dot className="bg-text-subtle" />
             NOTHING SET
           </span>

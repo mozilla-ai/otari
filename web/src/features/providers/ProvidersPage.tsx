@@ -650,7 +650,7 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   return (
     <span
       title={title}
-      className={`flex items-center gap-2 font-mono text-[13px] ${styles}`}
+      className={`flex items-center gap-2 text-mono-caption ${styles}`}
     >
       <Dot className={dot} />
       {HEALTH_LABELS[health.ok ? "ok" : degraded ? "degraded" : "unreachable"]}
@@ -957,7 +957,7 @@ export function ProvidersPage() {
         // column of statuses reads as a state the column does not carry. The
         // uppercase stays, which is what separates a category from the states
         // in the column beside it.
-        <span className="font-mono text-[13px] text-muted">
+        <span className="text-mono-caption text-muted">
           {row.source === "stored" ? "STORED" : "CONFIG"}
         </span>
       ),
@@ -1115,13 +1115,13 @@ export function ProvidersPage() {
         >
           <Dot className="mt-2 bg-danger" />
           <p className="text-muted">
-            <span className="font-mono text-[13px] text-foreground">
+            <span className="text-mono-caption text-foreground">
               OTARI_SECRET_KEY
             </span>{" "}
             is not set, so provider keys can&rsquo;t be encrypted at rest and
             adding providers from the dashboard is disabled. Set it on the
             server and restart to add providers here. Providers defined in{" "}
-            <span className="font-mono text-[13px]">config.yml</span> keep
+            <span className="text-mono-caption">config.yml</span> keep
             working without it.
           </p>
         </Section>
