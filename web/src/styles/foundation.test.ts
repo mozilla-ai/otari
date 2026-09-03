@@ -228,6 +228,27 @@ describe("the type scale's two halves", () => {
     }
   })
 
+  // The other half of the declare-vs-register trap, and the half that fails
+  // silently in the opposite direction. A self-referential registration
+  // (`--color-x: var(--color-x)`) exists only to make the utility, and it
+  // resolves to nothing unless a theme block declares a real value. When it
+  // does not, `text-x` is a class that compiles, ships, and paints the
+  // inherited color instead: no error, no warning, no failing check. That is
+  // how `--color-accent-glyph` lost both declarations to a careless edit and
+  // turned a white checkmark black.
+  it("declares a real value for every self-referential @theme key", () => {
+    const theme = declarations(block("@theme"))
+    const undeclared: string[] = []
+    for (const [key, value] of theme) {
+      if (value !== `var(${key})`) continue
+      if (!LIGHT.has(key) || !DARK.has(key)) undeclared.push(key)
+    }
+    expect(
+      undeclared,
+      "registered in @theme but not declared in both theme blocks, so the utility resolves to nothing",
+    ).toEqual([])
+  })
+
   it("registers in @theme only the keys HeroUI does not declare", () => {
     // Tracking is emitted into `.text-xs` and friends only if the key is
     // registered at build time, so these have to be in `@theme`; a value at

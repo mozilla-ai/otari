@@ -50,7 +50,7 @@ export function Toggle({
         // benefits from being followed.
         className={`inline-block h-5 w-5 transform transition-transform duration-150 motion-reduce:transition-none ${
           checked
-            ? "translate-x-[21px] bg-accent"
+            ? "translate-x-[21px] bg-control-indicator"
             : "translate-x-px bg-control-thumb"
         }`}
       />

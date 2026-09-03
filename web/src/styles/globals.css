@@ -189,6 +189,18 @@
      graphical object at 3:1, which 3.48 clears, and white is what reads at
      16px. Same value in both themes, because the accent is. */
   --color-accent-glyph: #ffffff;
+  /* The fill a CONTROL INDICATOR draws itself in: the checkbox's box and the
+     toggle's on-knob. The button teal rather than the accent, because these
+     are the accent's other job: a small solid shape whose whole meaning is
+     "on", read against the page and, for the checkmark, against white ink
+     inside it. Both readings improve: the glyph goes 3.48 to 4.71, and the
+     knob against the light ground goes 3.27 to 4.23.
+     METERS AND SPINNERS STAY on `--color-primary`, and so do the charts. They
+     are quantity and motion, not state, they are read as area and length
+     rather than as a mark, and the accent is what the data ink is keyed to. A
+     later reader collecting "all the indicators" onto one token is exactly the
+     move this paragraph exists to stop. */
+  --color-control-indicator: #00808a;
   /* Text on the subtle fill, which is a different question from text on the
      solid one and does not have the same answer. `--color-primary` itself
      is under AA on `--color-primary-subtle`, so the obvious reading, "the
@@ -501,6 +513,8 @@
   --color-primary-subtle: rgb(0 152 164 / 0.18); /* selection / soft fill */
   --color-primary-foreground: #08090a;
   --color-accent-glyph: #ffffff;
+  /* Same value as light: a filled indicator carries its own ground. */
+  --color-control-indicator: #00808a;
   /* The same four values as the light block, and that is the point rather than
      an omission: a filled button carries its own ground, so the ink on it and
      the ramp under it do not change with the page behind them. Declared here
@@ -697,6 +711,7 @@
   /* Declaring it in the theme blocks is not enough to make `text-accent-glyph`
    * exist; a `--color-*` generates no utility until it is registered here. */
   --color-accent-glyph: var(--color-accent-glyph);
+  --color-control-indicator: var(--color-control-indicator);
   /* Attention — warm high-attention accent that pops against the cool UI.
    * Reserved for action-required banners and new/unread indicators; use it
    * sparingly so it keeps its pull. Distinct from --color-warning (caution):
@@ -1295,6 +1310,7 @@ main {
 .button--primary,
 .button--danger,
 .bg-accent,
+.bg-control-indicator,
 .bg-success,
 .bg-warning,
 .bg-danger,
@@ -1302,6 +1318,73 @@ main {
 .bg-attention {
   --focus-ring-ink: var(--color-text);
   --focus: var(--color-text);
+}
+
+/* The press.
+ *
+ * HeroUI already presses every button, and it presses them by size:
+ * `scale(.98)` at sm, `.97` at the base and `.96` at lg. So the ladder is not
+ * ours to invent, and it is deliberately left where it is; what was wrong with
+ * it is the timing and the reach.
+ *
+ * The timing: the transform ran 250ms on an ease that is built for travel.
+ * A press is not travel, it is an acknowledgement, and it has to land inside
+ * the time the finger is still down. 100ms, ease-out.
+ *
+ * The reach: a button told to fill its container is not being used as an
+ * action, it is being used as a ROW, and a percentage of a row is a
+ * displacement rather than a press. Measured on the page: the workspace
+ * switcher is 239px wide and moves 7.2px under the .97 it inherits today, and
+ * the member role trigger 150px, 4.5px. Both carry `w-full`, and so will the
+ * next one, which is why this is written against that rather than against the
+ * two that exist now. HeroUI does the same thing for its own button groups,
+ * where a scaling member would pull away from its neighbors. */
+.button {
+  transition-duration: 100ms;
+  transition-timing-function: var(--ease-out, ease-out);
+}
+.button:is(.w-full, .w-full\!):is(:active, [data-pressed="true"]) {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button:is(:active, [data-pressed="true"]) {
+    transform: none;
+  }
+  /* With the movement gone the press still has to be answerable, and the
+     answer is the hover value rather than a third step down. A third step is
+     what the dark ramp is frozen for: it cannot darken without failing its
+     ground or its ink, and reduced motion is not a reason to reintroduce one
+     in either theme. */
+  .button--primary,
+  .button--danger {
+    --button-bg-pressed: var(--button-bg-hover);
+  }
+}
+
+/* The checkbox's touch target, which is four times the area of the box it
+ * draws. 16px drawn, 40px targeted, 44px on a coarse pointer, carried by a
+ * pseudo-element so the box does not grow and no row changes height.
+ *
+ * The rule an invisible bleed follows: it may never exceed the pitch of the
+ * thing it repeats within, or two neighbors overlap and a press lands on the
+ * wrong one. Measured before applying: a table row's pitch here is 58px, so a
+ * 40px target clears it with room, and 44 still does. The size the target is
+ * built from is the TARGET, not the drawing: the box is 16px and the native
+ * input inside it is 13, and a rule phrased against either number would have
+ * left the table's checkboxes at their drawn size. */
+.otari-checkbox-box {
+  position: relative;
+}
+.otari-checkbox-box::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+}
+@media (pointer: coarse) {
+  .otari-checkbox-box::before {
+    inset: -14px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
