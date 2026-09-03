@@ -92,8 +92,8 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     # provider's rejection reads as an upstream outage instead of a 400.
     #
     # Stopgap: remove this declaration once the SDK pin carries the param
-    # (mozilla-ai/any-llm#1329, merged after 1.26.0). Until then it also shadows
-    # whatever annotation any-llm picks for it.
+    # (mozilla-ai/any-llm#1329, merged after 1.26.0; tracked in #924). Until
+    # then it also shadows whatever annotation any-llm picks for it.
     container: str | None = None
     # any-llm types ``stream`` as ``bool | None``; keep the Anthropic wire
     # contract (a non-nullable boolean defaulting to false) for stable SDK
