@@ -134,6 +134,22 @@ Playwright behavioral tests run against a real built gateway and scope
 assertions to the rows they create. Dismiss React Aria popovers before asserting
 outside them.
 
+**A failure's accessibility snapshot describes the state at capture, not at the
+action.** It is written when the assertion finally times out, which can be
+seconds after the click that actually failed, so it shows the page as it settled
+rather than as it was pressed. Reading correctly-loaded content in one and
+concluding a race is refuted is a mistake this repo has already made: the
+snapshot has no bearing on what was on screen when the action ran. Use the trace
+instead, where each action carries its own duration and error, and a click that
+completed in 68ms with no error tells you the press was delivered and the app
+dropped it.
+
+Assertions that press a row therefore wait on the data before pressing, not just
+on the element. A press delivered while a filtered query is in flight is
+discarded by the re-render while Playwright's actionability check passes
+happily, because the row it is about to press is present and visible right up to
+the moment it is replaced.
+
 Screenshot tests cover three viewports and both themes. They are
 workflow-dispatch only, their baselines are gitignored, and CI artifacts are the
 review output until the suite becomes a pull-request gate.
