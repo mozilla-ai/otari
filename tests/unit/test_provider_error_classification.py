@@ -359,6 +359,19 @@ def test_rejected_param_maps_to_400_naming_the_param() -> None:
     assert "'seed'" in mapping.detail
 
 
+def test_rejected_container_maps_to_400_naming_the_param() -> None:
+    """``container`` is hand-declared on the Messages request and rides any-llm's
+    ``**kwargs``, so a provider that bridges Messages through Chat Completions
+    hands it to an SDK method with no such parameter. Without the registration it
+    misses the caller-fault gate and a permanent, caller-fixable rejection is
+    reported as a generic upstream failure."""
+    exc = TypeError("AsyncCompletions.create() got an unexpected keyword argument 'container'")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "'container'" in mapping.detail
+
+
 def test_rejected_param_detail_does_not_name_the_sdk_internals() -> None:
     """Only the param name crosses the boundary: the SDK's class and method are
     the gateway's implementation, not something a caller can act on."""

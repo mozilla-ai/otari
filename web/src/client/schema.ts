@@ -6572,7 +6572,9 @@ export interface components {
          *
          *     The wire fields are derived from any-llm's ``MessagesParams`` (see
          *     ``_schema_derive``) so the schema cannot silently drop a param any-llm
-         *     forwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
+         *     forwards. ``container`` is an Anthropic wire param ``MessagesParams`` does
+         *     not model, declared here and forwarded as an any-llm ``**kwargs`` param.
+         *     Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
          *     ``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request
          *     into gateway-managed MCP / sandbox / web_search / guardrails without
          *     changing the upstream wire shape. They're stripped before the request is

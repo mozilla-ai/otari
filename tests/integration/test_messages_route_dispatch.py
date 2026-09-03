@@ -170,6 +170,81 @@ def test_container_reaches_plain_amessages_unchanged(
     assert captured["container"] == "container_01ABC"
 
 
+def test_container_is_dropped_when_the_gateway_runs_code_execution(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``otari_code_execution`` means the sandbox runs the code, so Anthropic is
+    never asked to stand up a container this request could reach."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    forwarded: dict[str, Any] = {}
+
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
+        forwarded.update(completion_kwargs)
+        return _text_response()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch(
+            "gateway.api.routes._pipeline.SandboxBackend",
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=fake_backend),
+                __aexit__=AsyncMock(return_value=None),
+            ),
+        ),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": "compute"}],
+                "max_tokens": 100,
+                "tools": [{"type": "otari_code_execution"}],
+                "container": "container_01ABC",
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "container" not in forwarded
+
+
+def test_container_survives_provider_native_code_execution(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The provider-named keyword leaves execution with the provider, which is
+    the case the container id is for."""
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response()
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": "compute"}],
+                "max_tokens": 100,
+                "tools": [{"type": "code_execution_20250825", "name": "code_execution"}],
+                "betas": ["code-execution-2025-08-25"],
+                "container": "container_01ABC",
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["container"] == "container_01ABC"
+
+
 def test_cache_control_and_non_stream_usage_round_trip(
     client: TestClient,
     api_key_header: dict[str, str],

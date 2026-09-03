@@ -74,7 +74,9 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
 
     The wire fields are derived from any-llm's ``MessagesParams`` (see
     ``_schema_derive``) so the schema cannot silently drop a param any-llm
-    forwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
+    forwards. ``container`` is an Anthropic wire param ``MessagesParams`` does
+    not model, declared here and forwarded as an any-llm ``**kwargs`` param.
+    Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
     ``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request
     into gateway-managed MCP / sandbox / web_search / guardrails without
     changing the upstream wire shape. They're stripped before the request is
@@ -82,7 +84,16 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     """
 
     messages: list[dict[str, Any]] = Field(min_length=1)
-    # Compatibility field until any-llm's MessagesParams includes it.
+    # Anthropic's top-level container id, for continuing a code-execution
+    # container across turns. ``MessagesParams`` does not model it, so the
+    # derived base would drop a caller's value before the provider call. It
+    # rides any-llm's ``**kwargs``, which is why it is also registered in
+    # ``_pipeline._FORWARDED_PARAMS``: without that, a bridged (non-Anthropic)
+    # provider's rejection reads as an upstream outage instead of a 400.
+    #
+    # Stopgap: remove this declaration once the SDK pin carries the param
+    # (mozilla-ai/any-llm#1329, merged after 1.26.0). Until then it also shadows
+    # whatever annotation any-llm picks for it.
     container: str | None = None
     # any-llm types ``stream`` as ``bool | None``; keep the Anthropic wire
     # contract (a non-nullable boolean defaulting to false) for stable SDK
@@ -587,6 +598,12 @@ async def create_message(
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.intercepts_web_search and request_fields.get("messages"):
         request_fields["messages"] = _strip_gateway_minted_blocks(request_fields["messages"])
+    if tool_ctx.use_sandbox:
+        # ``container`` addresses Anthropic's own code-execution container. The
+        # gateway is running the code in its sandbox instead, and the tool is
+        # gone from the forwarded ``tools``, so the provider would be asked to
+        # attach a container nothing in this request can reach.
+        request_fields.pop("container", None)
 
     # ------------------------------------------------------------------
     # Streaming path
