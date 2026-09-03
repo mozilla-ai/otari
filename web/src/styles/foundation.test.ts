@@ -797,7 +797,113 @@ describe("content text wears a type role", () => {
     expect(sources.length).toBeGreaterThan(30)
   })
 
+  /**
+   * The sites where 12px is the ruled size, and why the rule needed the
+   * exception rather than the pages needing a change.
+   *
+   * The discriminator is the referent: `text-caption` is for text whose
+   * referent is a CONTROL, text that helps you operate the thing it sits
+   * under. Metadata, page-referent prose, and a note about an action's effect
+   * rather than its operation are 12px on purpose, and an audit read every
+   * `text-xs` in the tree and ruled each site individually. This rule cannot
+   * express "referent is a control", so it cannot tell the two apart, and
+   * making it green by converting these would reverse a per-site ruling and
+   * move 33 pieces of text up a point. That is why the list is here and not
+   * in the pages.
+   *
+   * Every entry was checked to be present verbatim at the audit's final
+   * commit, so each is a site the audit saw and left, not one it never
+   * reached.
+   *
+   * Read the site before trusting either source. The record is complete for
+   * what was ruled, and a code comment carries decisions made below the
+   * reporting threshold: `--text-xl`'s retune from 20 to 22 is argued at the
+   * stat tile and never reached the record, because the change was reported
+   * upstream as its other half.
+   */
+  const CAPTION_SIZE_IS_RULED: Array<[string, string]> = [
+    // Metadata: identifiers, table-cell content, figures and status labels,
+    // which are read rather than operated.
+    [
+      "features/organization/OrganizationGeneralPage.tsx",
+      "the organization slug in a copyable",
+    ],
+    [
+      "features/admin/DeploymentAccountsPage.tsx",
+      "an account's email under its name, in a cell",
+    ],
+    [
+      "features/workspaces/WorkspacesPage.tsx",
+      "a workspace description truncated in a cell, and its budget helper",
+    ],
+    [
+      "features/models/ModelsPage.tsx",
+      "the selector, the family, and the not-discovered label",
+    ],
+    [
+      "features/models/ModelScopeControl.tsx",
+      "the blocked-from-every-model state banner",
+    ],
+    [
+      "features/overview/OverviewPage.tsx",
+      "an error-count figure and a chart's figcaption",
+    ],
+    ["shared/components/surface.tsx", "the KPI cell's severity and delta line"],
+    [
+      "features/organization/OrganizationMembersPage.tsx",
+      "a table head row, an empty state, and fieldset prose",
+    ],
+    [
+      "features/budgets/BudgetsPage.tsx",
+      "the delete confirmation's consequence text",
+    ],
+    [
+      "features/activity/ActivityTimeline.tsx",
+      "the brush's drag hint beside the chart",
+    ],
+    // Page-referent: prose that describes the page rather than a control on
+    // it. The auth pages' centered text was ruled this explicitly.
+    ["features/auth/Login.tsx", "the divider row and the page's footer prose"],
+    [
+      "features/invitations/AcceptInvitationPage.tsx",
+      "the centered next-step prose, page-referent",
+    ],
+    // The named edge: a note about what an action will do, in the row with
+    // the button, rather than about how to operate a control.
+    [
+      "features/routing/RoutingPage.tsx",
+      "consequence notes in the button row, and the candidate cap",
+    ],
+    ["features/usage/ShareDialog.tsx", "a notice in the dialog's button row"],
+    // Excluded on its own grounds rather than the referent one: this is a
+    // `<legend>` carrying `font-medium`, and `text-caption` sets
+    // `font-weight: normal`, so converting it would trade this failure for
+    // the one that bans a weight beside a role. A fix that moves a failure
+    // sideways is not a fix.
+    [
+      "features/tools/WorkspaceCodeExecutionPolicyCard.tsx",
+      "a legend, not a caption, and it carries a weight",
+    ],
+  ]
+  const RULED = new Map(CAPTION_SIZE_IS_RULED)
+
+  it("names no site that has stopped hand-rolling the caption role", () => {
+    // The guard that makes the list above defensible. A path that no longer
+    // offends is an entry protecting nothing, and without this it keeps
+    // passing silently while the file it names has moved on.
+    const stale = [...RULED.keys()].filter(
+      (name) =>
+        !sources.includes(name) ||
+        !together("text-xs", "text-muted").test(read(name)),
+    )
+    expect(
+      stale,
+      "these are exempted from the caption rule but no longer need to be; delete the entries",
+    ).toEqual([])
+  })
+
   it.each(sources)("spells the caption role in %s as text-caption", (name) => {
+    if (RULED.has(name)) return
     expect(
       read(name),
       `${name} hand-rolls the caption role as \`text-xs text-muted\`: 12px where the role is 13, plus the ink it already sets. Use text-caption`,
