@@ -54,7 +54,7 @@ function AccessMark({ account }: { account: DeploymentUser }) {
       ? { dot: "bg-accent", ink: "text-muted", word: "Operator" }
       : { dot: "bg-text-subtle", ink: "text-subtle", word: "Member" }
   return (
-    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
       {word.toUpperCase()}
     </span>
@@ -125,7 +125,7 @@ export function DeploymentAccountsPage() {
         // sessions are ended and it cannot sign in, which is worth noticing,
         // and it is also a state an operator chose rather than a fault.
         cell: (account) => (
-          <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+          <span className="flex items-center gap-2 text-mono-caption text-muted">
             <Dot className={account.is_active ? "bg-success" : "bg-danger"} />
             {account.is_active ? "ACTIVE" : "DEACTIVATED"}
           </span>

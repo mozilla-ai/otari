@@ -305,7 +305,7 @@ export function RowAction({
       disabled={isDisabled}
       aria-label={ariaLabel}
       onClick={onPress}
-      className={`text-[13px] whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-50 ${
+      className={`text-caption whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-50 ${
         isDanger ? "text-danger" : "text-muted hover:text-foreground"
       }`}
     >
@@ -402,7 +402,7 @@ export function DismissChip({
   dismissLabel?: string
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 font-mono text-[13px] text-foreground">
+    <span className="inline-flex items-center gap-1.5 text-mono-caption text-foreground">
       {label ? <span className="text-subtle">{label}:</span> : null}
       {value}
       <button
@@ -498,7 +498,7 @@ export function KpiCell({
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
           would out-weigh the page title above it. */}
-      <span className="font-mono text-[30px] leading-[36px] font-normal text-foreground tabular-nums">
+      <span className="text-mono-figure font-normal text-foreground">
         {value}
       </span>
       {/* One line, always present, so no cell is shorter than its neighbors.

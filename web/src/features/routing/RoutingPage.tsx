@@ -1280,7 +1280,7 @@ function PolicyForm({
 /** The affirmative kind mark: an accent dot and the word, in mono. */
 function KindMark({ label }: { label: string }) {
   return (
-    <span className="flex items-center gap-2 font-mono text-[13px] text-foreground">
+    <span className="flex items-center gap-2 text-mono-caption text-foreground">
       <Dot className="bg-accent" />
       {label.toUpperCase()}
     </span>
@@ -1453,7 +1453,7 @@ export function RoutingPage() {
         header: "Source",
         cell: (row) => (
           <div className="flex items-center gap-4">
-            <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+            <span className="flex items-center gap-2 text-mono-caption text-muted">
               <Dot
                 className={
                   row.source === "config" ? "bg-text-subtle" : "bg-accent"
@@ -1462,7 +1462,7 @@ export function RoutingPage() {
               {row.source.toUpperCase()}
             </span>
             {row.kind === "alias" ? (
-              <span className="font-mono text-[11px] tracking-[0.1em] text-subtle uppercase">
+              <span className="text-mono-overline text-subtle">
                 alias
               </span>
             ) : null}

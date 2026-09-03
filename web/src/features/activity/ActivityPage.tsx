@@ -415,7 +415,7 @@ function StatusMark({ status }: { status: string }) {
         ? { dot: "bg-text-subtle", ink: "text-subtle" }
         : { dot: "bg-success", ink: "text-muted" }
   return (
-    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
       <Dot className={dot} />
       {statusLabel(status)}
     </span>
@@ -872,7 +872,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                 <td className="px-3 py-2 break-all text-foreground">
                   {pricingSelectorOf(attempt)}
                   {attempt.id === entry.id ? (
-                    <span className="ml-2 border border-border px-1.5 py-0.5 text-[10px] text-muted">
+                    <span className="ml-2 border border-border px-1.5 py-0.5 text-xs text-subtle">
                       this row
                     </span>
                   ) : null}
@@ -1956,7 +1956,7 @@ export function ActivityPage() {
                   the count inside is a summary of it. */}
               <span
                 role="img"
-                className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.1em] text-muted uppercase"
+                className="inline-flex items-center gap-1.5 text-mono-overline text-muted"
                 title={detail}
                 aria-label={`Gateway tools: ${detail}`}
               >

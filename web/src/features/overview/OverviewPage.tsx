@@ -1002,7 +1002,7 @@ function SpendChart({
             numbers change width. */}
         <div
           aria-hidden
-          className="flex h-[180px] w-11 shrink-0 flex-col justify-between pr-2 text-right font-mono text-[11px] text-subtle"
+          className="flex h-[180px] w-11 shrink-0 flex-col justify-between pr-2 text-right text-mono-micro text-subtle"
         >
           {steps.map((value) => (
             <span key={value} className="leading-none">
@@ -1053,7 +1053,7 @@ function SpendChart({
           {/* Every fourth day, which lands nine labels across a thirty-day
               window: enough to date a bar, few enough not to become a second
               row of text under a chart that is not the headline. */}
-          <div className="mt-1.5 flex font-mono text-[11px] text-subtle">
+          <div className="mt-1.5 flex text-mono-micro text-subtle">
             {series.map((point, i) => (
               <span
                 key={point.bucket_start}
@@ -1112,13 +1112,13 @@ function ChartHoverCard({
         transform: `translateX(-${Math.min(90, Math.max(10, atPercent * 100))}%)`,
       }}
     >
-      <span className="block border-b border-border px-2.5 py-1.5 font-mono text-[11px] text-subtle">
+      <span className="block border-b border-border px-2.5 py-1.5 text-mono-micro text-subtle">
         {date}
       </span>
       <span className="flex items-center gap-2 px-2.5 py-1.5">
         <Dot className="bg-accent" />
         <span className="text-muted">Spend</span>
-        <span className="ml-auto font-mono text-[13px] text-foreground tabular-nums">
+        <span className="ml-auto text-mono-caption text-foreground tabular-nums">
           {value}
         </span>
       </span>
@@ -1178,7 +1178,7 @@ function StatusMark({ status }: { status: string }) {
         : "bg-success"
   const text = word === "error" ? "text-danger" : "text-muted"
   return (
-    <span className={`flex items-center gap-2 font-mono text-[13px] ${text}`}>
+    <span className={`flex items-center gap-2 text-mono-caption ${text}`}>
       <Dot className={dot} />
       {word.toUpperCase()}
     </span>
@@ -1204,7 +1204,7 @@ function RecentActivity({
       header: "Time",
       cell: (entry) => (
         <span
-          className="font-mono text-[13px] text-muted"
+          className="text-mono-caption text-muted"
           title={new Date(entry.timestamp).toLocaleString()}
         >
           {formatRelative(entry.timestamp)}
@@ -1216,7 +1216,7 @@ function RecentActivity({
       header: "Model",
       isRowHeader: true,
       cell: (entry) => (
-        <span className="font-mono text-[13px] text-foreground">
+        <span className="text-mono-caption text-foreground">
           {entry.model}
         </span>
       ),
@@ -1225,7 +1225,7 @@ function RecentActivity({
       id: "key",
       header: "Key",
       cell: (entry) => (
-        <span className="font-mono text-[13px] text-muted">
+        <span className="text-mono-caption text-muted">
           {entry.api_key_name ?? "—"}
         </span>
       ),
@@ -1235,7 +1235,7 @@ function RecentActivity({
       header: "Tokens",
       align: "end",
       cell: (entry) => (
-        <span className="font-mono text-[13px] tabular-nums">
+        <span className="text-mono-caption tabular-nums">
           {entry.total_tokens === null ? "—" : formatNumber(entry.total_tokens)}
         </span>
       ),
@@ -1245,7 +1245,7 @@ function RecentActivity({
       header: "Cost",
       align: "end",
       cell: (entry) => (
-        <span className="font-mono text-[13px] tabular-nums">
+        <span className="text-mono-caption tabular-nums">
           {entry.cost === null ? "—" : formatUsd(entry.cost)}
         </span>
       ),
@@ -1330,7 +1330,7 @@ function RailStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-overline">{label}</dt>
-      <dd className="font-mono text-[30px] leading-[36px] font-normal text-foreground tabular-nums">
+      <dd className="text-mono-figure font-normal text-foreground">
         {value}
       </dd>
     </div>

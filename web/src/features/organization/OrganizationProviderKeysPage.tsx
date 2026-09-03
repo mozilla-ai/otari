@@ -267,13 +267,13 @@ export function OrganizationProviderKeysPage() {
         <div className="flex items-center gap-3">
           <span className="font-medium text-foreground">{row.name}</span>
           {row.is_org_default ? (
-            <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+            <span className="flex items-center gap-2 text-mono-caption text-muted">
               <Dot className="bg-accent" />
               DEFAULT
             </span>
           ) : null}
           {row.archived_at ? (
-            <span className="flex items-center gap-2 font-mono text-[13px] text-subtle">
+            <span className="flex items-center gap-2 text-mono-caption text-subtle">
               <Dot className="bg-text-subtle" />
               ARCHIVED
             </span>
