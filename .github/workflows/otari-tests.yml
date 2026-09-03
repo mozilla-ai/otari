@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  test-unit:
     runs-on: ubuntu-latest
     environment: integration-tests
 
@@ -48,16 +48,40 @@ jobs:
       run: |
         uv run pytest tests/unit -v --cov --cov-report=xml -n auto
 
+    - name: Upload coverage
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      with:
+        file: ./coverage.xml
+        flags: unit
+        fail_ci_if_error: false
+
+  test-integration:
+    runs-on: ubuntu-latest
+    environment: integration-tests
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      with:
+        python-version: 3.14
+        activate-environment: true
+
+    - name: Install dependencies
+      run: |
+         uv sync --dev --frozen
+
     - name: Run Otari integration tests
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
-        uv run pytest tests/integration -v --cov --cov-report=xml --cov-append -n auto
+        uv run pytest tests/integration -v --cov --cov-report=xml -n auto
 
     - name: Upload coverage
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
       with:
         file: ./coverage.xml
+        flags: integration
         fail_ci_if_error: false
 
   openapi-spec:
