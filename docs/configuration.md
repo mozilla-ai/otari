@@ -93,7 +93,7 @@ non-secret effective set through `GET /v1/settings`.
 | `db_pool_recycle` | Retire a connection after this many seconds. `-1` disables. |
 | `db_connect_timeout` | Seconds to wait for a new connection to be established. |
 | `db_command_timeout` | Client-side ceiling on one statement. `0` disables. |
-| `db_statement_timeout_ms` | Server-side ceiling on one statement. `0` disables. |
+| `db_statement_timeout_ms` | Server-side ceiling on one statement, the backstop for the setting above. Must exceed it; `0` disables. |
 | `db_log_pool_size` | Connections reserved for usage logging, separate from the pool above. |
 
 The pool sizes bound concurrent *database* work, not concurrent provider calls:
@@ -106,6 +106,12 @@ or a NAT, which drop idle connections without closing them. The pool's pre-ping
 would catch a closed connection, but the ping is itself a statement and blocks
 on a socket that went away silently, so leaving these unset turns a dropped
 connection into a request that hangs for minutes.
+
+`db_command_timeout` is enforced client-side and `db_statement_timeout_ms`
+server-side, so the second one still ends a statement when the client is the
+stuck half. Configure the server-side value above the client-side one, which
+the defaults do and startup validation requires: set equal, whichever fires
+first is a race.
 
 ## Provider configuration
 

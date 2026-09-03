@@ -425,11 +425,13 @@ class GatewayConfig(BaseSettings):
         ),
     )
     db_statement_timeout_ms: int = Field(
-        default=60000,
+        default=65000,
         ge=0,
         description=(
             "Server-side statement timeout in milliseconds, applied per connection. Backstop for "
-            "db_command_timeout, which cannot fire when the client is the stuck half. 0 disables."
+            "db_command_timeout, which cannot fire when the client is the stuck half. Must be "
+            "above db_command_timeout so the client-side timeout is the one callers normally see; "
+            "0 disables."
         ),
     )
     db_log_pool_size: int = Field(
@@ -1889,6 +1891,29 @@ class GatewayConfig(BaseSettings):
             provider = str(entry.get("provider") or name)
             if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
+
+    @model_validator(mode="after")
+    def _validate_database_timeout_ordering(self) -> "GatewayConfig":
+        """Keep the server-side statement timeout behind the client-side one.
+
+        Set equal, which the two defaults used to be, whichever fires first is
+        a race, and the two report differently: the server-side one arrives as
+        a translated database error, the client-side one as a timeout the
+        engine translates for the same handlers. Ordering them makes the
+        client-side timeout the one callers normally see and leaves the
+        server-side one as the backstop it is described as.
+        """
+        if self.db_command_timeout <= 0 or self.db_statement_timeout_ms <= 0:
+            return self
+        if self.db_statement_timeout_ms <= self.db_command_timeout * 1000:
+            msg = (
+                f"db_statement_timeout_ms ({self.db_statement_timeout_ms}) must be greater than "
+                f"db_command_timeout ({self.db_command_timeout}s = "
+                f"{int(self.db_command_timeout * 1000)}ms), so the server-side backstop fires "
+                "after the client-side timeout rather than racing it"
+            )
+            raise ValueError(msg)
+        return self
 
     @field_validator("web_search_provider")
     @classmethod

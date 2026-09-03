@@ -46,6 +46,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
+from gateway.core.database import release_session
 from gateway.core.metered_pricing import quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -476,6 +477,14 @@ async def run_passthrough(
     # much: an image generation routinely runs longer than a completion, and until
     # it settles the activity log has nothing to show for it. The entry is dropped
     # by InFlightMiddleware, not here.
+    #
+    # The upstream call starts here, and these endpoints held their connection
+    # across it exactly as the completion routes did: the allow-list read above
+    # is the last statement on the request session and nothing commits it. An
+    # image generation or a long transcription outlasts a completion, so this
+    # path reaches the pool ceiling sooner rather than later.
+    await release_session(db)
+
     track_request(
         raw_request,
         endpoint=endpoint,

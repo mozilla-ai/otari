@@ -5,13 +5,12 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select, update
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import create_session, get_db
+from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
@@ -135,7 +134,7 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
 
     try:
         result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
-    except SQLAlchemyError as e:
+    except DATABASE_ERRORS as e:
         record_auth_failure("db_error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -189,7 +188,10 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
         async with create_session() as session:
             await session.execute(update(APIKey).where(APIKey.id == api_key_id).values(last_used_at=now))
             await session.commit()
-    except SQLAlchemyError:
+    except DATABASE_ERRORS:
+        # Widened past SQLAlchemyError for the same reason as the arms above:
+        # this one promises never to fail the request, and a connect timeout
+        # raises a bare TimeoutError.
         logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
 
 
@@ -249,7 +251,7 @@ async def get_session_identity(
         return None
     try:
         return await resolve_dashboard_session(db, token)
-    except SQLAlchemyError as exc:
+    except DATABASE_ERRORS as exc:
         record_auth_failure("db_error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -273,7 +275,7 @@ async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSessio
     """Load the shared generated-key hash, treating DB failures as retryable auth outages."""
     try:
         stored_hash = await load_master_key_hash(db)
-    except SQLAlchemyError as exc:
+    except DATABASE_ERRORS as exc:
         record_auth_failure("db_error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

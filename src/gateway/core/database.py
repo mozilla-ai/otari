@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,10 +13,12 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import event
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
@@ -109,6 +112,90 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
         cursor.close()
 
 
+# What a database call can raise once a client-side ``command_timeout`` is set.
+#
+# asyncpg raises a bare ``asyncio.TimeoutError`` (``builtins.TimeoutError`` on
+# 3.11+) when a command exceeds it, and SQLAlchemy's asyncpg dialect translates
+# only asyncpg's own exception classes, so it would propagate untranslated past
+# every ``except SQLAlchemyError`` arm in the codebase. Those arms are what turn
+# a database failure into a 503 rather than a 500, release a budget hold rather
+# than leaking it, and roll a usage-log write back rather than dropping it.
+#
+# ``_install_timeout_translation`` closes that for statements. It cannot close
+# it for *connect*: SQLAlchemy only wraps DBAPI errors raised while opening a
+# connection, so a ``db_connect_timeout`` still surfaces as a plain
+# ``TimeoutError``. Handlers on the request path therefore catch both.
+DATABASE_ERRORS: tuple[type[BaseException], ...] = (SQLAlchemyError, TimeoutError)
+
+
+def translate_timeout_error(context: Any) -> None:
+    """Re-raise a bare command timeout as a ``SQLAlchemyError``.
+
+    A SQLAlchemy ``handle_error`` listener. Anything that is already a
+    ``SQLAlchemyError``, or is not a timeout at all, is left alone: re-wrapping
+    would erase the distinction between an ``IntegrityError`` and an
+    ``OperationalError`` that callers switch on.
+    """
+    original = context.original_exception
+    if isinstance(original, TimeoutError) and not isinstance(original, SQLAlchemyError):
+        raise OperationalError(
+            "database statement timed out (db_command_timeout)", None, original
+        ) from original
+
+
+def _install_timeout_translation(engine: AsyncEngine) -> None:
+    """Normalize what a statement on *engine* can raise.
+
+    One listener per engine rather than a widened ``except`` at each of the
+    ~80 call sites: the exception type a statement can raise is a property of
+    how the engine is configured, so the engine is where it is normalized.
+    """
+    event.listen(engine.sync_engine, "handle_error", translate_timeout_error)
+
+
+async def release_session(session: AsyncSession | None) -> bool:
+    """End *session*'s transaction so its connection goes back to the pool.
+
+    The gateway's request path reads the API key, the billed user and its
+    budget, the organization's guardrails and the workspace's tool rows on the
+    request-scoped session from :func:`get_db`. That session opens a
+    transaction on its first statement and holds its connection until something
+    ends it, and ``get_db`` only closes it when the request is over. Called
+    before dispatching upstream, this keeps one pooled connection from being
+    pinned for the whole provider call, which would make
+    ``db_pool_size + db_max_overflow`` a ceiling on concurrent *provider calls*
+    rather than on concurrent database work. Past that ceiling a request waits
+    ``db_pool_timeout`` and is then refused by the authentication dependency,
+    whose database-error arm reports a pool timeout as an authentication
+    outage.
+
+    Commits rather than closes, so the session stays usable: settlement and the
+    failure-row write that follow dispatch simply check a connection back out.
+    Safe to commit because the session factory sets ``expire_on_commit=False``
+    and no ORM ``relationship()`` is declared anywhere, so nothing the caller
+    already loaded is reloaded afterwards.
+
+    Returns whether the transaction was committed. A failure is not raised: the
+    caller is about to reach the provider, and losing a request that passed
+    every gate because the connection could not be handed back early is the
+    worse outcome. The session is rolled back in that case, because a failed
+    commit leaves it unusable and the settlement writes after dispatch would
+    otherwise raise ``PendingRollbackError`` on it.
+
+    ``None`` is accepted for hybrid mode, which is handed no session at all.
+    """
+    if session is None:
+        return False
+    try:
+        await session.commit()
+    except DATABASE_ERRORS:
+        logger.warning("Could not release the database connection before dispatch", exc_info=True)
+        with contextlib.suppress(*DATABASE_ERRORS):
+            await session.rollback()
+        return False
+    return True
+
+
 def engine_kwargs(
     config: GatewayConfig,
     *,
@@ -119,8 +206,10 @@ def engine_kwargs(
 ) -> dict[str, Any]:
     """Build ``create_async_engine`` kwargs for this deployment's database.
 
-    ``pool_size`` / ``max_overflow`` override the configured request-pool sizes
-    for a secondary pool; PostgreSQL only, since SQLite runs on ``NullPool``.
+    ``connect_args`` is copied, not adopted, so two engines built from the same
+    parsed URL cannot rewrite each other's arguments. ``pool_size`` /
+    ``max_overflow`` override the configured request-pool sizes for a secondary
+    pool; PostgreSQL only, since SQLite runs on ``NullPool``.
 
     The PostgreSQL arm adds the timeouts that otherwise do not exist anywhere on
     the database path. ``pool_pre_ping`` is what keeps a connection the server
@@ -132,7 +221,11 @@ def engine_kwargs(
     behind it is waiting on a pool slot the whole time. ``pool_recycle`` retires
     connections before they get old enough to be in that state at all.
     """
-    kwargs: dict[str, Any] = {"pool_pre_ping": True, "connect_args": connect_args}
+    # Copied, never mutated in place: two engines are built from one set of
+    # parsed URL arguments, and the first has already captured the reference by
+    # the time the second is built.
+    args = dict(connect_args)
+    kwargs: dict[str, Any] = {"pool_pre_ping": True, "connect_args": args}
     if is_sqlite:
         kwargs["poolclass"] = NullPool
         return kwargs
@@ -143,15 +236,17 @@ def engine_kwargs(
     if config.db_pool_recycle >= 0:
         kwargs["pool_recycle"] = config.db_pool_recycle
 
-    connect_args["timeout"] = config.db_connect_timeout
+    args["timeout"] = config.db_connect_timeout
     if config.db_command_timeout > 0:
-        connect_args["command_timeout"] = config.db_command_timeout
+        args["command_timeout"] = config.db_command_timeout
     if config.db_statement_timeout_ms > 0:
         # Server-side backstop for the client-side ``command_timeout`` above:
         # this one still ends the statement when the client is the wedged half.
-        server_settings = dict(connect_args.get("server_settings") or {})
+        # Configured to fire after it, so the translated client-side error is
+        # the one callers normally see.
+        server_settings = dict(args.get("server_settings") or {})
         server_settings.setdefault("statement_timeout", str(config.db_statement_timeout_ms))
-        connect_args["server_settings"] = server_settings
+        args["server_settings"] = server_settings
     return kwargs
 
 
@@ -169,28 +264,40 @@ def init_db(config: GatewayConfig) -> None:
         async_url,
         **engine_kwargs(config, connect_args=connect_args, is_sqlite=is_sqlite),
     )
+    _install_timeout_translation(_engine)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
-
-    # Usage logging gets a pool of its own. It shares the request pool's
-    # database, but not its contention: a saturated request pool used to time
-    # the writer out too, and a dropped usage row is unrecoverable. Metering is
-    # how spend, budgets and the activity log are reconstructed afterwards, so
-    # it must not be the first thing a busy gateway loses. Small and with no
-    # overflow, because the writer batches and is never a source of bursts.
-    _log_engine = create_async_engine(
-        async_url,
-        **engine_kwargs(
-            config,
-            connect_args=connect_args,
-            is_sqlite=is_sqlite,
-            pool_size=config.db_log_pool_size,
-            max_overflow=0,
-        ),
-    )
-    _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
+        # No second engine on SQLite. It would gain nothing (``NullPool``
+        # ignores ``db_log_pool_size``) and would cost something: a second set
+        # of connections to the same file, contending for its single writer
+        # without the busy timeout and foreign-key pragmas configured above.
+        # SQLite is the default for a bare run and for the OSS edition smoke
+        # test, so that would be an intermittent "database is locked" on the
+        # most common path.
+        _log_engine = None
+        _LogSessionLocal = _SessionLocal
+    else:
+        # Usage logging gets a pool of its own. It shares the request pool's
+        # database, but not its contention: a saturated request pool used to
+        # time the writer out too, and a dropped usage row is unrecoverable.
+        # Metering is how spend, budgets and the activity log are reconstructed
+        # afterwards, so it must not be the first thing a busy gateway loses.
+        # Small and with no overflow, because the writer batches and is never a
+        # source of bursts.
+        _log_engine = create_async_engine(
+            async_url,
+            **engine_kwargs(
+                config,
+                connect_args=connect_args,
+                is_sqlite=is_sqlite,
+                pool_size=config.db_log_pool_size,
+                max_overflow=0,
+            ),
+        )
+        _install_timeout_translation(_log_engine)
+        _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
 
     if config.auto_migrate:
         _run_migrations(database_url)
@@ -262,10 +369,13 @@ def reset_db() -> None:
 
 
 __all__ = [
+    "DATABASE_ERRORS",
     "create_log_session",
     "create_session",
     "engine_kwargs",
     "get_db",
     "init_db",
+    "release_session",
     "reset_db",
+    "translate_timeout_error",
 ]

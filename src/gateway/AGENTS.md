@@ -186,8 +186,18 @@ SQLModel tables live in `models/tenancy.py`. Both share `SQLModel.metadata`;
 `models/__init__.py` imports every table module before Alembic uses it.
 
 Request code gets a session through `get_db`; non-request code uses
-`create_session()`. Services own commits and rollbacks. Migrations live under
-`alembic/versions/`.
+`create_session()`; the usage-log writer uses `create_log_session()`, which
+draws from a pool of its own so metering is not starved by request traffic.
+Services own commits and rollbacks. The one exception is
+`release_session(db)`, which the request path calls before dispatching upstream
+so a pooled connection is not held across the provider call. Migrations live
+under `alembic/versions/`.
+
+Once a client-side `db_command_timeout` is configured, a database call can
+raise a bare `TimeoutError` as well as a `SQLAlchemyError`. Statement timeouts
+are translated back to `SQLAlchemyError` per engine, but a *connect* timeout is
+not, so handlers on the request path catch `DATABASE_ERRORS` from
+`core/database.py` rather than `SQLAlchemyError` alone.
 
 ## Configuration
 
