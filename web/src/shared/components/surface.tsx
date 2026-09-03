@@ -1,11 +1,14 @@
 import {
   type HTMLAttributes,
   type ReactNode,
+  type RefObject,
   useEffect,
   useId,
   useRef,
   useState,
 } from "react"
+
+import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
 
 /**
  * The shared vocabulary of the divided surface: the full-bleed rule, the square
@@ -267,11 +270,18 @@ export function RowAction({
   isDanger,
   isDisabled,
   ariaLabel,
+  ref,
   children,
 }: {
   onPress: () => void
   isDanger?: boolean
   isDisabled?: boolean
+  /**
+   * Forwarded to the button so a caller can move focus onto it. The two-step
+   * confirm is the only caller: its swap unmounts a focused control, and a ref
+   * is the only way to hand the caret to whatever replaced it.
+   */
+  ref?: RefObject<HTMLButtonElement | null>
   /**
    * Replaces the visible label for assistive tech, which is how a row action
    * says which row it acts on and why it is refused: a disabled control takes
@@ -283,6 +293,7 @@ export function RowAction({
 }) {
   return (
     <button
+      ref={ref}
       type="button"
       disabled={isDisabled}
       aria-label={ariaLabel}
@@ -321,10 +332,21 @@ export function ConfirmRowAction({
   children: ReactNode
 }) {
   const [armed, setArmed] = useState(false)
+  // Cancelling unmounts the focused Cancel button, which has no counterpart at
+  // rest, and focus lands on `<body>`: the way out of a destructive action
+  // costs a keyboard user their place. Arming does not have that problem, but
+  // only by accident, because React reuses the trigger's own node as Confirm;
+  // the hook covers both so the accident stops being load-bearing.
+  const { triggerRef, confirmRef } = useConfirmationFocus(armed)
   if (armed) {
     return (
       <>
-        <RowAction isDanger isDisabled={isPending} onPress={onConfirm}>
+        <RowAction
+          ref={confirmRef}
+          isDanger
+          isDisabled={isPending}
+          onPress={onConfirm}
+        >
           {confirmLabel}
         </RowAction>
         <RowAction isDisabled={isPending} onPress={() => setArmed(false)}>
@@ -333,7 +355,11 @@ export function ConfirmRowAction({
       </>
     )
   }
-  return <RowAction onPress={() => setArmed(true)}>{children}</RowAction>
+  return (
+    <RowAction ref={triggerRef} onPress={() => setArmed(true)}>
+      {children}
+    </RowAction>
+  )
 }
 
 /**
