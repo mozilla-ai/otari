@@ -102,7 +102,8 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 
 ## Repository Conventions
 - Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).
-- Add a comment only where the logic is not obvious; keep docstrings concise and meaningful on public functions and classes. Do not restate the code, narrate the change, or record what the code used to do: the commit message is where that belongs. Leave the comments around a change shorter than you found them: prune narration, repeated rationale, and implementation history as you touch them.
+- Add a comment only where the logic is not obvious; keep docstrings concise and meaningful. Do not restate the code, narrate the change, or record what the code used to do: the commit message is where that belongs. Leave the comments around a change shorter than you found them: prune narration, repeated rationale, and implementation history as you touch them.
+- Add a standalone document only for a durable user workflow, a public contract, or a cross-cutting invariant; implementation detail belongs next to the code. Link one canonical source rather than restating it, and fix or delete whatever the change made wrong before it lands.
 - Preserve security-relevant behavior: header parsing, auth checks, and the error-detail boundary. Do not leak internals in public error responses, and never log secrets, tokens, or raw API keys (the one-time bootstrap key print is the deliberate exception).
 - Keep test additions next to the behavior they cover: unit for pure logic, integration for route or database behavior.
 - CI runs Python 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
