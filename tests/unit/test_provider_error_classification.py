@@ -98,6 +98,7 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
         AnthropicAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
     ):
         assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
+        assert failure_status_code(exc) == 504
 
 
 def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:
