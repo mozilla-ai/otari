@@ -1,0 +1,15 @@
+# GitBook git-sync configuration.
+#
+# GitBook reads this from the repository root, then treats `root` as the
+# directory holding the published docs. Paths under `structure` are relative
+# to `root`.
+#
+# `readme` stays index.md rather than the conventional README.md: the file is
+# linked from the project README and from code comments, and renaming it would
+# break those references for no gain here.
+
+root: ./docs/
+
+structure:
+  readme: index.md
+  summary: SUMMARY.md
