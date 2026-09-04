@@ -1065,3 +1065,33 @@ describe("every column header says what it heads", () => {
     }
   })
 })
+
+// A number field's stepper is the user agent's, so it is spaced from the value
+// in CSS or not at all, and the number it is spaced by has to be the one the
+// trigger family already uses for a field's trailing glyph. Two places
+// declaring the gap between a field's text and the thing at its inline end is
+// how they come to disagree, which is what the type and radius sweeps above
+// guard in their own families.
+describe("a field's trailing glyph is spaced once", () => {
+  const stepper = block(
+    ".input::-webkit-inner-spin-button,\n.input::-webkit-outer-spin-button",
+  )
+  // The triggers' slot block, not the padding block above it: both carry the
+  // same selector list, and `block()` is a first-match `indexOf`, so the gap is
+  // read off the one that declares the layout.
+  const slotGap = CSS.match(
+    /\.dropdown__trigger \{[^}]*display:\s*flex;[^}]*gap:\s*([^;]+);/,
+  )?.[1].trim()
+  const margin = stepper.match(/margin-inline-start:\s*([^;]+);/)?.[1].trim()
+
+  it("spaces the stepper from the value at all", () => {
+    expect(margin, "nothing spaces the stepper from the value").toBe("8px")
+  })
+
+  it("spaces it by the gap the trigger family already uses", () => {
+    expect(slotGap, "no gap found in the trigger slot block").toBeDefined()
+    expect(margin, "the stepper's gap has drifted from the trigger's").toBe(
+      slotGap,
+    )
+  })
+})
