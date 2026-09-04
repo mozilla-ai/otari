@@ -14,7 +14,6 @@ upstream text.
 import asyncio
 
 import httpx
-import httpx2
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from any_llm.exceptions import UnsupportedParameterError
@@ -96,21 +95,9 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
     as a 504, not fall through to the generic 502."""
     for exc in (
         OpenAIAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
-        AnthropicAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
+        AnthropicAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
     ):
         assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
-
-
-@pytest.mark.parametrize("exc", [httpx2.ReadTimeout("slow"), httpx2.ConnectTimeout("slow")])
-def test_raw_httpx2_timeout_maps_to_504(exc: BaseException) -> None:
-    """Both SDKs wrap only the initial send, so a read timeout while the SSE body
-    is already streaming reaches the classifier as the HTTP client's own raw
-    exception. The Anthropic SDK's client is httpx2, whose exceptions share no
-    base class with httpx's and match neither ``*TimeoutError`` nor
-    ``*ConnectionError`` by name, so matching httpx alone would settle a real
-    provider timeout as the generic 502 an outage gets."""
-    assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
-    assert failure_status_code(exc) == 504
 
 
 def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:

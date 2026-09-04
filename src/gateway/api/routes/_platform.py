@@ -17,7 +17,6 @@ from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Literal, NamedTuple, TypeVar
 
 import httpx
-import httpx2
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from any_llm import LLMProvider
@@ -686,19 +685,11 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
     Recognizes, in order, walking ``.original_exception`` when the current
     exception carries no signal of its own:
 
-    1. Stdlib timeout exceptions, and the timeout/network exceptions of both
-       HTTP clients in the tree. Two are in play because the OpenAI SDK is on
-       ``httpx`` while the Anthropic SDK moved to ``httpx2``, whose exception
-       hierarchy is disjoint: ``httpx2.TimeoutException`` is not a subclass of
-       ``httpx.TimeoutException``, and neither is caught by the class-name
-       fallback in step 4 (``TimeoutException`` and ``ConnectError`` match
-       neither ``*TimeoutError`` nor ``*ConnectionError``). Matching only one
-       client would report the other's transport failures as a generic 502
-       and, in hybrid, stop them from driving fallback.
+    1. Stdlib/httpx timeout and network exceptions directly.
     2. The OpenAI and Anthropic SDKs' own ``APITimeoutError`` /
        ``APIConnectionError``. any-llm calls these SDKs directly (it does not
        wrap httpx itself unless ``ANY_LLM_UNIFIED_EXCEPTIONS=1``), and both
-       SDKs catch their client's timeout / network errors internally and
+       SDKs catch ``httpx.TimeoutException`` / network errors internally and
        re-raise as their own types. Those wrapped types are not instances of
        any httpx exception and carry no ``status_code``/``response``, so a
        real provider timeout or "provider unreachable" would otherwise be
@@ -706,12 +697,6 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
        in both SDKs, so the timeout check must run first. This covers the
        majority of any-llm providers, which reuse ``BaseOpenAIProvider`` or
        ``BaseAnthropicProvider``.
-
-       It does not cover a *streaming* failure. Both SDKs wrap only the
-       initial send, so a read timeout or dropped connection while the SSE
-       body is already streaming propagates as the client's own raw exception
-       through any-llm's unguarded ``async for`` over the stream. Step 1 is
-       what classifies those.
     3. An HTTP status code carried directly on the exception or on its
        attached ``.response``.
     4. A conservative duck-typed fallback, by exception class name, for the
@@ -739,21 +724,12 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
                 asyncio.TimeoutError,
                 TimeoutError,
                 httpx.TimeoutException,
-                httpx2.TimeoutException,
                 _OpenAIAPITimeoutError,
                 _AnthropicAPITimeoutError,
             ),
         ):
             return "timeout", None
-        if isinstance(
-            current,
-            (
-                httpx.NetworkError,
-                httpx2.NetworkError,
-                _OpenAIAPIConnectionError,
-                _AnthropicAPIConnectionError,
-            ),
-        ):
+        if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
             return "conn_err", None
 
         status_code = getattr(current, "status_code", None)
