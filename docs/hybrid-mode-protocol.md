@@ -487,10 +487,12 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
    so it additionally gets `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS`
    of grace on top of the budget (default 0). A request that forwards provider
    tools but does not run a gateway-managed tool loop keeps the tight budget on
-   non-final attempts, while its final deadline is floored to the tool-loop
-   budget (default 30000 ms). This gives tool-heavy agents more time only when
-   there is nowhere left to fail over. If the upstream raises before yielding or
-   the bounded wait times out, move to the next attempt.
+   non-final attempts, while its final attempt takes the tool-loop budget
+   (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP`, default 30000 ms) as
+   its base before the grace is added. This gives tool-heavy agents more time
+   only when there is nowhere left to fail over, and the configured grace stays
+   additive in every mode. If the upstream raises before yielding or the bounded
+   wait times out, move to the next attempt.
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
    and start flushing SSE chunks to the client.
 
@@ -530,4 +532,5 @@ flag.
 | `PLATFORM_USAGE_INLINE_TIMEOUT_MS` | `1500` | Budget for the one usage report the response path waits on to attach inline cost. Expiry ships the response without cost; the report itself continues. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. Forwarded provider-tool requests retain it on non-final attempts. |
-| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt. A final request with forwarded provider tools gets at least the tool-loop budget (`30000` ms by default). |
+| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP` | `30000` | Gate budget for a gateway-managed tool loop, and the final-attempt base for a request that forwards provider tools. |
+| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, added on top of whichever base budget applies. |

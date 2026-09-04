@@ -3713,9 +3713,11 @@ def stream_final_attempt_extra_seconds(
     Added on top of the per-attempt failover budget for the terminal attempt,
     which has no next entry in the routing policy to fall over to. A request that
     forwards provider-native tools but does not run a gateway-managed tool loop
-    keeps the plain failover budget for non-final attempts, while its final
-    deadline is floored to the tool-loop budget. Tool-heavy agents therefore get
-    the existing relaxed criterion only when there is nowhere left to fail over.
+    keeps the plain failover budget on non-final attempts, and on the final one
+    is raised to the tool-loop base before the configured grace is added, so
+    tool-heavy agents get the relaxed criterion only where there is nowhere left
+    to fail over. The grace stays additive in every mode: an operator who
+    configures it always buys that much more time.
     """
     configured_extra = (
         int(
@@ -3731,7 +3733,7 @@ def stream_final_attempt_extra_seconds(
 
     plain_budget = stream_first_chunk_timeout_seconds(config, tool_mode=False)
     tool_loop_budget = stream_first_chunk_timeout_seconds(config, tool_mode=True)
-    return max(configured_extra, tool_loop_budget - plain_budget)
+    return configured_extra + max(0.0, tool_loop_budget - plain_budget)
 
 
 # ---------------------------------------------------------------------------

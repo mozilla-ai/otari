@@ -2481,6 +2481,13 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
             "streaming_first_chunk_timeout_ms",
             int,
         ),
+        # The same budget for a request that runs a gateway-managed tool loop or
+        # forwards provider-native tools, which are slow to emit a first token
+        # because the model picks a tool before it says anything.
+        "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP": (
+            "streaming_first_chunk_timeout_ms_tool_loop",
+            int,
+        ),
         # Extra first-chunk grace for the sole/final streaming attempt, added on
         # top of the per-attempt budget above. The failover budget exists to move
         # to the next routing-policy entry when an attempt is slow; the final

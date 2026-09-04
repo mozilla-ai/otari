@@ -92,9 +92,10 @@ _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY = "streaming_first_chunk_timeout_ms
 # into a 504 with nothing to fall over to. Granting grace keeps the terminal wait
 # bounded (a genuinely hung upstream still times out at budget + grace) while not
 # failing valid slow-to-start responses. Applied on top of whichever base budget
-# is in effect (plain or tool-loop). Defaults to 0 (no grace), so behavior is
-# unchanged unless an operator opts in via ``config.platform`` (v1.2 will move
-# these onto the routing_policy schema).
+# is in effect: the tool-loop one whenever the request runs a gateway-managed
+# tool loop or forwards provider-native tools, the plain one otherwise. Defaults
+# to 0 (no grace), so behavior is unchanged unless an operator opts in via
+# ``config.platform`` (v1.2 will move these onto the routing_policy schema).
 _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS = 0
 _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_final_attempt_extra_first_chunk_timeout_ms"
 

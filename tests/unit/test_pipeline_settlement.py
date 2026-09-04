@@ -256,7 +256,7 @@ def test_first_chunk_timeout_reads_shared_config_keys() -> None:
     ("tool_mode", "has_forwarded_tools", "expected_final_timeout"),
     [
         pytest.param(False, False, 10.0, id="ordinary-final"),
-        pytest.param(False, True, 30.0, id="forwarded-tools-final"),
+        pytest.param(False, True, 37.0, id="forwarded-tools-final"),
         pytest.param(True, False, 37.0, id="managed-tool-loop-final"),
         pytest.param(True, True, 37.0, id="managed-loop-with-forwarded-tools-final"),
     ],
@@ -338,7 +338,7 @@ async def test_streaming_fallback_wires_forwarded_tools_into_final_timeout(
 
     assert response is marker
     assert captured["first_chunk_timeout_seconds"] == 3.0
-    assert captured["final_attempt_extra_seconds"] == 27.0
+    assert captured["final_attempt_extra_seconds"] == 34.0
 
 
 # ---------------------------------------------------------------------------
