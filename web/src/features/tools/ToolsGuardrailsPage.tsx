@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { Fragment, useEffect, useRef, useState } from "react"
+import { FiCheck } from "react-icons/fi"
 import type {
   ManagedTool,
   ToolServiceName,
@@ -110,20 +111,7 @@ function SaveToast({ message }: { message: string | null }) {
       aria-live="polite"
       className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-lg border border-success bg-success-subtle px-4 py-3 text-sm font-medium text-success shadow-elevation-lg"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        aria-hidden="true"
-        className="h-5 w-5"
-      >
-        <path
-          d="M20 6 9 17l-5-5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <FiCheck aria-hidden="true" className="h-5 w-5" />
       {message}
     </div>
   )

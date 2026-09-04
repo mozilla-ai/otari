@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { FiX } from "react-icons/fi"
 
 import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
 
@@ -429,16 +430,7 @@ export function DismissChip({
         }
         className="inline-flex h-6 w-6 items-center justify-center text-muted hover:text-foreground"
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          className="h-3 w-3"
-          aria-hidden="true"
-        >
-          <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-        </svg>
+        <FiX aria-hidden="true" className="h-3 w-3" />
       </button>
     </span>
   )

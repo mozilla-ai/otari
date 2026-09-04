@@ -16,6 +16,7 @@ import { Link } from "@tanstack/react-router"
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { Checkbox as AriaCheckbox } from "react-aria-components"
+import { FiCopy, FiRotateCw } from "react-icons/fi"
 import { ApiError } from "@/shared/api/client"
 import { Dot } from "@/shared/components/surface"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
@@ -443,21 +444,10 @@ export function RefreshButton({
         onPress={onRefresh}
         aria-label={label}
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+        <FiRotateCw
           aria-hidden="true"
-        >
-          <path
-            d="M20 11a8 8 0 1 0-.5 4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path d="M20 4v5h-5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+          className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+        />
       </Button>
     </span>
   )
@@ -663,21 +653,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
         aria-label={`Copy ${label}`}
         onPress={copy}
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className="h-3.5 w-3.5"
-          aria-hidden="true"
-        >
-          <rect x="9" y="9" width="11" height="11" rx="2" />
-          <path
-            d="M5 15V5a2 2 0 0 1 2-2h8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <FiCopy aria-hidden="true" className="h-3.5 w-3.5" />
       </Button>
       <Tooltip.Content placement="top" showArrow>
         {state === "failed"

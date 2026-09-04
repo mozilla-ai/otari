@@ -1,6 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
+import { FiShare } from "react-icons/fi"
 import type {
   SummaryDimension,
   UsageBucket,
@@ -1419,30 +1420,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                     aria-label="Share usage as an image"
                     aria-expanded={shareOpen}
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="h-4 w-4"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M12 15V3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M8 7l4-4 4 4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                    <FiShare aria-hidden="true" className="h-4 w-4" />
                   </Button>
                 </figcaption>
               </figure>
