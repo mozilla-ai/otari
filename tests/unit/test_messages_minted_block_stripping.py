@@ -13,10 +13,7 @@ from typing import Any
 import pytest
 
 from gateway.api.routes._pipeline import ToolContext
-from gateway.api.routes.messages import (
-    _has_gateway_minted_mcp_blocks,
-    _strip_gateway_minted_blocks,
-)
+from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
 
@@ -90,11 +87,11 @@ def test_non_list_input_passes_through() -> None:
     assert _strip_gateway_minted_blocks("not a list") == "not a list"
 
 
-# --- the gate that decides whether stripping runs at all ----------------------
+# --- web-search interception capability ---------------------------------------
 
 
 def _tool_ctx(config: GatewayConfig) -> ToolContext:
-    """A ToolContext carrying nothing but the two inputs the gate reads."""
+    """A ToolContext carrying nothing but the two inputs the property reads."""
     return ToolContext(
         config=config,
         mcp_server_configs=None,
@@ -125,9 +122,7 @@ def test_gate_is_on_when_opted_in_with_a_backend(monkeypatch: pytest.MonkeyPatch
 
 
 def test_gate_is_off_when_opted_in_without_a_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With nothing to intercept to, the keyword was forwarded and the provider ran
-    the search, so the blocks in the transcript are its own signed ones. Stripping
-    them would break the citations round-trip Anthropic itself established."""
+    """With nothing to intercept to, the provider remains the search owner."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     config = GatewayConfig(web_search_intercept=True)
     assert config.web_search_url is None
@@ -197,11 +192,10 @@ def test_gateway_mcp_activity_pair_is_stripped() -> None:
 
     kept = _strip_gateway_minted_blocks(messages)[0]["content"]
 
-    assert _has_gateway_minted_mcp_blocks(messages) is True
     assert kept == [{"type": "text", "text": "answer"}]
 
 
-def test_early_mcp_strip_preserves_web_search_blocks() -> None:
+def test_mcp_and_web_search_activity_are_stripped_together() -> None:
     gateway_mcp_pair = _mcp_pair(f"{MCP_ACTIVITY_ID_PREFIX}abc")
     web_pair = _gateway_pair()
     messages: list[dict[str, Any]] = [
@@ -211,15 +205,14 @@ def test_early_mcp_strip_preserves_web_search_blocks() -> None:
         }
     ]
 
-    kept = _strip_gateway_minted_blocks(messages, strip_web_search=False)[0]["content"]
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
 
-    assert kept == [*web_pair, {"type": "text", "text": "answer"}]
+    assert kept == [{"type": "text", "text": "answer"}]
 
 
 def test_provider_mcp_activity_pair_survives() -> None:
     messages: list[dict[str, Any]] = [{"role": "assistant", "content": _mcp_pair("mcptoolu_provider")}]
 
-    assert _has_gateway_minted_mcp_blocks(messages) is False
     assert _strip_gateway_minted_blocks(messages) == messages
 
 
@@ -249,7 +242,6 @@ def test_orphaned_gateway_mcp_result_is_stripped() -> None:
         }
     ]
 
-    assert _has_gateway_minted_mcp_blocks(messages) is True
     assert _strip_gateway_minted_blocks(messages)[0]["content"] == [
         {"type": "text", "text": "answer"}
     ]

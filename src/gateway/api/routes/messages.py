@@ -167,26 +167,7 @@ def _is_gateway_minted_mcp_block(block: Any) -> bool:
     return str(activity_id or "").startswith(MCP_ACTIVITY_ID_PREFIX)
 
 
-def _has_gateway_minted_mcp_blocks(messages: Any) -> bool:
-    """Whether an inbound transcript contains Otari-provenance MCP activity."""
-    if not isinstance(messages, list):
-        return False
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        content = message.get("content")
-        if not isinstance(content, list):
-            continue
-        if any(_is_gateway_minted_mcp_block(block) for block in content):
-            return True
-    return False
-
-
-def _strip_gateway_minted_blocks(
-    messages: Any,
-    *,
-    strip_web_search: bool = True,
-) -> Any:
+def _strip_gateway_minted_blocks(messages: Any) -> Any:
     """Drop this gateway's own server-tool blocks from inbound ``messages``.
 
     Continuing an Anthropic conversation means echoing the previous assistant turn.
@@ -214,11 +195,9 @@ def _strip_gateway_minted_blocks(
             continue
         # Two passes: identify our web-search results and our provenance-prefixed
         # MCP uses, then drop each complete pair. A provider's pair matches neither.
-        minted_web_ids = (
-            {block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)}
-            if strip_web_search
-            else set()
-        )
+        minted_web_ids = {
+            block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
+        }
         minted_mcp_ids = {
             block.get("id") if block.get("type") == "mcp_tool_use" else block.get("tool_use_id")
             for block in content
@@ -593,16 +572,12 @@ async def create_message(
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
-    # Remove replayed gateway-owned MCP activity before admission derives prompt
+    # Remove replayed gateway-owned activity before admission derives prompt
     # size. Waiting until request_fields are built below would reserve against
     # result content that never reaches the provider and can falsely reject or
-    # overcharge the request. Web-search stripping remains gated later because
-    # its provenance depends on the resolved interception configuration.
-    if _has_gateway_minted_mcp_blocks(request.messages):
-        request.messages = _strip_gateway_minted_blocks(
-            request.messages,
-            strip_web_search=False,
-        )
+    # overcharge the request. Provenance comes from each block, so this is
+    # independent of whether the current request enables the same tool again.
+    request.messages = _strip_gateway_minted_blocks(request.messages)
 
     async def _normalize(
         user_id: str,
@@ -693,9 +668,6 @@ async def create_message(
     scope_prompt_cache_key(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
-    inbound_messages = request_fields.get("messages")
-    if inbound_messages and tool_ctx.intercepts_web_search:
-        request_fields["messages"] = _strip_gateway_minted_blocks(inbound_messages)
     if tool_ctx.use_sandbox:
         # ``container`` addresses Anthropic's own code-execution container, and
         # the gateway sandbox owns execution for this request, so the provider

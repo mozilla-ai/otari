@@ -530,12 +530,12 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
     assert plain_amessages_called is False
 
 
-def test_mcp_servers_do_not_widen_web_search_replay_stripping(
+def test_web_search_replay_is_stripped_when_interception_is_off(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """MCP configuration must not strip web-search blocks when interception is off."""
+    """Gateway provenance, not the current interception setting, controls replay stripping."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     replayed_messages = [
         {"role": "user", "content": "search"},
@@ -581,7 +581,11 @@ def test_mcp_servers_do_not_widen_web_search_replay_stripping(
         )
 
     assert resp.status_code == 200, resp.text
-    assert captured["messages"] == replayed_messages
+    assert captured["messages"] == [
+        replayed_messages[0],
+        {"role": "assistant", "content": [{"type": "text", "text": "answer"}]},
+        replayed_messages[2],
+    ]
 
 
 def test_code_execution_dispatches_through_sandbox_backend(
@@ -1034,31 +1038,58 @@ async def _stream_iter(*events: MessageStreamEvent) -> AsyncIterator[MessageStre
         yield event
 
 
-def test_echoed_mcp_activity_is_removed_before_prompt_estimation(
+@pytest.mark.parametrize(
+    "activity_blocks",
+    [
+        [
+            {
+                "type": "mcp_tool_use",
+                "id": f"{MCP_ACTIVITY_ID_PREFIX}echoed",
+                "name": "lookup",
+                "server_name": "fixture",
+                "input": {"id": 755},
+            },
+            {
+                "type": "mcp_tool_result",
+                "tool_use_id": f"{MCP_ACTIVITY_ID_PREFIX}echoed",
+                "content": "large-result" * 10_000,
+                "is_error": False,
+            },
+        ],
+        [
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_echoed",
+                "name": "web_search",
+                "input": {"query": "otari"},
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_echoed",
+                "content": [
+                    {
+                        "type": "web_search_result",
+                        "url": "https://example.test",
+                        "title": "large-result" * 10_000,
+                        "encrypted_content": "",
+                    }
+                ],
+            },
+        ],
+    ],
+    ids=["mcp", "web-search"],
+)
+def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
     client: TestClient,
     api_key_header: dict[str, str],
+    activity_blocks: list[dict[str, Any]],
 ) -> None:
     """Gateway-owned result content must not consume budget headroom before being stripped."""
     messages = [
         {"role": "user", "content": "first turn"},
         {
             "role": "assistant",
-            "content": [
-                {
-                    "type": "mcp_tool_use",
-                    "id": f"{MCP_ACTIVITY_ID_PREFIX}echoed",
-                    "name": "lookup",
-                    "server_name": "fixture",
-                    "input": {"id": 755},
-                },
-                {
-                    "type": "mcp_tool_result",
-                    "tool_use_id": f"{MCP_ACTIVITY_ID_PREFIX}echoed",
-                    "content": "large-result" * 10_000,
-                    "is_error": False,
-                },
-                {"type": "text", "text": "prior answer"},
-            ],
+            "content": [*activity_blocks, {"type": "text", "text": "prior answer"}],
         },
         {"role": "user", "content": "continue"},
     ]
