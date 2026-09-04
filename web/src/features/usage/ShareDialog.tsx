@@ -1,4 +1,4 @@
-import { AlertDialog, Button } from "@heroui/react"
+import { Button, Modal } from "@heroui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client"
 import {
@@ -250,16 +250,17 @@ export function ShareDialog(props: ShareDialogProps) {
   }
 
   return (
-    <AlertDialog isOpen onOpenChange={(open) => (open ? undefined : onClose())}>
-      <AlertDialog.Backdrop>
-        <AlertDialog.Container placement="center" size="lg">
-          <AlertDialog.Dialog className="w-[92vw] max-w-[940px]">
-            <AlertDialog.Header>
-              <AlertDialog.Heading>
-                Share this view as an image
-              </AlertDialog.Heading>
-            </AlertDialog.Header>
-            <AlertDialog.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
+    <Modal isOpen onOpenChange={(open) => (open ? undefined : onClose())}>
+      <Modal.Trigger aria-hidden="true" className="hidden">
+        Open share dialog
+      </Modal.Trigger>
+      <Modal.Backdrop>
+        <Modal.Container placement="center" size="lg" scroll="outside">
+          <Modal.Dialog className="otari-modal-wide">
+            <Modal.Header>
+              <Modal.Heading>Share this view as an image</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body className="flex flex-col gap-4">
               <p className="text-caption">
                 The card shows the window and filters currently applied above.
                 Change them on the page to change what it says.
@@ -393,8 +394,8 @@ export function ShareDialog(props: ShareDialogProps) {
                   </div>
                 </div>
               </div>
-            </AlertDialog.Body>
-            <AlertDialog.Footer className="flex flex-wrap items-center gap-2">
+            </Modal.Body>
+            <Modal.Footer className="flex flex-wrap items-center gap-2">
               {notice !== undefined ? (
                 <span className="mr-auto text-xs text-accent">{notice}</span>
               ) : null}
@@ -431,10 +432,10 @@ export function ShareDialog(props: ShareDialogProps) {
                   Copy image
                 </Button>
               ) : null}
-            </AlertDialog.Footer>
-          </AlertDialog.Dialog>
-        </AlertDialog.Container>
-      </AlertDialog.Backdrop>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
 
       {/* Rendered at full size off-screen: html cannot be rasterized from a
           display:none subtree (it has no layout), and the preview above must not
@@ -456,7 +457,7 @@ export function ShareDialog(props: ShareDialogProps) {
           />
         </div>
       </div>
-    </AlertDialog>
+    </Modal>
   )
 }
 

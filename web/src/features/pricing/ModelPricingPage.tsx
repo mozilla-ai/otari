@@ -1,4 +1,4 @@
-import { AlertDialog, Button, Card } from "@heroui/react"
+import { Button, Card, Modal } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 
 import type { PricingRefreshPreview, PricingResponse } from "@/client"
@@ -72,15 +72,16 @@ function PricingRefreshDialog({
   onReject: () => void
 }) {
   return (
-    <AlertDialog.Backdrop>
-      <AlertDialog.Container placement="center" size="lg">
-        <AlertDialog.Dialog>
-          <AlertDialog.Header>
-            <AlertDialog.Heading>
-              Review default price updates
-            </AlertDialog.Heading>
-          </AlertDialog.Header>
-          <AlertDialog.Body className="flex flex-col gap-4">
+    <Modal.Backdrop
+      isDismissable={!isPending}
+      isKeyboardDismissDisabled={isPending}
+    >
+      <Modal.Container placement="center" size="lg">
+        <Modal.Dialog>
+          <Modal.Header>
+            <Modal.Heading>Review default price updates</Modal.Heading>
+          </Modal.Header>
+          <Modal.Body className="flex flex-col gap-4">
             <p className="text-sm text-muted">
               {preview.added_count} added, {preview.changed_count} changed, and{" "}
               {preview.removed_count} removed upstream model prices. The
@@ -104,18 +105,18 @@ function PricingRefreshDialog({
               </p>
             ) : null}
             <ErrorBanner error={error} />
-          </AlertDialog.Body>
-          <AlertDialog.Footer>
+          </Modal.Body>
+          <Modal.Footer>
             <Button variant="ghost" isDisabled={isPending} onPress={onReject}>
               Reject changes
             </Button>
             <Button variant="primary" isPending={isPending} onPress={onAccept}>
               Accept price updates
             </Button>
-          </AlertDialog.Footer>
-        </AlertDialog.Dialog>
-      </AlertDialog.Container>
-    </AlertDialog.Backdrop>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   )
 }
 
@@ -162,13 +163,11 @@ function PricingRefreshSection() {
           <ErrorBanner error={previewRefresh.error} />
         </Card.Content>
       </Card>
-      <AlertDialog
+      <Modal
         isOpen={preview !== undefined}
         onOpenChange={(isOpen) => (!isOpen ? reject() : undefined)}
       >
-        <AlertDialog.Trigger className="hidden">
-          Review price updates
-        </AlertDialog.Trigger>
+        <Modal.Trigger className="hidden">Review price updates</Modal.Trigger>
         {preview ? (
           <PricingRefreshDialog
             preview={preview}
@@ -182,7 +181,7 @@ function PricingRefreshSection() {
             onReject={reject}
           />
         ) : null}
-      </AlertDialog>
+      </Modal>
     </section>
   )
 }

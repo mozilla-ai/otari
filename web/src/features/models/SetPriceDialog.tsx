@@ -1,4 +1,4 @@
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react"
+import { Button, Input, Label, Modal, TextField } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import { Field } from "@/shared/components/Field"
@@ -153,15 +153,21 @@ export function SetPriceDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
+    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
+      <Modal.Trigger aria-hidden="true" className="hidden">
+        {title}
+      </Modal.Trigger>
       {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{title}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
+        <Modal.Backdrop
+          isDismissable={!isPending}
+          isKeyboardDismissDisabled={isPending}
+        >
+          <Modal.Container placement="center" size="lg">
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>{title}</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="flex flex-col gap-4">
                 <p className="text-sm text-muted">{description(targetCount)}</p>
                 {collectModelKey ? (
                   <Field
@@ -208,8 +214,8 @@ export function SetPriceDialog({
                   rate.
                 </InfoBanner>
                 <ErrorBanner error={error} />
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
+              </Modal.Body>
+              <Modal.Footer>
                 <Button
                   variant="ghost"
                   isDisabled={isPending}
@@ -225,11 +231,11 @@ export function SetPriceDialog({
                 >
                   Set price
                 </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
       ) : null}
-    </AlertDialog>
+    </Modal>
   )
 }

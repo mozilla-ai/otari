@@ -913,6 +913,11 @@ body {
   width: fit-content;
   max-width: min(42rem, calc(100vw - 2rem));
 }
+/* ShareDialog opts out of the shared dialog cap through an app-owned hook. */
+.modal__dialog.otari-modal-wide {
+  width: min(92vw, 940px);
+  max-width: min(940px, calc(100vw - 2rem));
+}
 .modal__body {
   overflow: visible;
 }

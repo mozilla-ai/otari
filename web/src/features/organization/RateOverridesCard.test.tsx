@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationContext, OrganizationPricingOverride } from "@/client"
 import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { organizationContext } from "@/tests/fixtures"
+import { getModalBackdrop } from "@/tests/modal"
 import { renderWithRouter } from "@/tests/router"
 
 interface RecordedRequest {
@@ -192,6 +193,29 @@ describe("RateOverridesCard", () => {
         output_price_per_million: 15,
       })
     })
+  })
+
+  it("dismisses the override form from the backdrop and Escape", async () => {
+    mockApi({ overrides: [] })
+    const user = userEvent.setup()
+
+    await renderPage()
+    await user.click(
+      await screen.findByRole("button", { name: /add override/i }),
+    )
+    await screen.findByRole("dialog", { name: "Add rate override" })
+
+    await user.click(getModalBackdrop())
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByRole("button", { name: /add override/i }))
+    await screen.findByRole("dialog", { name: "Add rate override" })
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
   })
 
   it("refuses a model key with no provider prefix before sending it", async () => {

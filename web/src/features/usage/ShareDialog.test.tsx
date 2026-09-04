@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { UsageGroupRow, UsageTotals } from "@/client"
 import { usageTotals } from "@/tests/fixtures"
+import { getModalBackdrop } from "@/tests/modal"
 import { ShareDialog } from "./ShareDialog"
 
 // jsdom has no canvas, so the rasterizer cannot run for real here; mocked so the
@@ -54,23 +56,36 @@ const rows: UsageGroupRow[] = [
   },
 ]
 
-function renderDialog() {
+function TestShareDialog({ onClose }: { onClose: () => void }) {
+  const [isOpen, setIsOpen] = useState(true)
+
+  if (!isOpen) return null
+
+  return (
+    <ShareDialog
+      totals={totals}
+      series={[]}
+      modelRows={rows}
+      windowLabel="Jul 29 – Aug 11"
+      scopeSuffix=""
+      startIso="2026-07-29T00:00:00Z"
+      endIso="2026-08-11T00:00:00Z"
+      isStale={false}
+      onClose={() => {
+        setIsOpen(false)
+        onClose()
+      }}
+    />
+  )
+}
+
+function renderDialog(onClose = () => undefined) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <ShareDialog
-        totals={totals}
-        series={[]}
-        modelRows={rows}
-        windowLabel="Jul 29 – Aug 11"
-        scopeSuffix=""
-        startIso="2026-07-29T00:00:00Z"
-        endIso="2026-08-11T00:00:00Z"
-        isStale={false}
-        onClose={() => undefined}
-      />
+      <TestShareDialog onClose={onClose} />
     </QueryClientProvider>,
   )
 }
@@ -136,11 +151,44 @@ describe("ShareDialog", () => {
 
   it("presents as a modal dialog overlay, not an inline card", () => {
     renderDialog()
-    const dialog = screen.getByRole("alertdialog")
+    const dialog = screen.getByRole("dialog", {
+      name: "Share this view as an image",
+    })
     expect(dialog).toBeInTheDocument()
+    expect(dialog).toHaveClass("otari-modal-wide")
     expect(
       within(dialog).getByRole("button", { name: "Download PNG" }),
     ).toBeInTheDocument()
+  })
+
+  it("closes when Escape is pressed", async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    renderDialog(onClose)
+
+    await user.keyboard("{Escape}")
+
+    expect(onClose).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Share this view as an image" }),
+      ).not.toBeInTheDocument(),
+    )
+  })
+
+  it("closes when the backdrop is clicked", async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    renderDialog(onClose)
+
+    await user.click(getModalBackdrop())
+
+    expect(onClose).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Share this view as an image" }),
+      ).not.toBeInTheDocument(),
+    )
   })
 
   it("carries no window or filter control: data scope comes from the page", () => {
