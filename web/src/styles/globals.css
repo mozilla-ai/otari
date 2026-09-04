@@ -12,7 +12,7 @@
 /* =============================================================
  * Brand fonts — self-hosted woff2 (no runtime CDN request).
  *   Mozilla Text — UI / body (variable)
- *   Zilla Slab   — display / headings
+ *   Mozilla Headline — display / headings (variable)
  *   Fira Code    — mono / keys / IDs / code (variable)
  *
  * The faces and their SIL OFL 1.1 license texts live in
@@ -34,23 +34,10 @@
   font-display: swap;
 }
 @font-face {
-  font-family: "Zilla Slab";
-  src: url("/fonts/ZillaSlab-Medium.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Zilla Slab";
-  src: url("/fonts/ZillaSlab-SemiBold.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Zilla Slab";
-  src: url("/fonts/ZillaSlab-Bold.woff2") format("woff2");
-  font-weight: 700;
+  font-family: "Mozilla Headline";
+  src: url("/fonts/MozillaHeadline-Variable.woff2") format("woff2");
+  font-weight: 200 700;
+  font-stretch: 75% 125%;
   font-style: normal;
   font-display: swap;
 }
@@ -710,7 +697,7 @@
    * utilities and back the typography roles + base resets below. */
   --font-sans: "Mozilla Text", Arial, sans-serif;
   --font-mono: "Fira Code", "SF Mono", Menlo, Consolas, monospace;
-  --font-display: "Zilla Slab", Georgia, serif;
+  --font-display: "Mozilla Headline", "Mozilla Text", Arial, sans-serif;
   --color-background-alt: var(--color-background-muted);
   --color-surface-alt: var(--color-surface-muted);
   /* The deepest surface step, which HeroUI only exposes under its own
@@ -980,10 +967,9 @@
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   line-height: var(--text-2xl--line-height);
-  /* Overrides the step's -0.02em. Zilla Slab is a slab serif with wider
-     sidebearings than the body face, so it needs less negative tracking to
-     read as set rather than as squeezed. The step keeps -0.02em for any sans
-     consumer of text-2xl. */
+  /* Overrides the step's -0.02em. Mozilla Headline already draws tight
+     sidebearings at display sizes, so the full -0.02em reads as squeezed here.
+     The step keeps -0.02em for any other sans consumer of text-2xl. */
   letter-spacing: -0.01em;
   /* The semibold step, which is 550 here. Written as the token rather than as a
      number: the eight pages that spelled this header by hand asked for 600 and
@@ -1252,9 +1238,9 @@ body {
    every layer, so while this was unlayered it silently overrode the
    `font-family` of any role applied to a heading element. `text-heading` and
    `text-title` are set in the body face now, and both are worn by `<h2>` and
-   `<h3>`, so unlayered here would have kept them in Zilla Slab and made the
-   role a suggestion. Layered, a bare heading still gets the display face and a
-   role still wins. */
+   `<h3>`, so unlayered here would have kept them in Mozilla Headline and made
+   the role a suggestion. Layered, a bare heading still gets the display face
+   and a role still wins. */
 @layer base {
   h1,
   h2,
@@ -2991,9 +2977,9 @@ main {
 /* Rendered Markdown for the bundled user guide (DocsPage). There is no Tailwind
    typography plugin in web/, so the guide's prose is styled here, scoped to
    `.otari-markdown`, on the same tokens as the rest of the shell. Its headings
-   pick up Zilla Slab from the global h1–h6 rule, and its code the Fira Code
-   stack, so the guide is set in the dashboard's own faces rather than in a
-   second stack declared here. */
+   pick up Mozilla Headline from the global h1–h6 rule, and its code the Fira
+   Code stack, so the guide is set in the dashboard's own faces rather than in
+   a second stack declared here. */
 /* 16/26, and the step *up* from the product's 14px is the point: everything
    else in this dashboard is scanned and this is read. */
 .otari-markdown {

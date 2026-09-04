@@ -649,9 +649,9 @@ describe("semantic tokens only", () => {
 
 // A bare heading is not unstyled: the `@layer base` rule in globals.css hands
 // `h1`-`h6` the display face, so a heading that skips the type scale renders in
-// Zilla Slab at whatever size its hand-rolled classes say. otari#810 migrated
-// 35 sites and still left six behind (otari-ai#1933), which is what a rule
-// without a test does.
+// Mozilla Headline at whatever size its hand-rolled classes say. otari#810
+// migrated 35 sites and still left six behind (otari-ai#1933), which is what a
+// rule without a test does.
 describe("headings wear a type role", () => {
   const SRC = join(WEB, "src")
   const sources = readdirSync(SRC, { recursive: true })

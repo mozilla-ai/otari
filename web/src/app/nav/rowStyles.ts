@@ -119,7 +119,8 @@ const ROW_FOCUS =
  * `Disclosure.Trigger` wrapped in a `Disclosure.Heading`, which HeroUI renders
  * as a real `<h3>`, and the base reset gives every `h1`-`h6` the display face.
  * The button inherits it, so without this the rows that hold sub-items (Routing,
- * Tools) come out in Zilla Slab while their leaf siblings are in Mozilla Text.
+ * Tools) come out in Mozilla Headline while their leaf siblings are in Mozilla
+ * Text.
  * Naming the family on the shared row is what keeps the rail one typeface
  * wherever a row is rendered, rather than patching the one heading that has a
  * control inside it.
