@@ -479,12 +479,12 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
         <AlertDialog isOpen={dialogOpen} onOpenChange={onOpenChange}>
           {isGenerated ? (
             <AlertDialog.Trigger
-              className={buttonVariants({ size: "sm", variant: "danger-soft" })}
+              className={buttonVariants({ size: "sm", variant: "danger" })}
             >
               Regenerate
             </AlertDialog.Trigger>
           ) : (
-            <Button size="sm" variant="danger-soft" isDisabled>
+            <Button size="sm" variant="danger" isDisabled>
               Managed in configuration
             </Button>
           )}

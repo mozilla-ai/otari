@@ -807,7 +807,7 @@ export function ConfirmButton({
     <Button
       ref={triggerRef}
       size="sm"
-      variant="danger-soft"
+      variant="danger"
       onPress={() => setArmed(true)}
     >
       {children}

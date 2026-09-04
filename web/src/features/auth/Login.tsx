@@ -780,7 +780,7 @@ export function Login() {
             {offersPasskey ? (
               <Button
                 type="button"
-                variant="secondary"
+                variant="ghost"
                 fullWidth
                 isDisabled={
                   isSubmitting || isSigningOut || pendingProvider !== null
@@ -800,7 +800,7 @@ export function Login() {
                 <Button
                   key={provider}
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   fullWidth
                   isDisabled={
                     isSubmitting ||

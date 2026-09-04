@@ -191,7 +191,7 @@ export function WorkspaceMembersPanel({
                 />
                 <Button
                   size="sm"
-                  variant="danger-soft"
+                  variant="danger"
                   isDisabled={!canManageWorkspace}
                   onPress={() => setRemoving(member)}
                 >
