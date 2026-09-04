@@ -1576,7 +1576,6 @@ function DiscoveredErrors({
     // provider means models are missing from the table under it, which is a
     // wrong answer rather than a caveat.
     <Section
-      bleed={false}
       className="border-y border-border py-3"
       contentClassName="flex items-start gap-3 text-sm text-muted"
     >
@@ -2256,181 +2255,183 @@ export function ModelsPage() {
         }
       />
 
-      <div
-        className={`grid gap-4 lg:items-start ${
-          selectedRow ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"
-        }`}
-      >
-        <div className="flex min-w-0 flex-col gap-3">
-          {/* Two controls stay inline and the other six move behind "Add
-              filter", which is the pattern Activity already uses. The row had
-              stopped fitting: at 1728 its children measured 1434px in a 1416px
-              container, and at 1512 it was 1259px in 1200px, so it was already
-              wrapping before anybody widened anything. Search and provider are
-              the two somebody reaches for first; the rest are narrowing moves
-              that earn a click. */}
-          <FilterChips
-            chips={modelFilterChips}
-            onClearAll={clearModelFilters}
-            start={
-              <>
-                <SearchInput
-                  value={search}
-                  onChange={changeSearch}
-                  placeholder="Search models…"
-                />
-                <FilterSelect
-                  ariaLabel="Filter by provider"
-                  value={providerFilter}
-                  onChange={changeFilter(setProviderFilter)}
-                  options={providerOptions}
-                />
-              </>
-            }
-          >
-            <FilterSelect
-              label="Pricing"
-              value={pricingFilter}
-              onChange={changeFilter(setPricingFilter)}
-              options={PRICING_OPTIONS}
-            />
-            {/* Source, capability and release date all read a
+      <div className="flex flex-col gap-3">
+        {/* Two controls stay inline and the other six move behind "Add
+            filter", which is the pattern Activity already uses. The row had
+            stopped fitting: at 1728 its children measured 1434px in a 1416px
+            container, and at 1512 it was 1259px in 1200px, so it was already
+            wrapping before anybody widened anything. Search and provider are
+            the two somebody reaches for first; the rest are narrowing moves
+            that earn a click. */}
+        <FilterChips
+          chips={modelFilterChips}
+          onClearAll={clearModelFilters}
+          start={
+            <>
+              <SearchInput
+                value={search}
+                onChange={changeSearch}
+                placeholder="Search models…"
+              />
+              <FilterSelect
+                ariaLabel="Filter by provider"
+                value={providerFilter}
+                onChange={changeFilter(setProviderFilter)}
+                options={providerOptions}
+              />
+            </>
+          }
+        >
+          <FilterSelect
+            label="Pricing"
+            value={pricingFilter}
+            onChange={changeFilter(setPricingFilter)}
+            options={PRICING_OPTIONS}
+          />
+          {/* Source, capability and release date all read a
                 deployment-operator-only endpoint (`/v1/models/discoverable`
                 for the first, `/v1/models/metadata` for the other two). For a
                 caller those reads were withheld from, every value but "all"
                 would empty the table, so the control is absent rather than
                 offered as one that can only fail. */}
-            {isOperator ? (
-              <FilterSelect
-                label="Source"
-                value={sourceFilter}
-                onChange={changeFilter(setSourceFilter)}
-                options={SOURCE_OPTIONS}
-              />
-            ) : null}
-            {isOperator ? (
-              <FilterSelect
-                label="Capability"
-                value={capabilityFilter}
-                onChange={changeFilter(setCapabilityFilter)}
-                options={CAPABILITY_OPTIONS}
-              />
-            ) : null}
+          {isOperator ? (
             <FilterSelect
-              label="Min context"
-              value={minContext}
-              onChange={changeFilter(setMinContext)}
-              options={CONTEXT_OPTIONS}
+              label="Source"
+              value={sourceFilter}
+              onChange={changeFilter(setSourceFilter)}
+              options={SOURCE_OPTIONS}
             />
-            <FilterSelect
-              label="Max input price"
-              value={maxInput}
-              onChange={changeFilter(setMaxInput)}
-              options={PRICE_OPTIONS}
-            />
-            <FilterSelect
-              label="Compare at"
-              value={comparisonContext}
-              onChange={setComparisonContext}
-              options={PRICE_COMPARISON_OPTIONS}
-            />
-            {isOperator ? (
-              <FilterSelect
-                label="Released"
-                value={releaseFilter}
-                onChange={changeFilter(setReleaseFilter)}
-                options={RELEASE_OPTIONS}
-              />
-            ) : null}
-          </FilterChips>
-
-          <DiscoveredErrors
-            providers={discoveredErrors}
-            onPriceModel={setCustomPriceKey}
-          />
-
-          {selectedModelKeys.length > 0 ? (
-            <BulkActionBar
-              selectedCount={bulkCount}
-              allMatching={selection.allMatching}
-              matchingTotal={total}
-              canSelectAllMatching={canSelectAllMatching}
-              onSelectAllMatching={selection.enableAllMatching}
-              onClear={selection.clear}
-            >
-              <Button
-                size="sm"
-                variant="primary"
-                onPress={() => setBulkPriceOpen(true)}
-              >
-                Set pricing
-              </Button>
-            </BulkActionBar>
           ) : null}
-
-          <ModelTable
-            rows={pageModels}
-            isLoading={modelsLoading}
-            empty={emptyModels}
-            sortDescriptor={sortDescriptor}
-            onSortChange={onSortChange}
-            selectedKey={selectedKey}
-            onSelect={setSelectedKey}
-            onEditPricing={isOperator ? onEditPricing : undefined}
-            comparisonContextTokens={comparisonContextTokens}
-            selectedKeys={selection.selectedKeys}
-            onSelectionChange={selection.onSelectionChange}
-          />
-
-          {pricingRow ? (
-            <Section
-              bleed={false}
-              className="border-y border-border"
-              contentClassName="flex flex-col"
-            >
-              <div className="flex items-center justify-between border-b border-border py-2">
-                <h2 className="text-title">Edit pricing</h2>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => setPricingKey(null)}
-                >
-                  Close
-                </Button>
-              </div>
-              <InlinePriceForm
-                row={pricingRow}
-                onClose={() => setPricingKey(null)}
-              />
-            </Section>
-          ) : null}
-
-          <TablePagination
-            page={clampedPage}
-            pageSize={pageSize}
-            total={total}
-            rowsOnPage={pageModels.length}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
-              setPageSize(size)
-              setPage(0)
-            }}
-            pageSizeOptions={[15, 25, 50]}
-          />
-        </div>
-
-        {selectedRow ? (
-          <aside className="lg:sticky lg:top-4">
-            <ModelDetailPanel
-              row={selectedRow}
-              metadata={metadataByKey[selectedRow.key]}
-              metadataAvailable={metadataAvailable}
-              canEditPricing={isOperator}
-              discoveryKnown={isOperator}
-              onClose={() => setSelectedKey(null)}
+          {isOperator ? (
+            <FilterSelect
+              label="Capability"
+              value={capabilityFilter}
+              onChange={changeFilter(setCapabilityFilter)}
+              options={CAPABILITY_OPTIONS}
             />
-          </aside>
+          ) : null}
+          <FilterSelect
+            label="Min context"
+            value={minContext}
+            onChange={changeFilter(setMinContext)}
+            options={CONTEXT_OPTIONS}
+          />
+          <FilterSelect
+            label="Max input price"
+            value={maxInput}
+            onChange={changeFilter(setMaxInput)}
+            options={PRICE_OPTIONS}
+          />
+          <FilterSelect
+            label="Compare at"
+            value={comparisonContext}
+            onChange={setComparisonContext}
+            options={PRICE_COMPARISON_OPTIONS}
+          />
+          {isOperator ? (
+            <FilterSelect
+              label="Released"
+              value={releaseFilter}
+              onChange={changeFilter(setReleaseFilter)}
+              options={RELEASE_OPTIONS}
+            />
+          ) : null}
+        </FilterChips>
+
+        <DiscoveredErrors
+          providers={discoveredErrors}
+          onPriceModel={setCustomPriceKey}
+        />
+
+        {selectedModelKeys.length > 0 ? (
+          <BulkActionBar
+            selectedCount={bulkCount}
+            allMatching={selection.allMatching}
+            matchingTotal={total}
+            canSelectAllMatching={canSelectAllMatching}
+            onSelectAllMatching={selection.enableAllMatching}
+            onClear={selection.clear}
+          >
+            <Button
+              size="sm"
+              variant="primary"
+              onPress={() => setBulkPriceOpen(true)}
+            >
+              Set pricing
+            </Button>
+          </BulkActionBar>
         ) : null}
+
+        <div
+          className={`grid gap-4 lg:items-start ${
+            selectedRow ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"
+          }`}
+        >
+          <div className="flex min-w-0 flex-col gap-3">
+            <ModelTable
+              rows={pageModels}
+              isLoading={modelsLoading}
+              empty={emptyModels}
+              sortDescriptor={sortDescriptor}
+              onSortChange={onSortChange}
+              selectedKey={selectedKey}
+              onSelect={setSelectedKey}
+              onEditPricing={isOperator ? onEditPricing : undefined}
+              comparisonContextTokens={comparisonContextTokens}
+              selectedKeys={selection.selectedKeys}
+              onSelectionChange={selection.onSelectionChange}
+            />
+
+            {pricingRow ? (
+              <Section
+                bleed={false}
+                className="border-y border-border"
+                contentClassName="flex flex-col"
+              >
+                <div className="flex items-center justify-between border-b border-border py-2">
+                  <h2 className="text-title">Edit pricing</h2>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onPress={() => setPricingKey(null)}
+                  >
+                    Close
+                  </Button>
+                </div>
+                <InlinePriceForm
+                  row={pricingRow}
+                  onClose={() => setPricingKey(null)}
+                />
+              </Section>
+            ) : null}
+
+            <TablePagination
+              page={clampedPage}
+              pageSize={pageSize}
+              total={total}
+              rowsOnPage={pageModels.length}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size)
+                setPage(0)
+              }}
+              pageSizeOptions={[15, 25, 50]}
+            />
+          </div>
+
+          {selectedRow ? (
+            <aside className="lg:sticky lg:top-4">
+              <ModelDetailPanel
+                row={selectedRow}
+                metadata={metadataByKey[selectedRow.key]}
+                metadataAvailable={metadataAvailable}
+                canEditPricing={isOperator}
+                discoveryKnown={isOperator}
+                onClose={() => setSelectedKey(null)}
+              />
+            </aside>
+          ) : null}
+        </div>
       </div>
 
       <SetPriceDialog
