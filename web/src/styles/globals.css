@@ -1708,6 +1708,21 @@ main {
   box-shadow: none;
   padding-inline: 12px;
 }
+/* A number field's trailing glyph is the user agent's own stepper, and the
+   family had no notion of it: the value sat hard against it in all five
+   `type="number"` call sites, because the padding above is outside the stepper
+   and nothing was spacing the inside. 8px is the gap the trigger family below
+   already puts between a field's text and its trailing glyph, so a stepper is
+   spaced like a chevron rather than on a number of its own. It arrives as a
+   margin on the stepper because an input has no children to lay out (see the
+   note below), and it costs the value 8px of room, which matters only in the
+   112px fields and only past eight characters. Blink and WebKit only: Firefox
+   draws its stepper with no pseudo-element to reach. */
+.input::-webkit-inner-spin-button,
+.input::-webkit-outer-spin-button {
+  margin-inline-start: 8px;
+}
+
 /* The slot layout is the triggers' alone: an `<input>` is a replaced element
    with no children to lay out, so `display: flex` and a `gap` on it would be
    two declarations that read as intent and do nothing. */
