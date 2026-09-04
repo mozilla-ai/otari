@@ -796,7 +796,10 @@ function GetStartedStrip() {
 
   return (
     <Section
-      className="border-y border-border py-5"
+      // Its top rule only, for the reason `AttentionStrip` gives below: whatever
+      // follows this band in the empty state (the attention strip, or the KPI
+      // strip under it) draws the seam from its own side.
+      className="border-t border-border py-5"
       contentClassName="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex items-start gap-3">
@@ -917,13 +920,19 @@ function AttentionStrip({
     return null
   }
 
-  // No fill and no radius any more: the strip is a band of the page between two
-  // rules, and the square danger dot is what carries the urgency the tinted
+  // No fill and no radius any more: the strip is a band of the page under a
+  // rule, and the square danger dot is what carries the urgency the tinted
   // attention fill used to.
+  //
+  // Its top rule only. The band below it declares its own top rule, and two
+  // rules meeting on one line paint 1px twice: measured on this page, that seam
+  // came out two rows of pixels where every other rule was one, which is what
+  // read as a heavier rule. The seam belongs to the band below, which always
+  // renders; this band does not always.
   return (
     <Section
       role="alert"
-      className="border-y border-border py-3"
+      className="border-t border-border py-3"
       contentClassName="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center"
     >
       <span className="flex items-center gap-2 font-semibold text-foreground">
