@@ -14,7 +14,7 @@ import {
 import { ProductMark } from "@/shared/components/ProductMark"
 import { ErrorBanner } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { NAV_TRANSITION, navIndicatorClass } from "./rowStyles"
+import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
 
 // The menu's own rhythm, which is the rail's: a 44px row and a 32px heading
 // block. The eyebrow above the organization is shorter (28px), because it opens
@@ -118,8 +118,8 @@ export function WorkspaceSwitcher({
     <>
       <Popover isOpen={open} onOpenChange={setOpen}>
         {/* HeroUI's Button, not a plain one: the popover wires its trigger through
-          react-aria. `w-auto!` overrides the width the variant sets, which
-          otherwise stops this short of the rail rather than spanning it.
+          react-aria. It fills the band it opens the rail with, so the hover
+          fill is the band rather than a box inset inside it.
 
           Collapsing narrows the trigger to the mark, but it stays the same
           trigger: the rail's collapsed state is remembered, so a switcher that
@@ -140,13 +140,15 @@ export function WorkspaceSwitcher({
           // height and its mark rather than by an edge. So it takes the same
           // hover fill the nav rows take and nothing else.
           //
-          // 56px tall in both states, so the rail's first block is the same
-          // height whichever context it is in: the organization rail's "Back to"
-          // row sits in a box of exactly this height.
+          // It fills the 56px band in both states, so the rail's first block is
+          // the same height whichever context it is in: the organization rail's
+          // "Back to" row fills the same band. The band's own rule is what the
+          // fill stops at, which is why the height comes from `h-full` rather
+          // than from a floor of its own.
           className={
             collapsed
-              ? `min-h-14 w-full! items-center justify-center px-0 hover:bg-surface-alt ${NAV_TRANSITION}`
-              : `min-h-14 w-full! items-center justify-start gap-2.5 px-3 py-2 text-left hover:bg-surface-alt ${NAV_TRANSITION}`
+              ? `items-center justify-center hover:bg-surface-alt ${navBandRowClass({ collapsed })} ${NAV_TRANSITION}`
+              : `items-center justify-start gap-2.5 py-2 text-left hover:bg-surface-alt ${navBandRowClass()} ${NAV_TRANSITION}`
           }
         >
           {/* The mark is the switcher's hero, as in the prototype: the product

@@ -731,9 +731,9 @@ function AppShellChrome() {
               so the two meet at the rail's vertical rule and read as one
               unbroken line across the viewport. `h-14` and not `min-h-14`,
               because a row that can grow is a row that can miss it. */}
-          <div className="flex h-14 shrink-0 items-center border-b border-border px-3">
+          <div className="flex h-14 shrink-0 items-center border-b border-border">
             {showOrganizationRail ? (
-              <div className="flex w-full items-center">
+              <div className="flex h-full w-full items-center">
                 {inOrganization ? (
                   <Link
                     to={workspaceLanding?.to ?? "/"}
@@ -744,7 +744,10 @@ function AppShellChrome() {
                       recordNavigation(to, pathname === to)
                       closeMobileNav()
                     }}
-                    className={navRowClass({ collapsed: effectiveCollapsed })}
+                    className={navRowClass({
+                      collapsed: effectiveCollapsed,
+                      band: true,
+                    })}
                     aria-label={effectiveCollapsed ? backLabel : undefined}
                     title={effectiveCollapsed ? backLabel : undefined}
                   >
@@ -771,7 +774,7 @@ function AppShellChrome() {
                     type="button"
                     ref={orgNavBackRef}
                     onClick={() => setMobileOrgNavOpen(false)}
-                    className={`${navRowClass()} cursor-pointer`}
+                    className={`${navRowClass({ band: true })} cursor-pointer`}
                   >
                     <FiArrowLeft
                       aria-hidden="true"
@@ -947,7 +950,7 @@ function AppShellChrome() {
                 division of the rail. Unconditional now, where the hairline it
                 replaces appeared only for someone who managed an organization,
                 so the rail ended differently depending on who was looking. */}
-              <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border px-3">
+              <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu collapsed={effectiveCollapsed} />
               </div>
             </div>

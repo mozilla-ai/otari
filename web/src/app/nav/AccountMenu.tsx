@@ -291,9 +291,9 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
       {/* HeroUI's Button, not a plain one: the popover wires its trigger through
-          react-aria, and a bare <button> leaves it unopenable. `w-auto!` is what
-          makes it span the rail, overriding the width the variant sets, which
-          otherwise leaves this a pill in the corner. */}
+          react-aria, and a bare <button> leaves it unopenable. It fills the
+          band it closes the rail with, so the hover fill is the band rather
+          than a pill sitting inside it. */}
       <Button
         variant="ghost"
         // The identity this control exists to draw, folded into the name: a
@@ -303,7 +303,7 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
         // place it could reach anybody there. `AppearanceControl` folds its own
         // visible state in for the same reason.
         aria-label={`Account: ${identity.name}`}
-        className={`${navRowClass({ collapsed })} w-auto! justify-start`}
+        className={`${navRowClass({ collapsed, band: true })} justify-start`}
       >
         <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-control-border bg-surface-alt text-chrome-initials font-semibold text-muted">
           {identity.initials}
