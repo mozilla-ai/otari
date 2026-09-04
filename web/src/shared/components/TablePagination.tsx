@@ -124,7 +124,7 @@ export function TablePagination({
         <div className="otari-pagination__pager flex items-center gap-1">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             aria-label="First page"
             isDisabled={isFirst}
             onPress={() => onPageChange(0)}
@@ -133,7 +133,7 @@ export function TablePagination({
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             aria-label="Previous page"
             isDisabled={isFirst}
             onPress={() => onPageChange(page - 1)}
@@ -170,7 +170,7 @@ export function TablePagination({
           </span>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             aria-label="Next page"
             isDisabled={isLast}
             onPress={() => onPageChange(page + 1)}
@@ -179,7 +179,7 @@ export function TablePagination({
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             aria-label="Last page"
             isDisabled={pageCount == null || isLast}
             onPress={() => pageCount != null && onPageChange(pageCount - 1)}
