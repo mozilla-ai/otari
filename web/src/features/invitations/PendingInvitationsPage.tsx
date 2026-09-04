@@ -129,7 +129,7 @@ export function PendingInvitationsPage() {
                     Accept
                   </Button>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     aria-label={`Decline invitation to ${invitation.organization_name}`}
                     onPress={() => setDeclining(invitation)}
                   >

@@ -437,7 +437,7 @@ export function RefreshButton({
         <span className="text-caption">Updated {freshness}</span>
       ) : null}
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         isIconOnly
         isDisabled={isFetching}
@@ -574,7 +574,7 @@ export function CopyField({
         <label htmlFor={fieldId} className="text-caption">
           {label}
         </label>
-        <Button size="sm" variant="outline" onPress={copy}>
+        <Button size="sm" variant="ghost" onPress={copy}>
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>

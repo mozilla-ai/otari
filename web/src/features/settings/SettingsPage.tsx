@@ -314,7 +314,7 @@ function CopyField({
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <span className="text-caption">New master key</span>
-        <Button size="sm" variant="outline" onPress={copy}>
+        <Button size="sm" variant="ghost" onPress={copy}>
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
@@ -532,7 +532,7 @@ function SecretKeyRow() {
         <div className="shrink-0">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             isDisabled={!hasStoredKeys || reencrypt.isPending}
             onPress={() => reencrypt.mutate()}
           >

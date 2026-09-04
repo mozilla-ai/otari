@@ -154,7 +154,7 @@ function PricingRefreshSection() {
           </div>
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             isDisabled={previewRefresh.isPending || isPending}
             onPress={() => previewRefresh.mutate()}
           >

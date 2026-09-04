@@ -222,7 +222,7 @@ function UrlRow({
         </Button>
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           aria-label={`Test ${field.service}`}
           isDisabled={trimmed === "" || test.isPending}
           onPress={() => {
