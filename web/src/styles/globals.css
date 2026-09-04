@@ -1676,9 +1676,17 @@ main {
    button. `.otari-toolbar`, `.otari-pagination`, `.otari-table` and the
    per-page table classes already work this way for inputs and pagination
    controls; `.otari-bulk-bar` and `.otari-breakdown` already exist too.
-   `.otari-rail` and `.otari-row` are new class names for two places the
-   approved prototype declared (`place-nav` and `place-row`) and this
-   stylesheet had no word for.
+   `.otari-rail` is a new class name, for the place the approved prototype
+   declared as `place-nav` and this stylesheet had no word for. Its `place-row`
+   is deliberately NOT here: measured page by page, every candidate for it was
+   already covered or wanted the edge. A table row's ghosts are inside
+   `.otari-table`; the prototype demonstrated `place-row` only as a container
+   for icon-only ghosts, which the last selector below covers by what the
+   control is; a form row's single trailing action reads better WITH the edge
+   beside the bordered fields it sits with (compared on /routing, both ways);
+   and a table row's Edit and Delete are `RowAction`, a plain caption button
+   that is not part of this family at all. A place nobody consumes is a place
+   that goes stale, so it is not carried.
    The last selector is the one exception to place, and it is deliberate: an
    icon-only ghost never takes the edge, wherever it renders. `CopyButton` is
    why. It appears inside tables, inside the models detail panel, inside
@@ -1690,7 +1698,6 @@ main {
 .otari-bulk-bar .button--ghost,
 .otari-breakdown .button--ghost,
 .otari-rail .button--ghost,
-.otari-row .button--ghost,
 .button--ghost.button--icon-only {
   border-color: transparent;
 }
