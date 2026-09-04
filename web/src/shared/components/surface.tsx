@@ -32,21 +32,37 @@ import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
  *
  * `className` styles the band: its rules, its vertical padding, its own layout
  * if the content is a single row. `contentClassName` styles the column inside.
+ *
+ * `bleed={false}` for a band nested inside a column rather than sitting
+ * directly in the scroll area. The escape is `100cqw` against `<main>`, so a
+ * nested band does not stop at its column: measured inside a 360px grid cell it
+ * came out 1464px wide and 552px past the right edge of the page, painting over
+ * whatever shared the row. A nested band's rules run its own container instead,
+ * and its content aligns to that container's edges.
  */
 export function Section({
   className = "",
   contentClassName = "",
+  bleed = true,
   children,
   ...rest
 }: {
   className?: string
   contentClassName?: string
+  bleed?: boolean
   children: ReactNode
 } & Omit<HTMLAttributes<HTMLElement>, "className" | "children">) {
   return (
-    <section className={`otari-bleed ${className}`} {...rest}>
+    <section
+      className={bleed ? `otari-bleed ${className}` : className}
+      {...rest}
+    >
       <div
-        className={`mx-auto w-full max-w-[1800px] px-4 md:px-6 ${contentClassName}`}
+        className={
+          bleed
+            ? `mx-auto w-full max-w-[1800px] px-4 md:px-6 ${contentClassName}`
+            : `w-full ${contentClassName}`
+        }
       >
         {children}
       </div>
