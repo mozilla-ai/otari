@@ -213,7 +213,7 @@ scale a role belongs to before deciding a class beside it is redundant. `text-sh
 the one documented off-scale size, and globals.css says why: two letters in a 26px avatar are
 recognized rather than read.
 
-Zilla Slab is spent on `text-display` alone; every other content role, `text-heading`
+Mozilla Headline is spent on `text-display` alone; every other content role, `text-heading`
 included, is set in Mozilla Text, because at 18px a slab serif competes with the page title
 instead of sitting under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare
 `h1`-`h6` still defaults to the display face through the `@layer base` rule in the same file,

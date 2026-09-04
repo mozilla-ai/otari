@@ -15,7 +15,7 @@ the running dashboard too, not only present in the source tree.
 | Family | Faces | License | Copyright |
 | --- | --- | --- | --- |
 | Mozilla Text | `MozillaText-Variable.woff2`, `MozillaTextItalic-Variable.woff2` | [OFL 1.1](MozillaText-OFL.txt) | Copyright 2024, The Mozilla Foundation |
-| Zilla Slab | `ZillaSlab-Medium.woff2`, `ZillaSlab-SemiBold.woff2`, `ZillaSlab-Bold.woff2` | [OFL 1.1](ZillaSlab-OFL.txt) | Copyright 2017, The Mozilla Foundation |
+| Mozilla Headline | `MozillaHeadline-Variable.woff2` | [OFL 1.1](MozillaHeadline-OFL.txt) | Copyright 2025 The Mozilla Headline Project Authors |
 | Fira Code | `FiraCode-VariableFont_wght.woff2` | [OFL 1.1](FiraCode-OFL.txt) | Copyright (c) 2014, The Fira Code Project Authors |
 
 The license and copyright of each row are the font binary's own: the `name`
@@ -26,7 +26,8 @@ license file's own line, which for Fira Code is the upstream `LICENSE`'s
 `MozillaText-OFL.txt` is the canonical OFL 1.1 text under the copyright line and
 license URL that font declares, because Mozilla Text has no public upstream
 repository to copy a `LICENSE` from; the other two are their upstream projects'
-own license files verbatim.
+own license files verbatim (`MozillaHeadline-OFL.txt` from
+`mozilla/mozilla-headline-type`).
 
 Adding a face means adding its license here in the same commit. `fonts.test.ts`
 fails when a `.woff2` in this directory has no license file covering it, so the

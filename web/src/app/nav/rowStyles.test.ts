@@ -110,8 +110,8 @@ describe("navRowClass", () => {
   it("keeps every row on the sans face, groups included", () => {
     // A group's row is a `Disclosure.Trigger` inside a `Disclosure.Heading`,
     // which is a real <h3>, and the base reset hands every heading the display
-    // serif. Without the family named here, Routing and Tools come out in Zilla
-    // Slab beside leaves in Mozilla Text.
+    // face. Without the family named here, Routing and Tools come out in Mozilla
+    // Headline beside leaves in Mozilla Text.
     for (const row of [resting, selected]) {
       expect(row).toContain("font-sans")
     }
