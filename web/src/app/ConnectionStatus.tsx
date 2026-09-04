@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
+import { FiAlertTriangle } from "react-icons/fi"
 
 import { ApiError } from "@/shared/api/client"
 
@@ -52,24 +53,7 @@ export function ConnectionStatus() {
       aria-live="assertive"
       className="fixed right-4 bottom-4 z-50 flex max-w-sm items-start gap-2.5 rounded-lg border border-danger bg-danger-subtle px-4 py-3 text-sm text-danger shadow-elevation-lg"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        aria-hidden="true"
-        className="mt-0.5 h-5 w-5 shrink-0"
-      >
-        <path
-          d="M12 9v4M12 17h.01"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <FiAlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
       <span>
         <strong className="font-semibold">Can’t reach the gateway.</strong> The
         backend isn’t responding; data won’t load or save until the connection

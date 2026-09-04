@@ -1,6 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import type { ReactNode } from "react"
 import { useRef, useState } from "react"
+import { FiMinus, FiPlus } from "react-icons/fi"
 
 import type { UsageBucket } from "@/client"
 import {
@@ -295,16 +296,7 @@ export function ActivityTimeline({
               isDisabled={n === 0}
               onPress={zoomIn}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-4 w-4"
-                aria-hidden="true"
-              >
-                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-              </svg>
+              <FiPlus aria-hidden="true" className="h-4 w-4" />
             </Button>
             <Button
               size="sm"
@@ -314,16 +306,7 @@ export function ActivityTimeline({
               isDisabled={n === 0 || (atFullExtent && !largerPreset)}
               onPress={zoomOut}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-4 w-4"
-                aria-hidden="true"
-              >
-                <path d="M5 12h14" strokeLinecap="round" />
-              </svg>
+              <FiMinus aria-hidden="true" className="h-4 w-4" />
             </Button>
             {zoomed ? (
               <Button

@@ -1,5 +1,6 @@
 import { Button, Input, Label, Link, TextField } from "@heroui/react"
 import { useState } from "react"
+import { FiAlertCircle, FiChevronRight, FiEye, FiEyeOff } from "react-icons/fi"
 import { useAuth } from "@/features/auth/AuthContext"
 import type { SignInCredential } from "@/shared/api/client"
 import {
@@ -110,62 +111,22 @@ const CODE_CHIP =
 
 /** Sits on the label row beside a refusal. */
 function AlertIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-      className="h-3.5 w-3.5 shrink-0"
-    >
-      <circle cx="12" cy="12" r="9.25" />
-      <path d="M12 7.5v6" strokeLinecap="round" />
-      <path d="M12 16.6h.01" strokeLinecap="round" strokeWidth="2.4" />
-    </svg>
-  )
+  return <FiAlertCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
 }
 
-/**
- * The reveal toggle's two states. Drawn rather than set as a glyph so it takes
- * `currentColor` and renders the same face on every platform.
- */
+/** The reveal toggle's two states, both taking `currentColor`. */
 function EyeIcon({ isCrossedOut }: { isCrossedOut: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      aria-hidden="true"
-      className="h-4.5 w-4.5"
-    >
-      <path
-        d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="2.75" />
-      {isCrossedOut ? (
-        <path d="M4 20 20 4" strokeLinecap="round" strokeWidth="1.8" />
-      ) : null}
-    </svg>
-  )
+  const Glyph = isCrossedOut ? FiEyeOff : FiEye
+  return <Glyph aria-hidden="true" className="h-4.5 w-4.5" />
 }
 
 /** The disclosure's caret, rotating with its `<details open>`. */
 function DisclosureCaret() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
+    <FiChevronRight
       aria-hidden="true"
       className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
-    >
-      <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    />
   )
 }
 

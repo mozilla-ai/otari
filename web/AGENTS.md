@@ -69,6 +69,14 @@ Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
 types aligned with otari-ai.
 
+## Icons
+
+Icons come from `react-icons/fi`, the library the sidebar and the nav registry
+already use, and not from an inline `<svg>`: a hand-rolled glyph drifts from the
+library icon it imitates, and at the sizes these ship (12px to 20px) the drift
+is invisible until somebody looks closely. Inline SVG stays for the things that
+are not icons, the product mark and a chart's own marks.
+
 ## Data and generated files
 
 TanStack Query owns server state. Query keys, mutation invalidation, pagination,
