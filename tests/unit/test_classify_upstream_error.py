@@ -5,6 +5,7 @@ whether an upstream failure falls through to the next routing-policy attempt.
 import asyncio
 
 import httpx
+import httpx2
 import pytest
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -48,6 +49,13 @@ def test_provider_status_codes_fall_through(status: int) -> None:
         (asyncio.TimeoutError(), "timeout"),
         (httpx.TimeoutException("slow"), "timeout"),
         (httpx.ConnectError("refused"), "conn_err"),
+        # The Anthropic SDK is on httpx2, whose exceptions share no base class
+        # with httpx's. Without both, a raw transport failure on one client's
+        # providers classifies as "unknown" and stops driving fallback.
+        (httpx2.TimeoutException("slow"), "timeout"),
+        (httpx2.ConnectError("refused"), "conn_err"),
+        (httpx2.ReadTimeout("slow"), "timeout"),
+        (httpx2.ReadError("dropped"), "conn_err"),
     ],
 )
 def test_network_and_timeout_errors_are_retryable(exc: BaseException, expected_class: str) -> None:
