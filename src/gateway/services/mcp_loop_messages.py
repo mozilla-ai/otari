@@ -66,6 +66,7 @@ __all__ = [
     "MaxToolIterationsExceeded",
     "MCP_ACTIVITY_ID_PREFIX",
     "MCP_CLIENT_BETA",
+    "MCP_CLIENT_BETA_LEGACY",
     "anthropic_tool_loop",
     "anthropic_tool_loop_stream",
 ]
@@ -83,9 +84,11 @@ _PAGE_AGE_MAX_CHARS = 128
 # provider-native MCP blocks.
 MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
 
-# Anthropic beta capability a caller must declare before the Messages stream
+# Anthropic beta capabilities a caller may declare before the Messages stream
 # includes the beta-only MCP activity block vocabulary.
-MCP_CLIENT_BETA = "mcp-client-2025-04-04"
+MCP_CLIENT_BETA = "mcp-client-2025-11-20"
+MCP_CLIENT_BETA_LEGACY = "mcp-client-2025-04-04"
+_MCP_CLIENT_BETAS = frozenset({MCP_CLIENT_BETA, MCP_CLIENT_BETA_LEGACY})
 
 
 def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list[Any]:
@@ -892,7 +895,7 @@ async def anthropic_tool_loop_stream(
     natural ``message_start`` arrives downstream as if nothing had happened.
     """
     betas = completion_kwargs.get("betas")
-    emit_native_mcp = isinstance(betas, list) and MCP_CLIENT_BETA in betas
+    emit_native_mcp = isinstance(betas, list) and not _MCP_CLIENT_BETAS.isdisjoint(betas)
 
     # aclosing makes downstream closes (client disconnect) propagate to the
     # engine generator, and through it to the upstream provider stream,

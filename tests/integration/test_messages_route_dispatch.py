@@ -36,7 +36,11 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.services.mcp_client import MCPToolCallOutcome
-from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
+from gateway.services.mcp_loop_messages import (
+    MCP_ACTIVITY_ID_PREFIX,
+    MCP_CLIENT_BETA,
+    MCP_CLIENT_BETA_LEGACY,
+)
 
 _CONTEXT_MANAGEMENT = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
 _BETAS = ["compact-2026-01-12"]
@@ -326,6 +330,36 @@ def test_context_management_non_stream_contract(
     assert body["content"] == [{"type": "compaction", "content": "Conversation summary"}]
     assert body["context_management"]["applied_edits"][0]["cleared_input_tokens"] == 42
     assert body["usage"]["iterations"][0]["type"] == "compaction"
+
+
+def test_anthropic_beta_header_reaches_provider(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The Anthropic SDK's beta header is normalized into any-llm kwargs."""
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response()
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages?beta=true",
+            json={
+                "model": "anthropic:claude-opus-5",
+                "messages": [{"role": "user", "content": "Use the beta"}],
+                "max_tokens": 100,
+                "betas": _BETAS,
+            },
+            headers={
+                **api_key_header,
+                "anthropic-beta": f"{MCP_CLIENT_BETA},files-api-2025-04-14,{MCP_CLIENT_BETA}",
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["betas"] == [*_BETAS, MCP_CLIENT_BETA, "files-api-2025-04-14"]
 
 
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
@@ -1365,16 +1399,17 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
 
 
 @pytest.mark.parametrize(
-    ("betas", "expected_block_types"),
+    ("beta_header", "expected_block_types"),
     [
         (None, ["text"]),
-        ([MCP_CLIENT_BETA], ["mcp_tool_use", "mcp_tool_result", "text"]),
+        (MCP_CLIENT_BETA, ["mcp_tool_use", "mcp_tool_result", "text"]),
+        (MCP_CLIENT_BETA_LEGACY, ["mcp_tool_use", "mcp_tool_result", "text"]),
     ],
 )
 def test_stream_mcp_activity_requires_beta(
     client: TestClient,
     api_key_header: dict[str, str],
-    betas: list[str] | None,
+    beta_header: str | None,
     expected_block_types: list[str],
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
@@ -1482,9 +1517,11 @@ def test_stream_mcp_activity_requires_beta(
                 "max_tokens": 100,
                 "stream": True,
                 "mcp_servers": [{"name": "fixture", "url": "http://127.0.0.1:9999/mcp"}],
-                **({"betas": betas} if betas is not None else {}),
             },
-            headers=api_key_header,
+            headers={
+                **api_key_header,
+                **({"anthropic-beta": beta_header} if beta_header is not None else {}),
+            },
         )
 
     assert resp.status_code == 200, resp.text
@@ -1492,7 +1529,7 @@ def test_stream_mcp_activity_requires_beta(
     blocks = [payload["content_block"] for payload in payloads if payload.get("type") == "content_block_start"]
     assert [block["type"] for block in blocks] == expected_block_types
     assert calls == [("lookup", {"issue": 755})]
-    if betas is not None:
+    if beta_header is not None:
         assert blocks[0]["name"] == "lookup"
         assert blocks[0]["server_name"] == "fixture"
         assert blocks[0]["input"] == {"issue": 755}

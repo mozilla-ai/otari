@@ -72,6 +72,14 @@ from gateway.types.attempt import Attempt
 router = APIRouter(prefix="/v1", tags=["messages"])
 
 
+def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -> list[str] | None:
+    """Combine legacy body betas with Anthropic's standard beta header."""
+    betas = list(body_betas or [])
+    for header_value in raw_request.headers.getlist("anthropic-beta"):
+        betas.extend(beta.strip() for beta in header_value.split(",") if beta.strip())
+    return list(dict.fromkeys(betas)) or None
+
+
 class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc]
     """Anthropic Messages API-compatible request.
 
@@ -571,6 +579,9 @@ async def create_message(
     applies up to the pre-lock-in point, same as chat).
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
+    merged_betas = _merge_anthropic_betas(request.betas, raw_request)
+    if merged_betas is not None:
+        request.betas = merged_betas
 
     # Remove replayed gateway-owned activity before admission derives prompt
     # size. Waiting until request_fields are built below would reserve against
