@@ -269,11 +269,11 @@ export function OrganizationDomainsPage() {
             </Button>
           ) : null}
           <ConfirmButton
-            confirmLabel="Remove"
+            confirmLabel="Remove claim"
             isPending={remove.isPending}
             onConfirm={() => remove.mutate(row.id)}
           >
-            Remove
+            Remove domain
           </ConfirmButton>
         </div>
       ),
