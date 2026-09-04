@@ -850,11 +850,11 @@ function PanelPriceEditor({
           {row.source === "configured" ? (
             <>
               <ConfirmButton
-                confirmLabel="Reset"
+                confirmLabel="Reset to default"
                 isPending={deletePricing.isPending}
                 onConfirm={() => deletePricing.mutate(row.key)}
               >
-                Reset
+                Reset price
               </ConfirmButton>
               <InfoTooltip label="What reset does">
                 Removes the custom price. The model reverts to the default rate
@@ -1184,13 +1184,13 @@ function InlinePriceForm({
         {row.source === "configured" ? (
           <span className="inline-flex items-center gap-1">
             <ConfirmButton
-              confirmLabel="Reset"
+              confirmLabel="Reset to default"
               isPending={deletePricing.isPending}
               onConfirm={() =>
                 deletePricing.mutate(row.key, { onSuccess: onClose })
               }
             >
-              Reset
+              Reset price
             </ConfirmButton>
             <InfoTooltip label="What reset does">
               Removes the custom price. The model reverts to the default rate
