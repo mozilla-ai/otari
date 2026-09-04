@@ -501,7 +501,17 @@ export function KpiCell({
     // reserves nothing when no label wraps, so it costs no dead space wide.
     // `items-end` on the label is what makes a one-line label sit on the same
     // baseline as the last line of a two-line one.
-    <div className="grid row-span-4 grid-rows-subgrid gap-1.5 border-border px-7 py-[18px] not-last:border-r">
+    // `minmax(0,1fr)` for the cell's own column, not the `auto` a grid gives
+    // itself by default. The strip's tracks are already `minmax(0,1fr)`, so the
+    // cell's box is its track; what was unbounded was the column INSIDE it,
+    // which took its floor from the widest child. The subline never wraps, so
+    // its min-content is the whole string: measured with a 59-character
+    // subline, the inner column came out 356px inside a 283px cell and every
+    // child sized to it, the sparkline included, painted 129px into the cell
+    // beside it (218px at 1280, since the track shrinks and the string does
+    // not). Bounding the column is what makes the truncation and the
+    // sparkline's `w-full` mean anything.
+    <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[18px] not-last:border-r">
       <span className="flex items-end text-overline">{label}</span>
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
