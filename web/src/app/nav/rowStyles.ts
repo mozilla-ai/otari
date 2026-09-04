@@ -153,7 +153,11 @@ const ROW_FOCUS =
 // does. It emits `border-transparent` last, so a row carrying both measured
 // `rgba(0, 0, 0, 0)` on the page while reading as correct in the JSX. Exactly
 // one border-color utility reaches a row now.
-const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg border-l-2 px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
+// The horizontal padding is composed in `navRowClass` rather than set here, for
+// the reason the border color above is: a row in a chrome band pads by 24px and
+// a collapsed one by nothing, and three padding utilities on one row would leave
+// which of them wins to Tailwind's emitted order.
+const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg border-l-2 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 
 /**
  * `data-pressed` alongside `active` because a rail row is three different
@@ -213,24 +217,51 @@ const ROW_SELECTED = "bg-surface-subtle text-foreground border-foreground"
  */
 const ROW_ANCESTOR = `border-transparent text-foreground hover:bg-surface-alt ${ROW_PRESSED}`
 
+/**
+ * What a control takes to fill a chrome band: the scope switcher and the "Back
+ * to" row in the band at the rail's head, and the account control in the band
+ * at its foot.
+ *
+ * A band spans the rail and carries the rule that divides it, so a control
+ * inset inside one answers the pointer with a floating box instead of the band
+ * the reader is pointing at. The 12px the band used to pad with moves onto the
+ * control, and 24px is the lane a row's label already sits in (12px of rail
+ * gutter plus the row's own 12px), so the fill reaches both edges of the band
+ * without any label moving.
+ *
+ * `w-full!` because HeroUI's `Button` variant sets a width of its own, and
+ * `h-full` because a row's 44px floor is shorter than a band's 56px.
+ */
+export function navBandRowClass({
+  collapsed = false,
+}: {
+  collapsed?: boolean
+} = {}): string {
+  return `h-full w-full! ${collapsed ? "px-0" : "px-6"}`
+}
+
 /** The class list for one sidebar row. */
 export function navRowClass({
   isActive = false,
   ancestor = false,
   collapsed = false,
   nested = false,
+  band = false,
 }: {
   isActive?: boolean
   /** This row is the group holding the selected row, not the selected row. */
   ancestor?: boolean
   collapsed?: boolean
   nested?: boolean
+  /** This row is the whole of a chrome band rather than one row in a list. */
+  band?: boolean
 } = {}): string {
   return [
     ROW_BASE,
     isActive ? ROW_SELECTED : ancestor ? ROW_ANCESTOR : ROW_RESTING,
     nested ? "pl-[3.125rem]" : "",
-    collapsed ? "min-w-11 justify-center px-0" : "",
+    collapsed ? "min-w-11 justify-center" : "",
+    band ? navBandRowClass({ collapsed }) : collapsed ? "px-0" : "px-3",
   ]
     .filter(Boolean)
     .join(" ")
