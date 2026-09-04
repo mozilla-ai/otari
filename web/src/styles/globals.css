@@ -1468,6 +1468,29 @@ main {
   transform: scale(0.98);
 }
 
+/* And the pressed FILL, which has never rendered under a pointer.
+ *
+ * HeroUI declares the two in one layer at equal specificity and puts hover
+ * last: measured in the emitted stylesheet, `.button:active,
+ * .button[data-pressed="true"]` sets `background-color: var(--button-bg-pressed)`
+ * at byte 74094 and `.button:hover, .button[data-hovered="true"]` sets the
+ * hover fill at 74220. A pointer that is down is also hovering, so hover won
+ * and the pressed step was unreachable for every variant, primary included.
+ * It was never a broken step: pressing WITHOUT hovering (focus the control,
+ * hold Space) paints `--color-surface-subtle` on a ghost with
+ * `data-pressed="true"` and matching neither `:hover` nor `:active`, which is
+ * the third step exactly as specified.
+ *
+ * Restating it here wins by being unlayered rather than by being later, which
+ * is the mechanism this file already relies on elsewhere. It matters more than
+ * a missing state: the flat 0.98 press above is justified BY this fill, so
+ * without it the transform carries the acknowledgement alone at 1.27px where
+ * the size-stepped ladder it replaced gave 1.90px, and the press would be
+ * quieter than what it replaced on the interaction most people use. */
+.button:is(:active, [data-pressed="true"]) {
+  background-color: var(--button-bg-pressed);
+}
+
 /* `.button--full-width` alongside the two utilities: a button is also a row
    when HeroUI's own `fullWidth` prop puts it there, and that prop emits this
    class rather than either utility. Measured at 471px, the widest of them
