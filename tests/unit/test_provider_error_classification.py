@@ -322,6 +322,21 @@ def test_unsupported_feature_survives_the_unified_exception_wrapper() -> None:
     assert "context_management" in mapping.detail
 
 
+_CONTAINER_MSG = "container requires a provider with a native Anthropic Messages API"
+
+
+def test_unsupported_container_maps_to_400_naming_the_param() -> None:
+    """A Messages request carrying ``container`` against a provider any-llm bridges
+    through Chat Completions is refused before the bridge, because only a native
+    Anthropic account can resolve the id. The rejection is permanent and the caller
+    is the one who can fix it, so it owes a 400 naming the param rather than the
+    generic 502 an unclassified failure would report as an upstream outage."""
+    mapping = classify_provider_error(NotImplementedError(_CONTAINER_MSG))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "container" in mapping.detail
+
+
 def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
     """Typed any-llm capability failures are permanent caller errors, not 502s."""
     exc = UnsupportedParameterError("prompt_cache_key", "anthropic")
