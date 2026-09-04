@@ -36,11 +36,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.services.mcp_client import MCPToolCallOutcome
-from gateway.services.mcp_loop_messages import (
-    MCP_ACTIVITY_ID_PREFIX,
-    MCP_CLIENT_BETA,
-    MCP_CLIENT_BETA_LEGACY,
-)
+from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 
 _CONTEXT_MANAGEMENT = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
 _BETAS = ["compact-2026-01-12"]
@@ -1403,7 +1399,6 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     [
         (None, ["text"]),
         (MCP_CLIENT_BETA, ["mcp_tool_use", "mcp_tool_result", "text"]),
-        (MCP_CLIENT_BETA_LEGACY, ["mcp_tool_use", "mcp_tool_result", "text"]),
     ],
 )
 def test_stream_mcp_activity_requires_beta(

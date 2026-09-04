@@ -28,10 +28,10 @@ The loop stops when the model returns a normal assistant response or hits
 
 For streaming `/v1/messages` requests with the standard Anthropic header
 `anthropic-beta: mcp-client-2025-11-20`, Otari emits server-owned activity
-around each gateway-run MCP call. The legacy `mcp-client-2025-04-04` beta and
-the body form `betas: ["mcp-client-2025-04-04"]` remain supported for existing
-callers. An `mcp_tool_use` block starts immediately before execution with an
-opaque call id, tool and server names, and parsed input. A matching
+around each gateway-run MCP call. The body form
+`betas: ["mcp-client-2025-11-20"]` is also accepted. An `mcp_tool_use` block
+starts immediately before execution with an opaque call id, tool and server
+names, and parsed input. A matching
 `mcp_tool_result` block follows with the result content and `is_error` value.
 Each block uses a `content_block_start` / `content_block_stop` pair. Without an
 MCP client beta, Otari still runs the call but omits these activity blocks.
