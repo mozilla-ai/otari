@@ -338,7 +338,7 @@ function ListeningRow({
         )}
       </div>
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         isPending={isChecking}
         onPress={onCheckNow}
