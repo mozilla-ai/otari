@@ -163,7 +163,7 @@ function NarrowedDefaults({
               />
               <Button
                 size="sm"
-                variant="danger-soft"
+                variant="danger"
                 isDisabled={pending}
                 onPress={() =>
                   deleteDefault.mutate({ workspaceId, defaultId: row.id })
