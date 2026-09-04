@@ -33,7 +33,6 @@ from gateway.log_config import logger
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
-    MCP_CLIENT_BETA,
     MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
@@ -856,10 +855,10 @@ async def test_stream_emits_live_mcp_activity_around_execution(
         completion_kwargs={
             "model": "fake",
             "messages": [{"role": "user", "content": "go"}],
-            "betas": [MCP_CLIENT_BETA],
         },
         pool=cast(Any, pool),
         max_iterations=5,
+        emit_native_mcp=True,
     )
 
     assert (await anext(stream)).type == "message_start"
@@ -1001,10 +1000,10 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
             completion_kwargs={
                 "model": "fake",
                 "messages": [{"role": "user", "content": "go"}],
-                "betas": [MCP_CLIENT_BETA],
             },
             pool=cast(Any, pool),
             max_iterations=5,
+            emit_native_mcp=True,
         )
     ]
 
@@ -1318,10 +1317,10 @@ async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
                 "model": "fake",
                 "messages": [{"role": "user", "content": "go"}],
                 "max_tokens": 100,
-                "betas": [MCP_CLIENT_BETA],
             },
             pool=cast(Any, pool),
             max_iterations=5,
+            emit_native_mcp=True,
         )
     ]
 

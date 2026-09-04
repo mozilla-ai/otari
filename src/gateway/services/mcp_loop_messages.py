@@ -864,6 +864,7 @@ async def anthropic_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     emit_native_web_search: bool = False,
+    emit_native_mcp: bool = False,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
@@ -891,9 +892,6 @@ async def anthropic_tool_loop_stream(
     needed because ``amessages`` produces a fresh stream; the next call's
     natural ``message_start`` arrives downstream as if nothing had happened.
     """
-    betas = completion_kwargs.get("betas")
-    emit_native_mcp = isinstance(betas, list) and MCP_CLIENT_BETA in betas
-
     # aclosing makes downstream closes (client disconnect) propagate to the
     # engine generator, and through it to the upstream provider stream,
     # instead of waiting for event-loop async-generator finalization.

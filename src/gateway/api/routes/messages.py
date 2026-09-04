@@ -62,6 +62,7 @@ from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
+    MCP_CLIENT_BETA,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
@@ -78,6 +79,21 @@ def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -
     for header_value in raw_request.headers.getlist("anthropic-beta"):
         betas.extend(beta.strip() for beta in header_value.split(",") if beta.strip())
     return list(dict.fromkeys(betas)) or None
+
+
+def _split_mcp_client_beta(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Consume the client capability without forwarding it to the model provider."""
+    betas = kwargs.get("betas")
+    if not isinstance(betas, list) or MCP_CLIENT_BETA not in betas:
+        return kwargs, False
+
+    provider_kwargs = {**kwargs}
+    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA]
+    if provider_betas:
+        provider_kwargs["betas"] = provider_betas
+    else:
+        provider_kwargs.pop("betas")
+    return provider_kwargs, True
 
 
 class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc]
@@ -437,10 +453,12 @@ class _MessagesAdapter:
         return isinstance(chunk, MessageDeltaEvent)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
-        return await amessages(**kwargs)  # type: ignore[return-value]
+        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        return await amessages(**kwargs)  # type: ignore[return-value]
+        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
         self,
@@ -466,8 +484,9 @@ class _MessagesAdapter:
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
+        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
         return await anthropic_tool_loop(
-            completion_kwargs=kwargs,
+            completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
             emit_native_web_search=emit_native_web_search,
@@ -482,11 +501,16 @@ class _MessagesAdapter:
         *,
         emit_native_web_search: bool = False,
     ) -> AsyncIterator[MessageStreamEvent]:
+        provider_kwargs, emit_native_mcp = _split_mcp_client_beta(kwargs)
+        extra: dict[str, Any] = {}
+        if emit_native_mcp:
+            extra["emit_native_mcp"] = True
         return anthropic_tool_loop_stream(
-            completion_kwargs=kwargs,
+            completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
             emit_native_web_search=emit_native_web_search,
+            **extra,
         )
 
     def inject_hints(

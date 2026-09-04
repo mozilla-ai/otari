@@ -328,11 +328,11 @@ def test_context_management_non_stream_contract(
     assert body["usage"]["iterations"][0]["type"] == "compaction"
 
 
-def test_anthropic_beta_header_reaches_provider(
+def test_mcp_client_beta_is_not_forwarded_to_provider(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """The Anthropic SDK's beta header is normalized into any-llm kwargs."""
+    """The MCP client capability is consumed while other betas reach any-llm."""
     captured: dict[str, Any] = {}
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -355,7 +355,32 @@ def test_anthropic_beta_header_reaches_provider(
         )
 
     assert resp.status_code == 200, resp.text
-    assert captured["betas"] == [*_BETAS, MCP_CLIENT_BETA, "files-api-2025-04-14"]
+    assert captured["betas"] == [*_BETAS, "files-api-2025-04-14"]
+
+
+def test_mcp_client_beta_is_removed_for_translated_provider(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response()
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages?beta=true",
+            json={
+                "model": "openai:gpt-4o",
+                "messages": [{"role": "user", "content": "Use the MCP beta"}],
+                "max_tokens": 100,
+            },
+            headers={**api_key_header, "anthropic-beta": MCP_CLIENT_BETA},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "betas" not in captured
 
 
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
@@ -1408,6 +1433,7 @@ def test_stream_mcp_activity_requires_beta(
     expected_block_types: list[str],
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
+    provider_calls: list[dict[str, Any]] = []
     streams = iter(
         [
             _stream_iter(
@@ -1461,7 +1487,8 @@ def test_stream_mcp_activity_requires_beta(
         ]
     )
 
-    async def fake_amessages(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        provider_calls.append(kwargs)
         return next(streams)
 
     class ActivityPool:
@@ -1524,6 +1551,7 @@ def test_stream_mcp_activity_requires_beta(
     blocks = [payload["content_block"] for payload in payloads if payload.get("type") == "content_block_start"]
     assert [block["type"] for block in blocks] == expected_block_types
     assert calls == [("lookup", {"issue": 755})]
+    assert all(MCP_CLIENT_BETA not in call.get("betas", []) for call in provider_calls)
     if beta_header is not None:
         assert blocks[0]["name"] == "lookup"
         assert blocks[0]["server_name"] == "fixture"
