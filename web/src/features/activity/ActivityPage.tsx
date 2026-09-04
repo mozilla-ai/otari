@@ -31,6 +31,7 @@ import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import { Dot, TableScrollFrame } from "@/shared/components/surface"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
@@ -40,9 +41,9 @@ import {
   ErrorBanner,
   FilterMultiComboBox,
   FilterSelect,
-  PageHeader,
   RefreshButton,
 } from "@/shared/components/ui"
+import { formatRelative } from "@/shared/helpers/format"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -117,17 +118,6 @@ function absolute(iso: string): string {
 
 // Relative time reads better in a scan than a full timestamp; the absolute value
 // stays available as a tooltip.
-function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return iso
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (secs < 60) return `${secs}s ago`
-  const mins = Math.round(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.round(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
-}
 
 // ---------- requests in flight ----------
 //
@@ -208,14 +198,14 @@ function InFlightControl({
   if (data.total === 0 && !isOpen) return null
   return (
     <Popover isOpen={isOpen} onOpenChange={setIsOpen}>
-      <Button size="sm" variant="outline">
+      <Button size="sm" variant="ghost">
         {/* Decorative: the count beside it carries the same meaning in text, so
             nothing is encoded in motion alone. That is also why it can stop
             outright under `prefers-reduced-motion`, being the one element on the
             page that would otherwise animate indefinitely. Still at zero, where
             a pulse would suggest activity that is not there. */}
         <span
-          className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full motion-reduce:animate-none ${
+          className={`mr-1.5 inline-block h-1.5 w-1.5 motion-reduce:animate-none ${
             data.total > 0 ? "animate-pulse bg-accent" : "bg-muted"
           }`}
           aria-hidden="true"
@@ -408,22 +398,44 @@ function resolveExtentWindow(
 
 // ---------- small presentational pieces ----------
 
-// Status as a pill, failure-forward: errors use the shared red status surface so
-// they pop in a scan; success uses the muted brand tint.
-function StatusPill({ status }: { status: string }) {
-  const cls =
+/**
+ * Status as a square dot and a word, failure-forward.
+ *
+ * `error` is the only one that colors its text, which is what keeps a failure
+ * findable in a scan of fifty rows. `absorbed` is deliberately neutral rather
+ * than caution: a routing policy recovered from it, so the request was served,
+ * and painting it as a warning made a working gateway look like a failing one.
+ * It reads as the third thing it is, on the subtle rung in both channels.
+ */
+function StatusMark({ status }: { status: string }) {
+  const { dot, ink } =
     status === "error"
-      ? "border-danger bg-danger-subtle text-danger"
+      ? { dot: "bg-danger", ink: "text-danger" }
       : status === "absorbed"
-        ? "border-warning bg-warning-subtle text-warning"
-        : "border-border bg-primary-subtle text-primary-subtle-foreground"
+        ? { dot: "bg-text-subtle", ink: "text-subtle" }
+        : { dot: "bg-success", ink: "text-muted" }
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {status}
+    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
+      <Dot className={dot} />
+      {statusLabel(status)}
     </span>
   )
+}
+
+// The column's words, in their own casing. This used to be
+// `status.toUpperCase()` on the raw enum, which was a missing label map rather
+// than a decision to shout: a repeated column carries its labels in the case
+// they are written in, and uppercase emphasis here fell equally on the
+// successes, which is the last thing a column built to surface exceptions
+// wants to draw the eye to. Unknown values still render their slug.
+const STATUS_LABELS: Record<string, string> = {
+  error: "Error",
+  absorbed: "Absorbed",
+  success: "Success",
+}
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status
 }
 
 // Friendly labels for known provenance sources; unknown sources render their slug.
@@ -599,14 +611,14 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
   })
 
   return (
-    <span className="inline-flex flex-col items-end gap-1" title={summary}>
+    <span className="inline-flex flex-col items-end gap-1.5" title={summary}>
       <span className="tabular-nums">{composition.total.toLocaleString()}</span>
       <svg
         viewBox="0 0 100 4"
         preserveAspectRatio="none"
         role="img"
         aria-label={`Token composition: ${summary}`}
-        className="h-1.5 w-20 overflow-hidden rounded-full bg-primary-subtle"
+        className="h-1.5 w-20 overflow-hidden bg-primary-subtle"
       >
         {rects
           .filter((rect) => rect.width > 0)
@@ -812,8 +824,8 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-overline">Routing plan · {entry.policy_name}</span>
-      <span className="text-body">{summary}</span>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <span className="text-sm text-foreground">{summary}</span>
+      <div className="overflow-x-auto border border-control-border">
         <table
           className="w-full text-xs"
           aria-label={`Routing plan for policy ${entry.policy_name}`}
@@ -857,17 +869,13 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                 <td className="px-3 py-2 tabular-nums">
                   {attempt.attempt_position ?? "?"}
                 </td>
-                <td className="px-3 py-2 text-foreground">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="break-all">
-                      {pricingSelectorOf(attempt)}
+                <td className="px-3 py-2 break-all text-foreground">
+                  {pricingSelectorOf(attempt)}
+                  {attempt.id === entry.id ? (
+                    <span className="ml-2 border border-border px-1.5 py-0.5 text-xs text-subtle">
+                      this row
                     </span>
-                    {attempt.id === entry.id ? (
-                      <span className="rounded-full border border-border px-1.5 py-0.5 text-overline">
-                        this row
-                      </span>
-                    ) : null}
-                  </span>
+                  ) : null}
                 </td>
                 <td className="px-3 py-2">
                   {selectionReasonLabel(attempt.selection_reason) ?? "—"}
@@ -1064,7 +1072,7 @@ function RequestDetail({
           {onPriceModel ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onPress={() => onPriceModel(pricingKey)}
             >
               Price this model
@@ -1200,6 +1208,24 @@ export function ActivityPage() {
       setExtentWin(resolveExtentWindow(range, clock))
     }
   }, [selectionKey, range, startParam, endParam])
+
+  // An unrecognized `range` resolves to the default window (see `resolveWindow`),
+  // so the URL has to be corrected to say what the page is actually showing. The
+  // case that produces it is a Usage-page key: `90d` and `12mo` are presets there
+  // and not here, so a hand-edited or hand-copied URL carries one across and the
+  // address bar then claims ninety days over a list showing one. `patch` replaces
+  // rather than pushes, because this is a correction to the entry rather than a
+  // navigation, and writing the default drops the key entirely, which is the same
+  // URL the page produces when it is opened with no range at all.
+  //
+  // Bounds win over a preset, so a window carried in `start_date`/`end_date` is
+  // left alone: the range is not lying there, it is not being read.
+  const patch = url.patch
+  useEffect(() => {
+    if (startParam || endParam) return
+    if (range === CUSTOM_KEY || findPreset(ACTIVITY_PRESETS, range)) return
+    patch({ range: ACTIVITY_DEFAULT_KEY })
+  }, [range, startParam, endParam, patch])
 
   const priced =
     pricedFilter === "true"
@@ -1902,7 +1928,7 @@ export function ActivityPage() {
         header: "Time",
         cell: (e) => (
           <span title={absolute(e.timestamp)} className="text-muted">
-            {timeAgo(e.timestamp)}
+            {formatRelative(e.timestamp)}
           </span>
         ),
       },
@@ -1926,12 +1952,18 @@ export function ActivityPage() {
               {/* A generic span does not reliably expose aria-label, so the
                   badge takes the img role: the label is the whole meaning, and
                   the count inside is a summary of it. */}
+              {/* A marker, not a badge: an accent dot and the count in mono
+                  uppercase, on the same terms as every other marker in the
+                  product. A generic span does not reliably expose aria-label,
+                  so it takes the img role; the label is the whole meaning and
+                  the count inside is a summary of it. */}
               <span
                 role="img"
-                className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-1.5 py-0.5 text-xs font-medium text-primary-subtle-foreground"
+                className="inline-flex items-center gap-1.5 text-mono-overline text-muted"
                 title={detail}
                 aria-label={`Gateway tools: ${detail}`}
               >
+                <Dot className="bg-accent" />
                 {calls} {calls === 1 ? "tool" : "tools"}
               </span>
             </span>
@@ -1978,17 +2010,20 @@ export function ActivityPage() {
       {
         id: "status",
         header: "Status",
-        cell: (e) => <StatusPill status={e.status} />,
+        cell: (e) => <StatusMark status={e.status} />,
       },
     ]
   }, [groupOutcomes])
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Activity"
-        description="A per-request log of what the gateway served: tokens, cost, latency, and failures. No request or response content is stored."
-      />
+    <div className="flex flex-col">
+      <header className="pb-5">
+        <h1 className="text-display">Activity</h1>
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          A per-request log of what the gateway served: tokens, cost, latency,
+          and failures. No request or response content is stored.
+        </p>
+      </header>
 
       {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}
@@ -2036,7 +2071,7 @@ export function ActivityPage() {
               {newRows > 0 ? (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onPress={refresh}
                   isDisabled={usage.isFetching}
                 >
@@ -2166,28 +2201,30 @@ export function ActivityPage() {
         </BulkActionBar>
       ) : null}
 
-      <DataTable
-        ariaLabel="Activity log"
-        columns={columns}
-        rows={rows}
-        getRowKey={getActivityRowKey}
-        isLoading={usage.isLoading}
-        emptyContent={
-          anyFilter
-            ? "No requests match these filters."
-            : "No requests recorded yet."
-        }
-        selectionMode={showSelection ? "multiple" : "none"}
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-        disabledKeys={disabledKeys}
-        onRowAction={(key) =>
-          setExpandedId((current) => (current === key ? null : key))
-        }
-        rowClassName={activityRowClassName}
-        detailKey={expandedId}
-        renderDetail={renderDetail}
-      />
+      <TableScrollFrame className="otari-activity-table">
+        <DataTable
+          ariaLabel="Activity log"
+          columns={columns}
+          rows={rows}
+          getRowKey={getActivityRowKey}
+          isLoading={usage.isLoading}
+          emptyContent={
+            anyFilter
+              ? "No requests match these filters."
+              : "No requests recorded yet."
+          }
+          selectionMode={showSelection ? "multiple" : "none"}
+          selectedKeys={selection.selectedKeys}
+          onSelectionChange={selection.onSelectionChange}
+          disabledKeys={disabledKeys}
+          onRowAction={(key) =>
+            setExpandedId((current) => (current === key ? null : key))
+          }
+          rowClassName={activityRowClassName}
+          detailKey={expandedId}
+          renderDetail={renderDetail}
+        />
+      </TableScrollFrame>
 
       <TablePagination
         page={page}

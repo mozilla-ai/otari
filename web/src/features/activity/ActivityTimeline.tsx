@@ -1,6 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import type { ReactNode } from "react"
 import { useRef, useState } from "react"
+import { FiMinus, FiPlus } from "react-icons/fi"
 
 import type { UsageBucket } from "@/client"
 import {
@@ -9,6 +10,7 @@ import {
   type StackedPoint,
   TrendChart,
 } from "@/shared/components/charts"
+import { EmptyMessage, Tab, TabRow } from "@/shared/components/surface"
 import {
   bucketDurationMs,
   bucketIndexRange,
@@ -256,23 +258,25 @@ export function ActivityTimeline({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {presets.map((preset) => (
-          <Button
-            key={preset.key}
-            size="sm"
-            variant={extentKey === preset.key ? "primary" : "outline"}
-            onPress={() => onPreset(preset)}
-          >
-            {preset.label}
-          </Button>
-        ))}
+        <TabRow>
+          {presets.map((preset) => (
+            <Tab
+              key={preset.key}
+              isActive={extentKey === preset.key}
+              onPress={() => onPreset(preset)}
+            >
+              {preset.label}
+            </Tab>
+          ))}
+        </TabRow>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-caption">Showing {label} · UTC</span>
           {action}
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-surface p-2">
+      {/* A band of the page between rules, not a card. */}
+      <div className="border-y border-border py-3">
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="flex items-center gap-3">
             <span className="text-overline">
@@ -281,8 +285,8 @@ export function ActivityTimeline({
             <ChartLegend series={chartSeries} />
           </span>
           <div className="flex items-center gap-1.5">
-            <span className="hidden text-caption sm:inline">
-              drag across the chart to zoom
+            <span className="hidden text-xs text-muted sm:inline">
+              Drag to filter a range
             </span>
             <Button
               size="sm"
@@ -292,16 +296,7 @@ export function ActivityTimeline({
               isDisabled={n === 0}
               onPress={zoomIn}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-4 w-4"
-                aria-hidden="true"
-              >
-                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-              </svg>
+              <FiPlus aria-hidden="true" className="h-4 w-4" />
             </Button>
             <Button
               size="sm"
@@ -311,16 +306,7 @@ export function ActivityTimeline({
               isDisabled={n === 0 || (atFullExtent && !largerPreset)}
               onPress={zoomOut}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-4 w-4"
-                aria-hidden="true"
-              >
-                <path d="M5 12h14" strokeLinecap="round" />
-              </svg>
+              <FiMinus aria-hidden="true" className="h-4 w-4" />
             </Button>
             {zoomed ? (
               <Button
@@ -339,9 +325,9 @@ export function ActivityTimeline({
             <Spinner size="sm" />
           </div>
         ) : n === 0 ? (
-          <div className="flex h-[90px] items-center justify-center text-caption">
+          <EmptyMessage minHeight="90px">
             No activity in this range.
-          </div>
+          </EmptyMessage>
         ) : (
           <div className="flex flex-col gap-1">
             <TrendChart
@@ -351,6 +337,11 @@ export function ActivityTimeline({
               formatXTick={(iso) => formatTick(iso, bucket)}
               ariaLabel={ariaLabel}
               height={90}
+              // Three steps: this strip is a shape to drag on rather than a
+              // chart to read values off, and five would put more numbers
+              // beside it than it has room to justify.
+              showYAxis
+              yTickCount={3}
               onSelectRange={commit}
               window={zoomed || panSel ? sel : null}
             />
@@ -364,12 +355,18 @@ export function ActivityTimeline({
               // the stripe. A thumb the size of the stripe is unpannable on a
               // phone, which is the only place the zoom is hard to redo.
               <div
+                // The row is 44px so the handle inside it is a real touch
+                // target; the track and the handle keep the 10px they read best
+                // at, drawn as children so the grab area is the whole height
+                // rather than the stripe. A thumb the size of the stripe is
+                // unpannable on a phone, which is the only place the zoom is
+                // hard to redo.
                 ref={railRef}
                 className="relative flex h-11 w-full items-center"
               >
                 <div
                   aria-hidden="true"
-                  className="absolute inset-x-0 h-2.5 rounded-full bg-surface-alt"
+                  className="absolute inset-x-0 h-2.5 bg-surface-alt"
                 />
                 <div
                   role="slider"
@@ -379,7 +376,18 @@ export function ActivityTimeline({
                   aria-valuenow={Math.min(sel.startIndex, panMax)}
                   aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
                   tabIndex={0}
-                  className="group absolute inset-y-0 flex cursor-grab touch-none items-center outline-none active:cursor-grabbing"
+                  // Square, and here that is the point rather than
+                  // consistency: the window's edges assert two exact instants,
+                  // and a rounded end blurs the only thing the shape states.
+                  //
+                  // The fill lives on the stripe inside, not here: this element
+                  // is the 44px grab target and the stripe is the 10px drawing,
+                  // and painting both stacked two 40% accents into one 64% one.
+                  // `group` so the stripe's own variants have the ancestor they
+                  // address; without it they matched nothing and the hover was
+                  // dead. No `outline-none`, so the base `:focus-visible` rule
+                  // still rings the element that actually takes focus.
+                  className="group absolute inset-y-0 flex cursor-grab touch-none items-center active:cursor-grabbing"
                   style={{
                     left: `${loPct}%`,
                     width: `${Math.max(2, hiPct - loPct)}%`,
@@ -398,7 +406,7 @@ export function ActivityTimeline({
                   onPointerUp={endPan}
                   onPointerCancel={endPan}
                 >
-                  <div className="h-2.5 w-full rounded-full bg-accent/40 group-hover:bg-accent/60 group-focus-visible:ring-2 group-focus-visible:ring-accent" />
+                  <div className="h-2.5 w-full bg-accent/40 group-hover:bg-accent/60" />
                 </div>
               </div>
             ) : null}

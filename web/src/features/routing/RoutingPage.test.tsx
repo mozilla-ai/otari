@@ -325,7 +325,7 @@ describe("RoutingPage", () => {
     // needs to see that a fallback exists without opening the policy.
     expect(within(fastRow).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
     expect(within(fastRow).getByText(/\+1 on failure/)).toBeInTheDocument()
-    expect(within(fastRow).getByText("stored")).toBeInTheDocument()
+    expect(within(fastRow).getByText("STORED")).toBeInTheDocument()
   })
 
   it("marks a policy that decides per request, since it has no single target", async () => {
@@ -333,7 +333,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
-    expect(within(autoRow).getByText("Dynamic")).toBeInTheDocument()
+    expect(within(autoRow).getByText("DYNAMIC")).toBeInTheDocument()
     expect(within(autoRow).getByText(/Chosen per request/)).toBeInTheDocument()
   })
 
@@ -816,7 +816,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("Weighted")).toBeInTheDocument()
+    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
     expect(
       within(row).getByText(/70% \/ 30% across 2 models/),
     ).toBeInTheDocument()
@@ -966,7 +966,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("Weighted")).toBeInTheDocument()
+    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
     // Loading it as weighted is half the claim; saving it back unchanged is the
@@ -1063,7 +1063,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("future")).closest("tr")!
-    expect(within(row).getByText("Routed")).toBeInTheDocument()
+    expect(within(row).getByText("ROUTED")).toBeInTheDocument()
     expect(within(row).queryByText("Learned")).not.toBeInTheDocument()
   })
 
@@ -1189,11 +1189,11 @@ describe("RoutingPage", () => {
     await user.keyboard("{Escape}")
 
     expect(await screen.findByText("6 / 20 examples")).toBeInTheDocument()
-    expect(screen.getByText("warming up")).toBeInTheDocument()
+    expect(screen.getByText("WARMING UP")).toBeInTheDocument()
     // A task partition warms on its own, so it gets its own line.
     expect(screen.getByText("summaries")).toBeInTheDocument()
     expect(screen.getByText("21 / 20 examples")).toBeInTheDocument()
-    expect(screen.getByText("routing")).toBeInTheDocument()
+    expect(screen.getByText("ROUTING")).toBeInTheDocument()
   })
 
   it("says where examples come from instead of offering to collect them", async () => {

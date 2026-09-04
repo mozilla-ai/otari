@@ -1,4 +1,8 @@
-import { Button, Card, Chip, Spinner } from "@heroui/react"
+// `Chip` is still reached by the organization-owned marker, which arrived with
+// main's own-budgets work and is the one chip left on this page. The redesign
+// took chips off everything it rebuilt, so this is an inconsistency rather than
+// a decision: see the note in the PR body.
+import { Button, Chip, Spinner } from "@heroui/react"
 import { useEffect, useMemo, useState } from "react"
 import type {
   Budget,
@@ -25,11 +29,20 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
+  PageIntro,
+  RowAction,
+  RowActionRow,
+  Section,
+  Segmented,
+  SpendMeter,
+  spendState,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import {
   CopyableValue,
   EmptyState,
   ErrorBanner,
   InfoBanner,
-  PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
 import {
@@ -77,6 +90,11 @@ function absolute(iso: string | null): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString()
 }
+
+// The segment that opens the custom-days field. A sentinel rather than a number,
+// because "custom" is not a duration and any real one it borrowed would collide
+// with a preset the day someone added it.
+const CUSTOM_PERIOD = "custom"
 
 // ---------- limit + period inputs ----------
 
@@ -134,34 +152,38 @@ function PeriodPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-body">Reset period</span>
-      <div className="flex flex-wrap gap-2">
-        {PERIOD_PRESETS.map((preset) => (
-          <Button
-            key={preset.label}
-            size="sm"
-            variant={
-              !custom && value === preset.seconds ? "primary" : "outline"
-            }
-            onPress={() => {
-              setCustom(false)
-              // Keep the (hidden) custom draft in step, so reopening Custom shows
-              // the preset's day count rather than a stale earlier entry.
-              setDraft(daysString(preset.seconds))
-              onChange(preset.seconds)
-            }}
-          >
-            {preset.label}
-          </Button>
-        ))}
-        <Button
-          size="sm"
-          variant={custom ? "primary" : "outline"}
-          onPress={() => setCustom(true)}
-        >
-          Custom
-        </Button>
-      </div>
+      <span className="text-sm font-medium text-foreground">Reset period</span>
+      {/* A segmented control rather than a row of buttons. These are the
+          alternatives for one field, not five things to do, and filling the
+          chosen one primary said the opposite: it put the submit button's own
+          treatment on a value, two controls apart from the real submit button
+          wearing the same fill. */}
+      <Segmented
+        label="Reset period"
+        // `String(null)` rather than a blank: "No reset" IS a preset here, and
+        // its seconds are null, so collapsing null to "" would leave the group
+        // with nothing selected on a form that has always opened on it.
+        value={custom ? CUSTOM_PERIOD : String(value)}
+        options={[
+          ...PERIOD_PRESETS.map((preset) => ({
+            value: String(preset.seconds),
+            label: preset.label,
+          })),
+          { value: CUSTOM_PERIOD, label: "Custom" },
+        ]}
+        onChange={(next) => {
+          if (next === CUSTOM_PERIOD) {
+            setCustom(true)
+            return
+          }
+          setCustom(false)
+          // Keep the (hidden) custom draft in step, so reopening Custom shows
+          // the preset's day count rather than a stale earlier entry.
+          const seconds = next === "null" ? null : Number(next)
+          setDraft(daysString(seconds))
+          onChange(seconds)
+        }}
+      />
       {custom ? (
         <div className="flex items-end gap-2">
           <Field
@@ -263,59 +285,65 @@ function BudgetForm({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <h2 className="text-title">{title}</h2>
-        <ErrorBanner error={error} />
-        <Field
-          label="Name (optional)"
-          value={name}
-          onChange={setName}
-          autoFocus
-          placeholder="team-free-tier"
-          description="A label to recognize this budget later."
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      {/* A heading, not a styled div: this panel is a section of the page and
+          the type role is what it looks like, not what it is. */}
+      <h2 className="text-title">{title}</h2>
+      <ErrorBanner error={error} />
+      <Field
+        label="Name (optional)"
+        value={name}
+        onChange={setName}
+        autoFocus
+        placeholder="team-free-tier"
+        description="A label to recognize this budget later."
+      />
+      <Field
+        label="Spending limit (USD)"
+        value={limit}
+        onChange={setLimit}
+        placeholder="100.00"
+        description={
+          parsed.valid ? (
+            "The most a single user on this budget may spend per period. Leave blank for no limit."
+          ) : (
+            <span className="text-danger">
+              Enter a non-negative number, or leave blank for no limit.
+            </span>
+          )
+        }
+      />
+      <PeriodPicker
+        value={durationSec}
+        onChange={setDurationSec}
+        onInvalidChange={setPeriodInvalid}
+      />
+      {assignUsers ? (
+        <UserMultiSelect
+          label="Assign to people (optional)"
+          description="Everyone selected is held to this budget, each with their own allowance rather than a shared pool."
+          value={userIds}
+          onChange={setUserIds}
+          users={assignUsers}
         />
-        <Field
-          label="Spending limit (USD)"
-          value={limit}
-          onChange={setLimit}
-          placeholder="100.00"
-          description={
-            parsed.valid ? (
-              "The most a single user on this budget may spend per period. Leave blank for no limit."
-            ) : (
-              <span className="text-danger">
-                Enter a non-negative number, or leave blank for no limit.
-              </span>
-            )
-          }
-        />
-        <PeriodPicker
-          value={durationSec}
-          onChange={setDurationSec}
-          onInvalidChange={setPeriodInvalid}
-        />
-        {assignUsers ? (
-          <UserMultiSelect
-            label="Assign to people (optional)"
-            description="Everyone selected is held to this budget, each with their own allowance rather than a shared pool."
-            value={userIds}
-            onChange={setUserIds}
-            users={assignUsers}
-          />
-        ) : assignmentNote ? (
-          <p className="text-caption">{assignmentNote}</p>
-        ) : null}
-        <div className="flex gap-2">
-          <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
-            {isPending ? "Saving…" : submitLabel}
-          </Button>
-          <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+      ) : assignmentNote ? (
+        // Why there is nobody to assign, rather than an absent control the
+        // reader has to account for. The prop is supplied by the caller and
+        // without this branch it would be passed and never rendered.
+        <p className="text-caption">{assignmentNote}</p>
+      ) : null}
+      <div className="flex gap-2">
+        <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
+          {isPending ? "Saving…" : submitLabel}
+        </Button>
+        <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -341,27 +369,22 @@ function UsageCell({ budget }: { budget: Budget }) {
     )
   }
   const allocated = budget.max_budget * budget.user_count
-  const pct = allocated > 0 ? Math.min(100, (spent / allocated) * 100) : 0
-  const over = spent > allocated
+  const state = spendState(spent, allocated)
   return (
     <div className="flex min-w-[140px] flex-col gap-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-foreground">{formatUSD(spent)}</span>
+        {/* The one number in this product that changes color, and only in the
+            state that has already gone past the limit. */}
+        <span className={state === "over" ? "text-danger" : "text-foreground"}>
+          {formatUSD(spent)}
+        </span>
         <span className="text-muted">of {formatUSD(allocated)}</span>
       </div>
-      <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle"
-        role="progressbar"
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Aggregate spend against total allocation"
-      >
-        <div
-          className={`h-full rounded-full ${over ? "bg-danger" : "bg-accent"}`}
-          style={{ width: `${Math.max(pct, over ? 100 : 2)}%` }}
-        />
-      </div>
+      <SpendMeter
+        spent={spent}
+        allocated={allocated}
+        ariaLabel="Aggregate spend against total allocation"
+      />
     </div>
   )
 }
@@ -452,37 +475,28 @@ function InlineDelete({
   const [armed, setArmed] = useState(false)
 
   if (!armed) {
-    return (
-      <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
-        Delete
-      </Button>
-    )
+    return <RowAction onPress={() => setArmed(true)}>Delete</RowAction>
   }
+  // Armed, this one keeps its sentence: a budget's deletion has a consequence
+  // the label cannot carry, and a row action that only said "Delete permanently"
+  // would be asking for a decision without the fact behind it. The tinted box is
+  // gone with every other box on the row; the words and the danger ink are what
+  // is left, and they were doing the work anyway.
   return (
-    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-warning bg-warning-subtle p-2 text-right">
-      <span className="max-w-xs text-xs text-warning">
-        Delete <strong>{label}</strong>? Users keep their spend but lose this
-        limit. Cannot be undone.
+    <span className="flex flex-col items-end gap-1 text-right">
+      <span className="max-w-xs text-xs text-muted">
+        Delete <strong className="font-medium">{label}</strong>? Users keep
+        their spend but lose this limit. Cannot be undone.
       </span>
-      <span className="inline-flex gap-1">
-        <Button
-          size="sm"
-          variant="danger"
-          isDisabled={isPending}
-          onPress={onConfirm}
-        >
+      <span className="flex items-center gap-4">
+        <RowAction isDanger isDisabled={isPending} onPress={onConfirm}>
           Delete permanently
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          isDisabled={isPending}
-          onPress={() => setArmed(false)}
-        >
+        </RowAction>
+        <RowAction isDisabled={isPending} onPress={() => setArmed(false)}>
           Cancel
-        </Button>
+        </RowAction>
       </span>
-    </div>
+    </span>
   )
 }
 
@@ -632,7 +646,7 @@ function DeploymentBudgetsPage() {
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
-              <code className="font-mono text-caption" title={b.budget_id}>
+              <code className="text-mono-micro" title={b.budget_id}>
                 {shortId(b.budget_id)}
               </code>
             </CopyableValue>
@@ -670,12 +684,19 @@ function DeploymentBudgetsPage() {
           if (!holders || holders.length === 0) {
             return <span className="text-caption">&mdash;</span>
           }
+          // Names in prose, not chips, as everywhere else a row lists what
+          // points at it.
           return (
-            <div className="flex flex-wrap gap-1">
-              {holders.map((holder) => (
-                <Chip key={holder} size="sm">
-                  {holder}
-                </Chip>
+            <div className="flex flex-wrap items-center gap-x-2 text-xs">
+              {holders.map((holder, index) => (
+                <span key={holder} className="flex items-center gap-2">
+                  {index > 0 ? (
+                    <span aria-hidden className="text-subtle">
+                      ·
+                    </span>
+                  ) : null}
+                  <span className="text-foreground">{holder}</span>
+                </span>
               ))}
             </div>
           )
@@ -687,10 +708,8 @@ function DeploymentBudgetsPage() {
         header: "Actions",
         align: "end",
         cell: (b) => (
-          <div className="flex items-center justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
+          <RowActionRow>
+            <RowAction
               onPress={() =>
                 setHistoryOpen((current) =>
                   current === b.budget_id ? null : b.budget_id,
@@ -698,23 +717,21 @@ function DeploymentBudgetsPage() {
               }
             >
               {historyOpen === b.budget_id ? "Hide history" : "History"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+            </RowAction>
+            <RowAction
               onPress={() => {
                 setAddOpen(false)
                 setEditing(b.budget_id)
               }}
             >
               Edit
-            </Button>
+            </RowAction>
             <InlineDelete
               label={budgetLabel(b)}
               isPending={deleteBudget.isPending}
               onConfirm={() => deleteBudget.mutate(b.budget_id)}
             />
-          </div>
+          </RowActionRow>
         ),
       },
     ],
@@ -799,10 +816,9 @@ function DeploymentBudgetsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="flex flex-col">
+      <PageIntro
         title="Budgets"
-        description="Define spending limits and reset schedules. Assign a budget to users to enforce it."
         action={
           addOpen || showOnboarding ? null : (
             <Button
@@ -818,7 +834,10 @@ function DeploymentBudgetsPage() {
             </Button>
           )
         }
-      />
+      >
+        Define spending limits and reset schedules. Assign a budget to users to
+        enforce it.
+      </PageIntro>
 
       <ErrorBanner
         error={
@@ -944,37 +963,37 @@ function DeploymentBudgetsPage() {
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
       {showOnboarding ? null : (
-        <DataTable
-          ariaLabel="Budgets"
-          columns={columns}
-          rows={rows}
-          getRowKey={getBudgetRowKey}
-          isLoading={loading}
-          emptyContent="No budgets yet. Create one to cap spending."
-          selectionMode="multiple"
-          selectedKeys={selection.selectedKeys}
-          onSelectionChange={selection.onSelectionChange}
-        />
+        <TableScrollFrame className="otari-budgets-table">
+          <DataTable
+            ariaLabel="Budgets"
+            columns={columns}
+            rows={rows}
+            getRowKey={getBudgetRowKey}
+            isLoading={loading}
+            emptyContent="No budgets yet. Create one to cap spending."
+            selectionMode="multiple"
+            selectedKeys={selection.selectedKeys}
+            onSelectionChange={selection.onSelectionChange}
+          />
+        </TableScrollFrame>
       )}
 
       {historyBudget ? (
-        <Card>
-          <Card.Content className="p-0">
-            <div className="flex items-center justify-between border-b border-border px-4 py-2">
-              <span className="text-body">
-                Reset history — {budgetLabel(historyBudget)}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onPress={() => setHistoryOpen(null)}
-              >
-                Close
-              </Button>
-            </div>
-            <ResetHistory budgetId={historyBudget.budget_id} />
-          </Card.Content>
-        </Card>
+        <Section className="border-y border-border">
+          <div className="flex items-center justify-between border-b border-border py-2">
+            <span className="text-sm font-medium text-foreground">
+              Reset history — {budgetLabel(historyBudget)}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => setHistoryOpen(null)}
+            >
+              Close
+            </Button>
+          </div>
+          <ResetHistory budgetId={historyBudget.budget_id} />
+        </Section>
       ) : null}
 
       <ConfirmDialog

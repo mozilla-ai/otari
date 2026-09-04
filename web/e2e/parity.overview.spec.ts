@@ -68,13 +68,22 @@ test.describe("overview", () => {
     await expect(table(page, "Activity log")).toBeVisible()
   })
 
-  test("the budget tile is a way into budgets, not just a number", async ({
+  test("a budget near its limit is a way into budgets, not just a number", async ({
     page,
   }) => {
     await login(page)
-    // The tile is wrapped in a link (StatCard `to`), which is the whole point of
-    // it: a budget near its limit is read here and acted on there.
-    await tileValue(page, "Budget health").click()
+    // Deliberately not the tile. A KPI cell is a read-only figure: the counts
+    // that are navigation were moved out of the strip on purpose, and the
+    // cells' stray tab stops were removed as keyboard noise, so making the
+    // number clickable would reverse both decisions. Do not "fix" this back.
+    //
+    // Two paths carry the intent instead. General navigation is the rail, which
+    // is what this asserts because it is here on every load. The acted-on path
+    // is the attention strip, which renders "N budgets near limit" as a link
+    // beside the dot that flagged it, and appears only when a budget actually
+    // needs acting on: the parity fixture creates no budget, so that one is
+    // covered where it can be made to happen, in OverviewPage.test.tsx.
+    await page.getByRole("link", { name: "Budgets", exact: true }).click()
     await expect(
       page.getByRole("heading", { name: "Budgets", exact: true }),
     ).toBeVisible()

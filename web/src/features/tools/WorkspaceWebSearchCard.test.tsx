@@ -75,7 +75,7 @@ describe("WorkspaceWebSearchCard", () => {
     mockApi()
     renderCard()
 
-    expect(await screen.findByText("Nothing set")).toBeInTheDocument()
+    expect(await screen.findByText("NOTHING SET")).toBeInTheDocument()
     expect(selectTrigger("Web search")).toHaveTextContent("Deployment default")
   })
 

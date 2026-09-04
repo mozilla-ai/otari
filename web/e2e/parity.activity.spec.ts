@@ -40,6 +40,15 @@ async function openDetail(
   page: Page,
   row: ReturnType<typeof rows>,
 ): Promise<void> {
+  // Wait for the table to settle before pressing. A press delivered while the
+  // filtered query is still in flight is discarded by the re-render, and the
+  // detail never opens: measured at one failure in 27 here, and three in five
+  // with the activity request artificially delayed by 1.2s. These two waits took
+  // that to zero in 17 under the same forced delay. `rows()` alone is not enough,
+  // because Playwright's own actionability check passes on a row that is about to
+  // be replaced.
+  await expect(rows(page)).not.toHaveCount(0)
+  await expect(row).toBeVisible()
   await row.getByRole("rowheader").click()
   await expect(detailPanel(page).getByText("Request detail")).toBeVisible()
 }
@@ -60,7 +69,7 @@ test.describe("activity log", () => {
     await expect(filterChip(page, "Status", "Error")).toBeVisible()
     await expect(rows(page)).toHaveCount(COUNTS.errors)
     for (const row of await rows(page).all()) {
-      await expect(row).toContainText("error")
+      await expect(row).toContainText("Error")
     }
 
     // Clearing from the chip must restore the full log, not merely blank the

@@ -164,7 +164,12 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("$200.00")).toBeInTheDocument()
     expect(screen.getByText("2,000")).toBeInTheDocument()
     expect(screen.getByText("2.0%")).toBeInTheDocument()
-    expect(screen.getByText("Elevated")).toBeInTheDocument() // error-rate status word (non-hue)
+    // The status word, paired with a dot so severity never rides on hue alone.
+    // Uppercased in the mark, so the assertion is on the rendered casing.
+    expect(screen.getByText("ELEVATED")).toBeInTheDocument()
+    // And the rate's denominator, which is what the cell states instead of a
+    // sparkline it has no series for.
+    expect(screen.getByText("40 of 2,000 requests")).toBeInTheDocument()
   })
 
   it("renders period-over-period change as a trend chip, not a glyph", async () => {
@@ -351,7 +356,20 @@ describe("OverviewPage", () => {
     })
     renderPage(<OverviewPage />)
     expect(await screen.findByText("125.0%")).toBeInTheDocument() // 25 / (10*2)
-    expect(screen.getByText("Over budget")).toBeInTheDocument()
+    expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
+    // The meter names the budget it is reporting on, so the graphic is not a
+    // decoration a screen reader has to skip past. `progressbar` and not `img`:
+    // it is the same `SpendMeter` the Budgets table uses now, which reports a
+    // value rather than being a picture of one, and it also says in words how
+    // far past the limit this budget is.
+    const meter = screen.getByRole("progressbar", {
+      name: /Worst budget usage/,
+    })
+    expect(meter).toBeInTheDocument()
+    expect(meter).toHaveAttribute(
+      "aria-valuetext",
+      "125% of limit — over budget",
+    )
   })
 
   it("summarizes provider health and surfaces problems in the status strip", async () => {

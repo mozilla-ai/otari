@@ -104,7 +104,7 @@ describe("DeploymentAccountsPage", () => {
     // whether the account is still in use, and no stamp is the finding.
     expect(within(analyst).getByText("never")).toBeInTheDocument()
     expect(
-      within(rowFor("Operator")).getByText("Bootstrap operator"),
+      within(rowFor("Operator")).getByText("BOOTSTRAP OPERATOR"),
     ).toBeInTheDocument()
   })
 

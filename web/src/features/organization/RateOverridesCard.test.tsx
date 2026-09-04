@@ -107,7 +107,7 @@ describe("RateOverridesCard", () => {
     expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument()
     expect(await screen.findByText("$2.50")).toBeInTheDocument()
     expect(await screen.findByText(/^From /)).toBeInTheDocument()
-    expect(await screen.findByText("Active")).toBeInTheDocument()
+    expect(await screen.findByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("shows an unset cache rate as absent rather than as zero", async () => {

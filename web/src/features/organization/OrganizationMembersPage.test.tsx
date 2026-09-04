@@ -237,7 +237,7 @@ describe("OrganizationMembersPage", () => {
         name: /Remove Operator \(This is the last active owner/,
       }),
     ).toBeDisabled()
-    expect(within(owner).getByText("Active")).toBeInTheDocument()
+    expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("suspends a member rather than deleting them, and says so", async () => {
@@ -270,7 +270,7 @@ describe("OrganizationMembersPage", () => {
     // be an unconfirmed removal. The other direction has no subject: a
     // suspended membership is not listable, so no row exists to reactivate.
     expect(screen.queryByLabelText("Status for Analyst")).toBeNull()
-    expect(within(rowFor("Analyst")).getByText("Active")).toBeInTheDocument()
+    expect(within(rowFor("Analyst")).getByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("adds a member by address, into the workspaces that were ticked", async () => {
@@ -640,7 +640,10 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    expect(screen.queryByText("Model access")).not.toBeInTheDocument()
+    // "Spend" is still a column and is withheld by id. Model access is not a
+    // column any more, it reads under the member's name, so what is asserted
+    // here is the marker itself rather than a header that no longer exists.
+    expect(screen.queryAllByText("All models")).toHaveLength(0)
     expect(screen.queryByText("Spend")).not.toBeInTheDocument()
     // What is theirs stays.
     expect(screen.getByText("Role")).toBeInTheDocument()
@@ -700,7 +703,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    expect(await screen.findByText("Model access")).toBeInTheDocument()
+    expect((await screen.findAllByText("All models")).length).toBeGreaterThan(0)
     expect(screen.getByText("Spend")).toBeInTheDocument()
   })
 })

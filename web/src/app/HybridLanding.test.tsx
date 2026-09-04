@@ -51,17 +51,17 @@ describe("HybridLanding", () => {
   it("reports the gateway and its control plane as two separate conditions", async () => {
     renderLanding()
 
-    expect(await screen.findByText("Healthy")).toBeInTheDocument()
-    expect(screen.getByText("Connected")).toBeInTheDocument()
+    expect(await screen.findByText("HEALTHY")).toBeInTheDocument()
+    expect(screen.getByText("CONNECTED")).toBeInTheDocument()
   })
 
   it("blames the control plane only when the gateway says so", async () => {
     health("no")
     renderLanding()
 
-    expect(await screen.findByText("Unreachable")).toBeInTheDocument()
+    expect(await screen.findByText("UNREACHABLE")).toBeInTheDocument()
     // The gateway itself answered, so it is not the thing that is down.
-    expect(screen.getByText("Healthy")).toBeInTheDocument()
+    expect(screen.getByText("HEALTHY")).toBeInTheDocument()
   })
 
   it("leaves the connection unknown when the gateway does not answer", async () => {
@@ -70,10 +70,10 @@ describe("HybridLanding", () => {
     )
     renderLanding()
 
-    expect(await screen.findByText("Not responding")).toBeInTheDocument()
+    expect(await screen.findByText("NOT RESPONDING")).toBeInTheDocument()
     // Nothing here can see otari.ai except through the gateway, so a dead
     // gateway must not be reported as an unreachable control plane.
-    expect(screen.getByText("Unknown")).toBeInTheDocument()
+    expect(screen.getByText("UNKNOWN")).toBeInTheDocument()
   })
 
   it("shows the base URL a client is pointed at", async () => {
@@ -101,13 +101,13 @@ describe("HybridLanding", () => {
   it("offers no link when no control plane was configured", async () => {
     renderLanding({ management_url: null })
 
-    expect(await screen.findByText("Healthy")).toBeInTheDocument()
+    expect(await screen.findByText("HEALTHY")).toBeInTheDocument()
     expect(screen.queryByRole("link")).toBeNull()
   })
 
   it("reads nothing but the public health endpoint", async () => {
     renderLanding()
-    await screen.findByText("Healthy")
+    await screen.findByText("HEALTHY")
 
     // The management API does not exist on a hybrid gateway: every /v1/ path the
     // dashboard knows answers 404 there. A page that asked anyway would render a
@@ -120,7 +120,7 @@ describe("HybridLanding", () => {
 
   it("exposes no management surface", async () => {
     const { container } = renderLanding()
-    await screen.findByText("Healthy")
+    await screen.findByText("HEALTHY")
 
     // Not a shell with its pages hidden: there is no navigation at all, and the
     // only link leaves for otari.ai rather than entering a local route.
@@ -151,7 +151,7 @@ describe("HybridLanding", () => {
         </DeploymentProvider>
       </AppProviders>,
     )
-    await screen.findByText("Healthy")
+    await screen.findByText("HEALTHY")
 
     expect(document.body.textContent).not.toContain("gw_secret_token")
   })

@@ -29,8 +29,8 @@ import {
 } from "./rowStyles"
 
 // The control that ends the sidebar, and the menu it opens: account settings,
-// appearance, the legal pages, and the way out. The design's
-// "Menu member · Linear order" artboard is the order and the geometry. Who you
+// appearance, the legal pages, and the way out. The design's account-menu
+// artboard is the order and the geometry. Who you
 // are signed in as is the trigger's own line, not a row inside the menu: the
 // menu repeated it under an avatar the trigger already draws, so that block is
 // gone and /account is where an identity is actually read.
@@ -291,9 +291,9 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
       {/* HeroUI's Button, not a plain one: the popover wires its trigger through
-          react-aria, and a bare <button> leaves it unopenable. `w-auto!` is what
-          makes it span the rail, overriding the width the variant sets, which
-          otherwise leaves this a pill in the corner. */}
+          react-aria, and a bare <button> leaves it unopenable. It fills the
+          band it closes the rail with, so the hover fill is the band rather
+          than a pill sitting inside it. */}
       <Button
         variant="ghost"
         // The identity this control exists to draw, folded into the name: a
@@ -303,9 +303,9 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
         // place it could reach anybody there. `AppearanceControl` folds its own
         // visible state in for the same reason.
         aria-label={`Account: ${identity.name}`}
-        className={`${navRowClass({ collapsed })} w-auto! justify-start`}
+        className={`${navRowClass({ collapsed, band: true })} justify-start`}
       >
-        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center rounded-full border border-border bg-surface-alt text-shell-monogram font-semibold text-muted">
+        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-control-border bg-surface-alt text-chrome-initials font-semibold text-muted">
           {identity.initials}
         </span>
         {collapsed ? null : (

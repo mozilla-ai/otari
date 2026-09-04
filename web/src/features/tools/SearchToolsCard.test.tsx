@@ -216,8 +216,10 @@ describe("SearchToolsCard", () => {
     renderWithClient(<SearchToolsCard onSaved={() => {}} />)
     await screen.findByText("local")
 
-    await user.click(screen.getByRole("button", { name: "Remove" }))
-    await user.click(screen.getByRole("button", { name: "Remove" }))
+    // The two steps read differently now: the trigger names the object and the
+    // armed confirm names the consequence, which is what the second click does.
+    await user.click(screen.getByRole("button", { name: "Remove tool" }))
+    await user.click(screen.getByRole("button", { name: "Remove permanently" }))
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(

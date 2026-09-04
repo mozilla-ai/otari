@@ -91,7 +91,9 @@ describe("OrganizationDomainsPage", () => {
       await screen.findByRole("rowheader", { name: "acme.example" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
-    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Remove domain" }),
+    ).toBeInTheDocument()
   })
 
   it("shows a verified, enabled claim as active and pausable", async () => {

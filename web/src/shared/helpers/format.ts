@@ -146,6 +146,19 @@ export function deltaFraction(
   return (current - previous) / previous
 }
 
+/**
+ * A relative time, compact: "3m ago", "2h ago", "5d ago".
+ *
+ * Compact is the product's voice for this everywhere, which is a copy decision
+ * with a layout consequence: "6 minutes ago" needed 130px of column where "6m
+ * ago" fits 120, and a table lane widened to fit a phrase is a layout problem
+ * wearing a copy costume. One implementation rather than two, because Activity
+ * had grown its own and the two shapes were visibly different on pages sitting
+ * one click apart.
+ *
+ * Deliberately not `Intl.RelativeTimeFormat`: its narrow style still prints
+ * "6 min. ago" and its unit thresholds are not ours to choose.
+ */
 export function formatRelative(
   iso: string | null | undefined,
   now: number = Date.now(),
@@ -158,28 +171,14 @@ export function formatRelative(
     return iso
   }
   const seconds = Math.round((now - date.getTime()) / 1000)
-  const future = seconds < 0
-  const abs = Math.abs(seconds)
-
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["second", 60],
-    ["minute", 60],
-    ["hour", 24],
-    ["day", 30],
-    ["month", 12],
-    ["year", Number.POSITIVE_INFINITY],
-  ]
-
-  let value = abs
-  let unit: Intl.RelativeTimeFormatUnit = "second"
-  for (const [candidate, divisor] of units) {
-    unit = candidate
-    if (value < divisor) {
-      break
-    }
-    value = Math.floor(value / divisor)
-  }
-
-  const rtf = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" })
-  return rtf.format(future ? value : -value, unit)
+  // A clock skewed a few seconds ahead of the server is common and "in 2s" is
+  // never what an operator wants to read about a request that already landed,
+  // so the future collapses to the present rather than being spelled out.
+  if (seconds < 0) return "just now"
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }

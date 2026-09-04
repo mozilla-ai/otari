@@ -132,7 +132,7 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           autoComplete="new-password"
         />
         {problem ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-caption text-danger">
             {problem}
           </p>
         ) : null}

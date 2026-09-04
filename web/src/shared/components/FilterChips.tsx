@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react"
 import type { ReactNode } from "react"
 import { useId, useState } from "react"
+import { DismissChip } from "./surface"
 
 // Active filters shown as removable pills, with the pickers tucked behind an
 // "Add filter" toggle. This is the log-tool convention (CloudWatch, Railway):
@@ -44,11 +45,14 @@ export function FilterChips({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* `otari-toolbar`: this row IS the named dense place, so its controls
+          take the 38px height a filter above a table sits at. It was a toolbar
+          in everything but the class. */}
+      <div className="otari-toolbar flex flex-wrap items-center gap-2">
         {start}
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           onPress={() => setOpen((prev) => !prev)}
           aria-expanded={open}
           aria-controls={regionId}
@@ -56,30 +60,13 @@ export function FilterChips({
           {open ? "Done" : "Add filter"}
         </Button>
         {chips.map((chip) => (
-          <span
+          <DismissChip
             key={chip.key}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-primary-subtle py-0.5 pl-2.5 pr-1 text-xs text-primary-subtle-foreground"
-          >
-            <span className="text-muted">{chip.label}:</span>
-            <span className="font-medium">{chip.value}</span>
-            <button
-              type="button"
-              onClick={chip.onClear}
-              aria-label={chip.clearLabel ?? `Remove ${chip.label} filter`}
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted outline-none hover:bg-surface-subtle hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                className="h-3 w-3"
-                aria-hidden="true"
-              >
-                <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-              </svg>
-            </button>
-          </span>
+            label={chip.label}
+            value={chip.value}
+            onDismiss={chip.onClear}
+            dismissLabel={chip.clearLabel ?? `Remove ${chip.label} filter`}
+          />
         ))}
         {chips.length > 0 && onClearAll ? (
           <Button size="sm" variant="ghost" onPress={onClearAll}>
@@ -92,7 +79,12 @@ export function FilterChips({
       </div>
       <div
         id={regionId}
-        className={open ? "flex flex-wrap items-end gap-3" : "hidden"}
+        // The revealed pickers are the same place as the row that reveals
+        // them, so they take the same dense height. Without the class they came
+        // out 40px under a 38px row, which is two sizes for one control.
+        className={
+          open ? "otari-toolbar flex flex-wrap items-end gap-3" : "hidden"
+        }
       >
         {children}
       </div>

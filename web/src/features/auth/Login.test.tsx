@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -508,7 +508,25 @@ describe("Login", () => {
       name: "Finishing sign-out…",
     })
     expect(submitButton).toBeDisabled()
-    await user.click(submitButton)
+
+    // The submit event straight at the form, rather than a press on the
+    // disabled button, and the difference is not cosmetic.
+    //
+    // A press is not a path a browser has here: Chromium delivers pointerdown
+    // and pointerup to a disabled control but no mousedown, mouseup or click,
+    // so there is no activation for the guard to refuse. Under jsdom the
+    // synthesized press did not vanish either: it produced a submit event 81ms
+    // later, once the revocation had settled and the button read "Sign in",
+    // which signed in with no further interaction and left this test racing
+    // its own next click. That race is what made this test fail about one full
+    // run in three. Enter is no substitute: implicit submission goes through
+    // the default button, which is disabled, so it reaches nothing and the
+    // assertion below would hold with the guard deleted.
+    //
+    // So the guard is exercised where it actually lives, on the submit handler,
+    // by dispatching the event the handler is bound to. Removing
+    // `isSigningOut` from `submit`'s guard fails this line.
+    fireEvent.submit(keyField.closest("form") as HTMLFormElement)
 
     // Blocked: no sign-in POST was attempted while the old sign-out was pending.
     expect(
