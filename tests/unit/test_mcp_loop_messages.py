@@ -85,9 +85,16 @@ class _FakePool:
 class _ActivityPool(_FakePool):
     """MCP pool stand-in with server metadata and controllable execution."""
 
-    def __init__(self, *, content: str = "ok", is_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        content: str = "ok",
+        activity_content: str | None = None,
+        is_error: bool = False,
+    ) -> None:
         super().__init__(["fetch_url"])
         self.content = content
+        self.activity_content = activity_content if activity_content is not None else content
         self.is_error = is_error
         self.started = asyncio.Event()
         self.release = asyncio.Event()
@@ -99,7 +106,11 @@ class _ActivityPool(_FakePool):
         self.calls.append((name, arguments))
         self.started.set()
         await self.release.wait()
-        return MCPToolCallOutcome(content=self.content, is_error=self.is_error)
+        return MCPToolCallOutcome(
+            content=self.content,
+            activity_content=self.activity_content,
+            is_error=self.is_error,
+        )
 
 
 def _text_block(text: str) -> TextBlock:
@@ -794,10 +805,17 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("content", "is_error"), [("fixture result", False), ("fixture error", True)])
+@pytest.mark.parametrize(
+    ("content", "activity_content", "is_error"),
+    [
+        ("fixture result", "fixture result", False),
+        ("[tool error] fixture error", "fixture error", True),
+    ],
+)
 async def test_stream_emits_live_mcp_activity_around_execution(
     monkeypatch: pytest.MonkeyPatch,
     content: str,
+    activity_content: str,
     is_error: bool,
 ) -> None:
     """The MCP start reaches the client before execution, then a paired completion follows."""
@@ -822,11 +840,18 @@ async def test_stream_emits_live_mcp_activity_around_execution(
         ]
     )
 
+    provider_calls: list[dict[str, Any]] = []
+
     async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        provider_calls.append(kwargs)
         return next(iter_streams)
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
-    pool = _ActivityPool(content=content, is_error=is_error)
+    pool = _ActivityPool(
+        content=content,
+        activity_content=activity_content,
+        is_error=is_error,
+    )
     stream = anthropic_tool_loop_stream(
         completion_kwargs={
             "model": "fake",
@@ -859,7 +884,7 @@ async def test_stream_emits_live_mcp_activity_around_execution(
     result = cast(Any, completion_start).content_block
     assert result.type == "mcp_tool_result"
     assert result.tool_use_id == use.id
-    assert result.content == content
+    assert result.content == activity_content
     assert result.is_error is is_error
     assert cast(Any, completion_start).index == cast(Any, activity_start).index + 1
 
@@ -873,6 +898,7 @@ async def test_stream_emits_live_mcp_activity_around_execution(
         "message_stop",
     ]
     assert cast(Any, remaining[1]).index == cast(Any, completion_start).index + 1
+    assert provider_calls[1]["messages"][-1]["content"][0]["content"] == content
     assert pool.calls == [("fetch_url", {"url": "https://example.test"})]
 
 
@@ -989,7 +1015,7 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
         and getattr(cast(Any, event).content_block, "type", None) == "mcp_tool_result"
     )
     assert result.is_error is True
-    assert result.content == "[tool error] MCP tool execution failed"
+    assert result.content == "MCP tool execution failed"
     assert len(provider_calls) == 2
     model_result = provider_calls[1]["messages"][-1]["content"][0]
     assert model_result["content"] == "[tool error] MCP tool execution failed"

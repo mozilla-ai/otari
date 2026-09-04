@@ -74,4 +74,33 @@ async def test_call_tool_outcome_preserves_server_error_status(is_error: bool) -
     assert pool.server_name_for_tool("lookup") == "fixture"
     assert outcome.is_error is is_error
     assert outcome.content == ("[tool error] fixture result" if is_error else "fixture result")
+    assert outcome.activity_content == "fixture result"
+    assert outcome.transport_error is False
     session.call_tool.assert_awaited_once_with("lookup", {"id": 755})
+
+
+@pytest.mark.asyncio
+async def test_call_tool_sanitizes_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = SimpleNamespace(
+        call_tool=AsyncMock(side_effect=RuntimeError("https://internal.test/?token=secret"))
+    )
+    pool = MCPClientPool([])
+    pool._servers["fixture"] = _ConnectedServer(
+        name="fixture",
+        session=cast(Any, session),
+    )
+    pool._tool_owner["lookup"] = "fixture"
+    warnings: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        "gateway.services.mcp_client.logger.warning",
+        lambda message, *args: warnings.append((message, *args)),
+    )
+
+    content = await pool.call_tool("lookup", {"id": 755})
+
+    assert content == "[tool error] MCP tool execution failed"
+    assert warnings == [("MCP tool %s execution failed: %s", "lookup", "RuntimeError")]
+    assert "internal.test" not in str(warnings)
+    assert "secret" not in str(warnings)

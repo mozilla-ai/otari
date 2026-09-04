@@ -1426,7 +1426,11 @@ def test_stream_mcp_activity_requires_beta(
             assert name == "lookup"
             assert arguments == {"issue": 755}
             calls.append((name, arguments))
-            return MCPToolCallOutcome(content="issue result", is_error=False)
+            return MCPToolCallOutcome(
+                content="issue result",
+                activity_content="issue result",
+                is_error=False,
+            )
 
     with (
         patch("gateway.services.mcp_loop_messages.amessages", new=fake_amessages),

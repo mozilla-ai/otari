@@ -363,20 +363,25 @@ async def _call_stream_tool(
     arguments: dict[str, Any],
     *,
     mcp_backend: MCPToolBackend | None,
-) -> tuple[str, bool, bool]:
-    """Return ``(content, is_error, raised)`` for one gateway-owned call."""
+) -> tuple[str, str, bool, bool]:
+    """Return model content, activity content, error status, and transport status."""
     try:
         if mcp_backend is not None:
             outcome = await mcp_backend.call_tool_outcome(name, arguments)
-            return outcome.content, outcome.is_error, False
+            return (
+                outcome.content,
+                outcome.activity_content,
+                outcome.is_error,
+                outcome.transport_error,
+            )
         text = await pool.call_tool(name, arguments)
-        return text, is_tool_error(text), False
+        return text, text, is_tool_error(text), False
     except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
-        # Transport exceptions may include URLs, headers, or credentials. Neither
-        # logs, client events, nor the model-facing result may receive that detail.
+        # An unexpected backend exception may include URLs, headers, or credentials.
+        # Neither logs, client events, nor the model-facing result receives its detail.
         logger.warning("Gateway tool %s execution failed: %s", name, type(exc).__name__)
         detail = "MCP tool execution failed" if mcp_backend is not None else "Gateway tool execution failed"
-        return f"[tool error] {detail}", True, True
+        return f"[tool error] {detail}", detail, True, True
 
 
 def _content_block_events(block: Any, acc: _MessagesStreamAccumulator) -> list[Any]:
@@ -417,20 +422,17 @@ async def _execute_stream_owned_events(
             for event in _content_block_events(start, acc):
                 yield event
 
-        text, is_error, raised = await _call_stream_tool(
+        text, activity_content, is_error, transport_error = await _call_stream_tool(
             pool,
             name,
             parsed_input,
             mcp_backend=mcp_backend if server_name is not None else None,
         )
-        if not raised and native_blocks is not None:
+        if not transport_error and native_blocks is not None:
             native_blocks.extend(_native_blocks_for_call(pool, name, parsed_input))
         results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
 
         if activity_id is not None:
-            # A transport exception may embed URLs or headers. Expose only the
-            # truthful failure state and the same fixed message sent to the model.
-            activity_content = "[tool error] MCP tool execution failed" if raised else text
             completion = BetaMCPToolResultBlock(
                 type="mcp_tool_result",
                 tool_use_id=activity_id,

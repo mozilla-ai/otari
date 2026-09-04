@@ -44,10 +44,12 @@ def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class MCPToolCallOutcome:
-    """Rendered MCP result plus the server's explicit error classification."""
+    """Model-facing and client-facing renderings of one MCP result."""
 
     content: str
+    activity_content: str
     is_error: bool
+    transport_error: bool = False
 
 
 @dataclass
@@ -138,23 +140,35 @@ class MCPClientPool:
 
         The Messages stream uses this richer form for server-owned activity
         events. Other API formats keep using :meth:`call_tool`, which returns the
-        same model-facing text as before.
+        model-facing text. Transport failures are converted here so their URLs,
+        headers, or credentials cannot reach logs or a model provider through any
+        API format.
         """
         owner = self._tool_owner.get(name)
         if owner is None:
             raise KeyError(f"No MCP server owns tool {name!r}")
         try:
             result = await self._servers[owner].session.call_tool(name, arguments)
-        except Exception:
+        except Exception as exc:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            raise
+            logger.warning("MCP tool %s execution failed: %s", name, type(exc).__name__)
+            return MCPToolCallOutcome(
+                content="[tool error] MCP tool execution failed",
+                activity_content="MCP tool execution failed",
+                is_error=True,
+                transport_error=True,
+            )
         parts = [_render_content_block(block) for block in result.content]
         flattened = "\n".join(p for p in parts if p)
         rendered = f"[tool error] {flattened}" if result.isError else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
-        return MCPToolCallOutcome(content=rendered, is_error=bool(result.isError))
+        return MCPToolCallOutcome(
+            content=rendered,
+            activity_content=flattened,
+            is_error=bool(result.isError),
+        )
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Execute a tool call against its owning MCP server and flatten the result to text.
