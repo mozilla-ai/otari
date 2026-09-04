@@ -305,6 +305,7 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
                     },
                     {
                         "type": "message",
+                        "model": "fake",
                         "input_tokens": 10,
                         "output_tokens": 2,
                         "cache_creation_input_tokens": 0,
@@ -320,6 +321,7 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
                 iterations=[
                     {
                         "type": "message",
+                        "model": "fake",
                         "input_tokens": 12,
                         "output_tokens": 3,
                         "cache_creation_input_tokens": 0,
@@ -820,6 +822,7 @@ async def test_stream_replays_compaction_content_when_tool_loop_continues(
                     iterations=[
                         {
                             "type": "message",
+                            "model": "fake",
                             "input_tokens": 10,
                             "output_tokens": 5,
                             "cache_creation_input_tokens": 0,

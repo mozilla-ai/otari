@@ -89,6 +89,7 @@ def _compaction_response() -> MessageResponse:
                     },
                     {
                         "type": "message",
+                        "model": "claude-opus-5",
                         "input_tokens": 10,
                         "output_tokens": 5,
                         "cache_creation_input_tokens": 0,
@@ -1106,6 +1107,7 @@ def test_context_management_stream_contract(
                             },
                             {
                                 "type": "message",
+                                "model": "claude-opus-5",
                                 "input_tokens": 10,
                                 "output_tokens": 5,
                                 "cache_creation_input_tokens": 0,

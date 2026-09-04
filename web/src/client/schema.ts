@@ -6756,9 +6756,7 @@ export interface components {
          *
          *     The wire fields are derived from any-llm's ``MessagesParams`` (see
          *     ``_schema_derive``) so the schema cannot silently drop a param any-llm
-         *     forwards. ``container`` is an Anthropic wire param ``MessagesParams`` does
-         *     not model, declared here and forwarded as an any-llm ``**kwargs`` param.
-         *     Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
+         *     forwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
          *     ``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request
          *     into gateway-managed MCP / sandbox / web_search / guardrails without
          *     changing the upstream wire shape. They're stripped before the request is
@@ -6803,6 +6801,8 @@ export interface components {
             } | null;
             /** Prompt Cache Key */
             prompt_cache_key?: string | null;
+            /** Service Tier */
+            service_tier?: string | null;
             /**
              * Session Label
              * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.

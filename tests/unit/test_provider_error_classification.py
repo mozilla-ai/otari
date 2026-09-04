@@ -14,6 +14,7 @@ upstream text.
 import asyncio
 
 import httpx
+import httpx2
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from any_llm.exceptions import UnsupportedParameterError
@@ -93,8 +94,10 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
     ``APITimeoutError`` (no ``status_code``, not an httpx exception instance).
     any-llm surfaces that wrapped type directly, so it must still classify
     as a 504, not fall through to the generic 502."""
-    request = httpx.Request("POST", "http://upstream")
-    for exc in (OpenAIAPITimeoutError(request=request), AnthropicAPITimeoutError(request=request)):
+    for exc in (
+        OpenAIAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
+        AnthropicAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
+    ):
         assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
 
 
@@ -357,19 +360,6 @@ def test_rejected_param_maps_to_400_naming_the_param() -> None:
     assert mapping is not None
     assert mapping.status_code == 400
     assert "'seed'" in mapping.detail
-
-
-def test_rejected_container_maps_to_400_naming_the_param() -> None:
-    """``container`` is hand-declared on the Messages request and rides any-llm's
-    ``**kwargs``, so a provider that bridges Messages through Chat Completions
-    hands it to an SDK method with no such parameter. Without the registration it
-    misses the caller-fault gate and a permanent, caller-fixable rejection is
-    reported as a generic upstream failure."""
-    exc = TypeError("AsyncCompletions.create() got an unexpected keyword argument 'container'")
-    mapping = classify_provider_error(exc)
-    assert mapping is not None
-    assert mapping.status_code == 400
-    assert "'container'" in mapping.detail
 
 
 def test_rejected_param_detail_does_not_name_the_sdk_internals() -> None:

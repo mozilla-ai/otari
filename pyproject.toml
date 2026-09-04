@@ -12,7 +12,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.25.0",
+    "any-llm-sdk[all]>=1.27.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the
