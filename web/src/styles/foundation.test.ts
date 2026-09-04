@@ -1095,3 +1095,75 @@ describe("a field's trailing glyph is spaced once", () => {
     )
   })
 })
+
+// Three button variants, and the only thing that can hold them to three.
+//
+// `Button` is HeroUI's, re-exported directly from shared/components/ui, so its
+// `variant` prop is typed by HeroUI's union and still accepts the four names
+// this product retired. Removing our CSS for them does not make
+// `variant="secondary"` a type error; it makes it a silently unstyled button,
+// which is why the reduction needs a check rather than a convention.
+//
+// Keyed on the HOST rather than on the word, which is load-bearing: `Chip` has
+// its own variant union that happens to share `secondary`, and two legitimate
+// `<Chip variant="secondary">` render on the Budgets page. A scan for the word
+// alone would fail on correct code the first time anyone ran it, and a gate
+// that fails on correct code is one people learn to suppress.
+describe("buttons come in three variants", () => {
+  const SRC = join(WEB, "src")
+  const RETIRED = ["outline", "secondary", "tertiary", "danger-soft"]
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((name) => String(name).replaceAll("\\", "/"))
+    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+
+  /** Every retired variant a `Button` carries in one file, with its line. */
+  function offenders(source: string): string[] {
+    const found: string[] = []
+    const text = source.replace(/\/\*[\s\S]*?\*\//g, "")
+    for (const match of text.matchAll(/variant\s*[=:]\s*"([a-z-]+)"/g)) {
+      const name = match[1]
+      if (!RETIRED.includes(name)) continue
+      const before = text.slice(0, match.index)
+      // The nearest opening tag before the prop is the component it is on.
+      const host = [...before.matchAll(/<([A-Z][A-Za-z0-9]*)/g)].pop()?.[1]
+      // `buttonVariants({ variant: … })` builds a button's className without a
+      // JSX host, so it is matched on the call rather than on a tag.
+      const call = /buttonVariants\s*\(\s*\{[^}]*$/.test(before)
+      if (host === "Button" || call) {
+        const line = before.split("\n").length
+        found.push(`line ${line}: ${match[0]}`)
+      }
+    }
+    return found
+  }
+
+  it("covers the source tree", () => {
+    expect(sources.length).toBeGreaterThan(30)
+  })
+
+  it.each(sources)("uses no retired button variant in %s", (name) => {
+    const source = readFileSync(join(SRC, name), "utf8")
+    expect(
+      offenders(source),
+      `${name} gives a Button a retired variant; use primary, ghost or danger`,
+    ).toEqual([])
+  })
+
+  it("still reads a retired variant on a Button as an offence", () => {
+    // The scan's own mutation check: this is what a reintroduced variant looks
+    // like, and it has to be caught by the same code the sweep above runs.
+    expect(
+      offenders('<Button size="sm" variant="secondary">Go</Button>'),
+    ).toEqual(['line 1: variant="secondary"'])
+    expect(
+      offenders('buttonVariants({ size: "sm", variant: "danger-soft" })'),
+    ).toEqual(['line 1: variant: "danger-soft"'])
+  })
+
+  it("leaves another component's identically named variant alone", () => {
+    // Chip's own vocabulary, which the product uses and must keep.
+    expect(
+      offenders('<Chip size="sm" variant="secondary">soft</Chip>'),
+    ).toEqual([])
+  })
+})

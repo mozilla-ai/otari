@@ -1725,35 +1725,17 @@ main {
   border-color: transparent;
 }
 
-/* An outlined button is an object, so it takes the object edge. HeroUI gives it
-   `--color-border`, the 0.08 divider alpha, which is tuned to separate two
-   surfaces of nearly the same value and leaves a button on the page ground with
-   no edge to speak of in dark. Select triggers already took the control edge in
-   the block above, so one control family had the rule and the other did not. */
-.button--outline {
-  border-color: var(--color-control-border);
-}
-
-/* And an object's edge is drawn INSIDE its box, so the border eats a pixel of
-   the inset that every other variant spends on air. Measured beside each
-   other: an outline sm put its label 13px from the edge where a primary sm put
-   its label at 12, which is a visible step between two controls that sit in
-   the same row. The padding gives the pixel back.
-   Written at both sizes even though only sm renders an outline today, because
-   the rule is about the border rather than about which sizes happen to be in
-   use, and md would acquire the same 1px the first time someone reaches for it.
-   Icon-only is excluded: it has no label to inset and HeroUI zeroes its
-   padding to keep it square.
-   Ghost and danger join it because they carry a 1px edge now too, and measured
-   beside a primary in the same dialog footer, a bordered button without this
-   puts its label 13px from the edge at sm and 17px at md where a primary puts
-   it at 12 and 16. */
-.button--outline.button--sm:not(.button--icon-only),
+/* An edge is drawn INSIDE the box, so it eats a pixel of the inset the other
+   variants spend on air. Measured beside a primary in the same dialog footer,
+   a bordered button without this puts its label 13px from the edge at sm and
+   17px at md where a primary puts it at 12 and 16. The padding gives the pixel
+   back. Both sizes, because the rule is about the border rather than about
+   which sizes happen to be in use today. Icon-only is excluded: it has no
+   label to inset and HeroUI zeroes its padding to keep it square. */
 .button--ghost.button--sm:not(.button--icon-only),
 .button--danger.button--sm:not(.button--icon-only) {
   padding-inline: 11px;
 }
-.button--outline:not(.button--sm):not(.button--icon-only),
 .button--ghost:not(.button--sm):not(.button--icon-only),
 .button--danger:not(.button--sm):not(.button--icon-only) {
   padding-inline: 15px;
