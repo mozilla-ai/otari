@@ -902,6 +902,7 @@ function ModelDetailPanel({
 
   return (
     <Section
+      bleed={false}
       className="border-y border-border py-5"
       contentClassName="flex flex-col gap-5"
     >
@@ -1575,6 +1576,7 @@ function DiscoveredErrors({
     // provider means models are missing from the table under it, which is a
     // wrong answer rather than a caveat.
     <Section
+      bleed={false}
       className="border-y border-border py-3"
       contentClassName="flex items-start gap-3 text-sm text-muted"
     >
@@ -2382,6 +2384,7 @@ export function ModelsPage() {
 
           {pricingRow ? (
             <Section
+              bleed={false}
               className="border-y border-border"
               contentClassName="flex flex-col"
             >
