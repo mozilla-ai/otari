@@ -256,7 +256,7 @@ export function OrganizationDomainsPage() {
           {row.verified_at !== null ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               isDisabled={update.isPending}
               onPress={() =>
                 update.mutate({
@@ -269,11 +269,11 @@ export function OrganizationDomainsPage() {
             </Button>
           ) : null}
           <ConfirmButton
-            confirmLabel="Remove"
+            confirmLabel="Remove claim"
             isPending={remove.isPending}
             onConfirm={() => remove.mutate(row.id)}
           >
-            Remove
+            Remove domain
           </ConfirmButton>
         </div>
       ),

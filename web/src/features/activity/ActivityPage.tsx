@@ -198,7 +198,7 @@ function InFlightControl({
   if (data.total === 0 && !isOpen) return null
   return (
     <Popover isOpen={isOpen} onOpenChange={setIsOpen}>
-      <Button size="sm" variant="outline">
+      <Button size="sm" variant="ghost">
         {/* Decorative: the count beside it carries the same meaning in text, so
             nothing is encoded in motion alone. That is also why it can stop
             outright under `prefers-reduced-motion`, being the one element on the
@@ -1072,7 +1072,7 @@ function RequestDetail({
           {onPriceModel ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onPress={() => onPriceModel(pricingKey)}
             >
               Price this model
@@ -2068,7 +2068,7 @@ export function ActivityPage() {
               {newRows > 0 ? (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onPress={refresh}
                   isDisabled={usage.isFetching}
                 >

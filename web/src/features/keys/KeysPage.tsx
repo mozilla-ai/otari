@@ -1258,7 +1258,7 @@ export function KeysPage() {
         >
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             isDisabled={bulkPending}
             onPress={() =>
               void runBulk(selectedKeys, (k) =>
@@ -1273,7 +1273,7 @@ export function KeysPage() {
           {isDeploymentWide ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               isDisabled={bulkPending}
               onPress={() =>
                 void runBulk(selectedKeys, (k) =>

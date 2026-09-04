@@ -314,7 +314,7 @@ function CopyField({
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <span className="text-caption">New master key</span>
-        <Button size="sm" variant="outline" onPress={copy}>
+        <Button size="sm" variant="ghost" onPress={copy}>
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
@@ -479,12 +479,12 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
         <AlertDialog isOpen={dialogOpen} onOpenChange={onOpenChange}>
           {isGenerated ? (
             <AlertDialog.Trigger
-              className={buttonVariants({ size: "sm", variant: "danger-soft" })}
+              className={buttonVariants({ size: "sm", variant: "danger" })}
             >
               Regenerate
             </AlertDialog.Trigger>
           ) : (
-            <Button size="sm" variant="danger-soft" isDisabled>
+            <Button size="sm" variant="danger" isDisabled>
               Managed in configuration
             </Button>
           )}
@@ -532,7 +532,7 @@ function SecretKeyRow() {
         <div className="shrink-0">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             isDisabled={!hasStoredKeys || reencrypt.isPending}
             onPress={() => reencrypt.mutate()}
           >

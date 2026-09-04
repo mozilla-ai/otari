@@ -110,7 +110,7 @@ export function MailDeliveryCard() {
           />
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             isDisabled={!ready || to.trim() === "" || sendTest.isPending}
             onPress={() => sendTest.mutate({ to: to.trim() })}
           >

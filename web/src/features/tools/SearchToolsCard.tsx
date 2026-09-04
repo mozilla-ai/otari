@@ -132,7 +132,7 @@ function StoredToolRow({
           {update.isPending ? "Saving…" : "Save"}
         </Button>
         <ConfirmButton
-          confirmLabel="Remove"
+          confirmLabel="Remove permanently"
           isPending={busy}
           onConfirm={() => {
             setError("")
@@ -142,7 +142,7 @@ function StoredToolRow({
             })
           }}
         >
-          Remove
+          Remove tool
         </ConfirmButton>
       </div>
       {error ? (

@@ -62,7 +62,7 @@ function ConnectionTest({
   return (
     <div className="flex flex-col gap-1.5">
       <Button
-        variant="outline"
+        variant="ghost"
         isDisabled={payload === null || test.isPending}
         onPress={() => {
           if (payload) test.mutate(payload)
@@ -507,7 +507,7 @@ function EditProviderForm({
             </span>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               onPress={() => setReplacingKey(true)}
             >
               Replace key

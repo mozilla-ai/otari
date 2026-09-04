@@ -438,7 +438,7 @@ function PricingTierEditor({
             request.
           </p>
         </div>
-        <Button size="sm" variant="outline" onPress={add}>
+        <Button size="sm" variant="ghost" onPress={add}>
           Add tier
         </Button>
       </div>
@@ -844,17 +844,17 @@ function PanelPriceEditor({
       />
       {readOnly ? null : (
         <div className="flex items-center gap-2 pt-1">
-          <Button size="sm" variant="outline" onPress={startEdit}>
+          <Button size="sm" variant="ghost" onPress={startEdit}>
             {row.source === "configured" ? "Edit price" : "Set price"}
           </Button>
           {row.source === "configured" ? (
             <>
               <ConfirmButton
-                confirmLabel="Reset"
+                confirmLabel="Reset to default"
                 isPending={deletePricing.isPending}
                 onConfirm={() => deletePricing.mutate(row.key)}
               >
-                Reset
+                Reset price
               </ConfirmButton>
               <InfoTooltip label="What reset does">
                 Removes the custom price. The model reverts to the default rate
@@ -1184,13 +1184,13 @@ function InlinePriceForm({
         {row.source === "configured" ? (
           <span className="inline-flex items-center gap-1">
             <ConfirmButton
-              confirmLabel="Reset"
+              confirmLabel="Reset to default"
               isPending={deletePricing.isPending}
               onConfirm={() =>
                 deletePricing.mutate(row.key, { onSuccess: onClose })
               }
             >
-              Reset
+              Reset price
             </ConfirmButton>
             <InfoTooltip label="What reset does">
               Removes the custom price. The model reverts to the default rate
@@ -1603,7 +1603,7 @@ function DiscoveredErrors({
               the wrong provider without saying so. */}
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               className="mt-2"
               onPress={() =>
                 onPriceModel(
@@ -2221,7 +2221,7 @@ export function ModelsPage() {
       {isOperator ? (
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           onPress={() => setCustomPriceKey(searchedSelector ?? "")}
         >
           {searchedSelector

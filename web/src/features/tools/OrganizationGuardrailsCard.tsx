@@ -300,7 +300,7 @@ function GuardrailRow({
           {update.isPending ? "Saving…" : "Save"}
         </Button>
         <ConfirmButton
-          confirmLabel="Remove"
+          confirmLabel="Remove permanently"
           isPending={busy}
           onConfirm={() => {
             setError("")
@@ -310,7 +310,7 @@ function GuardrailRow({
             })
           }}
         >
-          Remove
+          Remove guardrail
         </ConfirmButton>
       </div>
       {error ? (

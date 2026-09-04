@@ -52,7 +52,7 @@ export function FilterChips({
         {start}
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           onPress={() => setOpen((prev) => !prev)}
           aria-expanded={open}
           aria-controls={regionId}
