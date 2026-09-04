@@ -5238,6 +5238,17 @@
             ],
             "title": "Prompt Cache Key"
           },
+          "service_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Tier"
+          },
           "session_label": {
             "anyOf": [
               {
@@ -5902,6 +5913,141 @@
           "active_organization_id"
         ],
         "title": "OAuthSessionResponse",
+        "type": "object"
+      },
+      "OTLPLogsPartialSuccess": {
+        "properties": {
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "rejectedLogRecords": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rejected log record count, encoded as an int64 string by OTLP JSON.",
+            "title": "Rejectedlogrecords"
+          }
+        },
+        "title": "OTLPLogsPartialSuccess",
+        "type": "object"
+      },
+      "OTLPLogsServiceResponse": {
+        "properties": {
+          "partialSuccess": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OTLPLogsPartialSuccess"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "OTLPLogsServiceResponse",
+        "type": "object"
+      },
+      "OTLPMetricsPartialSuccess": {
+        "properties": {
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "rejectedDataPoints": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rejected data point count, encoded as an int64 string by OTLP JSON.",
+            "title": "Rejecteddatapoints"
+          }
+        },
+        "title": "OTLPMetricsPartialSuccess",
+        "type": "object"
+      },
+      "OTLPMetricsServiceResponse": {
+        "properties": {
+          "partialSuccess": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OTLPMetricsPartialSuccess"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "OTLPMetricsServiceResponse",
+        "type": "object"
+      },
+      "OTLPTracePartialSuccess": {
+        "properties": {
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage"
+          },
+          "rejectedSpans": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rejected span count, encoded as an int64 string by OTLP JSON.",
+            "title": "Rejectedspans"
+          }
+        },
+        "title": "OTLPTracePartialSuccess",
+        "type": "object"
+      },
+      "OTLPTraceServiceResponse": {
+        "properties": {
+          "partialSuccess": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OTLPTracePartialSuccess"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "OTLPTraceServiceResponse",
         "type": "object"
       },
       "OrgProviderKeyCreateRequest": {
@@ -17916,10 +18062,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OTLPLogsServiceResponse"
+                }
+              },
+              "application/x-protobuf": {
+                "schema": {
+                  "$ref": "#/components/schemas/OTLPLogsServiceResponse"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "OTLP export response. A partial success still returns HTTP 200; the rejected count is present only when the gateway rejected part of the export."
           }
         },
         "security": [
@@ -18042,10 +18195,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OTLPMetricsServiceResponse"
+                }
+              },
+              "application/x-protobuf": {
+                "schema": {
+                  "$ref": "#/components/schemas/OTLPMetricsServiceResponse"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "OTLP export response. A partial success still returns HTTP 200; the rejected count is present only when the gateway rejected part of the export."
           }
         },
         "security": [
@@ -25168,10 +25328,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OTLPTraceServiceResponse"
+                }
+              },
+              "application/x-protobuf": {
+                "schema": {
+                  "$ref": "#/components/schemas/OTLPTraceServiceResponse"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "OTLP export response. A partial success still returns HTTP 200; the rejected count is present only when the gateway rejected part of the export."
           }
         },
         "security": [
