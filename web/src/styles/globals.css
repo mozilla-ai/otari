@@ -1414,7 +1414,6 @@ main {
    2px of `--background`. Setting only ours would recolor every ringed control
    except the buttons, which are the ones this ruling is mostly about. */
 .button--primary,
-.button--danger,
 .bg-accent,
 .bg-control-indicator,
 .bg-success,
@@ -1455,7 +1454,28 @@ main {
   transition-duration: 100ms;
   transition-timing-function: var(--ease-out, ease-out);
 }
-.button:is(.w-full, .w-full\!):is(:active, [data-pressed="true"]) {
+/* One value at every rung, replacing the ladder above.
+ *
+ * The ladder deepened with size, so a wider button displaced more on a deeper
+ * value: measured per edge, 0.57px at sm, 1.90px at md, 2.78px at lg. It ran
+ * that way because the press had no color answer and the transform was
+ * carrying the whole acknowledgement alone. Ghost has a real color step now
+ * (below), so 0.98 everywhere is enough: 1.27px at md, 1.39px at lg. If the
+ * ghost ramp is ever dropped, the ladder comes back with it. */
+.button:is(:active, [data-pressed="true"]),
+.button--sm:is(:active, [data-pressed="true"]),
+.button--lg:is(:active, [data-pressed="true"]) {
+  transform: scale(0.98);
+}
+
+/* `.button--full-width` alongside the two utilities: a button is also a row
+   when HeroUI's own `fullWidth` prop puts it there, and that prop emits this
+   class rather than either utility. Measured at 471px, the widest of them
+   displaced 7.07px. */
+.button:is(.w-full, .w-full\!, .button--full-width):is(
+  :active,
+  [data-pressed="true"]
+) {
   transform: none;
 }
 
@@ -1598,6 +1618,83 @@ main {
   --button-fg: var(--color-primary-button-foreground);
 }
 
+/* =============================================================
+ * Three variants: primary, ghost, danger.
+ *
+ * `secondary`, `tertiary`, `danger-soft` and `outline` are retired at the call
+ * sites; ghost carries the opaque edge outline had, and danger absorbs
+ * danger-soft. HeroUI still declares all seven, so nothing here can stop a
+ * retired name from being typed: `foundation.test.ts` is what does that.
+ *
+ * GHOST'S EDGE NEEDS A WIDTH, not just a color, and this is the one place the
+ * spec for this change was wrong. Ghost reads as edgeless today because HeroUI
+ * gives `.button--outline` `border-width: 1px` and gives ghost none: measured
+ * on the page, a ghost button's computed `border-top-width` is 0px while its
+ * border-color is already set to the divider alpha. Setting only the color
+ * would have compiled, linted, shipped and painted nothing.
+ *
+ * The color is `--color-text-subtle`, opaque, which measures 6.01 against the
+ * page in light and 6.13 in dark, where the divider alpha it replaces measured
+ * 1.14 and 1.18. No new token: the same one, in a job it was not being given.
+ *
+ * The press ramp gives ghost three steps where it had two, and it is not a new
+ * idea in this stylesheet: `.list-box-item` below already uses this exact pair
+ * for hover and selection. Rest to pressed goes from 1.05 to 1.22 in dark and
+ * from 1.06 to 1.14 in light. The light half is marginal and stated rather
+ * than trimmed; no neutral fill in this palette does better, the whole ramp
+ * spans 1.05 to 1.22.
+ * ============================================================= */
+.button--ghost {
+  border-style: var(--tw-border-style, solid);
+  border-width: 1px;
+  border-color: var(--color-text-subtle);
+  --button-bg: transparent;
+  --button-bg-hover: var(--color-surface-alt);
+  --button-bg-pressed: var(--color-surface-subtle);
+}
+
+/* Danger, once, unfilled: transparent ground, danger ink, danger edge, filling
+   to the subtle danger on hover. A filled destructive button read as a second
+   primary, which is what absorbing `danger-soft` into it is for. The ink
+   measures 5.15 on the page ground in light and 5.54 in dark, both clearing
+   4.5 as text.
+   Hover and pressed share the one subtle danger fill, because that is the only
+   subtle danger value in the palette and inventing a second is a token change
+   rather than a role change. The press is carried by the transform above and by
+   the ink, not by a third fill. */
+.button--danger {
+  border-style: var(--tw-border-style, solid);
+  border-width: 1px;
+  border-color: var(--color-danger);
+  --button-bg: transparent;
+  --button-bg-hover: var(--color-danger-subtle);
+  --button-bg-pressed: var(--color-danger-subtle);
+  --button-fg: var(--color-danger);
+}
+
+/* Where an edge is too loud, named as a place rather than remembered per
+   button. `.otari-toolbar`, `.otari-pagination`, `.otari-table` and the
+   per-page table classes already work this way for inputs and pagination
+   controls; `.otari-bulk-bar` and `.otari-breakdown` already exist too.
+   `.otari-rail` and `.otari-row` are new class names for two places the
+   approved prototype declared (`place-nav` and `place-row`) and this
+   stylesheet had no word for.
+   The last selector is the one exception to place, and it is deliberate: an
+   icon-only ghost never takes the edge, wherever it renders. `CopyButton` is
+   why. It appears inside tables, inside the models detail panel, inside
+   banners and standalone on a page, so no container can reach it, and a rule
+   keyed on what the control IS cannot be forgotten by a call site either. */
+.otari-toolbar .button--ghost,
+.otari-pagination .button--ghost,
+.otari-table .button--ghost,
+.otari-bulk-bar .button--ghost,
+.otari-breakdown .button--ghost,
+.otari-rail .button--ghost,
+.otari-row .button--ghost,
+.button--ghost.button--icon-only {
+  border-color: transparent;
+}
+
 /* An outlined button is an object, so it takes the object edge. HeroUI gives it
    `--color-border`, the 0.08 divider alpha, which is tuned to separate two
    surfaces of nearly the same value and leaves a button on the page ground with
@@ -1616,12 +1713,30 @@ main {
    the rule is about the border rather than about which sizes happen to be in
    use, and md would acquire the same 1px the first time someone reaches for it.
    Icon-only is excluded: it has no label to inset and HeroUI zeroes its
-   padding to keep it square. */
-.button--outline.button--sm:not(.button--icon-only) {
+   padding to keep it square.
+   Ghost and danger join it because they carry a 1px edge now too, and measured
+   beside a primary in the same dialog footer, a bordered button without this
+   puts its label 13px from the edge at sm and 17px at md where a primary puts
+   it at 12 and 16. */
+.button--outline.button--sm:not(.button--icon-only),
+.button--ghost.button--sm:not(.button--icon-only),
+.button--danger.button--sm:not(.button--icon-only) {
   padding-inline: 11px;
 }
-.button--outline:not(.button--sm):not(.button--icon-only) {
+.button--outline:not(.button--sm):not(.button--icon-only),
+.button--ghost:not(.button--sm):not(.button--icon-only),
+.button--danger:not(.button--sm):not(.button--icon-only) {
   padding-inline: 15px;
+}
+
+/* The rail is the exception, and it has to be one: its two band controls set
+   their own lane so their mark and their label line up with the nav rows'
+   icon lane, which is a call-site decision this rule would otherwise outrank
+   (an unlayered rule beats `@layer utilities`, so `px-6` cannot win on its
+   own). `revert-layer` hands the value back to the utility rather than
+   restating the number here, so the lane stays declared in exactly one place. */
+.otari-rail .button--ghost:not(.button--icon-only) {
+  padding-inline: revert-layer;
 }
 
 /* =============================================================
