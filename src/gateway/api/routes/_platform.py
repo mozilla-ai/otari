@@ -27,7 +27,11 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import GatewayConfig
-from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
+from gateway.core.usage import (
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt
 from gateway.models.mcp import McpServerConfig
@@ -945,13 +949,19 @@ async def _report_platform_usage(
         payload["session_label"] = normalized_label
     if outcome == "success":
         if usage is not None:
-            payload["usage"] = {
+            cache_write_tokens = cache_write_tokens_of(usage)
+            usage_payload: dict[str, Any] = {
                 "prompt_tokens": usage.prompt_tokens,
                 "completion_tokens": usage.completion_tokens,
                 "total_tokens": usage.total_tokens,
                 "cache_read_tokens": cache_read_tokens_of(usage),
-                "cache_write_tokens": cache_write_tokens_of(usage),
+                "cache_write_tokens": cache_write_tokens,
             }
+            # Only a cache-writing report can carry a TTL split, so a provider
+            # with no cache-write concept keeps the exact payload it sent before.
+            if cache_write_tokens:
+                usage_payload["cache_write_1h_tokens"] = cache_write_1h_tokens_of(usage)
+            payload["usage"] = usage_payload
     elif error_class is not None:
         payload["error_class"] = error_class
 

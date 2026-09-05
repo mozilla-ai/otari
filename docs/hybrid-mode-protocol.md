@@ -407,6 +407,32 @@ that in mind:
   and are not part of `prompt_tokens`. `cache_write_tokens` is a true cache
   creation charge billed at a premium.
 
+`cache_write_1h_tokens` is an optional **subset** of `cache_write_tokens`: the
+portion created with a one-hour TTL rather than the five-minute default, which
+Anthropic bills at a higher rate. It is never added to `cache_write_tokens`, so
+the five-minute portion is `cache_write_tokens - cache_write_1h_tokens`. A
+receiver that does not price the two TTLs separately can ignore it.
+
+The key is present whenever `cache_write_tokens` is non-zero, and `0` there means
+every write used the five-minute TTL. It is omitted entirely when the report
+carries no cache writes, which is every OpenAI and Gemini report; hence its
+absence from the example above. Absent means zero, so a report from an older
+gateway prices exactly as before. A cache-writing report looks like:
+
+```json
+"usage": {
+  "prompt_tokens": 13,
+  "completion_tokens": 7,
+  "total_tokens": 20,
+  "cache_read_tokens": 8,
+  "cache_write_tokens": 30,
+  "cache_write_1h_tokens": 10
+}
+```
+
+so 10 of those 30 written tokens carry the one-hour TTL and the other 20 the
+five-minute one.
+
 The platform must accept these additive keys with lenient parsing; a handler that
 rejects unknown fields would 422 the report (a non-retryable status), silently
 dropping it. See companion issue mozilla-ai/otari-ai#1168.
