@@ -21,7 +21,8 @@ def test_download_openapi_describes_binary_content() -> None:
     responses = app.openapi()["paths"]["/v1/files/{file_id}/content"]["get"]["responses"]
 
     assert responses["200"]["content"] == {
-        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+        "*/*": {"schema": {"type": "string", "format": "binary"}},
     }
     assert responses["200"]["headers"]["Content-Disposition"]["schema"]["type"] == "string"
     assert "application/json" in responses["422"]["content"]

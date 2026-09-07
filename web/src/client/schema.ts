@@ -12304,6 +12304,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "*/*": string;
                     "application/octet-stream": string;
                 };
             };

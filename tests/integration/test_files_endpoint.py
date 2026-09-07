@@ -184,6 +184,8 @@ def test_upload_get_list_delete_roundtrip(
     assert content.content == payload
     assert content.headers["content-type"].split(";")[0] == media_type
     assert content.headers["content-disposition"].startswith("attachment;")
+    assert f'filename="{filename}"' in content.headers["content-disposition"]
+    assert f"filename*=UTF-8''{filename}" in content.headers["content-disposition"]
 
     listed = client.get("/v1/files", headers=api_key_header)
     assert listed.status_code == 200

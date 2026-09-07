@@ -17417,6 +17417,12 @@
         "responses": {
           "200": {
             "content": {
+              "*/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "application/octet-stream": {
                 "schema": {
                   "format": "binary",

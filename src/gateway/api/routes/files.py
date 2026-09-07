@@ -297,7 +297,10 @@ async def get_file(
             "description": (
                 "File content. Content-Type reflects the stored media type; application/octet-stream is the fallback."
             ),
-            "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+                "*/*": {"schema": {"type": "string", "format": "binary"}},
+            },
             "headers": {
                 "Content-Disposition": {
                     "description": "Attachment filename, with a UTF-8 filename* parameter for non-ASCII names.",
