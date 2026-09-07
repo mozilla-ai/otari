@@ -833,10 +833,13 @@ export function Login() {
                 separator is what says so now that no card edge does.
                 Left-aligned with the column, like everything else in it. */}
         <div className="flex flex-col gap-3 border-t border-border pt-5">
-          {/* Names the credential the form above actually took. The master key
-              is the one that has a page explaining it, so only that branch
-              links out; a password deployment would otherwise send someone to
-              the bootstrap guide to read about a credential it retired. */}
+          {/* Names the credential the form above actually took. Only the
+              master-key branch links to /welcome: a claimed deployment signs in
+              with a password, so pointing at the bootstrap guide there would
+              explain the wrong credential. The master key itself is not gone,
+              it stays an API credential and the recovery path
+              (docs/access-control.md), which is why the two service-unavailable
+              screens above still say the management API accepts it. */}
           {usesPassword ? (
             <p className="text-xs text-muted">
               Your password is sent once and exchanged for a session cookie. It

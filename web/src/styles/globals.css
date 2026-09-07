@@ -1953,6 +1953,17 @@ main {
     height: 44px;
     min-width: 44px;
   }
+  /* The strip's fields come up with its buttons. They are not
+     `[data-slot="button"]`, so neither the floor further down nor the rule
+     above reaches them, and a 44px arrow beside a 32px page-size select is the
+     ragged half-conversion this place exists to avoid. Safe where the arrows
+     are not: a select and a number field are one control each, not a cluster
+     of neighbors doing opposite things. */
+  .otari-pagination .input,
+  .otari-pagination .select__trigger {
+    height: 44px;
+    min-height: 44px;
+  }
   .otari-pagination__pager {
     gap: 8px;
   }
@@ -1976,6 +1987,14 @@ main {
   .otari-toolbar .select__trigger,
   .otari-toolbar input[type="search"] {
     height: 44px;
+  }
+  /* A select inside a table cell is the third place the dense height outlives
+     the floor. Not the same as #927: a row's Edit and Delete cannot reach 44
+     without widening the lane, while a cell's select is one control with the
+     row's height to grow into. */
+  .table__cell .select__trigger {
+    height: 44px;
+    min-height: 44px;
   }
 }
 

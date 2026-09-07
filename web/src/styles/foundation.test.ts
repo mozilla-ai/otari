@@ -1021,6 +1021,21 @@ describe("the phone viewport's touch-target floor", () => {
       /@media \(max-width: 767px\) \{\s*\.otari-toolbar \.input,\s*\.otari-toolbar \.select__trigger,\s*\.otari-toolbar input\[type="search"\] \{\s*height: 44px;/,
     )
   })
+
+  // Every dense field, not just the one a review happened to notice. Three
+  // places pin a non-button control to 32px, and a floor keyed on
+  // `[data-slot="button"]` reaches none of them.
+  it("raises the pager's own fields with its buttons on a coarse pointer", () => {
+    expect(CSS).toMatch(
+      /\.otari-pagination \.input,\s*\.otari-pagination \.select__trigger \{\s*height: 44px;\s*min-height: 44px;/,
+    )
+  })
+
+  it("raises a table cell's select on the phone viewport", () => {
+    expect(CSS).toMatch(
+      /\.table__cell \.select__trigger \{\s*height: 44px;\s*min-height: 44px;/,
+    )
+  })
 })
 
 // Form controls. The shared `Checkbox` (`shared/components/ui.tsx`) is the one

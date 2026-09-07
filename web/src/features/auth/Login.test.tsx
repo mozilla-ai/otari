@@ -200,8 +200,8 @@ describe("Login", () => {
     expect(
       screen.getByText(/Your password is sent once and exchanged/),
     ).toBeInTheDocument()
-    // And the master-key link is gone with it: `/welcome` documents a
-    // credential this deployment has retired.
+    // And the master-key link is gone with it: `/welcome` documents the
+    // bootstrap credential, which is not the one this form takes any more.
     expect(screen.queryByText(/master key/, { selector: "a" })).toBeNull()
   })
 
