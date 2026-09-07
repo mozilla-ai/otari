@@ -148,39 +148,9 @@ def _capture_transport(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_connect_opens_the_transport_with_redirects_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The SDK's default client follows redirects, and this transport must not.
-
-    ``validate_mcp_url`` vets the configured URL, so a followed redirect is a
-    request that leaves the process having never been vetted. A 307 also
-    replays the MCP request body to the destination.
-    """
-    captured = _capture_transport(monkeypatch)
-    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp", authorization_token="ghp_token")
-
-    async with MCPClientPool([config]):
-        pass
-
-    factory = captured["httpx_client_factory"]
-    client = factory({"Authorization": "Bearer ghp_token"}, None, None)
-    try:
-        assert client.follow_redirects is False
-    finally:
-        await client.aclose()
-
-
-@pytest.mark.asyncio
 async def test_the_transport_keeps_the_sdk_timeout_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only redirects change.
-
-    The managed tool loop serves live completions, so narrowing its timeouts
-    here would turn a security fix into a behavior change for anyone whose MCP
-    tool is slower than the new bound.
-    """
     captured = _capture_transport(monkeypatch)
     config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp")
 
@@ -200,18 +170,63 @@ async def test_the_transport_keeps_the_sdk_timeout_defaults(
 
 
 @pytest.mark.asyncio
-async def test_a_redirect_is_not_followed(
+@pytest.mark.parametrize(
+    ("base_url", "location"),
+    [
+        ("https://93.184.216.34/mcp", "/mcp/"),
+        ("http://93.184.216.34/mcp", "https://93.184.216.34/mcp/"),
+    ],
+)
+async def test_safe_redirect_is_followed(
     monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+    location: str,
 ) -> None:
-    """The redirect is returned as a response, so nothing is re-sent anywhere."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(307, headers={"location": "http://169.254.169.254/"})
+        if len(seen) == 1:
+            return httpx.Response(307, headers={"location": location})
+        return httpx.Response(200)
 
     captured = _capture_transport(monkeypatch)
-    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp", authorization_token="ghp_token")
+    config = McpServerConfig(name="tools", url=base_url)
+
+    async with MCPClientPool([config]):
+        pass
+
+    client = captured["httpx_client_factory"](None, None, None)
+    client._transport = httpx.MockTransport(handler)  # noqa: SLF001
+    async with client:
+        response = await client.post(base_url, json={"method": "tools/list"})
+
+    assert response.status_code == 200
+    assert len(seen) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location",
+    [
+        "http://169.254.169.254/",
+        "http://93.184.216.34/mcp",
+        "https://93.184.216.34:8443/mcp",
+    ],
+)
+async def test_unsafe_redirect_is_blocked_before_sending(
+    monkeypatch: pytest.MonkeyPatch,
+    location: str,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(307, headers={"location": location})
+
+    base_url = "https://93.184.216.34/mcp"
+    captured = _capture_transport(monkeypatch)
+    config = McpServerConfig(name="tools", url=base_url, authorization_token="ghp_token")
 
     async with MCPClientPool([config]):
         pass
@@ -219,8 +234,8 @@ async def test_a_redirect_is_not_followed(
     client = captured["httpx_client_factory"]({"Authorization": "Bearer ghp_token"}, None, None)
     client._transport = httpx.MockTransport(handler)  # noqa: SLF001
     async with client:
-        response = await client.post("https://93.184.216.34/mcp", json={"method": "tools/list"})
+        with pytest.raises(httpx.RequestError, match="outside the validated origin"):
+            await client.post(base_url, json={"method": "tools/list"})
 
-    assert response.status_code == 307
     assert len(seen) == 1
     assert seen[0].url.host == "93.184.216.34"

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -31,35 +32,46 @@ if TYPE_CHECKING:
     from gateway.models.mcp import McpServerConfig
 
 
-def _no_redirect_http_client(
+def _effective_port(url: httpx.URL) -> int | None:
+    if url.port is not None:
+        return url.port
+    return {"http": 80, "https": 443}.get(url.scheme)
+
+
+def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
+    same_host = base.host == target.host
+    same_origin = (
+        same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
+    )
+    https_upgrade = (
+        same_host
+        and base.scheme == "http"
+        and _effective_port(base) == 80
+        and target.scheme == "https"
+        and _effective_port(target) == 443
+    )
+    return same_origin or https_upgrade
+
+
+def _origin_bound_http_client(
+    base_url: str,
     headers: dict[str, str] | None = None,
     timeout: httpx.Timeout | None = None,
     auth: httpx.Auth | None = None,
 ) -> httpx.AsyncClient:
-    """The MCP SDK's own HTTP client, with redirects turned off.
+    """Create an MCP HTTP client that refuses redirects outside the vetted origin."""
+    base = httpx.URL(base_url)
 
-    ``services/url_safety.validate_mcp_url`` vets a server's configured URL
-    before anything connects, refusing private, loopback, link-local and
-    reserved addresses. The SDK's default client sets ``follow_redirects=True``,
-    so a server answering with a redirect had that check bypassed entirely: the
-    redirected request that actually left the process was never vetted. For a
-    status such as 307, httpx also re-sends the method and request body to the
-    redirect destination.
+    async def enforce_origin(request: httpx.Request) -> None:
+        if not _is_allowed_mcp_redirect(base, request.url):
+            raise httpx.RequestError("MCP redirect target is outside the validated origin", request=request)
 
-    The SDK transport passes its headers, authentication and effective timeout
-    into this factory. Preserving those values keeps the managed tool loop's
-    existing behavior; the fallback matches the SDK's 30-second default for
-    direct callers that omit a timeout.
-
-    Following redirects safely means validating each destination before sending
-    anything to it. That is a larger change than this, and out of scope: no
-    caller needs a redirecting MCP server today.
-    """
     return httpx.AsyncClient(
         headers=headers,
         timeout=timeout if timeout is not None else httpx.Timeout(30.0),
         auth=auth,
-        follow_redirects=False,
+        follow_redirects=True,
+        event_hooks={"request": [enforce_origin]},
     )
 
 
@@ -125,7 +137,11 @@ class MCPClientPool:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
 
         transport = await self._stack.enter_async_context(
-            streamablehttp_client(cfg.url, headers=headers, httpx_client_factory=_no_redirect_http_client)
+            streamablehttp_client(
+                cfg.url,
+                headers=headers,
+                httpx_client_factory=partial(_origin_bound_http_client, cfg.url),
+            )
         )
         read, write, _ = transport
         session = await self._stack.enter_async_context(ClientSession(read, write))
