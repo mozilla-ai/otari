@@ -311,4 +311,22 @@ describe("PricingWarning", () => {
     await user.click(await screen.findByRole("button", { name: "Dismiss" }))
     expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
   })
+
+  it("takes up room rather than covering what is under it", async () => {
+    // `InfoBanner` paints no ground, so an alarm out of flow lays its sentence
+    // over the top bar's trail and the page's own first rows. Negative
+    // assertions on the class string, which reject more than a token check
+    // would: no positioning scheme at all is the property, not the absence of
+    // one particular class.
+    mockSettings({ ...BASE, require_pricing: true, default_pricing: false })
+    renderPage(<PricingWarning />)
+
+    const banner = (await screen.findByText(/Requests are rejected/)).closest(
+      "div.px-6",
+    )
+    expect(banner).not.toBeNull()
+    expect(banner?.className).not.toContain("absolute")
+    expect(banner?.className).not.toContain("fixed")
+    expect(banner?.className).not.toContain("z-")
+  })
 })
