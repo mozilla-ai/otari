@@ -1,0 +1,214 @@
+"""One bounded stateless execution (execution steps 9-13, R-EXEC-1, R-ERR-2, R-ERR-3).
+
+The dispatch boundary is what these cover. Before the transport starts writing
+``tools/call``, Otari knows the tool did not run and says ``not_started``. From
+that moment on it cannot know, so every failure is ``outcome_unknown`` and no
+path may invite a retry of a call that may already have mutated something.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from typing import Any
+
+import pytest
+from mcp.types import CallToolResult, TextContent
+
+from gateway.models.mcp import ResolvedMcpServer
+from gateway.services import mcp_stateless
+from gateway.services.mcp_stateless import (
+    RESULT_MAX_BYTES,
+    ConcurrencyGate,
+    ExecutionState,
+    McpExecutionError,
+    execute_stored_tool,
+)
+
+SERVER = ResolvedMcpServer(
+    id=uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e"),
+    name="github",
+    url="https://mcp.example.com/mcp",
+    authorization_token="server-secret",
+    allowed_tools=["create_issue"],
+)
+
+RESULT = CallToolResult(content=[TextContent(type="text", text="Created issue #42")])
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.listed = 0
+        self.call_error: BaseException | None = None
+        self.result = RESULT
+
+    async def list_tools(self, cursor: str | None = None) -> Any:
+        self.listed += 1
+        raise AssertionError("execution must never call list_tools")
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, arguments))
+        if self.call_error is not None:
+            raise self.call_error
+        return self.result
+
+
+@pytest.fixture
+def session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
+    """Substitute the real transport with a session that records what it is asked."""
+    fake = _FakeSession()
+    state = {"connect_error": None, "cleanup_error": None}
+    fake.transport = state  # type: ignore[attr-defined]
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def open_session(*args: Any, **kwargs: Any) -> Any:
+        if state["connect_error"] is not None:
+            raise state["connect_error"]
+        yield fake
+        if state["cleanup_error"] is not None:
+            raise state["cleanup_error"]
+
+    monkeypatch.setattr(mcp_stateless, "open_session", open_session)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_the_exact_tool_is_called_once_without_live_discovery(session: _FakeSession) -> None:
+    result = await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"})
+
+    assert result == RESULT
+    assert session.calls == [("create_issue", {"title": "Approved"})]
+    assert session.listed == 0
+
+
+@pytest.mark.asyncio
+async def test_a_connection_failure_is_not_started(session: _FakeSession) -> None:
+    session.transport["connect_error"] = RuntimeError("server-secret refused")
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_connection_failed"
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+    assert raised.value.status_code == 502
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_deadline_after_dispatch_is_an_unknown_outcome(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_stateless, "CALL_TIMEOUT_S", 0.01)
+
+    async def never_answer(name: str, arguments: dict[str, Any]) -> CallToolResult:
+        session.calls.append((name, arguments))
+        await asyncio.sleep(10)
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(session, "call_tool", never_answer)
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_outcome_unknown"
+    assert raised.value.execution_state is ExecutionState.OUTCOME_UNKNOWN
+    assert raised.value.status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_a_transport_failure_after_dispatch_is_an_unknown_outcome(session: _FakeSession) -> None:
+    session.call_error = RuntimeError("connection reset")
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_outcome_unknown"
+    assert raised.value.execution_state is ExecutionState.OUTCOME_UNKNOWN
+    assert raised.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_dispatch_is_an_unknown_outcome(session: _FakeSession) -> None:
+    """Cancelling local work cannot assert the remote server stopped the tool."""
+    session.call_error = asyncio.CancelledError()
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.execution_state is ExecutionState.OUTCOME_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_result_is_refused_as_an_unknown_outcome(session: _FakeSession) -> None:
+    session.result = CallToolResult(content=[TextContent(type="text", text="x" * (RESULT_MAX_BYTES + 1))])
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_result_too_large"
+    assert raised.value.execution_state is ExecutionState.OUTCOME_UNKNOWN
+    assert raised.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_a_definitive_result_survives_a_cleanup_failure(session: _FakeSession) -> None:
+    """R-EXEC-1: transport shutdown must not turn a completed mutation into a retry."""
+    session.transport["cleanup_error"] = RuntimeError("server-secret cleanup failure")
+
+    assert await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"}) == RESULT
+
+
+@pytest.mark.asyncio
+async def test_a_server_reported_error_is_a_definitive_result(session: _FakeSession) -> None:
+    session.result = CallToolResult(content=[TextContent(type="text", text="denied")], isError=True)
+
+    result = await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert result.isError is True
+
+
+@pytest.mark.asyncio
+async def test_no_free_slot_before_the_deadline_is_not_started(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = ConcurrencyGate(limit=1, admission_timeout_s=0.01)
+    monkeypatch.setattr(mcp_stateless, "EXECUTION_GATE", gate)
+
+    async with gate.slot():
+        with pytest.raises(McpExecutionError) as raised:
+            await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_capacity_unavailable"
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+    assert raised.value.status_code == 503
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_phase_timings_and_result_size_are_recorded_without_content(session: _FakeSession) -> None:
+    """R-OBS-1: the route logs phases and sizes, and R-OBS-2 leaves out everything else."""
+    timings: dict[str, float] = {}
+
+    await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"}, timings=timings)
+
+    assert set(timings) == {"admission_ms", "connect_ms", "call_ms", "cleanup_ms", "result_bytes"}
+    assert all(value >= 0 for value in timings.values())
+    assert timings["result_bytes"] > 0
+
+
+@pytest.mark.asyncio
+async def test_phase_timings_survive_a_failure_after_dispatch(session: _FakeSession) -> None:
+    session.call_error = RuntimeError("connection reset")
+    timings: dict[str, float] = {}
+
+    with pytest.raises(McpExecutionError):
+        await execute_stored_tool(SERVER, "create_issue", {}, timings=timings)
+
+    assert "connect_ms" in timings
+    assert "call_ms" in timings
+    assert "result_bytes" not in timings

@@ -3995,6 +3995,16 @@
         "title": "EmbeddingRequest",
         "type": "object"
       },
+      "ExecutionState": {
+        "description": "Whether the remote tool may have run (R-ERR-2).\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
+        "enum": [
+          "not_started",
+          "outcome_unknown",
+          "completed"
+        ],
+        "title": "ExecutionState",
+        "type": "string"
+      },
       "ExplainRequest": {
         "description": "Ask what a policy would do, without dispatching anything.\n\nEither name a stored/configured policy (``name``) or pass a draft ``spec`` that\nhas not been saved. The draft form is what makes authoring-time validation\npossible: the compiler filters candidates, so a chain can compile down to one\nattempt, and an author needs to see that before saving rather than during an\noutage.",
         "properties": {
@@ -5334,20 +5344,64 @@
         "title": "ManagedTool",
         "type": "object"
       },
+      "McpErrorBody": {
+        "description": "The one error shape both stored-server endpoints return (R-ERR-1).",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "execution_state": {
+            "$ref": "#/components/schemas/ExecutionState"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "code",
+          "execution_state",
+          "request_id"
+        ],
+        "title": "McpErrorBody",
+        "type": "object"
+      },
       "McpExecuteRequest": {
-        "description": "One MCP server and the exact tool call the client approved.",
+        "additionalProperties": false,
+        "description": "One stored server, and the exact call the application authorized.\n\nNo inline server fields (R-REQ-4): a caller registers a remote MCP server\nthrough the control plane once and refers to it by id afterwards, which\nkeeps URLs, credentials, revocation and allowlist policy on Otari's side of\nthe boundary instead of in every request.\n\nExtras are forbidden rather than ignored, so a caller still sending the old\ninline ``server`` block is told its configuration was not used instead of\nwatching Otari quietly execute against a different server than the one it\nnamed.",
         "properties": {
           "arguments": {
             "additionalProperties": true,
-            "description": "The JSON-object arguments to pass to the approved tool.",
+            "description": "The exact caller-authorized JSON-object arguments.",
             "title": "Arguments",
             "type": "object"
           },
-          "server": {
-            "$ref": "#/components/schemas/McpServerConfig"
+          "client_execution_id": {
+            "description": "A caller-generated UUID, for correlation only. It is not proof of approval and not an idempotency key: repeating a request with the same value may execute the tool again, so this request must never be retried automatically.",
+            "format": "uuid",
+            "title": "Client Execution Id",
+            "type": "string"
+          },
+          "mcp_server_id": {
+            "description": "The stored MCP server to execute against.",
+            "format": "uuid",
+            "title": "Mcp Server Id",
+            "type": "string"
+          },
+          "server_revision": {
+            "description": "The stored-server revision returned by tool discovery. Required, and compared against the current one so a configuration change since the caller authorized this call is refused rather than executed. Not an approval credential.",
+            "pattern": "^[A-Za-z0-9._:\\-]{1,128}$",
+            "title": "Server Revision",
+            "type": "string"
           },
           "tool_name": {
-            "description": "The MCP tool the caller has approved for this one execution.",
+            "description": "The remote MCP tool name the caller authorized for this one execution.",
             "maxLength": 256,
             "minLength": 1,
             "title": "Tool Name",
@@ -5355,8 +5409,10 @@
           }
         },
         "required": [
-          "server",
-          "tool_name"
+          "mcp_server_id",
+          "tool_name",
+          "server_revision",
+          "client_execution_id"
         ],
         "title": "McpExecuteRequest",
         "type": "object"
@@ -5418,6 +5474,110 @@
           "url"
         ],
         "title": "McpServerConfig",
+        "type": "object"
+      },
+      "McpToolDefinition": {
+        "description": "One live tool a caller-orchestrated application may expose to its model.\n\n``annotations`` is the remote server's own metadata, passed through as\nuntrusted data. Otari never turns ``readOnlyHint`` into an authorization\ndecision (R-RISK-1); each application owns its risk policy, and a server\ncannot waive an application's approval gate by labeling itself read-only.",
+        "properties": {
+          "annotations": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The server's MCP annotations, untrusted metadata rather than policy.",
+            "title": "Annotations"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The server's own description, untrusted.",
+            "title": "Description"
+          },
+          "input_schema": {
+            "additionalProperties": true,
+            "description": "The tool's MCP inputSchema, unmodified.",
+            "title": "Input Schema",
+            "type": "object"
+          },
+          "name": {
+            "description": "The remote MCP tool name to send back to /v1/mcp/execute.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "input_schema"
+        ],
+        "title": "McpToolDefinition",
+        "type": "object"
+      },
+      "McpToolWarning": {
+        "description": "One tool that was omitted, and the code that omitted it (R-SCHEMA-3).",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name",
+          "code"
+        ],
+        "title": "McpToolWarning",
+        "type": "object"
+      },
+      "McpToolsResponse": {
+        "description": "The authorized catalog for one stored server.\n\nCarries no server URL, no credential, and no allowlist entry that the live\ncatalog did not return (R-DISC-2). ``server_revision`` is what an\napplication persists with a proposed call and sends back to\n``/v1/mcp/execute``, so a stored-configuration change between the two is\nrefused rather than executed.",
+        "properties": {
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "server_revision": {
+            "description": "An opaque revision of the stored server's URL, credential, enabled state and allowlist. It detects Otari-side and platform-side configuration changes only: a remote server that changes its own catalog or a tool's behavior behind an unchanged URL will not move it.",
+            "title": "Server Revision",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/McpToolDefinition"
+            },
+            "maxItems": 200,
+            "title": "Tools",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/McpToolWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "server_id",
+          "server_revision",
+          "tools",
+          "warnings"
+        ],
+        "title": "McpToolsResponse",
         "type": "object"
       },
       "Message": {
@@ -18528,7 +18688,7 @@
     },
     "/v1/mcp/execute": {
       "post": {
-        "description": "Execute one caller-approved tool against one inline MCP server.\n\nThe server is connected only for this request. Otari validates its URL,\napplies its configured tool allowlist, confirms the tool through live MCP\ndiscovery, and then executes exactly the named call. A server-returned\n``isError`` remains a typed MCP result; transport and protocol failures are\nreturned as a sanitized gateway error.",
+        "description": "Execute one caller-authorized tool call against a stored MCP server.\n\nThe calling application owns any user approval, argument editing,\ncancellation and action history; Otari executes exactly the tool name and\narguments it is given, once, and returns the remote server's native result.\nA result with ``isError: true`` is a definitive outcome and comes back as an\nHTTP 200.\n\n**This request must never be retried automatically.** ``client_execution_id``\nis correlation, not idempotency: once the call has been dispatched Otari\ncannot know whether the tool ran, and an ``outcome_unknown`` response means\nexactly that. Proxies, service meshes and SDKs on this path have to disable\nretries for it, including on connection resets and 5xx responses.",
         "operationId": "execute_mcp_tool_v1_mcp_execute_post",
         "requestBody": {
           "content": {
@@ -18551,15 +18711,115 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/McpErrorBody"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
           }
         },
         "security": [
@@ -18571,6 +18831,128 @@
           }
         ],
         "summary": "Execute Mcp Tool",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/v1/mcp/servers/{mcp_server_id}/tools": {
+      "get": {
+        "description": "List the tools a stored MCP server exposes to the authenticated workspace.\n\nCall this once per server when preparing a model or workflow run, and reuse\nthe answer for every tool from that server for the length of the run: there\nis no cross-run cache in this version, so a later run rediscovers and\nstaleness stays bounded without any invalidation state to keep.\n\nThe response is the whole authorized catalog or an error. It is never\npartial, because a caller would read a short catalog as the complete input\nto its own authorization and risk policy. The single exception is\n``warnings``, which names a tool whose descriptor Otari could not carry.\n\nA tool the server removes after discovery may still be proposed from the\nrun's snapshot; execution then returns the remote server's own typed error.",
+        "operationId": "list_mcp_tools_v1_mcp_servers__mcp_server_id__tools_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mcp_server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mcp Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Mcp Tools",
         "tags": [
           "mcp"
         ]

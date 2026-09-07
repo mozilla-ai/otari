@@ -88,6 +88,13 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ),
     ("/v1/batches", "queues completions, so it is dispatch deferred rather than avoided"),
     (
+        "/v1/mcp",
+        "caller-orchestrated MCP discovery and execution. Neither dispatches to a "
+        "model, and execution bills nothing here, but both open an outbound MCP "
+        "session on behalf of a tenant, which belongs on the data-plane gateway "
+        "that holds that tenant's request context",
+    ),
+    (
         "/v1/files",
         "dispatches to no provider and costs nothing to serve, so not the leak "
         "itself. It exists only to be referenced from a completion or a batch, and "

@@ -2168,9 +2168,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"server\": {\n    \"name\": \"string\",\n    \"url\": \"string\"\n  },\n  \"tool_name\": \"string\"\n}"
+              "raw": "{\n  \"mcp_server_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"tool_name\": \"string\",\n  \"server_revision\": \"string\",\n  \"client_execution_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
-            "description": "Execute one caller-approved tool against one inline MCP server.\n\nThe server is connected only for this request. Otari validates its URL,\napplies its configured tool allowlist, confirms the tool through live MCP\ndiscovery, and then executes exactly the named call. A server-returned\n``isError`` remains a typed MCP result; transport and protocol failures are\nreturned as a sanitized gateway error.",
+            "description": "Execute one caller-authorized tool call against a stored MCP server.\n\nThe calling application owns any user approval, argument editing,\ncancellation and action history; Otari executes exactly the tool name and\narguments it is given, once, and returns the remote server's native result.\nA result with ``isError: true`` is a definitive outcome and comes back as an\nHTTP 200.\n\n**This request must never be retried automatically.** ``client_execution_id``\nis correlation, not idempotency: once the call has been dispatched Otari\ncannot know whether the tool ran, and an ``outcome_unknown`` response means\nexactly that. Proxies, service meshes and SDKs on this path have to disable\nretries for it, including on connection resets and 5xx responses.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2188,6 +2188,34 @@
                 "execute"
               ],
               "raw": "{{baseUrl}}/v1/mcp/execute"
+            }
+          }
+        },
+        {
+          "name": "List Mcp Tools",
+          "request": {
+            "description": "List the tools a stored MCP server exposes to the authenticated workspace.\n\nCall this once per server when preparing a model or workflow run, and reuse\nthe answer for every tool from that server for the length of the run: there\nis no cross-run cache in this version, so a later run rediscovers and\nstaleness stays bounded without any invalidation state to keep.\n\nThe response is the whole authorized catalog or an error. It is never\npartial, because a caller would read a short catalog as the complete input\nto its own authorization and risk policy. The single exception is\n``warnings``, which names a tool whose descriptor Otari could not carry.\n\nA tool the server removes after discovery may still be proposed from the\nrun's snapshot; execution then returns the remote server's own typed error.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "mcp",
+                "servers",
+                ":mcp_server_id",
+                "tools"
+              ],
+              "raw": "{{baseUrl}}/v1/mcp/servers/:mcp_server_id/tools",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "mcp_server_id",
+                  "value": ""
+                }
+              ]
             }
           }
         }

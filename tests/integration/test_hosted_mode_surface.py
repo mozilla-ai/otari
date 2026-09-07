@@ -39,6 +39,9 @@ INFERENCE_PATHS = (
     "/v1/moderations",
     "/v1/search",
     "/v1/files",
+    # Discovery and execution both belong to the data plane: a hosted control
+    # plane holds no MCP session and runs no tool.
+    "/v1/mcp/execute",
 )
 
 EXPECTED_DETAIL = (

@@ -50,7 +50,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.entities import WorkspaceMcpServer
-from gateway.models.mcp import McpServerConfig
+from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.secret_box import (
@@ -299,6 +299,52 @@ async def resolve_workspace_mcp_servers(
     return resolved
 
 
+async def resolve_workspace_mcp_server(
+    db: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> ResolvedMcpServer | None:
+    """Resolve one stored server for the caller-orchestrated MCP endpoints.
+
+    The standalone counterpart of `_platform._resolve_platform_mcp_server`, and
+    the singular sibling of :func:`resolve_workspace_mcp_servers`. It differs
+    from that one in the two ways the stored-server endpoints need. It reports a
+    disabled server instead of skipping it, because a disabled server is a
+    named 404 here rather than one entry quietly missing from a list; and it
+    returns the id, so a revision can be derived over the configuration that
+    was actually resolved (R-RES-3).
+
+    ``None`` means no such server *in this workspace*, which covers an id
+    belonging to another one: the same non-oracle answer the plural resolver
+    gives, since ``workspace_id`` comes off the authenticating key.
+
+    Raises `secret_box.SecretDecryptionError` when a stored token will not
+    decrypt, for the same reason the plural resolver does: connecting without a
+    credential the workspace configured would send an unauthenticated request
+    to a server that expects one.
+    """
+    row = (
+        await db.execute(
+            select(WorkspaceMcpServer).where(
+                WorkspaceMcpServer.workspace_id == workspace_id,
+                WorkspaceMcpServer.id == server_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return ResolvedMcpServer(
+        id=row.id,
+        name=row.name,
+        url=row.url,
+        authorization_token=decrypt_secret(row.encrypted_token) if row.encrypted_token else None,
+        enabled=row.enabled,
+        purpose_hint=row.purpose_hint,
+        allowed_tools=row.allowed_tools,
+    )
+
+
 class WorkspaceMcpServerService:
     """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
 
@@ -504,5 +550,6 @@ __all__ = [
     "WorkspaceMcpServerService",
     "WorkspaceMcpServerUpdate",
     "WorkspaceMcpServersPublic",
+    "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",
 ]
