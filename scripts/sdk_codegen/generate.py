@@ -249,6 +249,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     Streaming still cannot be generated (OpenAPI Generator emits no SSE); the SDK
     shell hand-writes the stream iterator over the generated client.
     """
+    from any_llm.types.batch import Batch
     from any_llm.types.completion import (
         ChatCompletion,
         ChatCompletionChunk,
@@ -320,8 +321,49 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "IMG",
     )
 
-    def set_json_200(path: str, schema_name: str, description: str) -> None:
-        op = spec["paths"][path]["post"]
+    schemas["BatchResponse"] = absorb(
+        Batch.model_json_schema(mode="serialization", ref_template="#/components/schemas/BATCH_{model}"),
+        "BATCH",
+    )
+    schemas["BatchResponse"]["properties"]["provider"] = {
+        "type": "string",
+        "description": "Provider instance that owns the batch.",
+    }
+    schemas["BatchResponse"].setdefault("required", []).append("provider")
+    schemas["BatchListResponse"] = {
+        "type": "object",
+        "required": ["data"],
+        "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/BatchResponse"}}},
+    }
+    schemas["BatchResultItem"] = {
+        "type": "object",
+        "required": ["custom_id", "result", "error"],
+        "properties": {
+            "custom_id": {"type": "string", "description": "Identifier supplied for this request in the batch."},
+            "result": {
+                "description": "Serialized provider result, or null when the request failed.",
+                "anyOf": [{"type": "object", "additionalProperties": True}, {"type": "null"}],
+            },
+            "error": {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "required": ["code", "message"],
+                        "properties": {"code": {"type": "string"}, "message": {"type": "string"}},
+                    },
+                    {"type": "null"},
+                ]
+            },
+        },
+    }
+    schemas["BatchResultsResponse"] = {
+        "type": "object",
+        "required": ["results"],
+        "properties": {"results": {"type": "array", "items": {"$ref": "#/components/schemas/BatchResultItem"}}},
+    }
+
+    def set_json_200(path: str, schema_name: str, description: str, method: str = "post") -> None:
+        op = spec["paths"][path][method]
         op["responses"]["200"] = {
             "description": description,
             "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{schema_name}"}}},
@@ -332,6 +374,11 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     set_json_200("/v1/rerank", "RerankResponse", "Rerank result")
     set_json_200("/v1/embeddings", "CreateEmbeddingResponse", "Embeddings")
     set_json_200("/v1/images/generations", "ImagesResponse", "Generated images")
+    set_json_200("/v1/batches", "BatchResponse", "Created batch")
+    set_json_200("/v1/batches", "BatchListResponse", "Batches", method="get")
+    set_json_200("/v1/batches/{batch_id}", "BatchResponse", "Batch", method="get")
+    set_json_200("/v1/batches/{batch_id}/cancel", "BatchResponse", "Canceled batch")
+    set_json_200("/v1/batches/{batch_id}/results", "BatchResultsResponse", "Batch results", method="get")
 
     schemas["ChatCompletionRequest"]["properties"]["messages"] = {
         "type": "array",
