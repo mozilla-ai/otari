@@ -221,9 +221,11 @@ its own tenant.
 
 Called when a request references workspace-scoped MCP server ids (a
 hybrid-only feature). Otari swaps those ids for the inline server configs it
-needs to open the connections. `POST /v1/mcp/execute` also calls this endpoint
-with an empty `mcp_server_ids` list to authenticate and authorize its inline,
-stateless MCP call through the same platform boundary.
+needs to open the connections. The caller-orchestrated endpoints,
+`GET /v1/mcp/servers/{mcp_server_id}/tools` and `POST /v1/mcp/execute`, call the
+same endpoint with the one id they were asked about, and read the answer more
+strictly than the tool loop does: exactly one entry, whose `id` is the id that
+was requested.
 
 ### Request
 
@@ -238,8 +240,8 @@ Content-Type: application/json
 }
 ```
 
-For stateless execution the body is `{"mcp_server_ids": []}`. A successful
-peer returns `{"servers": []}`.
+The caller-orchestrated endpoints send exactly one id:
+`{"mcp_server_ids": ["2c948a61-dc96-4cd8-96bb-8e1434bf424e"]}`.
 
 ### Response
 
@@ -247,8 +249,10 @@ peer returns `{"servers": []}`.
 {
   "servers": [
     {
+      "id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
       "name": "github",
       "url": "https://mcp.example.com/github",
+      "enabled": true,
       "authorization_token": "ghp_...",   // optional
       "purpose_hint": "Repo and issue lookups",   // optional
       "allowed_tools": ["list_issues", "get_file"] // optional
@@ -262,6 +266,19 @@ Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
 as an empty list. The same URL-safety rules as inline MCP configs apply once the
 configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
 
+`id` and `enabled` are required by the caller-orchestrated endpoints and unused
+by the tool loop. `id` is what lets those endpoints confirm they resolved the
+server the caller named, and `enabled` is what turns a decommissioned server
+into their `404` rather than a live connection. A peer that omits either answers
+those two endpoints with `502 mcp_resolution_failed`; the tool loop keeps
+working, since it reads neither.
+
+Otari derives the `server_revision` those endpoints publish from the resolved
+URL, a digest of the resolved credential, `enabled`, and the sorted
+`allowed_tools`. `name` and `purpose_hint` are excluded, so retitling a server
+does not invalidate an authorization an application is still holding. Nothing
+platform-side stores or returns a revision.
+
 ### Failure
 
 | Status | Behavior |
@@ -269,6 +286,13 @@ configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
 | `400`, `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
+
+The caller-orchestrated endpoints publish their own error contract instead of
+forwarding any of this, because a platform `detail` may name a workspace, a plan,
+or a stored server. A `401`, `402` or `403` becomes `401 authentication_failed`,
+a `404` becomes `404 mcp_server_not_found`, a `429` keeps its status and
+`Retry-After` as `rate_limit_exceeded`, and everything else becomes
+`502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Web search resolution
 
