@@ -582,6 +582,7 @@ async def execute_mcp_tool(
     exactly that. Proxies, service meshes and SDKs on this path have to disable
     retries for it, including on connection resets and 5xx responses.
     """
+    started = time.monotonic()
     principal = await _authenticate(raw_request, db, config)
     server = await _resolve_server(principal, db, config, request.mcp_server_id)
     _require_allowed(server, request.tool_name)
@@ -597,7 +598,6 @@ async def execute_mcp_tool(
     track_request(raw_request, endpoint=EXECUTE_ENDPOINT, model=EXECUTE_LABEL)
 
     dispatched = False
-    started = time.monotonic()
     timings: dict[str, float] = {"resolve_ms": (time.monotonic() - started) * 1000}
 
     def mark_dispatched() -> None:

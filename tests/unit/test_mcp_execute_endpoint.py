@@ -95,6 +95,7 @@ class _Platform:
         self.status_code = 200
         self.bodies: list[dict[str, Any]] = []
         self.retry_after: str | None = None
+        self.delay_s = 0.0
 
     def payload(self) -> Any:
         return {"servers": self.servers} if self.status_code == 200 else {"detail": "refused"}
@@ -105,6 +106,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
     fake = _Platform()
 
     async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
+        await asyncio.sleep(fake.delay_s)
         fake.bodies.append(body)
         response_headers = {"Retry-After": fake.retry_after} if fake.retry_after else None
         return httpx.Response(fake.status_code, json=fake.payload(), headers=response_headers)
@@ -184,6 +186,27 @@ def test_the_request_id_is_returned_on_success_without_touching_the_result(
 
     assert response.headers["X-Otari-Request-ID"]
     assert "request_id" not in response.json()
+
+
+def test_execution_timings_include_server_resolution(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = Mock()
+    monkeypatch.setattr(log_config.logger, "info", info)
+    platform.delay_s = 0.02
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 200, response.text
+    info.assert_called_once()
+    duration_ms = info.call_args.args[6]
+    phases = dict(field.split("=", 1) for field in info.call_args.args[7].split())
+    resolve_ms = float(phases["resolve_ms"])
+    assert resolve_ms >= 15
+    assert duration_ms >= resolve_ms
 
 
 def test_a_server_reported_error_is_a_definitive_two_hundred(

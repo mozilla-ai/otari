@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import AsyncExitStack
 from typing import Any
 from unittest.mock import Mock
 
@@ -289,6 +290,25 @@ async def test_a_grouped_cleanup_failure_still_preserves_the_result(session: _Fa
     )
 
     assert await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"}) == RESULT
+
+
+@pytest.mark.asyncio
+async def test_a_cleanup_timeout_cancels_and_awaits_the_closer(monkeypatch: pytest.MonkeyPatch) -> None:
+    finished = asyncio.Event()
+
+    async def stalled_cleanup() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.set()
+
+    stack = AsyncExitStack()
+    stack.push_async_callback(stalled_cleanup)
+    monkeypatch.setattr(mcp_stateless, "CLEANUP_TIMEOUT_S", 0.01)
+
+    await mcp_stateless._close_bounded(stack)
+
+    assert finished.is_set(), "the timed-out closer must not remain detached"
 
 
 @pytest.mark.parametrize(

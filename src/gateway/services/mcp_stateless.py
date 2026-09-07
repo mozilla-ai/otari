@@ -692,15 +692,17 @@ async def _close_bounded(stack: AsyncExitStack) -> None:
     Shielded and bounded (R-EXEC-1). A definitive result is already in hand by
     the time this runs, so a transport that will not close, or a request whose
     task is being cancelled, must not turn a completed mutation into an error
-    the caller might retry. A close that overruns its deadline is left to finish
-    on its own and reported as a failure class with no content.
+    the caller might retry. A close that overruns its deadline is cancelled and
+    awaited so stalled shutdowns cannot accumulate detached transport tasks.
     """
     closer = asyncio.ensure_future(stack.aclose())
-    # Read the outcome even when the wait below gives up on it, so an abandoned
-    # close cannot surface later as an unretrieved task exception.
-    closer.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
     try:
         async with asyncio.timeout(CLEANUP_TIMEOUT_S):
             await asyncio.shield(closer)
     except BaseException as exc:
         logger.warning("Stateless MCP cleanup failed error_class=%s", failure_class(exc))
+        closer.cancel()
+        try:
+            await closer
+        except BaseException:
+            pass
