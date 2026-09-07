@@ -23,13 +23,13 @@ describe("SettingsGroup", () => {
       </SettingsGroup>,
     )
     const band = rowsBand()
-    expect(band.className).toContain("border-y")
-    expect(band.className).toContain("border-border")
+    expect(band).toHaveClass("border-y")
+    expect(band).toHaveClass("border-border")
     expect(band.className).not.toContain("border-border-subtle")
 
     const rows = band.firstElementChild as HTMLElement
-    expect(rows.className).toContain("divide-y")
-    expect(rows.className).toContain("divide-border-subtle")
+    expect(rows).toHaveClass("divide-y")
+    expect(rows).toHaveClass("divide-border-subtle")
   })
 
   it("introduces the group with a heading between rules", () => {
@@ -41,11 +41,11 @@ describe("SettingsGroup", () => {
     const heading = screen.getByRole("heading", { name: /Credential security/ })
     // 16px at the semibold step, which is what `text-title` is. Named as the
     // token rather than as numbers so this cannot drift from the scale.
-    expect(heading.className).toContain("text-title")
+    expect(heading).toHaveClass("text-title")
     expect(heading.textContent).toContain("(2)")
     // The rule above the heading is the group's opening; the rows band below
     // carries the one under it. Two bands is what puts the heading between them.
-    expect(heading.closest("section")?.className).toContain("border-t")
+    expect(heading.closest("section")).toHaveClass("border-t")
   })
 
   it("drops the heading band entirely when there is nothing to put in it", () => {
@@ -57,7 +57,7 @@ describe("SettingsGroup", () => {
       </SettingsGroup>,
     )
     expect(screen.queryByRole("heading")).toBeNull()
-    expect(rowsBand().className).toContain("border-y")
+    expect(rowsBand()).toHaveClass("border-y")
   })
 
   it("caps its description to a readable measure", () => {
@@ -70,6 +70,6 @@ describe("SettingsGroup", () => {
       </SettingsGroup>,
     )
     const description = screen.getByText("What this group is for.")
-    expect(description.className).toContain("max-w-prose")
+    expect(description).toHaveClass("max-w-prose")
   })
 })

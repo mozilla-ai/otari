@@ -55,11 +55,7 @@ export function BulkActionBar({
           Foreground, not accent: this is a count, not a destination, and accent
           ink on something unclickable promises an interaction that is not
           there. */}
-      <span
-        role="status"
-        aria-live="polite"
-        className="text-sm font-medium text-foreground"
-      >
+      <span role="status" aria-live="polite" className="text-body">
         {label}
       </span>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (

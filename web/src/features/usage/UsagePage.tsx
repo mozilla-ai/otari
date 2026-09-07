@@ -1107,11 +1107,16 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     <div className="flex flex-col">
       <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-display">Usage &amp; analytics</h1>
+          <h1 className="text-display">
+            {orgWide ? "Organization usage" : "Usage & analytics"}
+          </h1>
+          {/* The drill-in clause is in the workspace arm only: organization
+              scope passes `onDrill={undefined}` to all three breakdowns, so
+              promising a clickable row is exactly wrong for this caller. */}
           <p className="mt-1 max-w-[620px] text-sm text-muted">
-            Spend, tokens, cache use, and request volume over time. Group the
-            chart by model, user, key, or source, and click a breakdown row to
-            drill into the request log.
+            {orgWide
+              ? "Spend, tokens, cache use, and request volume over time across every workspace in this organization. Group the chart by model, user, key, or source."
+              : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">

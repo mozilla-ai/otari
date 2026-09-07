@@ -201,9 +201,7 @@ function RevealSecretStrip({
       <CopyField label="Secret key" value={secret} fieldRef={secretRef} />
       <div className="flex flex-col gap-2">
         <div>
-          <div className="text-sm font-medium text-foreground">
-            Make your first call
-          </div>
+          <div className="text-body">Make your first call</div>
           {snippets === undefined ? (
             <MissingGatewayAddressNotice />
           ) : (

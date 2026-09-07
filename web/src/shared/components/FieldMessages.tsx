@@ -82,7 +82,7 @@ export function ControlField({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-foreground">{label}</span>
+      <span className="text-body">{label}</span>
       {description ? (
         <FieldMessages reserve={reserve}>
           <p className="text-muted">{description}</p>

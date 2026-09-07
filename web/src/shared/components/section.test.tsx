@@ -21,8 +21,8 @@ describe("Section", () => {
         rows
       </Section>,
     )
-    expect(band(container).className).toContain("otari-bleed")
-    expect(band(container).firstElementChild?.className).toContain("mx-auto")
+    expect(band(container)).toHaveClass("otari-bleed")
+    expect(band(container).firstElementChild).toHaveClass("mx-auto")
   })
 
   it("stays inside its container when nested", () => {
@@ -32,13 +32,13 @@ describe("Section", () => {
       </Section>,
     )
     expect(band(container).className).not.toContain("otari-bleed")
-    expect(band(container).className).toContain("py-5")
+    expect(band(container)).toHaveClass("py-5")
     // No centered column either: the container it sits in is the column, so a
     // second inset would pull the content off the alignment of everything
     // else in that column.
     expect(band(container).firstElementChild?.className).not.toContain(
       "mx-auto",
     )
-    expect(band(container).firstElementChild?.className).toContain("flex")
+    expect(band(container).firstElementChild).toHaveClass("flex")
   })
 })

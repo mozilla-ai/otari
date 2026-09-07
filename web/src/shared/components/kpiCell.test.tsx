@@ -20,8 +20,8 @@ describe("KpiCell", () => {
     const { container } = render(
       <KpiCell label="Cache hit rate" value="13.1%" subline="239.3k read" />,
     )
-    expect(cell(container).className).toContain("grid-cols-[minmax(0,1fr)]")
-    expect(cell(container).className).toContain("min-w-0")
+    expect(cell(container)).toHaveClass("grid-cols-[minmax(0,1fr)]")
+    expect(cell(container)).toHaveClass("min-w-0")
   })
 
   it("keeps the subline on one line and truncates it", () => {
@@ -32,7 +32,7 @@ describe("KpiCell", () => {
     // One line, so no cell is taller than its neighbours, and the full string
     // stays reachable on the title rather than being lost to the ellipsis.
     const line = cell(container).children[2] as HTMLElement
-    expect(line.className).toContain("text-nowrap")
-    expect(getByTitle(subline).className).toContain("truncate")
+    expect(line).toHaveClass("text-nowrap")
+    expect(getByTitle(subline)).toHaveClass("truncate")
   })
 })

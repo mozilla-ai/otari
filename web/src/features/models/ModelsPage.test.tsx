@@ -1403,4 +1403,40 @@ describe("ModelsPage", () => {
     )
     expect(urls.some((url) => url.includes("/v1/models/metadata"))).toBe(false)
   })
+
+  // Selection is the route into bulk pricing, so it is an operator control.
+  // Left ungated, a member could select rows, press "Set pricing" and fire the
+  // bulk write: the price-write class of defect, reached by another door.
+  it("offers a non-operator no row selection, and so no bulk pricing", async () => {
+    mockApi({
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    renderWithClient(<ModelsPage />)
+    await screen.findByText("openai:gpt-4o")
+
+    // No checkbox on the row and none in the header, so there is nothing to
+    // select and the bulk bar has no way to appear.
+    const row = tableRow("openai:gpt-4o")
+    expect(within(row).queryByRole("checkbox")).toBeNull()
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    expect(screen.queryByText(/\d+ selected/)).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Set pricing" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("still offers an operator the selection that feeds it", async () => {
+    // The other half, so the gate above cannot be satisfied by removing
+    // selection for everyone.
+    mockApi()
+    renderWithClient(<ModelsPage />)
+    await screen.findByText("openai:gpt-4o")
+
+    expect(
+      within(tableRow("openai:gpt-4o")).getByRole("checkbox"),
+    ).toBeInTheDocument()
+  })
 })

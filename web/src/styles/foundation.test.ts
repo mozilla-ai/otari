@@ -914,6 +914,94 @@ describe("content text wears a type role", () => {
     ).not.toMatch(together("text-xs", "text-muted"))
   })
 
+  /**
+   * The body role's hand-rolled spelling, as the three tokens it takes.
+   *
+   * All three, not the size-and-weight pair: `text-sm font-medium` beside
+   * `text-link`, `text-danger` or `text-success` is a legitimate emphasized
+   * link or status word, and eight files write one. It is the `text-foreground`
+   * that makes the trio a role spelled out.
+   */
+  const HAND_ROLLED_BODY = ["text-sm", "font-medium", "text-foreground"]
+
+  /** Every class-list literal in a source, so a match cannot span two. */
+  const classLists = (source: string): string[] =>
+    [...source.matchAll(/"([^"\n]*)"|`([^`\n]*)`/g)].map(
+      (m) => m[1] ?? m[2] ?? "",
+    )
+
+  const handRollsBody = (source: string): boolean =>
+    classLists(source).some((list) =>
+      HAND_ROLLED_BODY.every((name) =>
+        new RegExp(`(?<![:\\w-])${name}(?![\\w-])`).test(list),
+      ),
+    )
+
+  /**
+   * The one site where the trio is right, and why.
+   *
+   * A role sets the body face, so wearing one on a `<code>` would replace the
+   * mono face Tailwind's preflight gives it. There is no mono role at 14px
+   * (they are 11px, 13px and 30px), so these two identifiers stay spelled out.
+   */
+  const BODY_ROLE_IS_RULED: Array<[string, string]> = [
+    [
+      "features/settings/SettingsPage.tsx",
+      "two <code> identifiers at body size; a role would override the mono face",
+    ],
+  ]
+  const BODY_RULED = new Map(BODY_ROLE_IS_RULED)
+
+  it("names no site that has stopped hand-rolling the body role", () => {
+    // Same guard as the caption list's: an entry that no longer offends is
+    // protecting nothing and would keep passing while its file moved on.
+    const stale = [...BODY_RULED.keys()].filter(
+      (name) => !sources.includes(name) || !handRollsBody(read(name)),
+    )
+    expect(
+      stale,
+      "these are exempted from the body-role rule but no longer need to be; delete the entries",
+    ).toEqual([])
+  })
+
+  it("reads the trio as an offence and an emphasized link as fine", () => {
+    // The rule's own mutation check, since its whole difficulty is the third
+    // token: without it, eight files with a legitimate emphasized link or
+    // status word fail, and a rule that fails on correct code gets suppressed.
+    expect(
+      handRollsBody('<span className="text-sm font-medium text-foreground">'),
+    ).toBe(true)
+    expect(handRollsBody('<a className="text-sm font-medium text-link">')).toBe(
+      false,
+    )
+    expect(
+      handRollsBody('<span className="text-sm font-medium text-danger">'),
+    ).toBe(false)
+    // Two lists, not one: a span may not cross a quote.
+    expect(
+      handRollsBody(
+        'className={on ? "text-sm font-medium" : "text-foreground"}',
+      ),
+    ).toBe(false)
+    expect(
+      handRollsBody(
+        '<span className="text-sm font-medium hover:text-foreground">',
+      ),
+    ).toBe(false)
+  })
+
+  // `--font-weight-medium` is deliberately 400 here, so this trio renders
+  // exactly `text-body` while reading as emphasis to whoever wrote it. It went
+  // from 0 sites to 21 across 14 files on one branch while `text-emphasis`
+  // went to 0 consumers, which is what an unenforced role costs.
+  it.each(sources)("spells the body role in %s as text-body", (name) => {
+    if (BODY_RULED.has(name)) return
+    expect(
+      handRollsBody(read(name)),
+      `${name} hand-rolls the body role as \`text-sm font-medium text-foreground\`. font-medium is 400 here, so it renders as text-body while reading as emphasis. Use text-body, or text-emphasis if it is meant to be heavier`,
+    ).toBe(false)
+  })
+
   it.each(sources)("overrides no type role's own metrics in %s", (name) => {
     const source = read(name)
     for (const [what, utility] of [
@@ -1140,22 +1228,108 @@ describe("buttons come in three variants", () => {
     .map((name) => String(name).replaceAll("\\", "/"))
     .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
 
+  /**
+   * The index just past the balanced region starting at `text[start]`, which is
+   * either a quoted string or a `{`-delimited expression. Brace depth is
+   * tracked outside quotes only, so a `>` or a `}` inside a string cannot end
+   * it early.
+   */
+  function endOfValue(text: string, start: number): number {
+    const opener = text[start]
+    if (opener === '"' || opener === "'") {
+      const close = text.indexOf(opener, start + 1)
+      return close === -1 ? text.length : close + 1
+    }
+    if (opener !== "{") return start
+    let depth = 0
+    let quote: string | null = null
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i]
+      if (quote) {
+        if (ch === quote) quote = null
+        continue
+      }
+      if (ch === '"' || ch === "'" || ch === "`") {
+        quote = ch
+        continue
+      }
+      if (ch === "{") depth += 1
+      else if (ch === "}") {
+        depth -= 1
+        if (depth === 0) return i + 1
+      }
+    }
+    return text.length
+  }
+
+  /**
+   * The whole `<Button …>` opening tag beginning at `start`.
+   *
+   * Scanned rather than matched: a prop can hold JSX of its own
+   * (`startContent={<FiX />}`), so the tag's own `>` is the first one at brace
+   * depth zero and outside any string, not the first one at all.
+   */
+  function openingTag(text: string, start: number): string {
+    let depth = 0
+    let quote: string | null = null
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i]
+      if (quote) {
+        if (ch === quote) quote = null
+        continue
+      }
+      if (ch === '"' || ch === "'" || ch === "`") {
+        quote = ch
+        continue
+      }
+      if (ch === "{") depth += 1
+      else if (ch === "}") depth -= 1
+      else if (ch === ">" && depth === 0) return text.slice(start, i + 1)
+    }
+    return text.slice(start)
+  }
+
+  /**
+   * Every variant name written in one opening tag's `variant` prop.
+   *
+   * Every string literal in the prop's value, not just a bare one straight
+   * after the `=`: a toggle writes `variant={on ? "primary" : "ghost"}`, and a
+   * scan keyed on the literal position reports green on every one of those.
+   */
+  function variantNames(tag: string): string[] {
+    const at = /\bvariant\s*=\s*/.exec(tag)
+    if (!at) return []
+    const start = at.index + at[0].length
+    const value = tag.slice(start, endOfValue(tag, start))
+    return [...value.matchAll(/"([a-z-]+)"/g)].map((m) => m[1])
+  }
+
   /** Every retired variant a `Button` carries in one file, with its line. */
   function offenders(source: string): string[] {
     const found: string[] = []
     const text = source.replace(/\/\*[\s\S]*?\*\//g, "")
-    for (const match of text.matchAll(/variant\s*[=:]\s*"([a-z-]+)"/g)) {
-      const name = match[1]
-      if (!RETIRED.includes(name)) continue
-      const before = text.slice(0, match.index)
-      // The nearest opening tag before the prop is the component it is on.
-      const host = [...before.matchAll(/<([A-Z][A-Za-z0-9]*)/g)].pop()?.[1]
-      // `buttonVariants({ variant: … })` builds a button's className without a
-      // JSX host, so it is matched on the call rather than on a tag.
-      const call = /buttonVariants\s*\(\s*\{[^}]*$/.test(before)
-      if (host === "Button" || call) {
-        const line = before.split("\n").length
-        found.push(`line ${line}: ${match[0]}`)
+    // Keyed on the host by reading the tag it opens, rather than by guessing
+    // the nearest `<Capital` behind the prop: that guess resolves
+    // `<Button startContent={<FiX />} variant="outline">` to `FiX` and skips
+    // it. `Chip` still cannot be confused for a Button, because only a tag
+    // that opens `<Button` is read at all.
+    for (const match of text.matchAll(/<Button(?=[\s/>])/g)) {
+      const tag = openingTag(text, match.index)
+      const line = text.slice(0, match.index).split("\n").length
+      for (const name of variantNames(tag)) {
+        if (!RETIRED.includes(name)) continue
+        found.push(`line ${line}: variant="${name}"`)
+      }
+    }
+    // `buttonVariants({ variant: … })` builds a button's className with no JSX
+    // host, so it is matched on the call instead.
+    for (const match of text.matchAll(
+      /buttonVariants\s*\(\s*\{([\s\S]*?)\}/g,
+    )) {
+      for (const found_ of match[1].matchAll(/variant\s*:\s*"([a-z-]+)"/g)) {
+        if (!RETIRED.includes(found_[1])) continue
+        const line = text.slice(0, match.index).split("\n").length
+        found.push(`line ${line}: variant: "${found_[1]}"`)
       }
     }
     return found
@@ -1188,6 +1362,29 @@ describe("buttons come in three variants", () => {
     // Chip's own vocabulary, which the product uses and must keep.
     expect(
       offenders('<Chip size="sm" variant="secondary">soft</Chip>'),
+    ).toEqual([])
+  })
+
+  // The two shapes the first version of this scan reported green on. Six
+  // retired `outline` Buttons survived in `features/usage/ShareDialog.tsx`
+  // behind the first of them, so these are regression tests and not
+  // hypotheticals.
+  it("reads a retired variant inside a conditional expression", () => {
+    expect(
+      offenders('<Button variant={on ? "primary" : "outline"}>Go</Button>'),
+    ).toEqual(['line 1: variant="outline"'])
+  })
+
+  it("reads one on a Button whose earlier prop holds JSX of its own", () => {
+    // The old host guess resolved this tag's host to `FiX` and skipped it.
+    expect(
+      offenders('<Button startContent={<FiX />} variant="outline">Go</Button>'),
+    ).toEqual(['line 1: variant="outline"'])
+  })
+
+  it("still leaves a Chip alone when its variant is conditional", () => {
+    expect(
+      offenders('<Chip variant={on ? "primary" : "secondary"}>soft</Chip>'),
     ).toEqual([])
   })
 })

@@ -245,9 +245,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
       </div>
       {workspaces.data && workspaces.data.length > 0 ? (
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-medium text-foreground">
-            Workspaces (optional)
-          </legend>
+          <legend className="text-body">Workspaces (optional)</legend>
           <span className="text-xs text-muted">
             Joined as a member of each, in the same request, so someone never
             exists without the access they were added for. Workspace roles are
@@ -407,9 +405,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
       </div>
       {workspaces.data && workspaces.data.length > 0 ? (
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-medium text-foreground">
-            Workspaces (optional)
-          </legend>
+          <legend className="text-body">Workspaces (optional)</legend>
           <span className="text-xs text-muted">
             Granted once the invitation is accepted, not before.
           </span>
@@ -655,7 +651,13 @@ function MemberEditor({
       <div className="text-title">Edit {memberLabel(member)}</div>
       <ErrorBanner error={error} />
 
-      {spendRow ? (
+      {/* Withheld entirely from a caller who does not operate the deployment.
+          `spendRow` comes from `useUsers(operates)`, so for them it is always
+          undefined and the fallback below would report "no spend row yet" for a
+          row that may well exist. That is the confusion the roster's own
+          member cell is gated to avoid: a withheld read must not read as an
+          absent gateway identity. */}
+      {!operates ? null : spendRow ? (
         <ModelScopeControl
           title="Model access (default for this member's keys)"
           description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
@@ -673,9 +675,7 @@ function MemberEditor({
       )}
 
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium text-foreground">
-          Workspace access
-        </span>
+        <span className="text-body">Workspace access</span>
         <div className="max-w-3xl overflow-x-auto">
           <table className="w-full min-w-lg text-sm">
             <thead>
@@ -745,13 +745,18 @@ function MemberEditor({
             </tbody>
           </table>
         </div>
-        <span className="max-w-2xl text-xs text-muted">
-          Each workspace holds its own allowance, so someone in two workspaces
-          has two. The amount and the reset period belong to the budget, so
-          editing one moves everyone held to it; pick a different budget here to
-          change only this person. Adding them to a workspace that has a default
-          member budget gives them that budget unless another is chosen.
-        </span>
+        {/* Gated with the Budget column it explains: "pick a different budget
+            here" names a control this caller is not offered. */}
+        {operates ? (
+          <span className="max-w-2xl text-xs text-muted">
+            Each workspace holds its own allowance, so someone in two workspaces
+            has two. The amount and the reset period belong to the budget, so
+            editing one moves everyone held to it; pick a different budget here
+            to change only this person. Adding them to a workspace that has a
+            default member budget gives them that budget unless another is
+            chosen.
+          </span>
+        ) : null}
       </div>
 
       <div className="flex gap-2">

@@ -224,7 +224,7 @@ export function PasswordCard() {
             isRequired
             className="flex max-w-md flex-col gap-1"
           >
-            <Label className="text-sm font-medium text-foreground">Email</Label>
+            <Label className="text-body">Email</Label>
             {/* autoComplete="username" and not "email": this is the handle
                 the sign-in form will ask for, so a password manager should
                 file it against the credential it is being set beside. */}

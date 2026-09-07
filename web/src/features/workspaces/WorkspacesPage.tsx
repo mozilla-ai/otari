@@ -698,9 +698,7 @@ export function WorkspacesPage() {
         isRowHeader: true,
         cell: (workspace) => (
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium text-foreground">
-              {workspace.name}
-            </span>
+            <span className="text-body">{workspace.name}</span>
             {/* One line, truncated. Capping this lane so the columns after it
                 stay adjacent is what made the description wrap and took two
                 rows off the 58px pitch, which is the same trade the members

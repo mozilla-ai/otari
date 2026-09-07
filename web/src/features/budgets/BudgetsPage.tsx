@@ -152,7 +152,7 @@ function PeriodPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-foreground">Reset period</span>
+      <span className="text-body">Reset period</span>
       {/* A segmented control rather than a row of buttons. These are the
           alternatives for one field, not five things to do, and filling the
           chosen one primary said the opposite: it put the submit button's own
@@ -980,7 +980,7 @@ function DeploymentBudgetsPage() {
       {historyBudget ? (
         <Section className="border-y border-border">
           <div className="flex items-center justify-between border-b border-border py-2">
-            <span className="text-sm font-medium text-foreground">
+            <span className="text-body">
               Reset history — {budgetLabel(historyBudget)}
             </span>
             <Button

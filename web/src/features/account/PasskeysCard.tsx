@@ -299,9 +299,7 @@ export function PasskeysCard() {
               onChange={setNewName}
               className="flex max-w-md flex-1 flex-col gap-1"
             >
-              <Label className="text-sm font-medium text-foreground">
-                Name
-              </Label>
+              <Label className="text-body">Name</Label>
               <Input
                 placeholder="Work laptop"
                 maxLength={MAX_PASSKEY_NAME_LENGTH}

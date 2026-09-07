@@ -1002,10 +1002,11 @@ function ModelDetailPanel({
               ? "None reported."
               : canEditPricing
                 ? "Extended metadata unavailable (models.dev disabled or unreachable)."
-                : // The metadata read is operator-only and was never asked, so
-                  // saying models.dev failed would be reporting an outage that
-                  // did not happen.
-                  "None reported."}
+                : // The metadata read is operator-only and was never asked for
+                  // this caller, so neither "None reported." nor a models.dev
+                  // outage is true: one asserts the model reports nothing, the
+                  // other reports a failure that did not happen.
+                  "Extended metadata is available to deployment operators."}
           </span>
         )}
       </PanelSection>
@@ -1532,7 +1533,10 @@ function ModelTable({
         getRowKey={getModelRowKey}
         isLoading={isLoading}
         emptyContent={empty}
-        selectionMode="multiple"
+        // Selection exists to feed the bulk pricing action, so it is offered
+        // only to a caller who can price. `onEditPricing` arrives already
+        // gated on operator authority, which is what makes it the right key.
+        selectionMode={onEditPricing ? "multiple" : "none"}
         selectedKeys={selectedKeys}
         onSelectionChange={onSelectionChange}
         sortDescriptor={sortDescriptor}
@@ -2244,8 +2248,9 @@ export function ModelsPage() {
       <header className="pb-1">
         <h1 className="text-display">Models</h1>
         <p className="mt-1 max-w-[620px] text-sm text-muted">
-          Every model your providers can serve. Set a price on any model so
-          budgets and usage tracking work.
+          {isOperator
+            ? "Every model your providers can serve. Set a price on any model so budgets and usage tracking work."
+            : "Every model this gateway can serve, with the rates your usage is metered at. Providers and pricing are managed by a deployment operator."}
         </p>
       </header>
 
@@ -2343,7 +2348,11 @@ export function ModelsPage() {
           onPriceModel={setCustomPriceKey}
         />
 
-        {selectedModelKeys.length > 0 ? (
+        {/* Gated on authority as well as on a selection. The table only offers
+            selection to an operator, so this is the second of two locks rather
+            than the only one: it means a non-operator reaching a selected key
+            by any other route still cannot open the pricing dialog. */}
+        {isOperator && selectedModelKeys.length > 0 ? (
           <BulkActionBar
             selectedCount={bulkCount}
             allMatching={selection.allMatching}

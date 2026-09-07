@@ -369,7 +369,7 @@ function ModeToggle({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-foreground">{label}</span>
+      <span className="text-body">{label}</span>
       <TabRow>
         {MODE_VALUES.map((mode) => (
           <Tab
@@ -696,9 +696,7 @@ function PolicyForm({
         <div className="grid gap-4 sm:grid-cols-2">
           {editingAlias ? (
             <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-foreground">
-                Alias name
-              </span>
+              <span className="text-body">Alias name</span>
               <code className="text-sm text-muted">{previousName}</code>
               <span className="text-xs text-muted">
                 An alias name is its key and cannot be changed here. Delete and
@@ -737,9 +735,7 @@ function PolicyForm({
           )}
           {routed ? (
             <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-foreground">
-                Serves
-              </span>
+              <span className="text-body">Serves</span>
               <span className="text-sm text-foreground">
                 {effectiveTarget.trim() === "" ? (
                   <span className="text-muted">
@@ -1049,9 +1045,7 @@ function PolicyForm({
         {guardrails.length > 0 ? (
           <div className="flex flex-col gap-3 border border-control-border p-3">
             <div>
-              <span className="text-sm font-medium text-foreground">
-                Always check
-              </span>
+              <span className="text-body">Always check</span>
               <p className="text-caption">
                 Runs on every request through this policy. Callers can add their
                 own guardrails but cannot weaken these.

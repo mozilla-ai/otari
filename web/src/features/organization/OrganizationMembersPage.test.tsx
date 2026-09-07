@@ -694,6 +694,53 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     )
   })
 
+  it("withholds model access in the editor rather than denying it exists", async () => {
+    // `spendRow` comes from `useUsers(operates)`, so for this caller it is
+    // always undefined. Ungated, the editor falls to "No spend row yet", which
+    // states as fact something the page never read: the same confusion the
+    // roster's member cell is gated to avoid, one surface along.
+    mockApi({
+      members: [OWNER, ANALYST],
+      workspaces: [workspace()],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+
+    expect(screen.queryByText(/Model access/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No spend row yet/)).not.toBeInTheDocument()
+    // And the guidance that names the Budget column this caller is not shown.
+    expect(
+      screen.queryByText(/pick a different budget here/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows an operator both, so the case above is not vacuous", async () => {
+    mockApi({
+      members: [OWNER, ANALYST],
+      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      workspaces: [workspace()],
+      context: organizationContext({ deployment_operator: true }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+
+    expect(screen.getByText(/Model access/)).toBeInTheDocument()
+    expect(screen.getByText(/pick a different budget here/)).toBeInTheDocument()
+  })
+
   it("still shows the columns to an operator, so the case above is not vacuous", async () => {
     mockApi({
       members: [OWNER, ANALYST],

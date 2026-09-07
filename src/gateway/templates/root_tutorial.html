@@ -8,8 +8,15 @@
     <style>
       :root {
         --brand: #0098a4;
-        --brand-dark: #3c6678;
-        --brand-tint: #eaf1f3;
+        /* Both derived from the accent above rather than from the blue-grey it
+           replaced, and both taken from the dashboard's own light palette so
+           this page and the app cannot drift: `--brand-dark` is
+           `--color-link`, the accent's darker step, and `--brand-tint` is
+           `--color-primary-subtle` composited on white, since this page uses
+           opaque fills. Measured: the ink reads 5.53 on white and 4.70 on the
+           tint, both clearing 4.5. */
+        --brand-dark: #00747e;
+        --brand-tint: #dbf1f2;
         --ink: #14242c;
         --muted: #5b6b73;
         --line: #dbe5e8;
