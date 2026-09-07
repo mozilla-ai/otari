@@ -1016,7 +1016,7 @@ function AppShellChrome() {
             inert={backgroundInert}
             className="flex-1 overflow-y-auto focus:outline-none"
           >
-            <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
+            <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
               {answerIsStillComing ? (
                 <PendingPage />
               ) : routeIsGatedOff ? (

@@ -40,6 +40,7 @@ import { Field } from "@/shared/components/Field"
 import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
 import {
   Dot,
+  PageIntro,
   RowAction,
   RowActionRow,
   Section,
@@ -1134,31 +1135,29 @@ export function KeysPage() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
-        <div className="max-w-[620px]">
-          <h1 className="text-display">API keys</h1>
-          <p className="mt-1 text-sm text-muted">
-            {isDeploymentWide
-              ? "Issue and revoke the keys that authenticate callers to this gateway. Secrets are shown once at creation."
-              : "Create and manage your own keys for calling this gateway. Secrets are shown once at creation."}
-          </p>
-        </div>
-        {addOpen ? null : (
-          <Button
-            // The reveal strip hands focus back here when it closes, so the
-            // control that opened it has to stay addressable.
-            ref={createButtonRef}
-            variant="primary"
-            className="shrink-0"
-            onPress={() => {
-              setEditing(null)
-              setAddOpen(true)
-            }}
-          >
-            Create key
-          </Button>
-        )}
-      </header>
+      <PageIntro
+        title="API keys"
+        action={
+          addOpen ? undefined : (
+            <Button
+              // The reveal strip hands focus back here when it closes, so the
+              // control that opened it has to stay addressable.
+              ref={createButtonRef}
+              variant="primary"
+              onPress={() => {
+                setEditing(null)
+                setAddOpen(true)
+              }}
+            >
+              Create key
+            </Button>
+          )
+        }
+      >
+        {isDeploymentWide
+          ? "Issue and revoke the keys that authenticate callers to this gateway. Secrets are shown once at creation."
+          : "Create and manage your own keys for calling this gateway. Secrets are shown once at creation."}
+      </PageIntro>
 
       <ErrorBanner
         error={
@@ -1174,7 +1173,7 @@ export function KeysPage() {
           pages they cannot open. The two links stay in link ink: they are real
           links inside a sentence, which is what that ink is for. */}
       {isDeploymentWide ? (
-        <p className="max-w-[620px] pb-5 text-sm text-muted">
+        <p className="max-w-[38.75rem] pb-5 text-sm text-muted">
           A key spends against its owner's budget. Owners live under{" "}
           <Link
             to="/organization/members"
@@ -1192,7 +1191,7 @@ export function KeysPage() {
           .
         </p>
       ) : (
-        <p className="max-w-[620px] pb-5 text-sm text-muted">
+        <p className="max-w-[38.75rem] pb-5 text-sm text-muted">
           These are your keys: requests on them are billed to you and spend
           against your budget.
         </p>

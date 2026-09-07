@@ -22,7 +22,7 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/hooks"
-import { Dot, SettingsGroup } from "@/shared/components/surface"
+import { Dot, PageIntro, SettingsGroup } from "@/shared/components/surface"
 import {
   ErrorBanner,
   errorMessage,
@@ -735,22 +735,21 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="pb-1">
-        <h1 className="text-display">
-          {only
+      <PageIntro
+        title={
+          only
             ? (SERVICES.find((service) => service.key === only)?.label ??
               "Tools & Guardrails")
-            : "Tools & Guardrails"}
-        </h1>
+            : "Tools & Guardrails"
+        }
+      >
         {/* Two readings: an operator configures the service endpoints, and a
             caller who does not is told what the deployment's tools do to their
             requests instead of how to configure a backend they cannot reach. */}
-        <p className="mt-1 max-w-[620px] text-sm text-muted">
-          {isOperator
-            ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist. URLs are validated for shape (http/https) and can be tested for reachability before saving; the network-safety gates for these services live on the Settings page."
-            : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates. The service backends themselves are a deployment operator's to configure."}
-        </p>
-      </header>
+        {isOperator
+          ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist. URLs are validated for shape (http/https) and can be tested for reachability before saving; the network-safety gates for these services live on the Settings page."
+          : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates. The service backends themselves are a deployment operator's to configure."}
+      </PageIntro>
 
       <ErrorBanner error={query.error} />
 

@@ -61,6 +61,14 @@ Two ways a small visual keeps a large target:
 - A 24px toggle track grows its hit area with a `before:` pseudo-element
   (`before:-inset-y-2.5`), absolutely positioned so the row does not move.
 
+**One control is knowingly under the floor**, and it is the shape of the exception
+rather than a licence to add more. `DismissChip`'s remove button is 24px, because
+neither device above reaches it: its row wraps at an 8px gap, so a `before:` bleed
+would overlap the row above and a press near the seam would dismiss the neighboring
+filter, and a real 44px target grows the filter area on three pages. #947 carries
+the decision. A new control under 44px needs the same kind of argument, in writing,
+or it is a bug.
+
 Hover is never the only channel. A hover state that carries information alone does
 not exist on a phone: pair it with a fill *and* an ink change, as the rail rows do.
 

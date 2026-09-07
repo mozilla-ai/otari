@@ -79,7 +79,7 @@ describe("PageIntro", () => {
     render(<PageIntro title="API keys">Keys authenticate requests.</PageIntro>)
     const column = screen.getByText("Keys authenticate requests.")
       .parentElement as HTMLElement
-    expect([...column.classList]).toContain("max-w-[620px]")
+    expect([...column.classList]).toContain("max-w-[38.75rem]")
   })
 
   it("narrows the description without dropping what the role already gives it", () => {

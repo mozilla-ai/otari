@@ -32,7 +32,12 @@ import {
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
-import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
+import {
+  Dot,
+  PageIntro,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
 import { TablePagination } from "@/shared/components/TablePagination"
 import {
   ConfirmButton,
@@ -2245,14 +2250,11 @@ export function ModelsPage() {
     : null
   return (
     <div className="flex flex-col gap-6">
-      <header className="pb-1">
-        <h1 className="text-display">Models</h1>
-        <p className="mt-1 max-w-[620px] text-sm text-muted">
-          {isOperator
-            ? "Every model your providers can serve. Set a price on any model so budgets and usage tracking work."
-            : "Every model this gateway can serve, with the rates your usage is metered at. Providers and pricing are managed by a deployment operator."}
-        </p>
-      </header>
+      <PageIntro title="Models">
+        {isOperator
+          ? "Every model your providers can serve. Set a price on any model so budgets and usage tracking work."
+          : "Every model this gateway can serve, with the rates your usage is metered at. Providers and pricing are managed by a deployment operator."}
+      </PageIntro>
 
       <ErrorBanner
         error={

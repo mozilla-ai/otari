@@ -16,7 +16,9 @@ import { describe, expect, it } from "vitest"
  * being reached for and the ramp was incidental. This is what makes the next
  * one fail here rather than on somebody's screen.
  */
-const SRC = join(import.meta.dirname, "..", "..")
+// Resolved from the Vitest root (web/) rather than import.meta.url, which the
+// jsdom environment reports as an http URL. Same reason as foundation.test.ts.
+const SRC = join(process.cwd(), "src")
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir)) {

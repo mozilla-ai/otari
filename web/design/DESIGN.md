@@ -40,7 +40,7 @@ from the module, not from `@/shared/components`.
 | Module | Exports you will reach for |
 | --- | --- |
 | `@heroui/react` | `Button`, `Select`, `Tooltip`, `Spinner`, and the rest of HeroUI v3 |
-| `@/shared/components/surface` | `Section`, `PageIntro`, `SettingsGroup`, `Toolbar`, `KpiStrip`, `KpiCell`, `SeverityMark`, `Meter`, `SpendMeter`, `spendState`, `Tab`, `TabRow`, `Segmented`, `RowAction`, `RowActionRow`, `ConfirmRowAction`, `DismissChip`, `Dot`, `EmptyMessage`, `TableScrollFrame`, `FULL_BLEED`, `BLEED_INSET` |
+| `@/shared/components/surface` | `Section`, `PageIntro`, `SettingsGroup`, `Toolbar`, `KpiStrip`, `KpiCell`, `SeverityMark`, `Meter`, `SpendMeter`, `spendState`, `Tab`, `TabRow`, `Segmented`, `RowAction`, `RowActionRow`, `ConfirmRowAction`, `DismissChip`, `Dot`, `EmptyMessage`, `TableScrollFrame` |
 | `@/shared/components/ui` | `ConfirmButton`, `InfoBanner`, `ErrorBanner`, `EmptyState`, `PageLoading`, `Checkbox`, `CopyField`, `CopyButton`, `CopyableValue`, `RefreshButton`, `Badge`, `FilterSelect`, `FilterMultiComboBox`, `errorMessage` |
 | `@/shared/components/DataTable` | `DataTable`, and the `DataTableColumn` type |
 | `@/shared/components/Field` · `/SecretField` | `Field` · `SecretField` |

@@ -31,6 +31,7 @@ import { SecretField } from "@/shared/components/SecretField"
 import {
   ConfirmRowAction,
   Dot,
+  PageIntro,
   RowAction,
   RowActionRow,
   Section,
@@ -802,7 +803,7 @@ function OnboardingPanel({
           until pricing is set.{" "}
           <button
             type="button"
-            className="font-medium text-link hover:text-link-hover disabled:opacity-50"
+            className="font-medium text-link hover:text-link-hover disabled:opacity-(--disabled-opacity)"
             disabled={enabling}
             onClick={onEnablePricing}
           >
@@ -1045,33 +1046,31 @@ export function ProvidersPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
-        <div className="max-w-[620px]">
-          <h1 className="text-display">Providers</h1>
-          <p className="mt-1 text-sm text-muted">
-            Add provider API keys here to serve models without editing
-            config.yml. Keys are encrypted at rest.
-          </p>
-        </div>
-        {/* The first-run strip supplies its own focused call to action, and the
-            form has its own Close, so the header action is redundant while
-            either is open. Disabled rather than hidden when the server has no
-            secret key: an operator who cannot add a provider still needs to see
-            that adding one is the thing they are being denied. */}
-        {addOpen || showOnboarding ? null : (
-          <Button
-            variant="primary"
-            className="shrink-0"
-            isDisabled={!secretKeyConfigured}
-            onPress={() => {
-              setEditing(null)
-              setAddOpen(true)
-            }}
-          >
-            Add provider
-          </Button>
-        )}
-      </header>
+      <PageIntro
+        title="Providers"
+        action={
+          /* The first-run strip supplies its own focused call to action, and the
+             form has its own Close, so the header action is redundant while
+             either is open. Disabled rather than hidden when the server has no
+             secret key: an operator who cannot add a provider still needs to see
+             that adding one is the thing they are being denied. */
+          addOpen || showOnboarding ? undefined : (
+            <Button
+              variant="primary"
+              isDisabled={!secretKeyConfigured}
+              onPress={() => {
+                setEditing(null)
+                setAddOpen(true)
+              }}
+            >
+              Add provider
+            </Button>
+          )
+        }
+      >
+        Add provider API keys here to serve models without editing config.yml.
+        Keys are encrypted at rest.
+      </PageIntro>
 
       {/* `settings.error` is deliberately absent. The page reads that endpoint
           only for the pricing hint below, and it is operator-only, so a caller

@@ -31,7 +31,7 @@ import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
-import { Dot, TableScrollFrame } from "@/shared/components/surface"
+import { Dot, PageIntro, TableScrollFrame } from "@/shared/components/surface"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
@@ -1947,9 +1947,6 @@ export function ActivityPage() {
           return (
             <span className="inline-flex items-center gap-1.5">
               {e.model}
-              {/* A generic span does not reliably expose aria-label, so the
-                  badge takes the img role: the label is the whole meaning, and
-                  the count inside is a summary of it. */}
               {/* A marker, not a badge: an accent dot and the count in mono
                   uppercase, on the same terms as every other marker in the
                   product. A generic span does not reliably expose aria-label,
@@ -2015,13 +2012,10 @@ export function ActivityPage() {
 
   return (
     <div className="flex flex-col">
-      <header className="pb-5">
-        <h1 className="text-display">Activity</h1>
-        <p className="mt-1 max-w-[620px] text-sm text-muted">
-          A per-request log of what the gateway served: tokens, cost, latency,
-          and failures. No request or response content is stored.
-        </p>
-      </header>
+      <PageIntro title="Activity">
+        A per-request log of what the gateway served: tokens, cost, latency, and
+        failures. No request or response content is stored.
+      </PageIntro>
 
       {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}

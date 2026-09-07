@@ -17,7 +17,7 @@ That needs two elements, always. `Section` is the pair.
 
 // Incorrect: one element cannot be both full-width and centered. On a wide
 // viewport every rule stops at the column edge and the page reads as cards again.
-<section className="border-y border-border mx-auto max-w-[1800px]">{cells}</section>
+<section className="border-y border-border mx-auto max-w-[112.5rem]">{cells}</section>
 ```
 
 `bleed={false}` for a band nested inside a column rather than sitting directly in
@@ -25,8 +25,10 @@ the scroll area. The escape is `100cqw` against `<main>`, so a nested band that
 still bleeds does not stop at its column: measured inside a 360px grid cell it came
 out 1464px wide and painted 552px past the right edge of the page.
 
-`FULL_BLEED` and `BLEED_INSET` are the two halves on their own, for a band that is
-not a `<section>` (a header row, a page-level notice).
+A band that is not a `<section>` (a header row, a page-level notice) writes the two
+halves out: `otari-bleed` on the outer element, and
+`mx-auto w-full max-w-[112.5rem] px-4 md:px-6` on the element inside it. There are no
+constants for these; `Section` is the one place the pair is named.
 
 ## The band components
 
@@ -128,7 +130,7 @@ rather than inventing a width.
 
 The step is 4px and everything is a multiple. The two values worth knowing by heart:
 a page's column is padded `px-4 md:px-6` with `py-5 md:py-6`, and a KPI cell is
-`px-7 py-[18px]`.
+`px-7 py-[1.125rem]`.
 
 Vary spacing deliberately: tighter to group, generous to separate. A uniform gap
 everywhere reads as a wireframe.

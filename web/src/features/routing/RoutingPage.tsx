@@ -35,6 +35,7 @@ import { ControlField } from "@/shared/components/FieldMessages"
 import {
   ConfirmRowAction,
   Dot,
+  PageIntro,
   RowAction,
   RowActionRow,
   Section,
@@ -1570,35 +1571,33 @@ export function RoutingPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
-        <div className="max-w-[620px]">
-          <h1 className="text-display">Routing</h1>
-          {/* Three readings of the same page, because what a caller may do here
-              differs: an operator sees the deployment-wide capabilities, an
-              admin sees what their own workspace writes reach, and a member is
-              told who manages these rather than offered a control they would
-              be refused. */}
-          <p className="mt-1 text-sm text-muted">
-            {isOperator
-              ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
-              : canEdit
-                ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
-                : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."}
-          </p>
-        </div>
-        {!canEdit || isAdding || editing !== null ? null : (
-          <Button
-            variant="primary"
-            className="shrink-0"
-            onPress={() => {
-              setEditing(null)
-              setAdding(true)
-            }}
-          >
-            New policy
-          </Button>
-        )}
-      </header>
+      <PageIntro
+        title="Routing"
+        action={
+          !canEdit || isAdding || editing !== null ? undefined : (
+            <Button
+              variant="primary"
+              onPress={() => {
+                setEditing(null)
+                setAdding(true)
+              }}
+            >
+              New policy
+            </Button>
+          )
+        }
+      >
+        {/* Three readings of the same page, because what a caller may do here
+            differs: an operator sees the deployment-wide capabilities, an
+            admin sees what their own workspace writes reach, and a member is
+            told who manages these rather than offered a control they would
+            be refused. */}
+        {isOperator
+          ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
+          : canEdit
+            ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
+            : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."}
+      </PageIntro>
 
       <ErrorBanner
         error={

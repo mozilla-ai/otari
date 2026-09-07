@@ -38,6 +38,7 @@ import {
   EmptyMessage,
   KpiCell,
   KpiStrip,
+  PageIntro,
   Section,
   Tab,
   TableScrollFrame,
@@ -261,7 +262,7 @@ function BreakdownTable({
                 fixed-length scale a reader compares rows against, and one that
                 stretched with its column made the same share look different in
                 the two tables beside each other. */}
-            <span className="block h-[3px] w-[140px] max-w-full bg-surface-subtle">
+            <span className="block h-[0.1875rem] w-[8.75rem] max-w-full bg-surface-subtle">
               <span
                 className="block h-full bg-accent"
                 style={{ width: `${Math.min(100, share * 100)}%` }}
@@ -372,7 +373,7 @@ function ToolBreakdownTable({
                 fixed-length scale a reader compares rows against, and one that
                 stretched with its column made the same share look different in
                 the two tables beside each other. */}
-            <span className="block h-[3px] w-[140px] max-w-full bg-surface-subtle">
+            <span className="block h-[0.1875rem] w-[8.75rem] max-w-full bg-surface-subtle">
               <span
                 className="block h-full bg-accent"
                 style={{ width: `${Math.min(100, share * 100)}%` }}
@@ -1105,31 +1106,28 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
 
   return (
     <div className="flex flex-col">
-      <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-display">
-            {orgWide ? "Organization usage" : "Usage & analytics"}
-          </h1>
-          {/* The drill-in clause is in the workspace arm only: organization
-              scope passes `onDrill={undefined}` to all three breakdowns, so
-              promising a clickable row is exactly wrong for this caller. */}
-          <p className="mt-1 max-w-[620px] text-sm text-muted">
-            {orgWide
-              ? "Spend, tokens, cache use, and request volume over time across every workspace in this organization. Group the chart by model, user, key, or source."
-              : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="text-overline">
-            {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
-          </span>
-          <RefreshButton
-            onRefresh={refresh}
-            isFetching={summary.isFetching}
-            updatedAt={summary.dataUpdatedAt}
-          />
-        </div>
-      </header>
+      <PageIntro
+        title={orgWide ? "Organization usage" : "Usage & analytics"}
+        action={
+          <div className="flex items-center gap-3">
+            <span className="text-overline">
+              {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
+            </span>
+            <RefreshButton
+              onRefresh={refresh}
+              isFetching={summary.isFetching}
+              updatedAt={summary.dataUpdatedAt}
+            />
+          </div>
+        }
+      >
+        {/* The drill-in clause is in the workspace arm only: organization
+            scope passes `onDrill={undefined}` to all three breakdowns, so
+            promising a clickable row is exactly wrong for this caller. */}
+        {orgWide
+          ? "Spend, tokens, cache use, and request volume over time across every workspace in this organization. Group the chart by model, user, key, or source."
+          : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."}
+      </PageIntro>
 
       <ErrorBanner
         error={
@@ -1388,7 +1386,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 <Spinner size="sm" />
               </div>
             ) : chart.data.length === 0 ? (
-              <EmptyMessage minHeight="16rem">
+              <EmptyMessage className="min-h-[16rem] py-0">
                 No data in this range.
               </EmptyMessage>
             ) : (

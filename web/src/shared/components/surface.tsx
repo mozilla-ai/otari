@@ -56,7 +56,7 @@ export function Section({
       <div
         className={
           bleed
-            ? `mx-auto w-full max-w-[1800px] px-4 md:px-6 ${contentClassName}`
+            ? `mx-auto w-full max-w-[112.5rem] px-4 md:px-6 ${contentClassName}`
             : `w-full ${contentClassName}`
         }
       >
@@ -100,7 +100,7 @@ export function PageIntro({
 }) {
   return (
     <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
-      <div className="max-w-[620px]">
+      <div className="max-w-[38.75rem]">
         <h1 className="text-display">{title}</h1>
         {children ? (
           <p className={`mt-1 text-sm text-muted ${descriptionClassName}`}>
@@ -193,21 +193,26 @@ export function SettingsGroup({
  * product where the two mean the same thing. Shared so the size cannot drift
  * again, the same reason `SettingsGroup` is shared.
  *
- * `minHeight` because an empty chart band still has to hold the space its chart
- * would have taken, or the page reflows the moment data arrives.
+ * `className` because an empty chart band still has to hold the space its chart
+ * would have taken, or the page reflows the moment data arrives. A class rather
+ * than an inline `style`: both callers pass a literal height, so nothing here
+ * is computed at runtime, and the height belongs in the same cascade as the
+ * padding it replaces.
  */
 export function EmptyMessage({
   children,
-  minHeight,
+  className = "",
 }: {
   children: ReactNode
-  /** A CSS length, for the bands that must not collapse. */
-  minHeight?: string
+  /**
+   * Extra classes for the band. A caller holding space passes a min-height and
+   * `py-0`, which the default vertical padding would otherwise fight.
+   */
+  className?: string
 }) {
   return (
     <div
-      className="flex items-center justify-center px-4 py-10 text-center text-sm text-muted"
-      style={minHeight ? { minHeight, paddingBlock: 0 } : undefined}
+      className={`flex items-center justify-center px-4 py-10 text-center text-sm text-muted ${className}`}
     >
       {children}
     </div>
@@ -296,7 +301,7 @@ export function RowAction({
       disabled={isDisabled}
       aria-label={ariaLabel}
       onClick={onPress}
-      className={`text-caption whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-50 ${
+      className={`text-caption whitespace-nowrap transition-colors motion-reduce:transition-none disabled:opacity-(--disabled-opacity) ${
         isDanger ? "text-danger" : "hover:text-foreground"
       }`}
     >
@@ -370,9 +375,12 @@ export function ConfirmRowAction({
  * No box, because the kinds here are told apart by dot, case and separator; a
  * bordered, filled chip would be the only boxed thing in the product.
  *
- * The dismiss is a real 24px target holding a 12px glyph. It reads small and is
- * not, which is the point: the visible cross stays quiet while the thing a
- * finger lands on is the size a finger needs.
+ * The dismiss is a 24px target holding a 12px glyph, which is under the 44px
+ * floor `design/motion-and-access.md` sets, and knowingly so. The device that
+ * doc names (a `before:` bleed, as `Toggle` uses) is not free here: this row
+ * wraps at an 8px gap, so stacked bleeds would overlap by about 12px and a
+ * press near the seam would dismiss the neighboring filter. Reaching 44px for
+ * real instead grows the row on three pages. #947 carries the decision.
  */
 export function DismissChip({
   label,
@@ -480,7 +488,7 @@ export function KpiCell({
     // beside it (218px at 1280, since the track shrinks and the string does
     // not). Bounding the column is what makes the truncation and the
     // sparkline's `w-full` mean anything.
-    <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[18px] not-last:border-r">
+    <div className="grid row-span-4 min-w-0 grid-rows-subgrid grid-cols-[minmax(0,1fr)] gap-1.5 border-border px-7 py-[1.125rem] not-last:border-r">
       <span className="flex items-end text-overline">{label}</span>
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
@@ -499,7 +507,7 @@ export function KpiCell({
           subgrid buys. The severity and the delta hold their width; the subline
           is the only thing that gives, and it truncates, because its facts also
           live in the breakdown tables while a delta lives nowhere else. */}
-      <span className="flex min-h-[18px] items-center gap-2 text-xs text-nowrap text-muted">
+      <span className="flex min-h-[1.125rem] items-center gap-2 text-xs text-nowrap text-muted">
         {severity ? <SeverityMark severity={severity} /> : null}
         {severity && delta ? <Separator /> : null}
         {delta}
@@ -567,7 +575,7 @@ export function Meter({
     <span
       role="img"
       aria-label={ariaLabel}
-      className="block h-[3px] w-[140px] bg-surface-subtle"
+      className="block h-[0.1875rem] w-[8.75rem] bg-surface-subtle"
     >
       <span className="block h-full bg-accent" style={{ width: `${pct}%` }} />
     </span>
@@ -652,7 +660,7 @@ export function SpendMeter({
       }
       aria-valuemin={0}
       aria-valuemax={100}
-      className={`flex h-[3px] w-full bg-surface-subtle ${className}`}
+      className={`flex h-[0.1875rem] w-full bg-surface-subtle ${className}`}
     >
       {state === "over" ? (
         <span className="block h-full w-full bg-danger" />
@@ -704,7 +712,7 @@ export function Tab({
       // A segment never shrinks and never wraps its label: a tab row that
       // squeezed would put the same control at two widths on one page, and a
       // wrapped label would break the row's height. The row scrolls instead.
-      className={`shrink-0 px-2.5 py-[5px] text-sm whitespace-nowrap transition-colors motion-reduce:transition-none ${
+      className={`shrink-0 px-2.5 py-[0.3125rem] text-sm whitespace-nowrap transition-colors motion-reduce:transition-none ${
         isActive
           ? "bg-surface-subtle text-foreground"
           : "text-muted hover:text-foreground"
@@ -768,7 +776,7 @@ export function Segmented({
             // The divider is a leading border on every segment but the first,
             // so the count of rules is always one less than the count of
             // segments, however many there are.
-            className={`shrink-0 cursor-pointer border-l border-control-border px-3 py-[5px] text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
+            className={`shrink-0 cursor-pointer border-l border-control-border px-3 py-[0.3125rem] text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
               selected
                 ? "bg-surface-subtle text-foreground"
                 : "text-muted hover:text-foreground"
@@ -829,17 +837,33 @@ export function TableScrollFrame({
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const root = ref.current
-    const scroller = root?.querySelector<HTMLElement>(
-      ".table__scroll-container",
-    )
-    if (!root || !scroller) return
+    if (!root) return
+    let scroller: HTMLElement | null = null
     const sync = () => {
+      if (!scroller) return
       root.dataset.scrolled = scroller.scrollLeft > 0 ? "true" : "false"
     }
-    sync()
-    scroller.addEventListener("scroll", sync, { passive: true })
-    return () => scroller.removeEventListener("scroll", sync)
-  })
+    const attach = () => {
+      const found = root.querySelector<HTMLElement>(".table__scroll-container")
+      if (!found || found === scroller) return
+      scroller?.removeEventListener("scroll", sync)
+      scroller = found
+      sync()
+      scroller.addEventListener("scroll", sync, { passive: true })
+    }
+    attach()
+    // The scroller is HeroUI's and is not in the tree when this first runs, and
+    // it is replaced when the table's body remounts. Watching for it costs one
+    // observer per table; the alternative is an effect with no dependency
+    // array, which re-queries and swaps the listener on every render of every
+    // table in the app, sort and hover included.
+    const observer = new MutationObserver(attach)
+    observer.observe(root, { childList: true, subtree: true })
+    return () => {
+      observer.disconnect()
+      scroller?.removeEventListener("scroll", sync)
+    }
+  }, [])
   return (
     <div ref={ref} className={className}>
       {children}

@@ -227,19 +227,6 @@
      they only happen to share a value today. */
   --color-primary-button-active: #005b62;
   --color-primary-button-foreground: #ffffff;
-  /* The armed confirm's fill. The rule the two button families share: a filled
-     button's ground is a DARKENED STEP OF ITS OWN INK. Primary's fill is the
-     same in both themes only because primary's ink is; danger's ink differs by
-     theme, so its fill does too, and the dark value below is not this one. That
-     is deliberate rather than an oversight: sharing one value would couple the
-     themes, and moving light's danger token would silently move dark's confirm
-     button with it.
-     #cb2526 is danger's existing light ink, already 5.48:1 under white, so it
-     darkens no further than contrast asks for. */
-  --color-danger-button: #cb2526;
-  --color-danger-button-hover: #ab1f20;
-  --color-danger-button-active: #8e1a1b;
-  --color-danger-button-foreground: #ffffff;
 
   /* ── Link & focus ───────────────────────────────────────────────────────
    * Link is the accent's darker step, clearly distinct from the accent itself
@@ -524,20 +511,6 @@
   --color-primary-button-hover: #00767f;
   --color-primary-button-active: #00767f;
   --color-primary-button-foreground: #ffffff;
-  /* A true step off dark's own danger ink (#f6453f), not light's value: 4.69:1
-     under white, and 4.06 and 4.25 against the surface and the canvas it sits
-     on. The nearer step (#d83d37) reaches 4.52, which passes 4.5 by two
-     hundredths and is the rounded-ratio trap; this one also matches primary's
-     4.71 headroom, so the two filled buttons carry the same margin. */
-  --color-danger-button: #d43b36;
-  /* The same 3.7 step as primary above, and it lands on the same two numbers:
-     5.39 under white ink, 3.54 against the surface. That is the ground talking
-     rather than a coincidence worth preserving; both families are pinned by
-     the same two limits, so both arrive in the same place. Active repeats
-     hover for the reason given there. */
-  --color-danger-button-hover: #c43530;
-  --color-danger-button-active: #c43530;
-  --color-danger-button-foreground: #ffffff;
   /* Same role as the light block's, and not simply the accent-on-tint
      pairing for the same reason. The contrast direction inverts here, so
      this is a lifted step rather than a darker one. */
@@ -1618,16 +1591,6 @@ main {
    reads instead of moving the accent: everything else `--accent` feeds (the
    switch knob, the meter and progress fills, the spinner) keeps #0098a4.
    Pressed takes its own step, where HeroUI reuses hover for both. */
-/* The armed confirm. Same override shape as the primary below, and for the
-   same reason: `--danger` feeds the status dot, the danger ink and the meter's
-   over-limit fill, none of which should follow a button's ground. */
-.button--danger {
-  --button-bg: var(--color-danger-button);
-  --button-bg-hover: var(--color-danger-button-hover);
-  --button-bg-pressed: var(--color-danger-button-active);
-  --button-fg: var(--color-danger-button-foreground);
-}
-
 .button--primary {
   --button-bg: var(--color-primary-button);
   --button-bg-hover: var(--color-primary-button-hover);
@@ -1999,9 +1962,7 @@ main {
 }
 
 /* =============================================================
- * HeroUI v3 fixes — narrow, well-justified component patches.
- * ============================================================= */ /* =============================================================
- * HeroUI v3 fixes — narrow, well-justified component patches.
+ * HeroUI v3 fixes: narrow, well-justified component patches.
  * ============================================================= */
 
 /* Spinner renders as inline <span>; force inline-flex so the

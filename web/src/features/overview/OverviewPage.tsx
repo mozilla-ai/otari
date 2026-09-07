@@ -30,6 +30,7 @@ import {
   Dot,
   KpiCell,
   KpiStrip,
+  PageIntro,
   Section,
   SpendMeter,
 } from "@/shared/components/surface"
@@ -756,24 +757,21 @@ function OverviewHeader({
   updatedAt: number
 }) {
   return (
-    <header className="flex flex-col gap-4 pb-6 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <h1 className="text-display">Overview</h1>
-        {/* ~620px rather than `max-w-prose`: this paragraph sits beside the meta
-            block, so its measure is set by the room the two share. */}
-        <p className="mt-1 max-w-[620px] text-sm text-muted">
-          At-a-glance spend, traffic, and health across the gateway.
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="text-overline">Last 30 days</span>
-        <RefreshButton
-          onRefresh={refresh}
-          isFetching={isRefreshing}
-          updatedAt={updatedAt}
-        />
-      </div>
-    </header>
+    <PageIntro
+      title="Overview"
+      action={
+        <div className="flex items-center gap-3">
+          <span className="text-overline">Last 30 days</span>
+          <RefreshButton
+            onRefresh={refresh}
+            isFetching={isRefreshing}
+            updatedAt={updatedAt}
+          />
+        </div>
+      }
+    >
+      At-a-glance spend, traffic, and health across the gateway.
+    </PageIntro>
   )
 }
 

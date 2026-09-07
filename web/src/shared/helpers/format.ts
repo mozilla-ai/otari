@@ -147,7 +147,7 @@ export function deltaFraction(
 }
 
 /**
- * A relative time, compact: "3m ago", "2h ago", "5d ago".
+ * A relative time, compact: "3m ago", "2h ago", "5d ago", "2mo ago", "1y ago".
  *
  * Compact is the product's voice for this everywhere, which is a copy decision
  * with a layout consequence: "6 minutes ago" needed 130px of column where "6m
@@ -180,5 +180,11 @@ export function formatRelative(
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.round(minutes / 60)
   if (hours < 24) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
+  const days = Math.round(hours / 24)
+  if (days < 30) return `${days}d ago`
+  // The coarse buckets floor where the finer ones round, so "1y ago" covers the
+  // whole year it names rather than a value at 18 months reading as two.
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
 }
