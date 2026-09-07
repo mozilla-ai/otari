@@ -18,8 +18,10 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 from gateway.log_config import logger
 from gateway.services.tool_usage import ToolUsageTally
@@ -28,6 +30,35 @@ if TYPE_CHECKING:
     from mcp.types import Tool as MCPTool
 
     from gateway.models.mcp import McpServerConfig
+
+
+def _no_redirect_http_client(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """The MCP SDK's own HTTP client, with redirects turned off.
+
+    ``services/url_safety.validate_mcp_url`` vets a server's configured URL
+    before anything connects, refusing private, loopback, link-local and
+    reserved addresses. The SDK's default client sets ``follow_redirects=True``,
+    so a server answering with a redirect had that check bypassed entirely: the
+    redirected request that actually left the process was never vetted. For a
+    status such as 307, httpx also re-sends the method and request body to the
+    redirect destination.
+
+    Delegates to the SDK for everything else, deliberately. Its timeout defaults
+    are what the managed tool loop has always run with, and narrowing them here
+    would turn this into a behavior change for anyone whose MCP tool is slower
+    than a bound picked for a different purpose.
+
+    Following redirects safely means validating each destination before sending
+    anything to it. That is a larger change than this, and out of scope: no
+    caller needs a redirecting MCP server today.
+    """
+    client = create_mcp_http_client(headers, timeout, auth)
+    client.follow_redirects = False
+    return client
 
 
 def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
@@ -91,7 +122,9 @@ class MCPClientPool:
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
 
-        transport = await self._stack.enter_async_context(streamablehttp_client(cfg.url, headers=headers))
+        transport = await self._stack.enter_async_context(
+            streamablehttp_client(cfg.url, headers=headers, httpx_client_factory=_no_redirect_http_client)
+        )
         read, write, _ = transport
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()

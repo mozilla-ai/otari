@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from mcp.shared._httpx_utils import create_mcp_http_client
 
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_client import MCPClientPool, _ConnectedServer
@@ -104,3 +107,118 @@ async def test_call_tool_sanitizes_transport_failure(
     assert warnings == [("MCP tool %s execution failed: %s", "lookup", "RuntimeError")]
     assert "internal.test" not in str(warnings)
     assert "secret" not in str(warnings)
+
+
+# --------------------------------------------------------------------------- #
+# Transport safety
+# --------------------------------------------------------------------------- #
+
+
+class _FakeSession:
+    """Enough of a ``ClientSession`` for ``_connect`` to finish."""
+
+    def __init__(self, *args: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def initialize(self) -> None:
+        return None
+
+    async def list_tools(self) -> SimpleNamespace:
+        return SimpleNamespace(tools=[])
+
+
+def _capture_transport(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Substitute the MCP transport and record the kwargs the pool opens it with."""
+    captured: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def fake_transport(url: str, **kwargs: Any) -> Any:
+        captured["url"] = url
+        captured.update(kwargs)
+        yield (None, None, None)
+
+    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", fake_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _FakeSession)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_connect_opens_the_transport_with_redirects_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SDK's default client follows redirects, and this transport must not.
+
+    ``validate_mcp_url`` vets the configured URL, so a followed redirect is a
+    request that leaves the process having never been vetted. A 307 also
+    replays the MCP request body to the destination.
+    """
+    captured = _capture_transport(monkeypatch)
+    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp", authorization_token="ghp_token")
+
+    async with MCPClientPool([config]):
+        pass
+
+    factory = captured["httpx_client_factory"]
+    client = factory({"Authorization": "Bearer ghp_token"}, None, None)
+    try:
+        assert client.follow_redirects is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_transport_keeps_the_sdk_timeout_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only redirects change.
+
+    The managed tool loop serves live completions, so narrowing its timeouts
+    here would turn a security fix into a behavior change for anyone whose MCP
+    tool is slower than the new bound.
+    """
+    captured = _capture_transport(monkeypatch)
+    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp")
+
+    async with MCPClientPool([config]):
+        pass
+
+    ours = captured["httpx_client_factory"](None, None, None)
+    theirs = create_mcp_http_client(None, None, None)
+    try:
+        assert ours.timeout == theirs.timeout
+    finally:
+        await ours.aclose()
+        await theirs.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_is_not_followed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The redirect is returned as a response, so nothing is re-sent anywhere."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(307, headers={"location": "http://169.254.169.254/"})
+
+    captured = _capture_transport(monkeypatch)
+    config = McpServerConfig(name="tools", url="https://93.184.216.34/mcp", authorization_token="ghp_token")
+
+    async with MCPClientPool([config]):
+        pass
+
+    client = captured["httpx_client_factory"]({"Authorization": "Bearer ghp_token"}, None, None)
+    client._transport = httpx.MockTransport(handler)  # noqa: SLF001
+    async with client:
+        response = await client.post("https://93.184.216.34/mcp", json={"method": "tools/list"})
+
+    assert response.status_code == 307
+    assert len(seen) == 1
+    assert seen[0].url.host == "93.184.216.34"
