@@ -11,10 +11,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
+from httpx import ConnectError
 from mcp.types import CallToolResult, TextContent
 
+from gateway import log_config
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import (
@@ -212,3 +215,96 @@ async def test_phase_timings_survive_a_failure_after_dispatch(session: _FakeSess
     assert "connect_ms" in timings
     assert "call_ms" in timings
     assert "result_bytes" not in timings
+
+
+# --------------------------------------------------------------------------- #
+# The shapes a real MCP transport failure actually arrives in
+#
+# The SDK yields inside ``anyio.create_task_group()``, so a dead server does not
+# raise the tidy ``Exception`` a mocked pool does. Against the pinned ``mcp``,
+# ``session.initialize()`` against a closed port raises a bare
+# ``CancelledError``, which is not an ``Exception`` at all, and transport
+# shutdown separately raises an ``ExceptionGroup``. Both have to land inside the
+# error contract rather than escaping it.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_a_task_group_cancelling_the_caller_is_a_connection_failure(session: _FakeSession) -> None:
+    """The shape a closed port actually produces: a bare CancelledError."""
+    session.transport["connect_error"] = asyncio.CancelledError()
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_connection_failed"
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+    assert raised.value.status_code == 502
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_grouped_connection_failure_is_reported_by_its_leaf(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ExceptionGroup`` alone says nothing, so the log names what was inside it."""
+    warning = Mock()
+    monkeypatch.setattr(log_config.logger, "warning", warning)
+    session.transport["connect_error"] = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [ConnectError("All connection attempts failed")],
+    )
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_connection_failed"
+    warning.assert_called_once_with("Stateless MCP connection failed error_class=%s", "ConnectError")
+
+
+@pytest.mark.asyncio
+async def test_a_group_holding_a_cancellation_after_dispatch_is_an_unknown_outcome(
+    session: _FakeSession,
+) -> None:
+    """A ``BaseExceptionGroup`` is not an ``Exception``, and must not escape the contract."""
+    session.call_error = BaseExceptionGroup("unhandled errors in a TaskGroup", [asyncio.CancelledError()])
+
+    with pytest.raises(McpExecutionError) as raised:
+        await execute_stored_tool(SERVER, "create_issue", {})
+
+    assert raised.value.code == "mcp_outcome_unknown"
+    assert raised.value.execution_state is ExecutionState.OUTCOME_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_a_grouped_cleanup_failure_still_preserves_the_result(session: _FakeSession) -> None:
+    """The shape transport shutdown actually produces, over R-EXEC-1."""
+    session.transport["cleanup_error"] = BaseExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [asyncio.CancelledError()],
+    )
+
+    assert await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"}) == RESULT
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (RuntimeError(), "RuntimeError"),
+        (ExceptionGroup("g", [ConnectError("x")]), "ConnectError"),
+        (BaseExceptionGroup("g", [asyncio.CancelledError()]), "CancelledError"),
+        (
+            ExceptionGroup("g", [ConnectError("x"), ExceptionGroup("inner", [TimeoutError()])]),
+            "ConnectError+TimeoutError",
+        ),
+        (ExceptionGroup("g", [ConnectError("x"), ConnectError("y")]), "ConnectError"),
+    ],
+)
+def test_a_failure_class_names_the_leaves_and_nothing_else(exc: BaseException, expected: str) -> None:
+    assert mcp_stateless.failure_class(exc) == expected
+
+
+def test_a_failure_class_carries_no_message_from_the_exception() -> None:
+    """R-OBS-2: an exception message can hold a URL, a credential, or an argument."""
+    assert "server-secret" not in mcp_stateless.failure_class(RuntimeError("server-secret leaked"))

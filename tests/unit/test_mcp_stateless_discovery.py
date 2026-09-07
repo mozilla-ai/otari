@@ -155,3 +155,32 @@ async def test_no_free_discovery_slot_before_the_deadline_is_refused(
 
     assert raised.value.code == "mcp_discovery_capacity_unavailable"
     assert raised.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_a_task_group_cancelling_the_caller_is_a_connection_failure(opened: dict[str, Any]) -> None:
+    """A dead server raises a bare CancelledError, which is not an ``Exception``."""
+    opened["connect_error"] = asyncio.CancelledError()
+
+    with pytest.raises(McpExecutionError) as raised:
+        await discover_stored_tools(SERVER)
+
+    assert raised.value.code == "mcp_connection_failed"
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+
+
+@pytest.mark.asyncio
+async def test_a_server_dying_mid_pagination_is_a_connection_failure(
+    opened: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def die(cursor: str | None = None) -> Any:
+        raise BaseExceptionGroup("unhandled errors in a TaskGroup", [asyncio.CancelledError()])
+
+    monkeypatch.setattr(opened["session"], "list_tools", die)
+
+    with pytest.raises(McpExecutionError) as raised:
+        await discover_stored_tools(SERVER)
+
+    assert raised.value.code == "mcp_connection_failed"
+    assert raised.value.status_code == 502

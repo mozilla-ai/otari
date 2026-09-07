@@ -561,3 +561,42 @@ def test_a_failure_after_dispatch_advertises_no_retry(
 
     assert response.status_code == 502
     assert "Retry-After" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        asyncio.CancelledError(),
+        ExceptionGroup("unhandled errors in a TaskGroup", [httpx.ConnectError("all attempts failed")]),
+    ],
+)
+def test_a_real_transport_failure_shape_still_gets_the_error_contract(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    """A dead server must not escape the contract into a bare 500.
+
+    The SDK yields inside an anyio task group, so a closed port surfaces as a
+    bare ``CancelledError`` and a shutdown as an ``ExceptionGroup``. Neither is
+    the tidy ``Exception`` a substituted session raises, and the earlier version
+    of this endpoint only ever saw the tidy one.
+    """
+
+    @asynccontextmanager
+    async def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise failure
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    monkeypatch.setattr(mcp_stateless, "open_session", refuse)
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 502, response.text
+    assert _error(response) == {
+        "detail": "MCP server connection failed",
+        "code": "mcp_connection_failed",
+        "execution_state": "not_started",
+    }

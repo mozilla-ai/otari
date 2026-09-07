@@ -195,6 +195,29 @@ class McpExecutionError(Exception):
 # --------------------------------------------------------------------------- #
 
 
+# Nesting depth followed when naming a grouped failure. anyio nests one level,
+# so this only exists so a pathological group cannot recurse without end.
+_FAILURE_GROUP_MAX_DEPTH = 4
+
+
+def failure_class(exc: BaseException, _depth: int = 0) -> str:
+    """Name a failure by its leaf types, carrying nothing the exception said.
+
+    The MCP SDK yields inside ``anyio.create_task_group()``, so a transport
+    failure usually arrives wrapped: ``ExceptionGroup('unhandled errors in a
+    TaskGroup', [ConnectError(...)])``. Logging the outer type alone records
+    ``ExceptionGroup`` for nearly every real failure, which is no diagnostic at
+    all, so the leaves are named instead.
+
+    Types only, never a message: an exception's message can hold the server URL,
+    the credential, or the caller's arguments (R-OBS-2).
+    """
+    if isinstance(exc, BaseExceptionGroup) and _depth < _FAILURE_GROUP_MAX_DEPTH:
+        leaves = sorted({failure_class(leaf, _depth + 1) for leaf in exc.exceptions})
+        return "+".join(leaves) if leaves else type(exc).__name__
+    return type(exc).__name__
+
+
 def _oversized(value: Any, ceiling: int) -> bool:
     """Whether ``value`` exceeds ``ceiling`` once encoded.
 
@@ -456,25 +479,29 @@ async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except TimeoutError:
+        # This deadline, converted by ``asyncio.timeout`` on the way out, which
+        # is why the arm below cannot mistake it for the server cancelling us.
         raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
+    except McpExecutionError:
+        raise
+    except BaseException as exc:
+        # Everything the transport can throw, in the shapes it actually throws
+        # them: a bare ``CancelledError`` when the SDK's task group cancels its
+        # caller, or a group when it collects several. Neither is an
+        # ``Exception``, so a narrower arm here would let the most ordinary
+        # failure of all escape the error contract and answer nothing.
+        logger.warning("Stateless MCP discovery failed error_class=%s", failure_class(exc))
+        raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
 
 async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
     stack = AsyncExitStack()
     try:
-        try:
-            session = await stack.enter_async_context(open_session(server))
-        except Exception as exc:
-            logger.warning("Stateless MCP discovery connection failed error_class=%s", type(exc).__name__)
-            raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
-
+        session = await stack.enter_async_context(open_session(server))
         try:
             listed = await collect_tools(session, allowed_tools=server.allowed_tools)
         except McpDiscoveryRefused:
             raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
-        except Exception as exc:
-            logger.warning("Stateless MCP discovery failed error_class=%s", type(exc).__name__)
-            raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
         tools: list[MCPTool] = []
         warnings: list[tuple[str, str]] = []
@@ -611,13 +638,19 @@ async def _execute_once(
     try:
         try:
             session = await stack.enter_async_context(open_session(server))
-        except Exception as exc:
+        except BaseException as exc:
+            # ``BaseException``, not ``Exception``, because that is what a dead
+            # server actually raises: the SDK yields inside an anyio task group,
+            # so a closed port surfaces as a bare ``CancelledError`` and a
+            # collected failure as a group, and neither is an ``Exception``. A
+            # narrower arm let the commonest failure of all escape the contract
+            # and return no response at all.
+            #
             # Still ``not_started``: nothing was written, so the caller's own
-            # execution claim is still safe to release or retry (R-ERR-2).
-            # Cancellation is deliberately not caught here and below: it is also
-            # how an enclosing phase deadline arrives, and converting it into a
-            # connection failure would hide which bound was actually reached.
-            logger.warning("Stateless MCP connection failed error_class=%s", type(exc).__name__)
+            # execution claim is safe to release or retry (R-ERR-2). The
+            # enclosing total deadline reaches here as a cancellation too, and
+            # is reported the same way, which is the same status and state.
+            logger.warning("Stateless MCP connection failed error_class=%s", failure_class(exc))
             raise McpExecutionError(CODE_CONNECTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
 
         timings["connect_ms"] = (monotonic() - phase_started) * 1000
@@ -629,11 +662,13 @@ async def _execute_once(
                 result = await session.call_tool(tool_name, arguments)
         except TimeoutError:
             raise McpExecutionError(CODE_OUTCOME_UNKNOWN, ExecutionState.OUTCOME_UNKNOWN, 504) from None
-        except (Exception, asyncio.CancelledError) as exc:
-            # Deliberately conservative (R-ERR-3), cancellation included: a
-            # cancelled local transport says nothing about whether the remote
-            # server ran the tool to completion.
-            logger.warning("Stateless MCP call failed after dispatch error_class=%s", type(exc).__name__)
+        except BaseException as exc:
+            # Deliberately conservative (R-ERR-3), cancellation and grouped
+            # cancellation included: a cancelled local transport says nothing
+            # about whether the remote server ran the tool to completion, and
+            # letting either escape would answer a possibly-completed mutation
+            # with no execution state at all.
+            logger.warning("Stateless MCP call failed after dispatch error_class=%s", failure_class(exc))
             raise McpExecutionError(CODE_OUTCOME_UNKNOWN, ExecutionState.OUTCOME_UNKNOWN, 502) from None
 
         finally:
@@ -667,5 +702,5 @@ async def _close_bounded(stack: AsyncExitStack) -> None:
     try:
         async with asyncio.timeout(CLEANUP_TIMEOUT_S):
             await asyncio.shield(closer)
-    except (Exception, asyncio.CancelledError) as exc:
-        logger.warning("Stateless MCP cleanup failed error_class=%s", type(exc).__name__)
+    except BaseException as exc:
+        logger.warning("Stateless MCP cleanup failed error_class=%s", failure_class(exc))
