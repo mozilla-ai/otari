@@ -79,12 +79,12 @@ import {
 // member, viewer) and the server enforces the same two rules this page disables
 // controls for, so a refusal is explained here rather than only reported.
 //
-// What the picker below does *not* do is the thing it used to look like it did
-// (otari#838). An organization role is authority over this tenant; operating the
-// deployment is a separate authority nothing on this page grants, held by a
-// superuser or the bootstrap identity and set from Platform Admin. The two were
-// indistinguishable from here, because promoting somebody to admin changed
-// nothing they could see, so the page now says which one it is setting.
+// What the picker below does *not* do is grant deployment authority (otari#838).
+// An organization role is authority over this tenant; operating the deployment
+// is a separate authority nothing on this page grants, held by a superuser or
+// the bootstrap identity and set from Platform Admin. The two are
+// indistinguishable from here unless the page says which one it is setting,
+// because promoting somebody to admin changes nothing they can see.
 
 // What a member spends and what their keys may call live on the gateway's own
 // `users` row, not on the membership: `organization_member` has no such columns.
@@ -874,10 +874,10 @@ export function OrganizationMembersPage() {
           const spendRow = member.attribution_user_id
             ? userByAttribution.get(member.attribution_user_id)
             : undefined
-          // Gated on `operates`, as the Model access column it replaced was.
-          // `DEPLOYMENT_WIDE_COLUMNS` withholds columns by id, and this moved
-          // into the member cell, so the filter no longer reaches it: without
-          // this a caller who does not operate the deployment would be shown
+          // Gated on `operates` here rather than by `DEPLOYMENT_WIDE_COLUMNS`,
+          // which withholds columns by id and so cannot reach a value living
+          // inside the member cell. Without this a caller who does not operate
+          // the deployment would be shown
           // every member's model-access ceiling under their name.
           const access =
             operates && spendRow ? accessLabel(spendRow.allowed_models) : null

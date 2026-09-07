@@ -24,22 +24,17 @@ import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
  * A band of the page: rules that run the full width of the scroll area, with
  * the content inside them still in the centered column.
  *
- * Two elements, and that is the point. A section that is both full-width and
- * centered cannot be one element, and the earlier single-class version only
- * escaped `<main>`'s padding, so on a wide viewport every rule stopped at the
- * column's edge and the page read as a stack of cards again. `.otari-bleed`
- * does the escaping (see globals.css for why it is container units and not
- * `100vw`); the inner element restores the column.
+ * It takes two elements, because one element cannot be both full-width and
+ * centered. `.otari-bleed` escapes `<main>` (see globals.css for why it is
+ * container units and not `100vw`); the inner element restores the column.
  *
  * `className` styles the band: its rules, its vertical padding, its own layout
  * if the content is a single row. `contentClassName` styles the column inside.
  *
  * `bleed={false}` for a band nested inside a column rather than sitting
  * directly in the scroll area. The escape is `100cqw` against `<main>`, so a
- * nested band does not stop at its column: measured inside a 360px grid cell it
- * came out 1464px wide and 552px past the right edge of the page, painting over
- * whatever shared the row. A nested band's rules run its own container instead,
- * and its content aligns to that container's edges.
+ * bleeding band nested in a narrow cell overflows the page instead of stopping
+ * at its column. A nested band rules its own container and aligns to its edges.
  */
 export function Section({
   className = "",
@@ -72,36 +67,16 @@ export function Section({
 }
 
 /**
- * The escape half on its own, for a band that is not a `<section>`: a header
- * row, a page-level notice. Pair it with `BLEED_INSET` on an inner element.
- */
-export const FULL_BLEED = "otari-bleed"
-/** The column a full-bleed band restores inside itself. */
-export const BLEED_INSET = "mx-auto w-full max-w-[1800px] px-4 md:px-6"
-
-/**
  * A page's opening: its title, the paragraph under it, and the one action that
  * belongs beside rather than below them.
  *
- * Shared because it was already written eight times. Every torn-down page spells
- * the same header by hand, down to the same arbitrary type values, so the type
- * of a page title is currently a string that has to be kept in step across eight
- * files by hand and will not be.
- *
- * The type is `text-display`, and the scale is what moved to meet it. Those
- * eight had each spelled 28/34 at semibold as literal utilities, which is the
- * size the direction draws a page title at and which rendered at weight 550
- * rather than the 600 it asked for, because the weight axis has two values and
- * 600 is not one of them. So the step became 28/34 at the semibold token and
- * every consumer converged on it, rather than nine call sites carrying an
- * arbitrary value that quietly disagreed with the scale.
- *
- * Those literals are described here rather than quoted, and that is not
- * fussiness: `foundation.test.ts`'s whole-tree rule matches `text-[` followed
- * by a digit against raw file contents and, unlike its sibling sweeps in the
- * same file, does not strip comments first. A docstring quoting the spelling it
- * replaced keeps this file on the offender list after every call site in it is
- * fixed, with nothing visibly wrong to find.
+ * Shared so the type of a page title is decided once rather than respelled on
+ * every page. The title is `text-display`, the scale's 28/34 semibold step; the
+ * weight axis has only 550 and 600, so an arbitrary utility asking for 600
+ * lands on 550 instead. Do not quote an arbitrary size spelling anywhere in
+ * this file, comments included: `foundation.test.ts` matches that spelling
+ * against raw file contents without stripping comments first, so a quoted
+ * example keeps the file on the offender list with nothing wrong to find.
  *
  * `pb-5` rather than a gap on the parent, because a page is a stack of bands
  * that set their own rules and spacing, and a column gap would add air above
@@ -142,9 +117,8 @@ export function PageIntro({
  * A settings list: a heading between rules, then its rows on the page ground
  * divided by row separators.
  *
- * Four blocks were spelling this by hand and had already drifted: two used an
- * 18px heading and two a 16px one, for groups of the same rank on the same
- * page. Shared so the rank of a group is decided once.
+ * Shared so the rank of a group is decided once: spelled by hand, groups of the
+ * same rank on the same page drift to different heading sizes.
  *
  * Two bands rather than one, which is what puts the heading *between* rules
  * rather than above them: the first carries the rule over the heading, the
@@ -393,17 +367,12 @@ export function ConfirmRowAction({
  * no fill, no shape of its own. Dismissability is a modifier on a kind rather
  * than a kind, so this wears the identifier kind and adds a control.
  *
- * It shipped as a bordered, filled chip first. That was the pill squared, and
- * squaring the pill was the wrong move on a pill that had been deleted: the
- * kinds here are told apart by dot, case and separator, not by boxes, and a
- * fourth boxed thing would have been the only one in the product. Corrected
- * before anything else grew a border to match it.
+ * No box, because the kinds here are told apart by dot, case and separator; a
+ * bordered, filled chip would be the only boxed thing in the product.
  *
  * The dismiss is a real 24px target holding a 12px glyph. It reads small and is
  * not, which is the point: the visible cross stays quiet while the thing a
- * finger lands on is the size a finger needs. That part came through the
- * retraction unchanged, as did the one shared component behind three call
- * sites.
+ * finger lands on is the size a finger needs.
  */
 export function DismissChip({
   label,

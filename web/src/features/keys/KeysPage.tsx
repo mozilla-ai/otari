@@ -263,7 +263,7 @@ function ArmedStrip({
    * both ends of the swap.
    *
    * Focus does not actually land here on arm, and that is measured rather than
-   * assumed: unlike the in-place swap this replaced, arming unmounts nothing, so
+   * assumed: arming unmounts nothing, so
    * the row's trigger stays mounted and keeps the caret, and there is no moment
    * where it falls to the body on the way in. What the hook does earn is the way
    * back out, since cancelling unmounts this strip from under the focused

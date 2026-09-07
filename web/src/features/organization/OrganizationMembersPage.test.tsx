@@ -523,9 +523,9 @@ describe("OrganizationMembersPage", () => {
   })
 
   it("edits model access, workspace membership and the workspace budget in one save", async () => {
-    // The three used to be separate controls on the row. They are three tables
-    // underneath, so this asserts all three writes land from a single save, and
-    // that the ceiling is written against the membership rather than the person.
+    // One control over three tables underneath, so this asserts all three
+    // writes land from a single save, and that the ceiling is written against
+    // the membership rather than the person.
     const requests = mockApi({
       members: [OWNER, ANALYST],
       users: [

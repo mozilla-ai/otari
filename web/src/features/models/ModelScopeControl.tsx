@@ -118,10 +118,9 @@ export function ModelScopeControl({
     emit("only", next)
   }
 
-  // The shared tab, which is what every segmented choice in the product is now.
-  // The raised-chip treatment this replaced was `bg-surface` plus an elevation
-  // that is `none`, so the selected segment had been reading 1.1:1 against its
-  // own track since the shadows were zeroed.
+  // The shared tab, which is what every segmented choice in the product uses. A
+  // raised chip (`bg-surface` plus an elevation that is `none` now shadows are
+  // zeroed) leaves the selected segment reading 1.1:1 against its own track.
   const modeButton = (value: Mode, label: string) => (
     <Tab
       key={value}

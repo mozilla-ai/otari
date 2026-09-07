@@ -247,9 +247,8 @@ function BudgetForm({
   onSubmit: (body: CreateBudgetRequest, userIds: string[]) => void
   onClose: () => void
   // Offer a multiselect to assign this budget to existing users on save. Given
-  // on both create and edit: assignment used to be reachable per-person on the
-  // Users page, and that page is gone, so this is the only place a budget is
-  // attached to a person.
+  // on both create and edit, because there is no per-person Users page: this is
+  // the only place a budget is attached to a person.
   assignUsers?: User[]
   // Who already holds this budget, so edit opens with them selected rather than
   // reading as an empty assignment that would clear them on save.

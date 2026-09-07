@@ -13,9 +13,9 @@ import type { ReactNode } from "react"
  * always will.
  *
  * The argument that survives is about this page on its own. A centered column
- * on an empty screen has nothing to align to, which is exactly why the card
- * that used to be here needed a border: with elevation zeroed, a floating
- * column had to manufacture its own edge or have none at all. Pinning it to the
+ * on an empty screen has nothing to align to, which is why a card here would
+ * need a border: with elevation zeroed, a floating column has to manufacture
+ * its own edge or have none at all. Pinning it to the
  * page's gutter with a rule down its right gives it a real one, made of the
  * page rather than drawn around the content. The ground beyond is deliberately
  * empty: there is one thing to do on this screen.

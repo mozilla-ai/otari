@@ -53,12 +53,11 @@ const STATUS_LABEL: Record<
 /**
  * The dot carries the state; the words stay quiet.
  *
- * Ink used to carry it alone, which spent the danger and success channels on
- * three states none of which is a problem: an override that has expired did
- * what it was for. So the words drop to the neutral rungs and the mark says
- * which of the three this is, which is the same division the rest of the
- * surface uses. Expired is the one that recedes, since it no longer bills
- * anything.
+ * Ink alone would spend the danger and success channels on three states none of
+ * which is a problem: an override that has expired did what it was for. So the
+ * words sit on the neutral rungs and the mark says which of the three this is,
+ * the same division the rest of the surface uses. Expired is the one that
+ * recedes, since it no longer bills anything.
  */
 const STATUS_DOT: Record<ReturnType<typeof overrideStatus>, string> = {
   active: "bg-success",

@@ -167,10 +167,10 @@ export type StatStatus = "ok" | "warn" | "alert"
 // The pill beside the value is HeroUI's own Chip, for the reason TrendChip is:
 // `globals.css` aliases the status bases the chip's CSS reads (`--success`,
 // `--warning`, `--danger`) onto our tokens, so naming a status here is all it
-// takes for both themes to follow the foundation. This used to be a hand-rolled
-// <span> carrying its own border/bg/text triple per status, which restated in
-// three class strings what the library already derives, and left the status pill
-// and the trend chip on the same tile as two different shapes.
+// takes for both themes to follow the foundation. A hand-rolled <span> carrying
+// its own border/bg/text triple per status would restate what the library
+// already derives, and leave the status pill and the trend chip on the same
+// tile as two different shapes.
 const STAT_STATUS: Record<
   StatStatus,
   { accent: string; chip: "success" | "warning" | "danger" }
@@ -220,12 +220,10 @@ export function StatCard({
       <span className="text-overline">{label}</span>
       <span className="flex flex-wrap items-center gap-2">
         {/* text-xl (22px), deliberately a step *below* the page title's
-            text-display (28px). It used to be text-xl rising to text-2xl at
-            `sm`, which made a number inside a card the largest text on the
-            page, 4px bigger than the name of the page itself. Fixing that by
-            raising the title alone would have left the two agreeing by
-            coincidence; both halves move so the ladder is correct by
-            construction. `tabular-nums` so a column of these aligns. */}
+            text-display (28px), and flat across breakpoints: rising to
+            text-2xl at `sm` would make a number inside a card the largest text
+            on the page, bigger than the name of the page itself.
+            `tabular-nums` so a column of these aligns. */}
         <span className="text-xl font-semibold tabular-nums text-foreground">
           {value}
         </span>
@@ -461,7 +459,7 @@ export function RefreshButton({
 // press target, and a press on it both toggles the row's selection and sets
 // `user-select: none` on the row for the duration; the re-render that selection
 // causes lands mid-drag and discards the selection the browser had started, so
-// dragging across an id used to select nothing at all (issue #478). Keeping the
+// dragging across an id would otherwise select nothing at all (issue #478). Keeping the
 // press from starting on the value itself is the fix: the pointer sequence stays
 // with the browser, which selects text with it. `select-text` then beats the
 // inherited `none` from any press elsewhere in the row (an own declaration
@@ -839,12 +837,9 @@ export function ConfirmButton({
  * element rather than a HeroUI `TextField` (a grid cell that supplies its own
  * label, a row whose control sits in a column of its own).
  *
- * It used to be its own smaller, rounder thing: `px-2 py-1` on `bg-surface`
- * with `rounded-md`, which came out 30px against the real field's 38 and was
- * the last rounded corner in the product. Its docstring said it was for "where
- * a HeroUI field is too much", and the cards it was written for are gone. So it
- * is the same field now, in the same tokens at the same height, and the only
- * thing it still is is an element rather than a component.
+ * The same field as HeroUI's, in the same tokens at the same height. Giving it
+ * a smaller, rounder treatment of its own puts a second input shape in the
+ * product; the only thing this is, is an element rather than a component.
  */
 export const INPUT_CLASS =
   // No padding here: `.input` carries it now, so a page cannot spell field

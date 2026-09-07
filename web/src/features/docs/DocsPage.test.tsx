@@ -177,12 +177,10 @@ describe("DocsPage code blocks", () => {
   })
 
   it("renders the guide's one fence with the block treatment", () => {
-    // This assertion used to pin zero fences, as a tripwire for the guide
-    // growing one outside the dropped walkthrough. It has fired: main's
-    // documentation rewrite left a `bash` fence (`otari gen-secret-key`)
-    // outside that section, so the label row and copy control now appear on
-    // this page for the first time. Pinned at one rather than back at zero, so
-    // a second fence still says so.
+    // The guide carries exactly one fence outside the dropped walkthrough (a
+    // `bash` block for `otari gen-secret-key`), which is what puts the label
+    // row and copy control on this page. Pinned at one rather than at zero, so
+    // a second fence appearing still says so.
     const { container } = render(<DocsPage />)
     const blocks = container.querySelectorAll("pre")
     expect(blocks).toHaveLength(1)

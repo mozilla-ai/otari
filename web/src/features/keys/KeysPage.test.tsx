@@ -386,11 +386,9 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  // Was "refuses a backdrop press and inerts the page behind the reveal". The
-  // reveal is a strip now, so it has no backdrop to press and does not take the
-  // page out of the accessibility tree. Both were the modal's, and the reveal's
-  // own docstring argues them away: a focus trap, a swallowed Esc and a
-  // backdrop that ignores clicks are a dialog fighting its own conventions.
+  // The reveal is a strip, not a modal: it has no backdrop to press and does
+  // not take the page out of the accessibility tree. Both would be a dialog
+  // fighting its own conventions, as the reveal's own docstring argues.
   // What has to survive is the part that mattered, that nothing incidental can
   // dismiss a secret shown once, so that is what this asserts now. The page
   // behind staying reachable is a deliberate change and not covered here.

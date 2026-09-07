@@ -570,11 +570,8 @@ it("has no comment opened inside another comment in globals.css", () => {
 })
 
 describe("semantic tokens only", () => {
-  // Every source file that styles anything, which is the whole of `src` now
-  // that there is no bridge tree left to be exempt. This used to be scoped to
-  // `shared/components/ui/` because the hand-rolled primitives beside it
-  // predated the foundation; they are on it now, so the exemption has no
-  // subject and the rule is the repo's.
+  // Every source file that styles anything, which is the whole of `src`: there
+  // is no bridge tree left to be exempt, so the rule is the repo's.
   const SRC = join(WEB, "src")
   // The one deliberate exception, and it says why at the top of the file: the
   // share card is rasterized through an <img>-loaded SVG document, where a
@@ -725,12 +722,11 @@ describe("headings wear a type role", () => {
   })
 })
 
-// The content scale's roles, and the spelling that kept them empty. Before this
-// sweep `text-caption` had one consumer, `text-body`, `text-emphasis` and
-// `text-overline` between them a handful, and 174 sites wrote the caption role
-// out as `text-xs text-muted`: a size a point under the role's own and an ink
-// the role already sets. A scale nobody uses is documentation, so the roles are
-// enforced here the way the chrome's are below.
+// The content scale's roles, and the spelling that empties them. Left
+// unenforced, the caption role gets written out as `text-xs text-muted` (a size
+// a point under the role's own, and an ink the role already sets) and the roles
+// collect a consumer or two each. A scale nobody uses is documentation, so the
+// roles are enforced here the way the chrome's are below.
 //
 // A role sets family, size, line-height, tracking, weight and ink together, and
 // each of those is a utility somebody can write beside it. That pairing is not a

@@ -127,16 +127,15 @@ function absolute(iso: string): string {
 // control, as a count that opens the list, rather than as rows pinned above the
 // log.
 //
-// Rows are what this replaced, and the reason is the same one that froze the log
-// (see `useUsageLogs`): the live rows re-derived themselves on a 2s poll, so on a
-// gateway with real traffic the top of the table reordered itself continuously
-// and an operator could not read a row before it moved. Off to one side, the same
-// information costs the table nothing, and an operator who wants the live view
-// opens it deliberately.
+// In-flight requests stay out of the table for the same reason the log is
+// frozen (see `useUsageLogs`): rows re-derived on a 2s poll reorder the top of
+// the table continuously on a gateway with real traffic, and an operator cannot
+// read a row before it moves. Off to one side, the same information costs the
+// table nothing, and an operator who wants the live view opens it deliberately.
 //
-// The trade this makes: a request no longer resolves in place from live row into
-// settled row. It leaves the list when it lands and appears in the log at the
-// next refresh.
+// The trade: a request does not resolve in place from live row into settled
+// row. It leaves the list when it lands and appears in the log at the next
+// refresh.
 
 // Coarser than the settled Total time column: this is a wall-clock wait an
 // operator is watching rather than a measurement, so sub-second precision is
@@ -324,8 +323,8 @@ const MODEL_AND_SOURCE_BREAKDOWNS: SummaryDimension[] = ["model", "source"]
 
 // The user and key pickers read these two. by_user and by_api_key carry each
 // entity's display name, resolved server-side in the same GROUP BY, so naming an
-// option costs nothing beyond the breakdown itself. The alternative, and what
-// this replaced, was paging the whole users and api_keys tables on every visit.
+// option costs nothing beyond the breakdown itself. The alternative is paging
+// the whole users and api_keys tables on every visit.
 const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"]
 const SOURCE_BREAKDOWN: SummaryDimension[] = ["source"]
 
@@ -422,10 +421,9 @@ function StatusMark({ status }: { status: string }) {
   )
 }
 
-// The column's words, in their own casing. This used to be
-// `status.toUpperCase()` on the raw enum, which was a missing label map rather
-// than a decision to shout: a repeated column carries its labels in the case
-// they are written in, and uppercase emphasis here fell equally on the
+// The column's words, in their own casing, rather than `status.toUpperCase()`
+// on the raw enum: a repeated column carries its labels in the case they are
+// written in, and uppercase emphasis would fall equally on the
 // successes, which is the last thing a column built to surface exceptions
 // wants to draw the eye to. Unknown values still render their slug.
 const STATUS_LABELS: Record<string, string> = {

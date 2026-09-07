@@ -448,8 +448,8 @@ export function OrganizationProviderKeysPage() {
         />
       ) : null}
 
-      {/* The page is a stack of bands that set their own spacing now, so this
-          one carries the air it used to get from a column gap. */}
+      {/* The page is a stack of bands that set their own spacing, so this one
+          carries its own air rather than taking it from a column gap. */}
       {archivedCount > 0 ? (
         <div className="pb-3">
           <Checkbox isSelected={showArchived} onChange={setShowArchived}>

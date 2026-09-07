@@ -196,12 +196,10 @@ function SettingControl({
         <span className="text-sm tabular-nums text-foreground">
           {formatValue(field)}
         </span>
-        {/* A label, not a chip. The pill it used to be was a bordered capsule
-            next to a value on a surface that no longer has boxes on it, so the
-            shape was doing the work the type should. `text-overline` is exactly
-            that role and already carries the size, weight, tracking, uppercase
-            and muted color, so this is the role rather than a seventh hand-rolled
-            spelling of it. */}
+        {/* A label, not a chip. A bordered capsule next to a value, on a
+            surface that has no boxes on it, puts the shape to work where the
+            type should be. `text-overline` is exactly that role and already
+            carries the size, weight, tracking, uppercase and muted color. */}
         <span className="text-overline">startup-only</span>
       </div>
     )

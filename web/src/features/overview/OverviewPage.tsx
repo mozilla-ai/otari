@@ -699,12 +699,11 @@ export function OverviewPage({
                   ? "no budgets set"
                   : "no data"
           }
-          // `SpendMeter`, not the plain accent `Meter` it used to be, and this
-          // was the gap: the strip named the state in words and drew it in one
-          // colour, so a budget 37% past its limit and one comfortably inside
-          // it produced the same teal bar. Same component as the Budgets
-          // table's cell now, so the two cannot say different things about the
-          // same budget.
+          // `SpendMeter`, not the plain accent `Meter`: a one-color bar would
+          // draw a budget 37% past its limit and one comfortably inside it the
+          // same way, leaving the strip to name the state in words alone. Same
+          // component as the Budgets table's cell, so the two cannot say
+          // different things about the same budget.
           graphic={
             !isEmpty && budgets.data && budget.worst ? (
               <SpendMeter
@@ -1086,12 +1085,11 @@ function SpendChart({
  * shadow). A mono date over a rule, then the value.
  *
  * Anchored to the top of the bar under the pointer, horizontally and
- * vertically. It used to sit at `bottom-full`, above the whole plot, which put
- * it a full plot-height away from a bar near the baseline: the card said one
- * thing and the pointer was somewhere else entirely. `bottom` is now the bar's
- * own height as a share of the plot, so the card rides up and down with what it
- * is describing, which is what the Usage chart's tooltip does by following the
- * pointer.
+ * vertically. `bottom-full` would put it above the whole plot, a full
+ * plot-height away from a bar near the baseline, with the card saying one thing
+ * and the pointer somewhere else. `bottom` is the bar's own height as a share
+ * of the plot, so the card rides up and down with what it is describing, which
+ * is what the Usage chart's tooltip does by following the pointer.
  *
  * Clamped at both ends. Horizontally by `translate`, so a card at either edge
  * stays inside the plot; vertically at 72%, so a bar near the top does not push

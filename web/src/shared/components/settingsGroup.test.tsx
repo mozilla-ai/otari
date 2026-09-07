@@ -7,11 +7,10 @@ import { SettingsGroup } from "./surface"
  *
  * A section rule divides the page and a row separator divides repeated things
  * inside one section, and the two are different weights on purpose. Using the
- * section tier for both flattens the hierarchy into a single weight, which was
- * found three separate times by eye before this component existed: on the
- * Overview activity preview, on Settings, and on the tools page's own
- * hand-rolled list. Every settings list in the app is this component now, and
- * none of them names a tier, so the mistake is only reachable from here.
+ * section tier for both flattens the hierarchy into a single weight, which is
+ * what a hand-rolled list drifts into. Every settings list in the app is this
+ * component and none of them names a tier, so the mistake is only reachable
+ * from here.
  */
 describe("SettingsGroup", () => {
   const rowsBand = () =>

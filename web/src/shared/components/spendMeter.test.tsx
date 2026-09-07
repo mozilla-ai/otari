@@ -4,9 +4,9 @@ import { SpendMeter, spendState } from "./surface"
 
 /**
  * The three states of a spend, and the fact that the bar and the figure beside
- * it read them from the same function. Before this the code had two states: a
- * bare `spent > allocated` ternary, so everything under the limit looked
- * identical and the first thing anyone learned was that they had gone past.
+ * it read them from the same function. Two states, from a bare
+ * `spent > allocated` ternary, make everything under the limit look identical,
+ * so the first thing anyone learns is that they have already gone past.
  */
 describe("spendState", () => {
   it("calls a spend well inside its allocation on track", () => {
@@ -74,8 +74,8 @@ describe("SpendMeter", () => {
     // Two facts, two fields. `aria-valuenow` stays inside the declared range,
     // because a progressbar reporting 140 out of 100 is malformed; the real
     // share goes in `aria-valuetext`, which is the field for a value's human
-    // reading. Carrying the overshoot in `valuenow` was the earlier version and
-    // abused one field to say the other's thing.
+    // reading. Carrying the overshoot in `valuenow` instead would abuse one
+    // field to say the other's thing.
     render(<SpendMeter spent={140} allocated={100} ariaLabel="Spend" />)
     const bar = screen.getByRole("progressbar")
     expect(bar).toHaveAttribute("aria-valuenow", "100")

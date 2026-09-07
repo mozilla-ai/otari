@@ -322,12 +322,10 @@ export function TrendChart({
               fill={s.color}
               stroke="var(--color-surface)"
               strokeWidth={series.length > 1 ? 1 : 0}
-              // Rounded data-ends only when nothing stacks on top; rounding
-              // every stacked segment would fake gaps inside a column.
-              // Square, always. A single-series chart used to get a 2px top
-              // radius, so Usage's Cost bars were rounded while its Tokens and
-              // Requests bars (which stack two series) were not: one chart, two
-              // shapes, decided by how many series happened to be on screen.
+              // Square, always. Rounding the data end of a single-series bar
+              // and not of a stacked one gives Usage's Cost bars a shape its
+              // Tokens and Requests bars do not have: one chart, two shapes,
+              // decided by how many series happen to be on screen.
               radius={0}
               isAnimationActive={false}
             />

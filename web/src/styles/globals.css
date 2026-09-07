@@ -89,18 +89,16 @@
        #f7f8f8   background       (canvas)
        #f0f1f2   background-subtle          ·  surface-muted
        #e8e9eb                                 surface-subtle
-     `--color-background-muted` is no longer the rail. The shell is flat: the
-     rail, the top bar and the content all sit on `--color-background`, divided
-     by hairlines rather than by level. What still reads this rung is
-     `--color-default`, which HeroUI binds to it.
+     `--color-background-muted` is not the rail. The shell is flat: the rail,
+     the top bar and the content all sit on `--color-background`, divided by
+     hairlines rather than by level. What reads this rung is `--color-default`,
+     which HeroUI binds to it.
 
-     That mapping used to be justified here as keeping "chips, Switch tracks,
-     Checkbox boxes and secondary Buttons" visible against the canvas. Measured
-     on the running app, only chips cash it: no HeroUI Switch, Checkbox or Radio
-     renders anywhere in this dashboard, and the fields read
-     `--field-background` rather than `--default`. Chips are the only real
-     dependent, and they are scheduled to go, so the rung is close to having no
-     consumer at all.                                                   */
+     Measured on the running app, only chips cash that mapping: no HeroUI
+     Switch, Checkbox or Radio renders anywhere in this dashboard, and the
+     fields read `--field-background` rather than `--default`. Chips are the
+     only real dependent, and they are scheduled to go, so the rung is close to
+     having no consumer at all.                                         */
   --color-background: #f7f8f8; /* page canvas */
   --color-background-muted: #ffffff; /* nav/sidebar chrome, one rung above the canvas */
   --color-background-subtle: #f0f1f2; /* hover/pressed on muted */
@@ -206,13 +204,13 @@
      moving it would have recoloured the toggle's on-knob and every progress
      fill along with the CTA. The accent stays #0098a4 for data ink, the mark
      and the control accents; only the button family darkens, and it darkens
-     because the ramp now runs under white ink, where the old lightening ramp
-     lost contrast as it went.
+     because the ramp runs under white ink, where a lightening ramp loses
+     contrast as it goes.
      4.71:1, 6.09:1 and 7.86:1 against white. The steps are spaced by
      lightness, not by eye: L* 48.60, 41.60, 34.73, so each is a step of about
      7, which is the cadence the danger family below moves at in this theme.
-     The first pair shipped 4.37 and then 2.26, and a 2.26 press is barely one
-     just-noticeable difference, so the button had a hover and effectively no
+     A pair at 4.37 and then 2.26 is barely one
+     just-noticeable difference apart, giving a hover and effectively no
      pressed state.
      The rest value is shared with dark, because a button's fill is its own
      ground; the two steps are not, because dark's are frozen (see below). */
@@ -497,10 +495,9 @@
      The same accent as light, unchanged: it clears AA on these grounds
      without lifting. Hover brightens, active drops back one step.       */
   --color-primary: #0098a4;
-  /* Both steps go UP here, mirroring light's two down. Before this, active sat
-     below primary while its own hover sat above it: the only role in either
-     theme travelling against itself. Light steps -7.13 then -6.99; dark now
-     +6.99 then +7.15. */
+  /* Both steps go UP here, mirroring light's two down, so the role never
+     travels against itself. Light steps -7.13 then -6.99; dark +6.99 then
+     +7.15. */
   --color-primary-hover: #00acba;
   --color-primary-active: #00c1d0;
   --color-primary-subtle: rgb(0 152 164 / 0.18); /* selection / soft fill */
@@ -518,9 +515,7 @@
      stay a shape. Under white ink there is nothing to spend it out of on the
      other side either: rest already sits at 4.71 under white, and one step
      brighter fails AA. That leaves a band of about ΔL 4, and the hover takes
-     3.7 of it. A house-cadence step of 7 is not available here at any hue,
-     which is what the earlier freeze was measuring when it read 3.17 and 2.57
-     against the surface.
+     3.7 of it. A house-cadence step of 7 is not available here at any hue.
      So there is no active COLOR step in dark, and that is the same constraint
      rather than a second one: the band is spent. The press transform and the
      focus ring carry the pressed state instead, and under reduced motion the
@@ -1140,8 +1135,8 @@
   font-size: 11px;
 }
 @utility text-mono-overline {
-  /* The overline's job at the mono family: six call sites had each spelled all
-     three of these by hand, and the tracking as an arbitrary value. */
+  /* The overline's job at the mono family, so a call site does not spell all
+     three by hand with the tracking as an arbitrary value. */
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.1em;
@@ -1259,15 +1254,14 @@ body {
 
 /* The focus ring, defined once. A call site never spells one.
  *
- * This used to set `outline-color` alone, unlayered, because a full outline
- * written unlayered beats every layer and would have doubled up with the ring
- * HeroUI's own components draw: 52 of its focus rules set `outline-style: none`
- * and paint a `box-shadow` instead, and an unlayered rule outranks all of them.
- * Colour alone was safe because it cannot create an outline where the style is
- * `none`, but it also left the width, offset and style to the browser, so the
- * ring was only half specified and every element that wanted a real one spelled
- * its own. Four of those spelled `accent` and two spelled `focus`, which is a
- * disagreement about an accessibility floor that nothing could fail on.
+ * Setting `outline-color` alone, unlayered, is the trap to avoid. An unlayered
+ * full outline beats every layer and doubles up with the ring HeroUI's own
+ * components draw (52 of its focus rules set `outline-style: none` and paint a
+ * `box-shadow` instead). Color alone is safe, because it cannot create an
+ * outline where the style is `none`, but it leaves the width, offset and style
+ * to the browser, so the ring is only half specified and every element that
+ * wants a real one spells its own, disagreeing about an accessibility floor
+ * that nothing can fail on.
  *
  * `@layer base` is what makes the full ring safe. It loses to HeroUI's
  * components layer, so a HeroUI component keeps its own indicator, and it wins
@@ -1484,9 +1478,9 @@ main {
  * Restating it here wins by being unlayered rather than by being later, which
  * is the mechanism this file already relies on elsewhere. It matters more than
  * a missing state: the flat 0.98 press above is justified BY this fill, so
- * without it the transform carries the acknowledgement alone at 1.27px where
- * the size-stepped ladder it replaced gave 1.90px, and the press would be
- * quieter than what it replaced on the interaction most people use. */
+ * without it the transform carries the acknowledgement alone at 1.27px, against
+ * the 1.90px a size-stepped ladder gives, and the press goes quiet on the
+ * interaction most people use. */
 .button:is(:active, [data-pressed="true"]) {
   background-color: var(--button-bg-pressed);
 }
@@ -1590,10 +1584,10 @@ main {
  *
  * Everything that leaves the page plane reads `--overlay`, which is
  * `--color-surface`, and that is one rung off the ground: 1.04:1 on light and
- * 1.05:1 on dark, measured. It used to be told apart by `--shadow-overlay`,
- * which on dark was a 1px white ring rather than a drop shadow. Zeroing the
- * elevation tokens took that away and left a popover as unbounded text over
- * whatever it covered.
+ * 1.05:1 on dark, measured. That rung is not enough on its own: with the
+ * elevation tokens zeroed there is no `--shadow-overlay` ring to tell a
+ * floating surface apart, and a popover reads as unbounded text over whatever
+ * it covers.
  *
  * So elevation is border weight now: one opaque hairline in the control edge,
  * square, no shadow. It is deliberately `--color-control-border` and not

@@ -893,8 +893,8 @@ describe("ModelsPage", () => {
     const row = tableRow("anthropic:claude-sonnet-4")
     // The read and write prices each sit in a fixed-width box so the column can
     // be scanned downward, which means the spacing between them is layout and
-    // not text. Asserting the concatenation back would pin the old single-string
-    // cell rather than what a reader sees.
+    // not text. Asserting the concatenation back would pin a single-string cell
+    // rather than what a reader sees.
     const cachingCell = within(row).getByRole("button", {
       name: "Edit caching price for anthropic:claude-sonnet-4",
     })
@@ -1385,10 +1385,10 @@ describe("ModelsPage", () => {
       screen.queryByRole("button", {
         name: (name) => name === label || name.endsWith(` ${label}`),
       })
-    // The labels are the redesign's: the controls carry a visible `label`
-    // rather than an `ariaLabel` of "Filter by X", so these are the names the
-    // accessible tree now has. Asserting the old ones would pass on the rename
-    // alone and stop testing the withholding.
+    // The controls carry a visible `label` rather than an `ariaLabel` of
+    // "Filter by X", so these are the names in the accessible tree. Asserting
+    // "Filter by X" would pass on the naming alone and stop testing the
+    // withholding.
     expect(filterTrigger("Source")).toBeNull()
     expect(filterTrigger("Capability")).toBeNull()
     expect(filterTrigger("Released")).toBeNull()
