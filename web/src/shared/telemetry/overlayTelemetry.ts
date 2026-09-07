@@ -49,9 +49,6 @@ function createQueuedTelemetry(
 
   void loadClient(token)
     .then((loaded) => {
-      if (failed) {
-        return
-      }
       client = loaded
       for (const apply of pending) {
         apply(loaded)
@@ -59,9 +56,11 @@ function createQueuedTelemetry(
       pending.length = 0
     })
     .catch(() => {
+      // A failed chunk is never retried, so drop the queue and stop taking
+      // new work: otherwise every later call retains a closure for the
+      // lifetime of the page.
       failed = true
       pending.length = 0
-      client = NO_TELEMETRY
     })
 
   const enqueue = (apply: (loaded: Telemetry) => void): void => {

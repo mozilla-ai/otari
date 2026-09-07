@@ -9,7 +9,7 @@ const identify = vi.fn()
 const reset = vi.fn()
 const peopleSet = vi.fn()
 
-vi.mock("mixpanel-browser", () => ({
+vi.mock("mixpanel-browser/dist/mixpanel-core.cjs.js", () => ({
   default: {
     init,
     track,
@@ -48,6 +48,9 @@ describe("createMixpanelTelemetry", () => {
         autocapture: false,
         track_pageview: false,
         record_sessions_percent: 0,
+        // The core entry has no recorder bundled, so remote settings must not
+        // be able to ask for one.
+        remote_settings_mode: "disabled",
       }),
     )
   })
@@ -155,6 +158,29 @@ describe("createMixpanelTelemetry", () => {
     telemetry.recordEvent(TELEMETRY_EVENTS.LOGOUT)
 
     expect(track).not.toHaveBeenCalled()
+  })
+
+  it("identifies nobody when consent is not granted", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token", "denied")
+
+    telemetry.identify(member("member-1"))
+
+    expect(identify).not.toHaveBeenCalled()
+    expect(peopleSet).not.toHaveBeenCalled()
+    expect(reset).not.toHaveBeenCalled()
+  })
+
+  it("identifies nobody while no consent decision is stored", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token", "unknown")
+
+    telemetry.identify(member("member-1"))
+    telemetry.identify(null)
+
+    expect(identify).not.toHaveBeenCalled()
+    expect(peopleSet).not.toHaveBeenCalled()
+    expect(reset).not.toHaveBeenCalled()
   })
 
   it("resets Mixpanel when identify is handed null", async () => {

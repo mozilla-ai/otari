@@ -3,6 +3,7 @@ import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
+import { loadEnv } from "vite"
 import { defineConfig } from "vitest/config"
 import { pwaManifest } from "./pwaManifest.ts"
 
@@ -26,6 +27,13 @@ const outDir = fileURLToPath(
 const webRoot = fileURLToPath(new URL("./", import.meta.url))
 const docsDir = fileURLToPath(new URL("../docs", import.meta.url))
 
+// Vite reads .env from envDir, which defaults to this directory. Point it at the
+// repo root so one .env serves the gateway and the dashboard, and so `pnpm run
+// dev` and `make dashboard` read the same file rather than needing the token in
+// two places. Only VITE_* is exposed to the client, so the provider keys beside
+// it in that file are never inlined.
+const repoRoot = fileURLToPath(new URL("../", import.meta.url))
+
 // The gateway serves the dashboard and the API from one origin, so the app
 // fetches "/v1/..." and "/health" as same-origin paths. `pnpm run dev` serves
 // only the SPA, so proxy those to a running gateway. Override the target to
@@ -33,6 +41,45 @@ const docsDir = fileURLToPath(new URL("../docs", import.meta.url))
 //   OTARI_DEV_API=https://your-app.up.railway.app pnpm run dev
 const apiTarget = process.env.OTARI_DEV_API ?? "http://localhost:8000"
 const apiProxy = { target: apiTarget, changeOrigin: true }
+
+// Mixpanel is gated at runtime by VITE_MIXPANEL_TOKEN, but that gate cannot keep
+// the SDK out of the artifact: Rolldown gives the dynamic import in
+// shared/telemetry/overlayTelemetry.ts its own chunk from the module graph,
+// before any dead code is eliminated, so a build with no key still writes ~128 kB
+// of mixpanel-browser to disk. It is never fetched, and shipping it in an OSS
+// release anyway is the part worth avoiding. So a keyless build resolves the
+// client module to an inert stub: the chunk still exists, the vendor is not in
+// it. Replacing the module rather than aliasing the specifier keeps this out of
+// resolve.alias, where "@/shared/telemetry/mixpanelClient" would have to be
+// matched ahead of "@".
+const MIXPANEL_CLIENT = "src/shared/telemetry/mixpanelClient.ts"
+const MIXPANEL_STUB =
+  "export function createMixpanelTelemetry() {\n" +
+  "  return {\n" +
+  '    consent: "unknown",\n' +
+  "    recordEvent: () => undefined,\n" +
+  "    identify: () => undefined,\n" +
+  "  }\n" +
+  "}\n"
+
+const excludeMixpanelWithoutKey = {
+  name: "exclude-mixpanel-without-key",
+  apply: "build",
+  enforce: "pre" as const,
+  hasKey: false,
+  config(_: unknown, { mode }: { mode: string }) {
+    const { VITE_MIXPANEL_TOKEN } = loadEnv(mode, repoRoot, "VITE_")
+    excludeMixpanelWithoutKey.hasKey = (VITE_MIXPANEL_TOKEN ?? "").trim() !== ""
+  },
+  load(id: string) {
+    if (excludeMixpanelWithoutKey.hasKey) {
+      return null
+    }
+    return id.replace(/\\/g, "/").endsWith(MIXPANEL_CLIENT)
+      ? MIXPANEL_STUB
+      : null
+  },
+}
 
 // Which gateway the dev server talks to decides which master key signs you in,
 // and the app reports an unreachable or unauthorized gateway as an invalid key.
@@ -60,11 +107,13 @@ const webStorageOptOut =
 
 export default defineConfig({
   base: "/",
+  envDir: repoRoot,
   plugins: [
     // Generates src/routeTree.gen.ts from src/routes/, and splits each route's
     // component into its own chunk (autoCodeSplitting), which is why a route
     // file may export nothing but `Route`. Must precede the React plugin: it
     // rewrites the route modules that plugin then compiles.
+    excludeMixpanelWithoutKey,
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
     react(),
     // The React Compiler memoizes components and derived values at build time,

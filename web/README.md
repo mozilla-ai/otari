@@ -66,10 +66,12 @@ filesystem events. Fall back to polling:
 VITE_USE_POLLING=1 pnpm run dev
 ```
 
-Dashboard analytics are gated by `VITE_MIXPANEL_TOKEN` (inlined at build time,
-also read from the repo-root `.env` by `make dashboard`). Without a token the
-SDK is never loaded. A local dashboard without a token logs `Mixpanel not
-initialized` once in the browser console.
+Dashboard analytics are gated by `VITE_MIXPANEL_TOKEN`, inlined at build time.
+Vite reads it from the repo-root `.env` (`envDir` in `vite.config.ts`), so
+`pnpm run dev` and `make dashboard` take it from the same file. Without a token
+the SDK is never loaded and nothing is recorded; the dev server logs `Mixpanel
+not initialized` once in the browser console. What a build with a token records
+is documented for operators in [docs/dashboard.md](../docs/dashboard.md).
 
 ## Build
 

@@ -16,21 +16,19 @@ export function readMixpanelToken(
   return token === "" ? undefined : token
 }
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
-
 /**
- * Whether this page is a local dashboard, the case that may announce a missing
- * Mixpanel key.
+ * Whether this page is a dev-server dashboard, the one case that may announce a
+ * missing Mixpanel key.
  *
- * `make dev` serves a production Vite build on localhost, so `import.meta.env.DEV`
- * is false there and cannot be the only signal. A deployed OSS host is neither
- * DEV nor a loopback name, and must stay silent.
+ * Deliberately the Vite DEV flag alone, and not a loopback hostname: a
+ * self-hosted gateway is a production build on `http://localhost:8000/` (the
+ * address `README.md` and `docs/dashboard.md` both tell operators to open), so
+ * a hostname test cannot tell an OSS operator from a mozilla.ai developer and
+ * would tell every operator that Mixpanel failed to start. `make dev` serves a
+ * production build and so loses the reminder; `pnpm run dev` still has it.
  */
 export function isLocalDashboard(
-  hostname: string = typeof window === "undefined"
-    ? ""
-    : window.location.hostname,
   isDev: boolean = import.meta.env.DEV,
 ): boolean {
-  return isDev || LOCAL_HOSTS.has(hostname)
+  return isDev
 }

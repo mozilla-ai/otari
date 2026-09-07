@@ -46,6 +46,11 @@ const OTHER_VENDORS = [
 
 const ALLOWED_MIXPANEL = "mixpanel-browser"
 
+// Any static import of the vendor, under any of its entry points.
+// mixpanelClient.ts imports it as "mixpanel-browser/dist/mixpanel-core.cjs.js",
+// so a pattern anchored on the bare specifier would let a deep one through.
+const VENDOR_IMPORT = /(?:from|import)\s+["']mixpanel-browser(?:\/[^"']*)?["']/
+
 function identity() {
   return {
     actorId: "member-1",
@@ -208,8 +213,7 @@ describe("the base telemetry seam", () => {
       "utf8",
     )
 
-    expect(source).not.toMatch(/from\s+["']mixpanel-browser["']/)
-    expect(source).not.toMatch(/import\s+["']mixpanel-browser["']/)
+    expect(source).not.toMatch(VENDOR_IMPORT)
   })
 
   it("loads the Mixpanel client only through a dynamic import", () => {
@@ -351,9 +355,40 @@ describe("always-loaded telemetry modules", () => {
     ]
     for (const name of alwaysLoaded) {
       const source = readFileSync(join(TELEMETRY_DIR, name), "utf8")
-      expect(source, name).not.toMatch(/from\s+["']mixpanel-browser["']/)
-      expect(source, name).not.toMatch(/import\s+["']mixpanel-browser["']/)
+      expect(source, name).not.toMatch(VENDOR_IMPORT)
     }
+  })
+})
+
+describe("keyless build", () => {
+  // The runtime gate stops the SDK being fetched; it cannot stop Rolldown
+  // writing it to disk, because the dynamic import earns its own chunk from the
+  // module graph before dead code is eliminated. `excludeMixpanelWithoutKey` in
+  // vite.config.ts replaces the client module with an inert stub when no key is
+  // configured, which is what keeps mixpanel-browser out of an OSS artifact.
+  // These pin the two halves that have to agree: which module id the plugin
+  // matches, and that the stub satisfies the seam's contract.
+  const config = readFileSync(join(WEB, "vite.config.ts"), "utf8")
+
+  it("replaces the module the client actually lives in", () => {
+    const match = config.match(/const MIXPANEL_CLIENT = "([^"]+)"/)
+    expect(match?.[1]).toBe("src/shared/telemetry/mixpanelClient.ts")
+    expect(
+      readdirSync(TELEMETRY_DIR).includes("mixpanelClient.ts"),
+      "the path MIXPANEL_CLIENT names must exist",
+    ).toBe(true)
+  })
+
+  it("stubs the export loadMixpanelClient calls, answering no consent", () => {
+    const stub = config.slice(config.indexOf("const MIXPANEL_STUB"))
+    expect(stub).toMatch(/createMixpanelTelemetry/)
+    expect(stub).toMatch(/consent: \\?"unknown\\?"/)
+    expect(stub).toMatch(/recordEvent/)
+    expect(stub).toMatch(/identify/)
+  })
+
+  it("only stubs a build, so the dev server keeps the real client", () => {
+    expect(config).toMatch(/apply: "build"/)
   })
 })
 

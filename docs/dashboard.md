@@ -148,6 +148,22 @@ This guide is bundled into the dashboard at `/#/docs`. Set `docs_url` to make
 the dashboard's Documentation link open a different site. The bundled route
 remains available.
 
+## Analytics
+
+The dashboard sends no analytics unless it was **built** with a Mixpanel project
+token in `VITE_MIXPANEL_TOKEN`. The published Docker image and every release
+artifact are built without one, so a self-hosted gateway loads no analytics SDK,
+opens no connection to Mixpanel, and records nothing. There is no runtime
+setting for this, and no way to turn it on for a build that shipped without a
+token.
+
+A build that does carry one records a fixed list of product events (sign-in,
+sign-up and verification steps, and sidebar navigation), and identifies the
+signed-in member by organization membership id, organization id, organization
+name and role. The token itself is the deployment's opt-in: such a build has no
+consent prompt, so operate one only where telling people about it is your own
+deployment's business to handle.
+
 ## Legal pages
 
 `terms_url` and `privacy_url` name where this deployment's terms of service and

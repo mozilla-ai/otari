@@ -3,11 +3,15 @@
  * after `readMixpanelToken()` has returned a value, so a build with no key
  * never fetches this module or `mixpanel-browser`.
  *
- * The SDK's ESM build exports only a default (`export { mixpanel as default }`).
- * Named imports type-check against its `.d.ts` and are `undefined` at runtime.
+ * Imported by its **core** entry point, not the package root. The root resolves
+ * to `dist/mixpanel.module.js`, which statically bundles the rrweb session
+ * recorder; `dist/mixpanel-core.cjs.js` is the same API with the recorder left
+ * out, and the recorder is code `record_sessions_percent: 0` guarantees never
+ * runs. It exports only a default; named imports type-check against its
+ * `.d.ts` and are `undefined` at runtime.
  */
 
-import mixpanel from "mixpanel-browser"
+import mixpanel from "mixpanel-browser/dist/mixpanel-core.cjs.js"
 
 import type {
   Telemetry,
@@ -21,12 +25,16 @@ import type {
  *
  * Autocapture, pageviews, and session replay would record names that are not
  * in `TELEMETRY_EVENTS`. The catalog is the whole of what this dashboard
- * sends, so those features stay off.
+ * sends, so those features stay off, and remote settings may not turn them
+ * back on.
  */
 const MIXPANEL_INIT = {
   autocapture: false,
   track_pageview: false,
   record_sessions_percent: 0,
+  // The core build has no recorder to load, so remote settings must not be
+  // able to ask for one: it would throw rather than record.
+  remote_settings_mode: "disabled",
   verbose: false,
   debug: false,
 } as const
@@ -60,10 +68,11 @@ function peopleProperties(identity: TelemetryIdentity): Record<string, string> {
  *
  * `consent` defaults to `"granted"` because a Mixpanel key is this
  * deployment's opt-in and there is no consent UI to answer otherwise. It is a
- * parameter rather than a constant because `types.ts` puts the `recordEvent`
- * gate on whichever module implements the seam: `TelemetryIdentity` withholds
- * only the identity, so without the check below a stored refusal would keep
- * every event firing. A build that grows a real consent source passes it here.
+ * parameter rather than a constant because `types.ts` puts the gate on
+ * whichever module implements the seam, and both calls carry it here:
+ * `TelemetryIdentity` withholds only the identity, and it reads `consent` off
+ * the queued wrapper, which cannot know the answer before the chunk resolves.
+ * A build that grows a real consent source passes it here.
  */
 export function createMixpanelTelemetry(
   token: string,
@@ -89,6 +98,9 @@ export function createMixpanelTelemetry(
       mixpanel.track(event, toDict(properties))
     },
     identify: (identity) => {
+      if (consent !== "granted") {
+        return
+      }
       if (identity === null) {
         identifiedActor = undefined
         mixpanel.reset()
