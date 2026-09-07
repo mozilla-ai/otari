@@ -193,26 +193,30 @@ export function SettingsGroup({
  * product where the two mean the same thing. Shared so the size cannot drift
  * again, the same reason `SettingsGroup` is shared.
  *
- * `className` because an empty chart band still has to hold the space its chart
- * would have taken, or the page reflows the moment data arrives. A class rather
- * than an inline `style`: both callers pass a literal height, so nothing here
- * is computed at runtime, and the height belongs in the same cascade as the
- * padding it replaces.
+ * `minHeightClass` because an empty chart band still has to hold the space its
+ * chart would have taken, or the page reflows the moment data arrives. It
+ * REPLACES the vertical padding rather than joining it, which is why it is its
+ * own prop and not a `className`: two padding utilities in one class list are
+ * both plain class selectors, so the winner is whichever Tailwind emits last
+ * (`py-10`, measured in the built stylesheet) and not whichever the call site
+ * writes last. The inline `style` this replaces won that fight by being inline.
  */
 export function EmptyMessage({
   children,
-  className = "",
+  minHeightClass,
 }: {
   children: ReactNode
   /**
-   * Extra classes for the band. A caller holding space passes a min-height and
-   * `py-0`, which the default vertical padding would otherwise fight.
+   * A min-height utility for a band that must not collapse, in `rem`. The
+   * height is the space, so the padding comes off with it.
    */
-  className?: string
+  minHeightClass?: string
 }) {
   return (
     <div
-      className={`flex items-center justify-center px-4 py-10 text-center text-sm text-muted ${className}`}
+      className={`flex items-center justify-center px-4 text-center text-sm text-muted ${
+        minHeightClass ?? "py-10"
+      }`}
     >
       {children}
     </div>

@@ -325,7 +325,7 @@ export function ActivityTimeline({
             <Spinner size="sm" />
           </div>
         ) : n === 0 ? (
-          <EmptyMessage className="min-h-[5.625rem] py-0">
+          <EmptyMessage minHeightClass="min-h-[5.625rem]">
             No activity in this range.
           </EmptyMessage>
         ) : (

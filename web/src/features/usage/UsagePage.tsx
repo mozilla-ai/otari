@@ -1386,7 +1386,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                 <Spinner size="sm" />
               </div>
             ) : chart.data.length === 0 ? (
-              <EmptyMessage className="min-h-[16rem] py-0">
+              <EmptyMessage minHeightClass="min-h-[16rem]">
                 No data in this range.
               </EmptyMessage>
             ) : (
