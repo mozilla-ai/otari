@@ -53,7 +53,9 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.inflight import track_request
 from gateway.log_config import logger
+from gateway.models.entities import APIKey
 from gateway.rate_limit import check_rate_limit
+from gateway.repositories.users_repository import get_active_user
 
 # The module as well as the names below, so the whole-request deadline is read
 # off it at call time and stays tunable in the one place that owns the ceilings.
@@ -306,6 +308,12 @@ async def _authenticate(
     workspace, which would let operator credentials reach one tenant's
     configured servers. No stored server is accessible to it, and that is what
     the 404 says.
+
+    A blocked user is refused too, and has to be refused here. ``users.blocked``
+    is read in ``budget_service.reserve_budget``, which is the only place any
+    request plane consults it, and these routes never reach it because they
+    reserve nothing. Without this, blocking someone would stop their completions
+    and leave them driving mutating MCP tools through the gateway.
     """
     if config.is_hybrid_mode:
         return _Principal(user_token=_extract_platform_user_token(raw_request), workspace_id=None)
@@ -318,8 +326,31 @@ async def _authenticate(
     api_key, _is_master = await verify_api_key_or_master_key(raw_request, db, config)
     if api_key is None:
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
-    check_rate_limit(raw_request, str(api_key.user_id))
+    # The key's own bucket, falling back to the key when it names no user, so
+    # every user-less key does not share one bucket keyed on ``"None"``.
+    check_rate_limit(raw_request, api_key.user_id or api_key.id)
+    await _refuse_blocked_user(db, api_key)
     return _Principal(user_token=None, workspace_id=await resolve_workspace_id(db, api_key))
+
+
+async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
+    """Refuse a key whose user an operator has blocked.
+
+    Reported as an authentication failure rather than a code of its own: the
+    caller's credential no longer authorizes anything, which is what the caller
+    needs to know, and the alternative would tell an unauthenticated probe that
+    a given key names a real but blocked user. Why it was refused goes to the
+    log instead.
+
+    A key with no user has no block to check, which is the bootstrap and
+    convenience path (``users_repository.DEFAULT_USER_ID``).
+    """
+    if api_key.user_id is None:
+        return
+    user = await get_active_user(db, api_key.user_id)
+    if user is not None and user.blocked:
+        logger.warning("Stateless MCP request refused reason=user_blocked api_key_id=%s", api_key.id)
+        raise McpExecutionError(CODE_AUTHENTICATION_FAILED, ExecutionState.NOT_STARTED, 401)
 
 
 async def _resolve_server(

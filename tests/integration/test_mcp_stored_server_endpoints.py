@@ -27,7 +27,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from gateway.api.routes import mcp as mcp_route
-from gateway.models.entities import APIKey, WorkspaceMcpServer
+from gateway.models.entities import APIKey, User, WorkspaceMcpServer
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, Workspace
 from gateway.services import mcp_stateless
@@ -36,6 +36,9 @@ from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from .conftest import build_test_client
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
+# The same public host over cleartext, for the credential rule rather than the
+# private-address one.
+CLEARTEXT_URL = "http://93.184.216.34/mcp"
 CLIENT_EXECUTION_ID = "6e51b3bc-6f48-4c68-a61e-0786bc80cd67"
 
 RESULT = CallToolResult(content=[TextContent(type="text", text="Created issue #42")])
@@ -299,6 +302,104 @@ def test_the_authenticated_principal_is_rate_limited_before_any_outbound_access(
         assert second.json()["execution_state"] == "not_started"
         assert second.headers["Retry-After"]
         assert len(session.calls) == 1, "the refused request never reached the server"
+
+
+def test_a_blocked_user_cannot_drive_an_outbound_mcp_call(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    """The block is a kill switch, and these endpoints are something to kill.
+
+    ``users.blocked`` is read in ``reserve_budget``, which these routes never
+    reach because they reserve nothing. Without a check of their own, blocking
+    someone would stop their completions and leave them driving mutating MCP
+    tools through the gateway.
+    """
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    body = _execute_body(row)
+    user = test_db.get(User, api_key_obj["user_id"])
+    assert user is not None
+    user.blocked = True
+    test_db.add(user)
+    test_db.commit()
+
+    executed = client.post("/v1/mcp/execute", headers=api_key_header, json=body)
+    tools = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header)
+
+    for response in (executed, tools):
+        assert response.status_code == 401, response.text
+        assert response.json()["code"] == "authentication_failed"
+        assert response.json()["execution_state"] == "not_started"
+    assert session.calls == []
+    assert session.pages == 0
+
+
+def test_an_unblocked_user_is_unaffected(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    """The other half of the block, so the check cannot pass by refusing everyone."""
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
+    user = test_db.get(User, api_key_obj["user_id"])
+    assert user is not None and user.blocked is False
+
+    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+
+    assert response.status_code == 200, response.text
+
+
+def test_a_stored_token_is_never_sent_over_cleartext_http(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    """The URL-safety rule the route's ``has_authorization_token`` argument feeds.
+
+    A public ``http://`` host, so the private-address rule cannot short-circuit
+    this and the cleartext-credential rule is what has to fire. Its pair below
+    is what makes the argument itself tested: the same URL with no stored token
+    has nothing to leak and is allowed through.
+    """
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=CLEARTEXT_URL, token="ghp_token")
+
+    response = client.post(
+        "/v1/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row)),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "unsafe_mcp_url"
+    assert response.json()["execution_state"] == "not_started"
+    assert session.calls == []
+    assert "ghp_token" not in response.text
+
+
+def test_the_same_cleartext_url_is_allowed_when_there_is_no_token_to_leak(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=CLEARTEXT_URL, token=None)
+
+    response = client.post(
+        "/v1/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row, token=None)),
+    )
+
+    assert response.status_code == 200, response.text
+    assert session.calls == [("create_issue", {"title": "Approved title"})]
 
 
 def test_a_master_key_cannot_reach_a_workspaces_stored_server(
