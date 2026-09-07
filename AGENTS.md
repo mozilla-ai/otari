@@ -100,6 +100,21 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   file to commit and never leaves a bundle to commit. Screenshot baselines are a fourth
   artifact that is deliberately neither: the suite runs on demand and its PNGs are gitignored
   while the dashboard is mid-migration.
+- Raising the `mcp` ceiling is an API change, not just a dependency bump.
+  `POST /v1/mcp/execute` answers with mcp's own `CallToolResult`, so ten
+  mcp-owned schemas (`CallToolResult`, `TextContent`, `ImageContent`,
+  `AudioContent`, `ResourceLink`, `EmbeddedResource`, `Annotations`,
+  `BlobResourceContents`, `TextResourceContents`, `Icon`) live in
+  `docs/public/openapi.json` and travel from there into the Postman collection
+  and `web/src/client/schema.ts`. An mcp release that touches any of those
+  shapes therefore changes three committed files with drift checks over them.
+  That is why `pyproject.toml` pins mcp to one minor line: left open, a
+  `uv lock` run for an unrelated dependency would move those artifacts as a
+  side effect and fail CI on a diff that explained none of it. So a bump means
+  raising the ceiling *and* regenerating both public artifacts and the
+  dashboard client in the same change. The native result is deliberate (a
+  gateway-owned mirror model would silently drop any content block type a
+  future mcp adds), so the cost is paid here rather than in the response shape.
 
 ## Repository Conventions
 - Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).

@@ -1089,7 +1089,7 @@ requires-dist = [
     { name = "genai-prices", specifier = ">=0.1.0" },
     { name = "idna", specifier = ">=3.7" },
     { name = "markitdown", extras = ["docx", "pptx", "xlsx", "pdf"], specifier = ">=0.1.0" },
-    { name = "mcp", specifier = ">=1.28.1,<2.0.0" },
+    { name = "mcp", specifier = ">=1.28.1,<1.29.0" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=1.26.0" },
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
     { name = "opentelemetry-proto", specifier = ">=1.39.1" },

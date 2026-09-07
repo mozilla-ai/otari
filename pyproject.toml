@@ -47,7 +47,23 @@ dependencies = [
     "fastapi>=0.115.0",
     "genai-prices>=0.1.0",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
-    "mcp>=1.28.1,<2.0.0",
+    # Pinned to one minor line, not just below the next major. The major
+    # ceiling is #689: mcp 2.0 removed
+    # `mcp.client.streamable_http.streamablehttp_client`, which
+    # `services/mcp_client.py` and `services/mcp_stateless.py` import at module
+    # scope, so a fresh resolution picking it up kills every gateway command.
+    # The minor ceiling is a second, separate coupling: `/v1/mcp/execute`
+    # answers with mcp's own `CallToolResult`, so ten mcp-owned schemas are
+    # written into `docs/public/openapi.json` and from there into the Postman
+    # collection and `web/src/client/schema.ts`, all three committed with drift
+    # checks. An mcp release that touches any of those shapes therefore changes
+    # three generated files here. Left open to `<2.0.0`, a `uv lock` run for an
+    # unrelated dependency would move mcp and those artifacts as a side effect,
+    # and the drift checks would fail on a PR whose diff explained none of it.
+    # Bumping this is deliberate work: raise the ceiling, then regenerate both
+    # public artifacts and the dashboard client (see AGENTS.md, "Generated
+    # Artifacts").
+    "mcp>=1.28.1,<1.29.0",
     "opentelemetry-api>=1.39.1",
     "pillow>=12.3.0",
     "pypdfium2>=4.30.0",
