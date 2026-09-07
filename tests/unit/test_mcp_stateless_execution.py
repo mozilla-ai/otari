@@ -45,6 +45,9 @@ class _FakeSession:
         self.listed = 0
         self.call_error: BaseException | None = None
         self.result = RESULT
+        # Set by the fixture below, so a test can fail the connect or the
+        # cleanup half of the substituted session independently.
+        self.transport: dict[str, BaseException | None] = {}
 
     async def list_tools(self, cursor: str | None = None) -> Any:
         self.listed += 1
@@ -61,8 +64,8 @@ class _FakeSession:
 def session(monkeypatch: pytest.MonkeyPatch) -> _FakeSession:
     """Substitute the real transport with a session that records what it is asked."""
     fake = _FakeSession()
-    state = {"connect_error": None, "cleanup_error": None}
-    fake.transport = state  # type: ignore[attr-defined]
+    state: dict[str, BaseException | None] = {"connect_error": None, "cleanup_error": None}
+    fake.transport = state
 
     from contextlib import asynccontextmanager
 

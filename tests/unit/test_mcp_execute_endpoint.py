@@ -145,7 +145,7 @@ def _body(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _error(response: httpx.Response) -> dict[str, Any]:
+def _error(response: Any) -> dict[str, Any]:
     payload = dict(response.json())
     assert payload.pop("request_id"), "every error body carries the opaque request id"
     return payload
@@ -534,7 +534,7 @@ def test_a_capacity_refusal_is_the_only_failure_that_invites_a_retry(
     monkeypatch.setattr(mcp_stateless, "EXECUTION_GATE", gate)
     monkeypatch.setattr(mcp_stateless, "DISCOVERY_GATE", gate)
 
-    async def hold_the_only_slot() -> httpx.Response:
+    async def hold_the_only_slot() -> Any:
         async with gate.slot():
             return await asyncio.to_thread(
                 lambda: client.post(path, headers=USER_AUTH, json=_body())

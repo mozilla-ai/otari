@@ -75,7 +75,8 @@ async def test_an_oversized_content_length_is_refused_before_the_body_is_read() 
 async def test_a_response_within_the_ceiling_is_allowed_through() -> None:
     response = httpx.Response(200, headers={"content-length": "10"})
 
-    assert await enforce_content_length(response) is None
+    # Returning at all is the assertion: the hook refuses by raising.
+    await enforce_content_length(response)
 
 
 @pytest.mark.asyncio
@@ -83,7 +84,7 @@ async def test_a_missing_content_length_is_left_to_the_post_decode_measurement()
     """A chunked or SSE response carries no length, and is bounded after decoding."""
     response = httpx.Response(200, headers={"transfer-encoding": "chunked"})
 
-    assert await enforce_content_length(response) is None
+    await enforce_content_length(response)
 
 
 def test_a_result_within_the_ceiling_passes_the_post_decode_measurement() -> None:

@@ -92,7 +92,7 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable, Coroutine
 
     from fastapi import Response
 
@@ -157,7 +157,7 @@ class _McpRoute(APIRoute):
     deployment picks up an error shape it never published.
     """
 
-    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         original = super().get_route_handler()
 
         async def handler(request: Request) -> Response:

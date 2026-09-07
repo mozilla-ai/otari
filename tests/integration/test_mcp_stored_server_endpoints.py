@@ -27,6 +27,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from gateway.api.routes import mcp as mcp_route
+from gateway.core.database import release_session
+from gateway.inflight import InFlightRegistry
 from gateway.models.entities import APIKey, User, WorkspaceMcpServer
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, Workspace
@@ -88,7 +90,7 @@ _EVENTS: list[str] = []
 def _events(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     """Record the order of the two steps that must not be interleaved."""
     _EVENTS.clear()
-    original = mcp_route.release_session
+    original = release_session
 
     async def spy(db: Any) -> bool:
         released = await original(db)
@@ -238,7 +240,7 @@ def test_the_call_appears_in_the_in_flight_registry_while_it_runs(
     session: _FakeSession,
 ) -> None:
     """Execution step 7, through the standard middleware lifecycle."""
-    registry = client.app.state.inflight
+    registry: InFlightRegistry = client.app.state.inflight  # type: ignore[attr-defined]
     seen: list[list[str]] = []
     session.on_call = lambda: seen.append([entry.endpoint for entry in registry.snapshot()])
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
@@ -259,7 +261,7 @@ def test_discovery_registers_under_its_own_endpoint_while_it_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An operator watching in-flight work sees which of the two endpoints is running."""
-    registry = client.app.state.inflight
+    registry: InFlightRegistry = client.app.state.inflight  # type: ignore[attr-defined]
     seen: list[list[str]] = []
     original = session.list_tools
 
