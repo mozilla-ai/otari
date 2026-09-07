@@ -12296,13 +12296,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description File content. Content-Type reflects the stored media type; application/octet-stream is the fallback. */
             200: {
                 headers: {
+                    /** @description Attachment filename, with a UTF-8 filename* parameter for non-ASCII names. */
+                    "Content-Disposition"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": string;
                 };
             };
             /** @description Validation Error */

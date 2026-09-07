@@ -17417,11 +17417,22 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "File content. Content-Type reflects the stored media type; application/octet-stream is the fallback.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Attachment filename, with a UTF-8 filename* parameter for non-ASCII names.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
