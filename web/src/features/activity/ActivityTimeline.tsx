@@ -320,8 +320,10 @@ export function ActivityTimeline({
           </div>
         </div>
 
+        {/* Both pre-data states hold the same reserved height, so the band does
+            not resize between them. */}
         {loading && n === 0 ? (
-          <div className="flex h-[90px] items-center justify-center">
+          <div className="flex h-[5.625rem] items-center justify-center">
             <Spinner size="sm" />
           </div>
         ) : n === 0 ? (

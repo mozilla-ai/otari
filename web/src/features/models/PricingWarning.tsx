@@ -76,7 +76,16 @@ export function PricingWarning() {
     // with. A band pushes the rail and the content down together, which is what
     // the rest of the surface already does with a full-bleed row, and an alarm
     // that reports traffic being dropped is worth the shift.
-    <div className="shrink-0 px-6">
+    // The column half of the band, spelled the way `Section`'s inner element
+    // and `<main>`'s own content column are: the inset matched the page at no
+    // breakpoint, and the sentence ran the whole window past the cap. It
+    // cannot line up with the page's column on a wide viewport, because this
+    // sits above the rail rather than beside it and the rail offsets `<main>`;
+    // what the cap buys is a bounded measure rather than an alignment.
+    <div
+      data-slot="pricing-alarm"
+      className="mx-auto w-full max-w-[112.5rem] shrink-0 px-4 md:px-6"
+    >
       <InfoBanner tone="warning">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span>

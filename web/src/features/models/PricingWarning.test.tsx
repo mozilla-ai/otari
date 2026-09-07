@@ -321,8 +321,12 @@ describe("PricingWarning", () => {
     mockSettings({ ...BASE, require_pricing: true, default_pricing: false })
     renderPage(<PricingWarning />)
 
+    // Keyed on the band's own slot rather than on a padding utility: the
+    // padding is the part of this wrapper most likely to move, and it has
+    // already moved once, so a lookup through it would fail on a change this
+    // assertion is not about.
     const banner = (await screen.findByText(/Requests are rejected/)).closest(
-      "div.px-6",
+      "[data-slot='pricing-alarm']",
     )
     expect(banner).not.toBeNull()
     expect(banner?.className).not.toContain("absolute")
