@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from mcp.shared._httpx_utils import create_mcp_http_client
 
 from gateway.log_config import logger
 from gateway.services.tool_usage import ToolUsageTally
@@ -47,18 +46,21 @@ def _no_redirect_http_client(
     status such as 307, httpx also re-sends the method and request body to the
     redirect destination.
 
-    Delegates to the SDK for everything else, deliberately. Its timeout defaults
-    are what the managed tool loop has always run with, and narrowing them here
-    would turn this into a behavior change for anyone whose MCP tool is slower
-    than a bound picked for a different purpose.
+    The SDK transport passes its headers, authentication and effective timeout
+    into this factory. Preserving those values keeps the managed tool loop's
+    existing behavior; the fallback matches the SDK's 30-second default for
+    direct callers that omit a timeout.
 
     Following redirects safely means validating each destination before sending
     anything to it. That is a larger change than this, and out of scope: no
     caller needs a redirecting MCP server today.
     """
-    client = create_mcp_http_client(headers, timeout, auth)
-    client.follow_redirects = False
-    return client
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout if timeout is not None else httpx.Timeout(30.0),
+        auth=auth,
+        follow_redirects=False,
+    )
 
 
 def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:

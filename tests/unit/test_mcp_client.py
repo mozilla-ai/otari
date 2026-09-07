@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from mcp.shared._httpx_utils import create_mcp_http_client
 
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_client import MCPClientPool, _ConnectedServer
@@ -188,13 +187,16 @@ async def test_the_transport_keeps_the_sdk_timeout_defaults(
     async with MCPClientPool([config]):
         pass
 
-    ours = captured["httpx_client_factory"](None, None, None)
-    theirs = create_mcp_http_client(None, None, None)
+    factory = captured["httpx_client_factory"]
+    default_client = factory(None, None, None)
+    transport_timeout = httpx.Timeout(30.0, read=300.0)
+    configured_client = factory(None, transport_timeout, None)
     try:
-        assert ours.timeout == theirs.timeout
+        assert default_client.timeout == httpx.Timeout(30.0)
+        assert configured_client.timeout == transport_timeout
     finally:
-        await ours.aclose()
-        await theirs.aclose()
+        await default_client.aclose()
+        await configured_client.aclose()
 
 
 @pytest.mark.asyncio
