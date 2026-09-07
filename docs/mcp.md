@@ -168,9 +168,11 @@ an approval credential.
 It detects Otari-side and platform-side configuration changes only. A remote
 server that changes its own catalog, or a tool's behavior, behind an unchanged
 URL will not move it; catching that would need another live `tools/list` at
-execution time, which this version does not do. What the revision binds is the
-stored server id, its stored configuration, the remote tool name, and the exact
-arguments, not an immutable remote implementation.
+execution time, which this version does not do. The revision binds the request
+only to the stored server configuration returned by discovery. The calling
+application is responsible for binding the server id,
+revision, remote tool name, and final arguments to its authorization or approval
+record. Neither mechanism binds the call to an immutable remote implementation.
 
 `client_execution_id` is a canonical UUID you generate, for correlation across
 your service and Otari. It is not proof of approval and **not an idempotency
