@@ -16,6 +16,11 @@ Tailwind CSS v4, TanStack Query, TanStack Router (file-based, `web/src/routes/`)
 Vitest + Testing Library, Playwright (`web/e2e/`, behavioral and screenshot suites). Package
 manager is **pnpm**.
 
+[web/design/DESIGN.md](../../../web/design/DESIGN.md) owns the design system: which component
+to reach for, which variant applies where, which token layer is allowed, and the three
+components that still exist but must not be used in new code. Ten short topic files; load the
+one covering the work at hand.
+
 [web/AGENTS.md](../../../web/AGENTS.md) owns the structure and is worth reading first: the
 `features/` / `shared/` / `app/` layout it mirrors from `otari-ai/frontend`, the three
 lint-enforced import rules, the routing conventions, the generated API client, and the design

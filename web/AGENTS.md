@@ -7,6 +7,17 @@ Before changing the dashboard, read
 [frontend-standards](../.github/skills/frontend-standards/SKILL.md) and the one
 topic guide it points to for the work at hand.
 
+## Design system
+
+[design/DESIGN.md](design/DESIGN.md) is the design system: what to reach for, which
+variant applies where, which token layer is allowed, and which components exist but
+must not be used in new code. It is ten short topic files, so load only the one
+covering what you are building. Written for a reader who cannot ask a question,
+which is what an agent is.
+
+The Paper file `Otari / Neat shell` is the visual reference for the same system:
+foundations, components with their states, and the page archetypes as artboards.
+
 ## Runtime contract
 
 `src/main.tsx` fetches unauthenticated `GET /v1/bootstrap` before mounting
