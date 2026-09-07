@@ -1965,6 +1965,20 @@ main {
   height: 32px;
 }
 
+/* The dense height above is a desktop size, so the phone viewport takes it
+   back off. The `[data-slot="button"]` floor further down cannot reach these:
+   a native `input[type="search"]` and a HeroUI select trigger are not buttons,
+   so without this the toolbar is the one place on the phone layout still
+   handing a finger a 32px target. Same 767px boundary as that floor, so the
+   toolbar's fields and its buttons come up to 44px together. */
+@media (max-width: 767px) {
+  .otari-toolbar .input,
+  .otari-toolbar .select__trigger,
+  .otari-toolbar input[type="search"] {
+    height: 44px;
+  }
+}
+
 /* =============================================================
  * HeroUI v3 fixes — narrow, well-justified component patches.
  * ============================================================= */ /* =============================================================

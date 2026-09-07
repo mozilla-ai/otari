@@ -833,17 +833,28 @@ export function Login() {
                 separator is what says so now that no card edge does.
                 Left-aligned with the column, like everything else in it. */}
         <div className="flex flex-col gap-3 border-t border-border pt-5">
-          <p className="text-xs text-muted">
-            Your{" "}
-            <a
-              href="/welcome"
-              className="font-medium text-link hover:text-link-hover"
-            >
-              master key
-            </a>{" "}
-            is sent once and exchanged for a session cookie. It is never stored
-            in the browser.
-          </p>
+          {/* Names the credential the form above actually took. The master key
+              is the one that has a page explaining it, so only that branch
+              links out; a password deployment would otherwise send someone to
+              the bootstrap guide to read about a credential it retired. */}
+          {usesPassword ? (
+            <p className="text-xs text-muted">
+              Your password is sent once and exchanged for a session cookie. It
+              is never stored in the browser.
+            </p>
+          ) : (
+            <p className="text-xs text-muted">
+              Your{" "}
+              <a
+                href="/welcome"
+                className="font-medium text-link hover:text-link-hover"
+              >
+                master key
+              </a>{" "}
+              is sent once and exchanged for a session cookie. It is never
+              stored in the browser.
+            </p>
+          )}
           {/* The rows
                 themselves take no gap, because each is 44px around a 20px line
                 and so already sits 24px from its neighbor's text. */}

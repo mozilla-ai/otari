@@ -17,12 +17,12 @@ import {
   useBudgets,
   useKeys,
   useOrganizationContext,
-  useOrganizationMembers,
   useProviderHealth,
   useProviders,
   useUsageLogs,
   useUsageSummary,
   useUsers,
+  useWorkspaceMembers,
 } from "@/shared/api/hooks"
 import { Sparkline } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
@@ -437,7 +437,11 @@ export function OverviewPage({
   // table behind it cannot disagree.
   const keys = useKeys(usage.scope)
   const users = useUsers()
-  const members = useOrganizationMembers()
+  // The rail this feeds is headed "This workspace", so it counts the selected
+  // workspace's roster and not the organization's: an organization member need
+  // not be a member of every workspace, so the deployment-wide count would
+  // overcount the rail and stay put when the switcher moves.
+  const members = useWorkspaceMembers(usage.scope ?? null)
 
   const todayTotals = today.data?.totals
   const periodTotals = period.data?.totals

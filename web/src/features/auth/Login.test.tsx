@@ -173,6 +173,38 @@ describe("Login", () => {
     expect(link).toHaveAttribute("href", "/welcome")
   })
 
+  // The note under the rule explains what becomes of the credential, so it has
+  // to name the credential the form above actually took. One block served both
+  // branches before, telling anyone signing in with an email and password that
+  // their "master key" was exchanged for a cookie.
+  it("names the master key in the credential note on an unclaimed deployment", () => {
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByText(/master key/, { selector: "a" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/^Your password is sent once/)).toBeNull()
+  })
+
+  it("names the password in the credential note once the deployment is claimed", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByText(/Your password is sent once and exchanged/),
+    ).toBeInTheDocument()
+    // And the master-key link is gone with it: `/welcome` documents a
+    // credential this deployment has retired.
+    expect(screen.queryByText(/master key/, { selector: "a" })).toBeNull()
+  })
+
   it("shows an error and stays on the form when the key is rejected", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ detail: "Invalid master key" }, 401),

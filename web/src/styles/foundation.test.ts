@@ -1008,6 +1008,19 @@ describe("the phone viewport's touch-target floor", () => {
       /@media \(max-width: 767px\) \{\s*\[data-slot="button"\] \{\s*min-height: 2\.75rem;\s*min-width: 2\.75rem;/,
     )
   })
+
+  it("takes the toolbar's dense field height back off at the same boundary", () => {
+    // The floor above is keyed on `[data-slot="button"]`, which a native
+    // `input[type="search"]` and a HeroUI select trigger are not, so the
+    // toolbar's own 32px rule would otherwise outlive it on the phone layout.
+    // Asserted as a pair: the dense height exists, and it is undone at 767px.
+    expect(CSS).toMatch(
+      /\.otari-toolbar \.input,\s*\.otari-toolbar \.select__trigger,\s*\.otari-toolbar input\[type="search"\] \{\s*height: 32px;/,
+    )
+    expect(CSS).toMatch(
+      /@media \(max-width: 767px\) \{\s*\.otari-toolbar \.input,\s*\.otari-toolbar \.select__trigger,\s*\.otari-toolbar input\[type="search"\] \{\s*height: 44px;/,
+    )
+  })
 })
 
 // Form controls. The shared `Checkbox` (`shared/components/ui.tsx`) is the one
