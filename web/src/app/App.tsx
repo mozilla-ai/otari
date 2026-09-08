@@ -2,13 +2,15 @@ import { RouterProvider } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { HybridLanding } from "@/app/HybridLanding"
 import { router } from "@/app/router"
-import type { DeploymentBootstrap } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import { publicAuthPath } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { ErrorBoundary } from "@/shared/components/feedback/ErrorBoundary"
+import type { WireBootstrap } from "@/shared/helpers/bootstrap"
+import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -31,7 +33,11 @@ function useHashPath(): string {
 export default function App({
   bootstrap,
 }: {
-  bootstrap: DeploymentBootstrap | null
+  // `WireBootstrap`, not `DeploymentBootstrap`: this is the one component that
+  // takes the payload as it came off the wire, and an older gateway sends fewer
+  // fields than the generated type promises. `normalizeBootstrap` below is
+  // where it becomes the complete shape everything under here reads.
+  bootstrap: WireBootstrap | null
 }) {
   // Null means /v1/bootstrap did not answer (see main.tsx). The app deliberately
   // has no fallback deployment to assume: rendering a management dashboard at a
@@ -53,10 +59,15 @@ export default function App({
     )
   }
 
+  // Outside the provider rather than inside it, because the provider's own
+  // correction memo reads `sign_in_methods` and is therefore one of the things
+  // that can throw on a bootstrap this dashboard did not expect.
   return (
-    <DeploymentProvider value={bootstrap}>
-      <DeploymentRoot />
-    </DeploymentProvider>
+    <ErrorBoundary>
+      <DeploymentProvider value={normalizeBootstrap(bootstrap)}>
+        <DeploymentRoot />
+      </DeploymentProvider>
+    </ErrorBoundary>
   )
 }
 
