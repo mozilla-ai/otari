@@ -1147,6 +1147,47 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     """
 
 
+class ConnectedAppNotConfiguredError(TenancyValidationError):
+    """This deployment has no client credentials for the app the caller wants to connect."""
+
+    def __init__(self, provider: str):
+        super().__init__(
+            f"Connecting {provider} accounts is not configured on this deployment; "
+            f"set connected_apps.{provider}.client_id and client_secret, and public_base_url."
+        )
+
+
+class ConnectedAccountNotFoundError(TenancyNotFoundError):
+    def __init__(self, account_id: object):
+        super().__init__(f"Connected account {account_id} not found")
+
+
+class ConnectedAccountStateInvalidError(TenancyValidationError):
+    """The callback named a state this deployment never issued, already used, expired, or another user's."""
+
+    def __init__(self) -> None:
+        super().__init__("The OAuth state is unknown, expired or already used; start the connection again.")
+
+
+class ConnectedAccountExchangeError(TenancyError):
+    """The provider refused the code exchange, the identity fetch, or a refresh."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, provider: str, stage: str):
+        super().__init__(f"{provider} did not complete the {stage}; try connecting again.")
+
+
+class ConnectedAccountReturnUrlError(TenancyValidationError):
+    def __init__(self, url: str):
+        super().__init__(f"return_url {url!r} must be https (or http on localhost) and carry no fragment")
+
+
+class ConnectedAccountLimitReachedError(TenancyConflictError):
+    def __init__(self, limit: int):
+        super().__init__(f"A user may hold at most {limit} connected accounts")
+
+
 __all__ = [
     "BootstrapOperatorProtectedError",
     "CurrentPasswordIncorrectError",
@@ -1216,6 +1257,12 @@ __all__ = [
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
+    "ConnectedAccountExchangeError",
+    "ConnectedAccountLimitReachedError",
+    "ConnectedAccountNotFoundError",
+    "ConnectedAccountReturnUrlError",
+    "ConnectedAccountStateInvalidError",
+    "ConnectedAppNotConfiguredError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
     "SecretBoxUnavailableTenancyError",

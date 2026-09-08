@@ -208,6 +208,8 @@ _DELIBERATELY_OMITTED: tuple[str, ...] = (
     "providers",
     "routing",
     "search_tools",
+    # Carries client secrets, and is a dict; its own surface is /v1/connected-accounts/apps.
+    "connected_apps",
     # Not shown today, and each could be. Nothing below is a secret or an
     # unrenderable shape; no page has needed it yet.
     "activation_guide",

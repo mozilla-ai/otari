@@ -33,6 +33,51 @@
         "title": "AcceptInvitationResultPublic",
         "type": "object"
       },
+      "AccessToken": {
+        "description": "A live credential for in-process consumers; never leaves the gateway.",
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "extra": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Secondary tokens, e.g. Slack's user token under 'user'.",
+            "title": "Extra",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "token_type": {
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "token",
+          "token_type",
+          "expires_at"
+        ],
+        "title": "AccessToken",
+        "type": "object"
+      },
       "ActivationApiKeyPublic": {
         "description": "The API key the guide hands out, with its plaintext.\n\nReturned once per call and never stored in plaintext, like every other key\nthis gateway mints: a page reload issues a new one and rotates the same row,\nwhich is what makes the guide able to show a working key without keeping a\nreadable secret anywhere.",
         "properties": {
@@ -1275,6 +1320,72 @@
         "title": "AuthenticatePasskeyRequest",
         "type": "object"
       },
+      "AuthorizePublic": {
+        "properties": {
+          "authorization_url": {
+            "description": "Send the user's browser here; Otari handles the rest of the flow.",
+            "title": "Authorization Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the link stops working; start again after that.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "expires_at"
+        ],
+        "title": "AuthorizePublic",
+        "type": "object"
+      },
+      "AuthorizeRequest": {
+        "properties": {
+          "return_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where to send the browser once the account is connected (or the attempt failed). https, or http on localhost. Otari appends connection=ok&provider=...&connection_id=..., or connection=error&provider=...&reason=.... Defaults to a page on this deployment.",
+            "title": "Return Url"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scopes to ask for instead of the deployment's defaults for this app.",
+            "title": "Scopes"
+          },
+          "user": {
+            "description": "Your application's id for the user.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user"
+        ],
+        "title": "AuthorizeRequest",
+        "type": "object"
+      },
       "AuthorizeResponse": {
         "description": "Where to send the browser, and the state to check when it comes back.",
         "properties": {
@@ -2299,6 +2410,190 @@
           "has_api_key"
         ],
         "title": "ConfigSearchToolSchema",
+        "type": "object"
+      },
+      "ConnectedAccountPublic": {
+        "description": "A connected account without its tokens.",
+        "properties": {
+          "account_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Identifier"
+          },
+          "account_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the provider calls the account: a name, an email, a workspace.",
+            "title": "Account Label"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "has_refresh_token": {
+            "title": "Has Refresh Token",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user's own label, when set.",
+            "title": "Label"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user": {
+            "description": "The application's id for the user who connected it.",
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user",
+          "provider",
+          "account_identifier",
+          "account_label",
+          "label",
+          "scopes",
+          "expires_at",
+          "has_refresh_token",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConnectedAccountPublic",
+        "type": "object"
+      },
+      "ConnectedAccountUpdate": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "title": "ConnectedAccountUpdate",
+        "type": "object"
+      },
+      "ConnectedAccountsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAccountPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ConnectedAccountsPublic",
+        "type": "object"
+      },
+      "ConnectedAppPublic": {
+        "description": "One app an end user may connect.",
+        "properties": {
+          "connected_accounts": {
+            "description": "How many accounts the named user has connected for this app.",
+            "title": "Connected Accounts",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "scope_details": {
+            "description": "Labels and descriptions for the scopes the preset documents.",
+            "items": {
+              "$ref": "#/components/schemas/ScopePublic"
+            },
+            "title": "Scope Details",
+            "type": "array"
+          },
+          "scopes": {
+            "description": "The scopes this deployment asks for by default.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "label",
+          "scopes",
+          "scope_details",
+          "connected_accounts"
+        ],
+        "title": "ConnectedAppPublic",
         "type": "object"
       },
       "CountTokensRequest": {
@@ -9324,6 +9619,39 @@
           "policies"
         ],
         "title": "RouterStatus",
+        "type": "object"
+      },
+      "ScopePublic": {
+        "properties": {
+          "access_type": {
+            "title": "Access Type",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "label",
+          "description",
+          "access_type",
+          "required"
+        ],
+        "title": "ScopePublic",
         "type": "object"
       },
       "ScopedBudgetResponse": {
@@ -17053,6 +17381,467 @@
         "summary": "Chat Completions",
         "tags": [
           "chat"
+        ]
+      }
+    },
+    "/v1/connections": {
+      "get": {
+        "description": "A user's connected accounts, optionally for one provider. Tokens are never included.",
+        "operationId": "list_connections_v1_connections_get",
+        "parameters": [
+          {
+            "description": "Your application's id for the user.",
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "description": "Your application's id for the user.",
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "User",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAccountsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Connections",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/apps": {
+      "get": {
+        "description": "The apps this deployment can connect and the scopes each asks for; with ``user``, how many accounts they hold.",
+        "operationId": "list_connected_apps_v1_connections_apps_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Your application's id for the user.",
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectedAppPublic"
+                  },
+                  "title": "Response List Connected Apps V1 Connections Apps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Connected Apps",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/{connection_id}": {
+      "delete": {
+        "description": "Disconnect an account: revoke the grant at the provider when it supports that, then forget the tokens.",
+        "operationId": "disconnect_connection_v1_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Your application's id for the user.",
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "description": "Your application's id for the user.",
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "User",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Disconnect Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "get": {
+        "description": "One connected account.",
+        "operationId": "get_connection_v1_connections__connection_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Your application's id for the user.",
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "description": "Your application's id for the user.",
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "User",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAccountPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "patch": {
+        "description": "Set or clear the user's own label for an account (\"Work Slack\").",
+        "operationId": "update_connection_v1_connections__connection_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Your application's id for the user.",
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "description": "Your application's id for the user.",
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "User",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectedAccountUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAccountPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/{provider}/authorize": {
+      "post": {
+        "description": "Start connecting an account for one of your users: the link to send their browser to.\n\nOtari runs the consent flow and the callback. The browser ends up at\n``return_url`` with ``connection=ok&provider=\u2026&connection_id=\u2026`` or\n``connection=error&provider=\u2026&reason=\u2026`` appended. The link is good for ten\nminutes and one exchange.",
+        "operationId": "authorize_connection_v1_connections__provider__authorize_post",
+        "parameters": [
+          {
+            "description": "Which app.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "Which app.",
+              "pattern": "^(atlassian|github|google|hubspot|linear|microsoft|notion|salesforce|slack|typeform)$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Authorize Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/v1/connections/{provider}/token": {
+      "get": {
+        "description": "The live credential for a user's account with an app, for code that calls the app itself.\n\nRefreshed first when it expires within a minute. This is the one place a\ntoken leaves Otari, and it goes only to the application whose users these\nare: the same application that registered the OAuth client. A user with no\naccount for the app answers 404.",
+        "operationId": "get_connection_token_v1_connections__provider__token_get",
+        "parameters": [
+          {
+            "description": "Which app.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "Which app.",
+              "pattern": "^(atlassian|github|google|hubspot|linear|microsoft|notion|salesforce|slack|typeform)$",
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Your application's id for the user.",
+            "in": "query",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "description": "Your application's id for the user.",
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "User",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Connection Token",
+        "tags": [
+          "connections"
         ]
       }
     },

@@ -350,3 +350,12 @@ DELETE /v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # oper
 # token; an application reaches the same search through the otari_web_search
 # tool on a completion request.
 GET /v1/web-search/search                                                 # gateway-to-gateway
+# Connections (docs/connections.md): the application-facing API for users'
+# OAuth grants. Not yet wrapped by any SDK shell.
+GET /v1/connections/apps                         # not yet wrapped
+GET /v1/connections                              # not yet wrapped
+POST /v1/connections/{provider}/authorize        # not yet wrapped
+GET /v1/connections/{provider}/token             # not yet wrapped
+GET /v1/connections/{connection_id}              # not yet wrapped
+PATCH /v1/connections/{connection_id}            # not yet wrapped
+DELETE /v1/connections/{connection_id}           # not yet wrapped

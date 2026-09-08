@@ -141,6 +141,18 @@ plane.
 A new path into an existing capability must honor the same veto. Direct search,
 for example, enforces the workspace search disable switch.
 
+## Connections
+
+`services/tenancy/connected_account_service.py` (`docs/connections.md`) holds
+the OAuth grants an application's users give for third-party apps, keyed by
+`EndUser` (the request's `user` string, scoped to the API key's workspace):
+apron-auth presets for the protocol, a database-backed `StateStore` bound to
+the end user, provider and return URL when the application starts the flow,
+tokens encrypted with the secret box. The hosted callback at
+`/connected-accounts/{provider}/callback` is unauthenticated and trusts only
+the state. A token leaves only through `access_token*` and
+`GET /v1/connections/{provider}/token`, to the application itself.
+
 ## Provider and search credential stores
 
 `provider_store_service.py` and `search_tool_store_service.py` overlay

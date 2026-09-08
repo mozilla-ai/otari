@@ -97,3 +97,16 @@ providers:
 #   local:
 #     provider: searxng
 #     api_base: "http://searxng:8080"
+
+# Third-party apps users may connect an account for through OAuth
+# (docs/connections.md). Needs public_base_url and OTARI_SECRET_KEY.
+# connected_apps:
+#   slack:
+#     client_id: ${SLACK_CLIENT_ID}
+#     client_secret: ${SLACK_CLIENT_SECRET}
+#     scopes: [chat:write, channels:join]
+#     user_scopes: [channels:read, channels:history, chat:write]
+#   github:
+#     client_id: ${GITHUB_CLIENT_ID}
+#     client_secret: ${GITHUB_CLIENT_SECRET}
+#     scopes: [repo]

@@ -35,6 +35,7 @@ from gateway.api.routes import (
     agent_telemetry,
     aliases,
     budgets,
+    connected_accounts,
     keys,
     mail,
     maintenance_mode,
@@ -80,6 +81,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # plausible wrong fix, and it would take the dashboard's Models and Pricing
 # pages and a data-plane gateway's usage report with it.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
+    ("connected_accounts", connected_accounts.router, verify_api_key_or_master_key),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
@@ -115,6 +117,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "auth_signup.router": _PUBLIC_AUTH,
     "auth_webauthn.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
+    "connected_accounts.callback_router": "the provider's redirect lands here; the OAuth state is the credential",
     "bootstrap.router": "unauthenticated on purpose: how a browser learns which mode it reached",
     "health.router": "unauthenticated liveness and readiness",
     "web_search_backend.router": "its own X-Gateway-Token, checked in the handler",

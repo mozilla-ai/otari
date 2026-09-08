@@ -165,6 +165,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Routing](docs/routing.md)
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
+- [Connections](docs/connections.md)
 - [SDK and agent integrations](docs/index.md#for-integrators)
 - [Architecture](ARCHITECTURE.md)
 

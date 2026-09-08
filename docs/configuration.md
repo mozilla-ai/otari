@@ -204,6 +204,19 @@ token price to a request-priced or image-priced endpoint.
 
 ## Search tools
 
+`connected_apps` registers the OAuth apps users may connect an account for
+([connections](connections.md)). Each entry carries the app's
+`client_id` and `client_secret` and may set `scopes` (and, for Slack,
+`user_scopes`); `public_base_url` and `OTARI_SECRET_KEY` must be set.
+
+```yaml
+connected_apps:
+  github:
+    client_id: ${GITHUB_CLIENT_ID}
+    client_secret: ${GITHUB_CLIENT_SECRET}
+    scopes: [repo]
+```
+
 `search_tools` configures direct `POST /v1/search` calls. The same entries can
 be managed at runtime from Tools or `/v1/search-tools`.
 

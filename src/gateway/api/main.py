@@ -16,6 +16,7 @@ from gateway.api.routes import (
     bootstrap,
     budgets,
     chat,
+    connected_accounts,
     embeddings,
     files,
     health,
@@ -149,6 +150,8 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(auth_password_reset.router)
     app.include_router(auth_webauthn.router)
     app.include_router(auth_oauth.router)
+    app.include_router(connected_accounts.router)
+    app.include_router(connected_accounts.callback_router)
     if serves_data_plane:
         # The rest of the data plane. ``files`` sits here because an upload
         # exists to be referenced from a completion or a batch, so it follows

@@ -1596,6 +1596,262 @@
     {
       "item": [
         {
+          "name": "List Connections",
+          "request": {
+            "description": "A user's connected accounts, optionally for one provider. Tokens are never included.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections"
+              ],
+              "query": [
+                {
+                  "description": "Your application's id for the user.",
+                  "disabled": false,
+                  "key": "user",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/connections?user=&provider="
+            }
+          }
+        },
+        {
+          "name": "List Connected Apps",
+          "request": {
+            "description": "The apps this deployment can connect and the scopes each asks for; with ``user``, how many accounts they hold.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections",
+                "apps"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/connections/apps?user="
+            }
+          }
+        },
+        {
+          "name": "Get Connection",
+          "request": {
+            "description": "One connected account.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections",
+                ":connection_id"
+              ],
+              "query": [
+                {
+                  "description": "Your application's id for the user.",
+                  "disabled": false,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/connections/:connection_id?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "connection_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Connection",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"label\": \"string\"\n}"
+            },
+            "description": "Set or clear the user's own label for an account (\"Work Slack\").",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections",
+                ":connection_id"
+              ],
+              "query": [
+                {
+                  "description": "Your application's id for the user.",
+                  "disabled": false,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/connections/:connection_id?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "connection_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Disconnect Connection",
+          "request": {
+            "description": "Disconnect an account: revoke the grant at the provider when it supports that, then forget the tokens.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections",
+                ":connection_id"
+              ],
+              "query": [
+                {
+                  "description": "Your application's id for the user.",
+                  "disabled": false,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/connections/:connection_id?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "connection_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Authorize Connection",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"user\": \"string\"\n}"
+            },
+            "description": "Start connecting an account for one of your users: the link to send their browser to.\n\nOtari runs the consent flow and the callback. The browser ends up at\n``return_url`` with ``connection=ok&provider=\u2026&connection_id=\u2026`` or\n``connection=error&provider=\u2026&reason=\u2026`` appended. The link is good for ten\nminutes and one exchange.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections",
+                ":provider",
+                "authorize"
+              ],
+              "raw": "{{baseUrl}}/v1/connections/:provider/authorize",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Connection Token",
+          "request": {
+            "description": "The live credential for a user's account with an app, for code that calls the app itself.\n\nRefreshed first when it expires within a minute. This is the one place a\ntoken leaves Otari, and it goes only to the application whose users these\nare: the same application that registered the OAuth client. A user with no\naccount for the app answers 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "connections",
+                ":provider",
+                "token"
+              ],
+              "query": [
+                {
+                  "description": "Your application's id for the user.",
+                  "disabled": false,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/connections/:provider/token?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "connections"
+    },
+    {
+      "item": [
+        {
           "name": "Create Embedding",
           "request": {
             "body": {

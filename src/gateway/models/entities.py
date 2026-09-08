@@ -919,9 +919,7 @@ class FileObject(Base):
     bytes: Mapped[int] = mapped_column()
     purpose: Mapped[str] = mapped_column(default="user_data")
     storage_ref: Mapped[str] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
@@ -964,9 +962,7 @@ class BatchRecord(Base):
     # this record is the strict ownership anchor, so it must always name an owner.
     # CASCADE: deleting the user drops the ownership record (the user's keys are
     # gone too, and usage_logs remain the billing history).
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     # The workspace this batch was CREATED in (otari#643 follow-up), so
@@ -1036,9 +1032,7 @@ class RoutingMemory(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -1048,9 +1042,7 @@ class RoutingMemory(Base):
     qualities: Mapped[dict[str, float]] = mapped_column(JSON)
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     label_source: Mapped[str] = mapped_column(default="human")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary.
@@ -1085,14 +1077,10 @@ class RouterPreference(Base):
     """
 
     __tablename__ = "router_preferences"
-    __table_args__ = (
-        Index("ix_router_preferences_workspace_user_created", "workspace_id", "user_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_router_preferences_workspace_user_created", "workspace_id", "user_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -1101,9 +1089,7 @@ class RouterPreference(Base):
     task_id: Mapped[str | None] = mapped_column(default=None)
     scores: Mapped[dict[str, float]] = mapped_column(JSON)
     label_source: Mapped[str] = mapped_column(default="human")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary."""
@@ -1950,3 +1936,107 @@ class OrganizationGuardrailWorkspace(Base):
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+
+
+class EndUser(Base):
+    """A user of the developer's own application, as that application names them.
+
+    The identity connected accounts hang off (``docs/connections.md``). An
+    application talks to otari with an API key and names its users with the
+    ``user`` field on a request; that string, scoped to the key's workspace,
+    is an end user here. Rows are created on first use by the connections
+    flow, never managed directly, and are distinct from the tenancy ``user``
+    table: those are people who sign in to otari, these are people who sign
+    in to something built on it. An operator connecting their own accounts
+    from the dashboard is an end user of their own workspace.
+
+    CASCADE from the workspace: a workspace's users have no meaning outside it.
+    """
+
+    __tablename__ = "end_users"
+    __table_args__ = (UniqueConstraint("workspace_id", "external_id", name="uq_end_users_workspace_external_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+
+
+class ConnectedAccount(Base):
+    """A third-party account an end user connected through OAuth (``docs/connections.md``).
+
+    The credential a gateway-run tool, an MCP server or an overlay uses to act
+    on that account on the user's behalf. Owned by an :class:`EndUser`: consent
+    is given by a person, for their own account, and the application that
+    holds the API key is what identified the person. Tokens are
+    Fernet-encrypted with ``OTARI_SECRET_KEY`` like
+    ``WorkspaceMcpServer.encrypted_token``; nothing serializes them and the
+    public shape carries only ``expires_at`` and the granted ``scopes``.
+    ``encrypted_extra_tokens`` holds a JSON object of secondary credentials a
+    provider issues alongside the primary one (Slack returns a user token next
+    to the bot token), encrypted as one value.
+
+    ``account_identifier`` is what the provider says the account is (an email,
+    a username, a Slack team id), so connecting the same account twice updates
+    one row instead of holding two grants for it.
+    """
+
+    __tablename__ = "connected_accounts"
+    __table_args__ = (
+        UniqueConstraint(
+            "end_user_id", "provider", "account_identifier", name="uq_connected_accounts_end_user_provider_account"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    end_user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("end_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    account_identifier: Mapped[str | None] = mapped_column(String(320), default=None)
+    account_label: Mapped[str | None] = mapped_column(String(200), default=None)
+    label: Mapped[str | None] = mapped_column(String(64), default=None)
+    encrypted_access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_refresh_token: Mapped[str | None] = mapped_column(Text, default=None)
+    encrypted_extra_tokens: Mapped[str | None] = mapped_column(Text, default=None)
+    token_type: Mapped[str] = mapped_column(String(50), nullable=False, default="Bearer")
+    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    scopes: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    account_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class ConnectedAccountOAuthState(Base):
+    """The pending half of one connect flow, between the consent screen and the callback.
+
+    apron-auth's ``StateStore`` persisted in the database rather than in
+    process memory, so a callback may land on any worker and a restart mid-flow
+    fails cleanly instead of accepting a state nobody issued. The row names the
+    end user the flow is for and where to send the browser afterwards; the
+    callback trusts nothing else in the query. The ``state`` value is the only
+    thing a browser carries, so it is minted with 256 bits of entropy and is
+    single-use: consumption is an ``UPDATE ... WHERE consumed_at IS NULL``
+    that wins for exactly one caller. Rows expire after ``OAUTH_STATE_TTL``
+    and are swept opportunistically on the next save.
+    """
+
+    __tablename__ = "connected_account_oauth_states"
+
+    state: Mapped[str] = mapped_column(String(128), primary_key=True)
+    end_user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("end_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    return_url: Mapped[str | None] = mapped_column(Text, default=None)
+    encrypted_code_verifier: Mapped[str | None] = mapped_column(Text, default=None)
+    requested_scopes: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)

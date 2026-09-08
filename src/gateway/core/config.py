@@ -48,6 +48,47 @@ GATEWAY_TOKEN_HEADER = "X-Gateway-Token"
 # ``IdentityProviderPort`` can record a connection this tuple never named, and
 # a closed enum here would make that value unrepresentable.
 OAUTH_PROVIDERS: tuple[str, ...] = ("github", "google")
+
+# The third-party apps a user may connect an account for (``connected_apps`` in
+# config, ``docs/connections.md``): every provider apron-auth ships a
+# preset for. Distinct from ``OAUTH_PROVIDERS``, which is dashboard sign-in: the
+# same Google client may serve both, but connecting a Google account asks for
+# app scopes a sign-in never should, so the two are configured apart.
+CONNECTED_APP_PROVIDERS: tuple[str, ...] = (
+    "atlassian",
+    "github",
+    "google",
+    "hubspot",
+    "linear",
+    "microsoft",
+    "notion",
+    "salesforce",
+    "slack",
+    "typeform",
+)
+
+
+def validate_connected_app_entry(name: str, entry: Any) -> None:
+    """Validate one ``connected_apps`` entry, raising ``ValueError`` on any problem."""
+    if name not in CONNECTED_APP_PROVIDERS:
+        msg = f"connected_apps.{name} is not a supported app; supported: {', '.join(CONNECTED_APP_PROVIDERS)}."
+        raise ValueError(msg)
+    if not isinstance(entry, dict):
+        msg = f"connected_apps.{name} must be a mapping."
+        raise ValueError(msg)
+    for key in ("client_id", "client_secret"):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value.strip():
+            msg = f"connected_apps.{name}.{key} is required."
+            raise ValueError(msg)
+    for key in ("scopes", "user_scopes"):
+        scopes = entry.get(key)
+        if scopes is not None and not (isinstance(scopes, list) and all(isinstance(scope, str) for scope in scopes)):
+            msg = f"connected_apps.{name}.{key} must be a list of scope strings."
+            raise ValueError(msg)
+    if "user_scopes" in entry and name != "slack":
+        msg = f"connected_apps.{name}.user_scopes is only meaningful for slack."
+        raise ValueError(msg)
 # Per-request opt-out for a policy's learned router: "off" serves the policy's
 # default target and skips the router entirely. There is no "force on": the
 # router is enabled by the policy, not by the caller.
@@ -751,6 +792,17 @@ class GatewayConfig(BaseSettings):
             "provider-native defaults. Standalone-mode only."
         ),
     )
+    connected_apps: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Third-party apps users may connect an account for through OAuth "
+            "(docs/connections.md), keyed by provider (slack, github, google, microsoft, "
+            "notion, linear, atlassian, hubspot, typeform, salesforce). Each entry needs the app's "
+            "'client_id' and 'client_secret' and may set 'scopes' (and, for slack, 'user_scopes') to "
+            "ask for instead of the provider preset's defaults. public_base_url must be set, because "
+            "the redirect URI is derived from it. Standalone-mode only."
+        ),
+    )
     enable_metrics: bool = Field(
         default=False,
         description="Enable Prometheus metrics endpoint at /metrics",
@@ -1362,6 +1414,23 @@ class GatewayConfig(BaseSettings):
             missing.append("public_base_url")
         return tuple(missing)
 
+    def connected_app(self, provider: str) -> dict[str, Any] | None:
+        """The ``connected_apps`` entry for ``provider`` when it is fully configured, else None.
+
+        None for a provider that is absent, and also when ``public_base_url`` is
+        unset, for the same reason ``oauth_client_credentials`` folds it in: the
+        redirect URI is derived from it, and an app whose consent screen cannot
+        be reached from here is not on offer.
+        """
+        if not self.public_base_url:
+            return None
+        return self.connected_apps.get(provider)
+
+    @property
+    def connected_app_providers(self) -> tuple[str, ...]:
+        """The connectable apps, sorted so the list a client renders is stable."""
+        return tuple(sorted(name for name in self.connected_apps if self.connected_app(name) is not None))
+
     def oauth_client_credentials(self, provider: str) -> tuple[str, str] | None:
         """The client ID and secret configured for ``provider``, or None.
 
@@ -1913,6 +1982,13 @@ class GatewayConfig(BaseSettings):
                 "after the client-side timeout rather than racing it"
             )
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_connected_apps(self) -> "GatewayConfig":
+        """Refuse a ``connected_apps`` entry that could never complete a flow, at load time."""
+        for name, entry in self.connected_apps.items():
+            validate_connected_app_entry(name, entry)
         return self
 
     @field_validator("web_search_provider")
