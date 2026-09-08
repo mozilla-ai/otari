@@ -1062,6 +1062,25 @@ describe("the shell chrome's type roles", () => {
     // produces no CSS, on text that looks merely unstyled rather than broken.
     expect(CSS).toContain(`@utility ${role} {`)
   })
+
+  it.each(SHELL_ROLES)("uses %s somewhere in the chrome", (role) => {
+    // The other half, and the one that was promised above but missing. A
+    // declared role with no call site is half of the failure that shipped:
+    // `text-chrome-initials` reached main because the declaration was renamed
+    // to `text-shell-monogram` and the call site was moved back to the old
+    // name, so the span carried a class that produces no CSS. Asserting the
+    // declaration could not catch that, because the declaration was fine.
+    const APP = join(WEB, "src", "app")
+    const users = readdirSync(APP, { recursive: true })
+      .map((name) => String(name).replaceAll("\\", "/"))
+      .filter((name) => /\.tsx$/.test(name) && !/\.test\.tsx$/.test(name))
+      .filter((name) => readFileSync(join(APP, name), "utf8").includes(role))
+
+    expect(
+      users,
+      `${role} is declared but never used; a class that produces no CSS reads as unstyled rather than broken`,
+    ).not.toEqual([])
+  })
 })
 
 // The scale's smallest step is 12px (`--text-xs`), so a size written at a call

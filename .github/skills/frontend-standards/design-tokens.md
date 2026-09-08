@@ -172,8 +172,12 @@ share is the rule that matters: the value lives in one named place, and a compon
 Never a hex, never a numbered Tailwind palette class, never `bg-white`, because those three do
 not adapt and nothing downstream can make them.
 
-The ones we have not aliased are a gap rather than a decision, and the gap decides how
-much work a visual fix is. A value
+The ones we have not aliased are a gap rather than a decision **where
+`@heroui/styles` still declares and reads them**, and the gap decides how much work a
+visual fix is. Not every unaliased name is one: `globals.css:361` records that upstream's
+`--content1` through `--content4` are deliberately left out because HeroUI v3 neither
+declares nor reads them, so aliasing those would restore four inert lines. Check that a
+variable is live upstream before treating its absence here as a gap. A value
 computed from a variable is one alias away from being ours; the same value chased through the
 rules that read it is a selector to keep in sync with somebody else's internals, forever. A
 table whose body corners are drawn at `min(32px, var(--radius-2xl))`, which is 16px, inside a

@@ -25,9 +25,13 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    classes the call site names itself, so `cursor-pointer` on a bare `<button>` is correct
    rather than a finding. Then four ways to change how it looks, in order: a variable (ours
    as a token, or one of HeroUI's own aliased onto ours;
-   `--radius` drives its whole radius ramp, and `--cursor-interactive`, `--disabled-opacity`
-   and the rest are in `@heroui/styles/dist/themes/`, none of them aliased in `globals.css`
-   yet, and the alias goes there rather than into a class string of ours), a shared utility
+   `--radius` drives its whole radius ramp, and it, `--disabled-opacity` and
+   `--field-border-width` are the three HeroUI variables `globals.css` already declares.
+   `--cursor-interactive`, `--ring-offset-width`, the `--scrollbar-*` family and the rest
+   are still only in `@heroui/styles/dist/themes/`, and an alias for one of those goes into
+   `globals.css` rather than into a class string of ours. Our variable block is unlayered
+   and has to stay that way: `@heroui/styles` declares many of the same names from inside
+   `@layer`, and an unlayered declaration is what outranks a layered one), a shared utility
    once the look repeats, the component's own prop (`variant`, `size`, `isDisabled`,
    `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
    own classes under the `.otari-*` namespace. HeroUI and Tailwind both permit that last one and

@@ -160,6 +160,23 @@ describe("CopyField", () => {
     expect(order).toEqual(["attempt", "focus"])
   })
 
+  it("rejects a falsy action at the type level", () => {
+    // `ReactNode` admitted `false`, so `action={enabled && <Button />}`
+    // compiled and then fell back to the default arrangement through
+    // `if (action)`. `ReactElement` rejects it where it is written.
+    const enabled = false
+    render(
+      <CopyField
+        label="TXT record"
+        value="otari-verify=abc"
+        // @ts-expect-error a conditional action is a falsy action, which would
+        // silently render the label-row button and the clipboard-only path.
+        action={enabled && <button type="button">Verify</button>}
+      />,
+    )
+    expect(screen.getByLabelText("TXT record")).toBeInTheDocument()
+  })
+
   it("rejects an action on the multiline variant at the type level", () => {
     render(
       // @ts-expect-error a textarea's right padding indents every line, so the

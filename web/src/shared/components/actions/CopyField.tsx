@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import type { ReactNode } from "react"
+import type { ReactElement, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { CopyButton } from "@/shared/components/actions/CopyButton"
 
@@ -89,8 +89,12 @@ type CopyFieldProps = {
        * A control to sit beside the field, which moves the copy affordance
        * inside the field and drops the button from the label row. Absent, the
        * field renders the arrangement it always has.
+       *
+       * `ReactElement` rather than `ReactNode`: the latter admits `false`, so
+       * `action={enabled && <Button />}` compiled and then silently fell back
+       * to the default arrangement, which is the one this exists to replace.
        */
-      action: ReactNode
+      action: ReactElement
     }
 )
 
@@ -140,7 +144,7 @@ export function CopyField({
   const shared =
     "w-full rounded-lg border border-border bg-surface-alt px-3 py-2 font-mono text-xs text-foreground"
 
-  if (action) {
+  if (action !== undefined) {
     return (
       <div className="flex flex-col gap-1">
         {/* The label keeps its own row and stays a real `<label>`: it is what
