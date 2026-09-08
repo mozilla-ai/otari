@@ -13,6 +13,7 @@ from mcp.types import CallToolResult, TextContent
 
 from gateway.services.mcp_stateless import (
     RESULT_MAX_BYTES,
+    TRANSPORT_MAX_BYTES,
     ConcurrencyGate,
     McpCapacityUnavailable,
     TransportResponseTooLarge,
@@ -22,12 +23,30 @@ from gateway.services.mcp_stateless import (
 )
 
 
+class _ChunkedStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self):  # type: ignore[no-untyped-def]
+        for chunk in self._chunks:
+            yield chunk
+
+
+class _UnreadableStream(httpx.AsyncByteStream):
+    """A body that fails the test if anything reads it."""
+
+    async def __aiter__(self):  # type: ignore[no-untyped-def]
+        raise AssertionError("the oversized body was read")
+        yield b""
+
+
 def test_the_transport_client_never_follows_a_redirect() -> None:
     factory = build_http_client_factory()
 
     client = factory({"Authorization": "Bearer server-secret"}, None, None)
 
     assert client.follow_redirects is False
+    assert client.headers["Accept-Encoding"] == "identity"
 
 
 @pytest.mark.asyncio
@@ -51,14 +70,6 @@ async def test_a_redirect_forwards_neither_credentials_nor_call_data() -> None:
     assert seen[0].url.host == "mcp.example.com"
 
 
-class _UnreadableStream(httpx.AsyncByteStream):
-    """A body that fails the test if anything reads it."""
-
-    async def __aiter__(self):  # type: ignore[no-untyped-def]
-        raise AssertionError("the oversized body was read")
-        yield b""
-
-
 @pytest.mark.asyncio
 async def test_an_oversized_content_length_is_refused_before_the_body_is_read() -> None:
     response = httpx.Response(
@@ -73,18 +84,43 @@ async def test_an_oversized_content_length_is_refused_before_the_body_is_read() 
 
 @pytest.mark.asyncio
 async def test_a_response_within_the_ceiling_is_allowed_through() -> None:
-    response = httpx.Response(200, headers={"content-length": "10"})
+    response = httpx.Response(200, headers={"content-length": "2"}, stream=_ChunkedStream([b"ok"]))
 
     # Returning at all is the assertion: the hook refuses by raising.
     await enforce_content_length(response)
+    assert await response.aread() == b"ok"
 
 
 @pytest.mark.asyncio
-async def test_a_missing_content_length_is_left_to_the_post_decode_measurement() -> None:
-    """A chunked or SSE response carries no length, and is bounded after decoding."""
-    response = httpx.Response(200, headers={"transfer-encoding": "chunked"})
+async def test_a_chunked_response_is_refused_while_streaming_past_the_ceiling() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"transfer-encoding": "chunked"},
+            stream=_ChunkedStream([b"x" * TRANSPORT_MAX_BYTES, b"x"]),
+        )
 
-    await enforce_content_length(response)
+    client = build_http_client_factory()()
+    client._transport = httpx.MockTransport(handler)  # noqa: SLF001
+    async with client:
+        with pytest.raises(TransportResponseTooLarge):
+            await client.get("https://mcp.example.com/mcp")
+
+
+@pytest.mark.asyncio
+async def test_a_compressed_response_is_refused_before_the_body_is_read() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-length": "10"},
+            stream=_UnreadableStream(),
+        )
+
+    client = build_http_client_factory()()
+    client._transport = httpx.MockTransport(handler)  # noqa: SLF001
+    async with client:
+        with pytest.raises(TransportResponseTooLarge):
+            await client.get("https://mcp.example.com/mcp")
 
 
 def test_a_result_within_the_ceiling_passes_the_post_decode_measurement() -> None:

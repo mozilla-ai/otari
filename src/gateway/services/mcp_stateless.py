@@ -82,13 +82,9 @@ DISCOVERY_MAX_EXAMINED = 1000
 DISCOVERY_MAX_TOOLS = 200
 DISCOVERY_RESPONSE_MAX_BYTES = 1024 * 1024
 
-# Transport (L-TRANSPORT-BYTES, L-RESULT-BYTES). One ceiling, enforced at the
-# two points that need no change to the MCP SDK's transport: the
-# ``Content-Length`` a well-behaved server sends, checked before the body is
-# read, and the decoded result, measured after. A chunked or SSE response
-# carries no length and the SDK buffers it before handing back a result, so in
-# the first version that case is bounded by the call and total deadlines rather
-# than mid-stream (R-TRANSPORT-1).
+# Transport (L-TRANSPORT-BYTES, L-RESULT-BYTES). Compressed responses are
+# refused before reading, and uncompressed response streams are counted as
+# they are consumed, including chunked JSON and SSE (R-TRANSPORT-1).
 TRANSPORT_MAX_BYTES = 1024 * 1024
 RESULT_MAX_BYTES = 1024 * 1024
 
@@ -323,25 +319,50 @@ def arguments_within_bounds(arguments: dict[str, Any]) -> bool:
 
 
 async def enforce_content_length(response: httpx.Response) -> None:
-    """Refuse an oversized response before its body is read.
+    """Install the decoded response ceiling before the body is read.
 
     Registered as an httpx response event hook, which runs with the headers
-    available and the body still unread, so a server declaring a gigabyte never
-    gets to send one.
-
-    A response with no ``Content-Length`` passes here and is caught by the
-    post-decode measurement instead; that is the documented shape of this bound
-    (R-TRANSPORT-1), not an oversight.
+    available and the body still unread. Compression is refused because one
+    encoded chunk can expand beyond the ceiling before a decoded-byte counter
+    can inspect it. Identity-encoded streams are wrapped so missing or dishonest
+    ``Content-Length`` values cannot bypass the limit.
     """
-    declared = response.headers.get("content-length")
-    if declared is None:
-        return
-    try:
-        length = int(declared)
-    except ValueError:
-        return
-    if length > TRANSPORT_MAX_BYTES:
+    content_encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if content_encoding not in {"", "identity"}:
         raise TransportResponseTooLarge
+
+    declared = response.headers.get("content-length")
+    if declared is not None:
+        try:
+            length = int(declared)
+        except ValueError:
+            pass
+        else:
+            if length > TRANSPORT_MAX_BYTES:
+                raise TransportResponseTooLarge
+
+    if not isinstance(response.stream, httpx.AsyncByteStream):  # pragma: no cover - async client invariant
+        raise TypeError("Expected an asynchronous HTTP response stream")
+    response.stream = _BoundedResponseStream(response.stream, TRANSPORT_MAX_BYTES)
+
+
+class _BoundedResponseStream(httpx.AsyncByteStream):
+    """Count response bytes while preserving streaming and close behavior."""
+
+    def __init__(self, stream: httpx.AsyncByteStream, ceiling: int) -> None:
+        self._stream = stream
+        self._ceiling = ceiling
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        consumed = 0
+        async for chunk in self._stream:
+            consumed += len(chunk)
+            if consumed > self._ceiling:
+                raise TransportResponseTooLarge
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
 
 
 def build_http_client_factory() -> Callable[..., httpx.AsyncClient]:
@@ -359,13 +380,14 @@ def build_http_client_factory() -> Callable[..., httpx.AsyncClient]:
         timeout: httpx.Timeout | None = None,
         auth: httpx.Auth | None = None,
     ) -> httpx.AsyncClient:
+        client_headers = dict(headers or {})
+        client_headers["Accept-Encoding"] = "identity"
         kwargs: dict[str, Any] = {
             "follow_redirects": False,
             "timeout": timeout if timeout is not None else httpx.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),
             "event_hooks": {"response": [enforce_content_length]},
+            "headers": client_headers,
         }
-        if headers is not None:
-            kwargs["headers"] = headers
         if auth is not None:
             kwargs["auth"] = auth
         return httpx.AsyncClient(**kwargs)
@@ -381,6 +403,15 @@ def result_exceeds_bound(result: CallToolResult) -> bool:
     back.
     """
     return _oversized(result, RESULT_MAX_BYTES)
+
+
+def discovery_response_exceeds_bound(response: Any) -> bool:
+    """Whether the complete serialized discovery response exceeds its ceiling."""
+    try:
+        value = response.model_dump(mode="json") if hasattr(response, "model_dump") else response
+        return len(_encode(value)) > DISCOVERY_RESPONSE_MAX_BYTES
+    except (TypeError, ValueError):
+        return True
 
 
 class ConcurrencyGate:
@@ -473,8 +504,8 @@ async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
         McpExecutionError: with the code and status the route returns.
     """
     try:
-        async with DISCOVERY_GATE.slot():
-            async with asyncio.timeout(DISCOVERY_TOTAL_TIMEOUT_S):
+        async with asyncio.timeout(DISCOVERY_TOTAL_TIMEOUT_S):
+            async with DISCOVERY_GATE.slot():
                 return await _discover_once(server)
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None

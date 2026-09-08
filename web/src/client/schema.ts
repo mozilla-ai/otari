@@ -6991,7 +6991,7 @@ export interface components {
         };
         /**
          * McpServerConfig
-         * @description Inline MCP server configuration accepted by generation and execution requests.
+         * @description Inline MCP server configuration accepted by generation requests.
          *
          *     Streamable HTTP transport. The `url` must be reachable from the gateway process.
          *

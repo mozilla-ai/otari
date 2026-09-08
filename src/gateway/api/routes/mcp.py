@@ -84,6 +84,7 @@ from gateway.services.mcp_stateless import (
     McpExecutionError,
     arguments_within_bounds,
     discover_stored_tools,
+    discovery_response_exceeds_bound,
     execute_stored_tool,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
@@ -499,7 +500,10 @@ async def list_mcp_tools(
     if server.allowed_tools == []:
         # An operator's explicit deny-all is a complete answer already, so this
         # opens no connection at all (R-RES-4).
-        return McpToolsResponse(server_id=server.id, server_revision=server.revision, tools=[], warnings=[])
+        response = McpToolsResponse(server_id=server.id, server_revision=server.revision, tools=[], warnings=[])
+        if discovery_response_exceeds_bound(response):  # pragma: no cover - fixed-size response
+            raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+        return response
 
     await release_session(db)
     await _require_safe_url(server)
@@ -518,15 +522,7 @@ async def list_mcp_tools(
         )
         raise
 
-    logger.info(
-        "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
-        getattr(raw_request.state, "otari_request_id", "-"),
-        mcp_server_id,
-        len(catalog.tools),
-        len(catalog.warnings),
-        (time.monotonic() - started) * 1000,
-    )
-    return McpToolsResponse(
+    response = McpToolsResponse(
         server_id=server.id,
         server_revision=server.revision,
         tools=[
@@ -542,6 +538,17 @@ async def list_mcp_tools(
         ],
         warnings=[McpToolWarning(tool_name=name, code=code) for name, code in catalog.warnings],
     )
+    if discovery_response_exceeds_bound(response):
+        raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+    logger.info(
+        "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
+        getattr(raw_request.state, "otari_request_id", "-"),
+        mcp_server_id,
+        len(catalog.tools),
+        len(catalog.warnings),
+        (time.monotonic() - started) * 1000,
+    )
+    return response
 
 
 @router.post(
@@ -583,22 +590,8 @@ async def execute_mcp_tool(
     retries for it, including on connection resets and 5xx responses.
     """
     started = time.monotonic()
-    principal = await _authenticate(raw_request, db, config)
-    server = await _resolve_server(principal, db, config, request.mcp_server_id)
-    _require_allowed(server, request.tool_name)
-    if request.server_revision != server.revision:
-        # In memory, over the resolution both modes already needed, so this
-        # costs no database, platform or MCP round trip (R-RES-2).
-        raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)
-
-    # Before DNS, before the concurrency wait, and before any MCP network I/O:
-    # a pooled connection must not be pinned for the length of a remote call.
-    await release_session(db)
-    await _require_safe_url(server)
-    track_request(raw_request, endpoint=EXECUTE_ENDPOINT, model=EXECUTE_LABEL)
-
     dispatched = False
-    timings: dict[str, float] = {"resolve_ms": (time.monotonic() - started) * 1000}
+    timings: dict[str, float] = {}
 
     def mark_dispatched() -> None:
         nonlocal dispatched
@@ -606,6 +599,21 @@ async def execute_mcp_tool(
 
     try:
         async with asyncio.timeout(mcp_stateless.EXECUTION_TOTAL_TIMEOUT_S):
+            principal = await _authenticate(raw_request, db, config)
+            server = await _resolve_server(principal, db, config, request.mcp_server_id)
+            _require_allowed(server, request.tool_name)
+            if request.server_revision != server.revision:
+                # In memory, over the resolution both modes already needed, so this
+                # costs no database, platform or MCP round trip (R-RES-2).
+                raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)
+
+            # Before DNS, before the concurrency wait, and before any MCP network I/O:
+            # a pooled connection must not be pinned for the length of a remote call.
+            await release_session(db)
+            await _require_safe_url(server)
+            timings["resolve_ms"] = (time.monotonic() - started) * 1000
+            track_request(raw_request, endpoint=EXECUTE_ENDPOINT, model=EXECUTE_LABEL)
+
             result = await execute_stored_tool(
                 server,
                 request.tool_name,

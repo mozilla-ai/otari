@@ -21,6 +21,7 @@ from mcp.types import Tool as MCPTool
 
 from gateway.api.deps import reset_config
 from gateway.api.routes import _platform as platform_module
+from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -209,6 +210,26 @@ def test_an_unusable_descriptor_is_omitted_and_labeled(
     assert [tool["name"] for tool in response.json()["tools"]] == ["create_issue"]
     assert response.json()["warnings"] == [{"tool_name": "broken", "code": "mcp_tool_schema_unsupported"}]
     assert "attacker.example.com" not in response.text
+
+
+def test_the_response_ceiling_includes_warnings_and_envelope(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def oversized_catalog(*args: Any, **kwargs: Any) -> mcp_stateless.DiscoveredCatalog:
+        return mcp_stateless.DiscoveredCatalog(
+            tools=[],
+            warnings=[("x" * mcp_stateless.DISCOVERY_RESPONSE_MAX_BYTES, "mcp_tool_schema_unsupported")],
+        )
+
+    monkeypatch.setattr(mcp_route, "discover_stored_tools", oversized_catalog)
+
+    response = client.get(TOOLS_PATH, headers=USER_AUTH)
+
+    assert response.status_code == 502, response.text
+    assert response.json()["code"] == "mcp_discovery_limit_exceeded"
 
 
 def test_an_unknown_schema_keyword_survives_the_round_trip(

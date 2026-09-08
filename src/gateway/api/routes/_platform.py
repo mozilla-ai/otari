@@ -556,7 +556,13 @@ async def _post_resolve(
         ) from None
 
     if response.status_code == 200:
-        return response.json()
+        try:
+            return response.json()
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Authorization service unavailable",
+            ) from None
 
     if response.status_code in {400, 401, 402, 403, 404, 429}:
         detail = _safe_detail_from_platform(response, client_error_detail)

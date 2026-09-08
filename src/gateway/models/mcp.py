@@ -27,7 +27,7 @@ REVISION_LENGTH = 32
 
 
 class McpServerConfig(BaseModel):
-    """Inline MCP server configuration accepted by generation and execution requests.
+    """Inline MCP server configuration accepted by generation requests.
 
     Streamable HTTP transport. The `url` must be reachable from the gateway process.
 

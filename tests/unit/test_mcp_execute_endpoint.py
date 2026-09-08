@@ -93,6 +93,7 @@ class _Platform:
     def __init__(self) -> None:
         self.servers: list[dict[str, Any]] | None = [_stored().model_dump(mode="json")]
         self.status_code = 200
+        self.malformed_json = False
         self.bodies: list[dict[str, Any]] = []
         self.retry_after: str | None = None
         self.delay_s = 0.0
@@ -109,6 +110,8 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
         await asyncio.sleep(fake.delay_s)
         fake.bodies.append(body)
         response_headers = {"Retry-After": fake.retry_after} if fake.retry_after else None
+        if fake.malformed_json:
+            return httpx.Response(fake.status_code, content=b"{")
         return httpx.Response(fake.status_code, json=fake.payload(), headers=response_headers)
 
     monkeypatch.setattr(platform_module, "_post_platform", post)
@@ -372,6 +375,20 @@ def test_multiple_resolver_entries_are_a_resolution_failure(
     assert session.calls == []
 
 
+def test_a_malformed_successful_resolver_response_is_a_resolution_failure(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+) -> None:
+    platform.malformed_json = True
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 502, response.text
+    assert _error(response)["code"] == "mcp_resolution_failed"
+    assert session.calls == []
+
+
 def test_the_platforms_rate_limit_is_preserved(
     client: TestClient,
     platform: _Platform,
@@ -534,6 +551,26 @@ def test_a_deadline_after_dispatch_is_an_unknown_outcome(
 
     assert response.status_code == 504, response.text
     assert _error(response)["execution_state"] == "outcome_unknown"
+
+
+def test_the_total_deadline_includes_platform_resolution(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_stateless, "EXECUTION_TOTAL_TIMEOUT_S", 0.01)
+    platform.delay_s = 10
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 502, response.text
+    assert _error(response) == {
+        "detail": "MCP server connection failed",
+        "code": "mcp_connection_failed",
+        "execution_state": "not_started",
+    }
+    assert session.calls == []
 
 
 def test_an_oversized_result_is_an_unknown_outcome(

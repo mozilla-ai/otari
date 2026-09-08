@@ -270,13 +270,12 @@ Gateway-owned ceilings, not caller-controlled request fields:
 Discovery and execution hold separate concurrency ceilings, so slow or hostile
 discovery cannot starve calls an application has already authorized.
 
-The 1 MiB transport ceiling is enforced at two points: a `Content-Length`
-pre-check that refuses an oversized response before its body is read, and a
-measurement of the decoded result. It is **not** a streaming bound. A chunked or
-SSE response carries no `Content-Length`, and the MCP SDK's Streamable HTTP
-transport buffers a JSON response before returning a result, so that case is
-bounded by the call and total deadlines and by your deployment's HTTP timeouts
-until a streaming-bounded transport lands.
+The 1 MiB transport ceiling is enforced while each response stream is read, so
+chunked JSON and SSE responses cannot bypass it by omitting `Content-Length`.
+Otari requests identity encoding and refuses compressed responses before
+reading their bodies, preventing a small encoded response from expanding past
+the ceiling during decompression. The decoded MCP result is measured again
+before it is returned.
 
 Redirects are disabled. Otari returns a redirect response rather than following
 it, so no credential and no call data is ever sent to a redirect destination.
