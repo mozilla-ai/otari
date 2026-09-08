@@ -4,6 +4,19 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.5.1](https://github.com/mozilla-ai/otari/releases/tag/v0.5.1) - 2026-09-08
+
+
+
+### Bug Fixes
+
+- **a11y:** Stop sidebar nav disclosures from emitting document headings in [#951](https://github.com/mozilla-ai/otari/pull/951) by [@AloysJehwin](https://github.com/AloysJehwin) ([`8722739`](https://github.com/mozilla-ai/otari/commit/87227391fb2b1114611dcdfe6319aa5e02d143a6))
+- **lint:** Strip block comments before matching arbitrary font-size rule in [#941](https://github.com/mozilla-ai/otari/pull/941) by [@AloysJehwin](https://github.com/AloysJehwin) ([`3146bea`](https://github.com/mozilla-ai/otari/commit/3146bea94de73004d5facca3f82d15359783870c))
+- **settings:** Prevent database_url value from overflowing Settings card in [#943](https://github.com/mozilla-ai/otari/pull/943) by [@AloysJehwin](https://github.com/AloysJehwin) ([`83d4c24`](https://github.com/mozilla-ai/otari/commit/83d4c2410ef5068835e396224b9cd794028ecb0d))
+- **gateway:** Let the platform health probe reach a route outside base_url's own path in [#964](https://github.com/mozilla-ai/otari/pull/964) by [@macaab26](https://github.com/macaab26) ([`2e0f885`](https://github.com/mozilla-ai/otari/commit/2e0f88501011c48de112b576d0c09dd44c1b8e12))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.5.0...v0.5.1
 ## [0.5.0](https://github.com/mozilla-ai/otari/releases/tag/v0.5.0) - 2026-09-08
 
 
