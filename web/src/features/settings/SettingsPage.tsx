@@ -4,22 +4,21 @@ import type { ConfigField, UpdateSettingsRequest } from "@/client"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { Toggle } from "@/features/settings/Toggle"
+import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useReencryptProviderCredentials,
-  useRotateMasterKey,
-  useSettings,
   useStoredProviders,
-  useUpdateSettings,
-} from "@/shared/api/hooks"
-import { PageIntro, SettingsGroup, Toolbar } from "@/shared/components/surface"
-import {
-  Checkbox,
-  ErrorBanner,
-  FilterSelect,
-  INPUT_CLASS,
-  InfoBanner,
-  PageLoading,
-} from "@/shared/components/ui"
+} from "@/shared/api/providers"
+import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Checkbox } from "@/shared/components/forms/Checkbox"
+import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
+import { Toolbar } from "@/shared/components/layout/Toolbar"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.

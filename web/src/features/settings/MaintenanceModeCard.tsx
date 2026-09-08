@@ -1,6 +1,10 @@
-import { useMaintenanceMode, useSetMaintenanceMode } from "@/shared/api/hooks"
-import { SettingsGroup } from "@/shared/components/surface"
-import { ErrorBanner, PageLoading } from "@/shared/components/ui"
+import {
+  useMaintenanceMode,
+  useSetMaintenanceMode,
+} from "@/shared/api/settings"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
 
 import { Toggle } from "./Toggle"
 

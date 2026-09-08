@@ -37,19 +37,38 @@ Every example in these files omits its imports. Here they are once. The alias is
 `@/`, mapped to `web/src/`, and every export is named. **There is no barrel:** import
 from the module, not from `@/shared/components`.
 
+**A component directory is named for the topic file that documents it**, so the
+table below is the topic list with `@/shared/components/` in front of it. One
+component per module, named for the file; where a module carries a second export
+it is because the two are useless apart (a component and the lane it sits in, a
+classifier and the meter that reads it).
+
 | Module | Exports you will reach for |
 | --- | --- |
 | `@heroui/react` | `Button`, `Select`, `Tooltip`, `Spinner`, and the rest of HeroUI v3 |
-| `@/shared/components/surface` | `Section`, `PageIntro`, `SettingsGroup`, `Toolbar`, `KpiStrip`, `KpiCell`, `SeverityMark`, `Meter`, `SpendMeter`, `spendState`, `Tab`, `TabRow`, `Segmented`, `RowAction`, `RowActionRow`, `ConfirmRowAction`, `DismissChip`, `Dot`, `EmptyMessage`, `TableScrollFrame` |
-| `@/shared/components/ui` | `ConfirmButton`, `InfoBanner`, `ErrorBanner`, `EmptyState`, `PageLoading`, `Checkbox`, `CopyField`, `CopyButton`, `CopyableValue`, `RefreshButton`, `Badge`, `FilterSelect`, `FilterMultiComboBox`, `errorMessage` |
-| `@/shared/components/DataTable` | `DataTable`, and the `DataTableColumn` type |
-| `@/shared/components/Field` · `/SecretField` | `Field` · `SecretField` |
-| `@/shared/components/TablePagination` | `TablePagination`, `PAGE_SIZE_OPTIONS` |
-| `@/shared/components/BulkActionBar` | `BulkActionBar` |
-| `@/shared/components/FilterChips` | `FilterChips`, and the `FilterChip` type |
-| `@/shared/components/TrendChip` | `TrendChip`, `trendState` |
-| `@/shared/components/charts` | `TrendChart`, `Sparkline`, `ChartLegend`, and the `SeriesDef` / `StackedPoint` types |
-| `@/shared/components/ConfirmDialog` | `ConfirmDialog` |
+| `layout/Section` · `/PageIntro` · `/SettingsGroup` · `/Toolbar` · `/TableScrollFrame` | one component each, named for its file |
+| `metrics/KpiStrip` · `/KpiCell` · `/Meter` | one each |
+| `metrics/SpendMeter` | `SpendMeter`, `spendState`, and the `SpendState` type |
+| `metrics/SeverityMark` | `SeverityMark`, and the `Severity` type |
+| `metrics/TrendChip` | `TrendChip`, `trendState`, and the `Trend*` types |
+| `metrics/charts` | `TrendChart`, `Sparkline`, `ChartLegend`, and the `SeriesDef` / `StackedPoint` types |
+| `feedback/ErrorBanner` · `/InfoBanner` · `/EmptyState` · `/EmptyMessage` · `/PageLoading` · `/ConfirmDialog` · `/errorMessage` | one each |
+| `forms/Field` · `/SecretField` | `Field` · `SecretField` |
+| `forms/FieldMessages` | `FieldMessages`, `ControlField` |
+| `forms/Checkbox` | `Checkbox`, `CheckboxVisual` |
+| `forms/inputClass` | `INPUT_CLASS` |
+| `actions/ConfirmButton` · `/RefreshButton` · `/CopyButton` | one each |
+| `actions/CopyField` | `CopyField`, `CopyableValue` |
+| `actions/RowAction` | `RowAction`, `RowActionRow` |
+| `actions/ConfirmRowAction` | `ConfirmRowAction` |
+| `data/DataTable` | `DataTable`, and the `DataTableColumn` type |
+| `data/TablePagination` | `TablePagination`, `PAGE_SIZE_OPTIONS` |
+| `data/BulkActionBar` | `BulkActionBar` |
+| `navigation/TabRow` | `TabRow`, `Tab` |
+| `navigation/Segmented` · `/FilterSelect` · `/FilterMultiComboBox` | one each |
+| `navigation/FilterChips` | `FilterChips`, and the `FilterChip` type |
+| `indicators/Dot` · `/Badge` · `/DismissChip` | one each |
+| `access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | one each |
 | `@/features/settings/Toggle` | `Toggle` |
 | `@/shared/helpers/format` | `formatUsd`, `formatUsdHeadline`, `formatNumber`, `formatTokens`, `formatPct`, `formatDate`, `formatDateTime`, `formatRelative`, `deltaFraction` |
 
@@ -66,7 +85,8 @@ A page component is a named export matching its filename. Icons come from
 How a screen gets its data. A guess there will be wrong:
 
 - Fetching, caching, mutations: the TanStack Query hooks in
-  `web/src/shared/api/hooks.ts`. Never a raw `fetch`.
+  `web/src/shared/api/`, one module per domain (`usage.ts`, `apiKeys.ts`,
+  `organizations.ts`, …). Never a raw `fetch`.
 - Filter and page state that must survive a reload: `web/src/shared/helpers/urlState.ts`,
   not `useState`.
 - Routing, and adding a rail destination: `web/src/routes/` and the nav registry.
@@ -82,7 +102,7 @@ and [web/AGENTS.md](../AGENTS.md).
 | [colors.md](colors.md) | Surfaces, text ramp, borders, the accent's five jobs, status, chart slots |
 | [typography.md](typography.md) | The 12 type roles, the ladder rule, the three families |
 | [layout.md](layout.md) | Bands, the bleed rule, `Section`, `PageIntro`, `SettingsGroup`, page recipes |
-| [buttons.md](buttons.md) | The three variants, sizes, places, icon-only, two-step confirm |
+| [actions.md](actions.md) | The three button variants, sizes, places, icon-only, the two-step confirm, and the other action shapes (`RowAction`, `RefreshButton`, `CopyButton`) |
 | [forms.md](forms.md) | `Field`, `SecretField`, `Toggle`, `Checkbox`, selects, validation timing |
 | [data.md](data.md) | `DataTable`, pagination, bulk actions |
 | [metrics.md](metrics.md) | KPI strip, trends, meters, status marks, charts |
@@ -98,10 +118,30 @@ artboards (foundations, components with every state, page archetypes).
 The redesign is not uniformly converted. These are still in the tree with live
 call sites, and reaching for one puts a card back on a flat page.
 
+**Ours live in `shared/components/deprecated/`**, which is what makes this
+mechanical rather than a rule somebody has to remember: the specifier says it at
+the call site, and `deprecated/deprecated.test.ts` fails on a call site that is
+not already in its list, naming what to use instead.
+
 | Do not use | Use instead | Still in |
 | --- | --- | --- |
-| `PageHeader` (`shared/components/ui.tsx`) | `PageIntro` (`shared/components/surface.tsx`) | 4 pages |
-| `StatCard` (`shared/components/ui.tsx`) | `KpiStrip` + `KpiCell` | Overview, Usage |
+| `deprecated/PageHeader` | `layout/PageIntro` | 4 pages, one use each |
+| `deprecated/StatCard` | `metrics/KpiStrip` + `KpiCell` | Overview only, 4 uses |
+| `deprecated/RowActions` | `actions/RowActionRow` | 1 use, in `PasskeysCard` |
+| `deprecated/SettingsSection` | `layout/SettingsGroup` | **nothing. Dead code** |
 | HeroUI `Card` | `Section`, or a bare band | 6 components |
+
+The counts are the tree's, not this table's memory of it: the gate test derives
+them, which is how the previous two were found to have drifted (`StatCard` was
+listed on Usage after Usage stopped using it, and `RowActions` on two call sites
+when it had one).
+
+`SettingsSection` is the row to act on: it has no call site anywhere, and it
+shadowed `layout/SettingsGroup` while diverging from this tree's
+`export function` convention. It is a deletion waiting for a maintainer rather
+than a migration.
+
+HeroUI `Card` is the one row with no module of ours behind it, so it stays a
+review note rather than a gate.
 
 Converting a remaining call site is welcome. Adding a new one is a review block.

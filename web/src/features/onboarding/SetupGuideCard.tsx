@@ -11,11 +11,13 @@ import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
   useCreateActivationKey,
   useDismissActivation,
-  useModels,
   useWorkspaceActivation,
-} from "@/shared/api/hooks"
-import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
-import { CopyField, ErrorBanner, InfoBanner } from "@/shared/components/ui"
+} from "@/shared/api/activation"
+import { useModels } from "@/shared/api/models"
+import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
+import { CopyField } from "@/shared/components/actions/CopyField"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,

@@ -8,21 +8,24 @@ import { currentPricing } from "@/features/models/pricing"
 // the tenancy feature keeps owning them.
 import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { isDeploymentOperator } from "@/features/organization/roles"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useConfirmPricingRefresh,
-  useOrganizationContext,
   usePreviewPricingRefresh,
   usePricing,
   useRejectPricingRefresh,
-  useSettings,
-} from "@/shared/api/hooks"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+} from "@/shared/api/pricing"
+import { useSettings } from "@/shared/api/settings"
 import {
-  PageIntro,
-  Section,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import { ErrorBanner, InfoBanner, PageLoading } from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 
 // The organization's model pricing: what the gateway meters a request at, and

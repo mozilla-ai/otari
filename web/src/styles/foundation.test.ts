@@ -852,7 +852,10 @@ describe("content text wears a type role", () => {
       "features/overview/OverviewPage.tsx",
       "an error-count figure and a chart's figcaption",
     ],
-    ["shared/components/surface.tsx", "the KPI cell's severity and delta line"],
+    [
+      "shared/components/metrics/KpiCell.tsx",
+      "the KPI cell's severity and delta line",
+    ],
     [
       "features/organization/OrganizationMembersPage.tsx",
       "a table head row, an empty state, and fieldset prose",
@@ -1126,7 +1129,7 @@ describe("the phone viewport's touch-target floor", () => {
   })
 })
 
-// Form controls. The shared `Checkbox` (`shared/components/ui.tsx`) is the one
+// Form controls. The shared `Checkbox` (`shared/components/forms/Checkbox.tsx`) is the one
 // on the tokens, and a bare `<input type="checkbox">` is the browser's own:
 // system blue in both themes, and a 13px box on a page whose smallest touch
 // target is meant to be 44.

@@ -8,11 +8,14 @@ import {
   useOrganizationBudgets,
   useOrganizationSpendCeilings,
   useUpdateOrganizationSpendCeiling,
-  useWorkspaces,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { ErrorBanner } from "@/shared/components/ui"
+} from "@/shared/api/budgets"
+import { useWorkspaces } from "@/shared/api/workspaces"
+import {
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { formatDate, formatUsd } from "@/shared/helpers/format"
 
 import { limitLabel, periodLabel, scopeLabel } from "./organizationBudget"

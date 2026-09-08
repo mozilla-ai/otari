@@ -17,9 +17,11 @@ import {
   useRemoveWorkspaceMember,
   useUpdateWorkspaceMemberRole,
   useWorkspaceMembers,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { ErrorBanner, FilterSelect, InfoBanner } from "@/shared/components/ui"
+} from "@/shared/api/workspaces"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // A workspace's roster, shared by the two places one is shown: expanded inside
 // a row on the Workspaces page, and as the whole of the Members page in the

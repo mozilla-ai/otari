@@ -17,7 +17,7 @@
 import { useMemo } from "react"
 
 import { isDeploymentOperator } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 

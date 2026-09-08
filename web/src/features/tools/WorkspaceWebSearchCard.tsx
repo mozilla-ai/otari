@@ -2,20 +2,19 @@ import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import { canManageWorkspace } from "@/features/organization/roles"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
-  useOrganizationContext,
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
-} from "@/shared/api/hooks"
-import { Field } from "@/shared/components/Field"
-import { Dot, Section } from "@/shared/components/surface"
-import {
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  InfoBanner,
-} from "@/shared/components/ui"
+} from "@/shared/api/tools"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Field } from "@/shared/components/forms/Field"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { Section } from "@/shared/components/layout/Section"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The layer above the deployment-wide web-search settings this card sits under:

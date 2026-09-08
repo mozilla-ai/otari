@@ -14,7 +14,7 @@ import {
 
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   THEME_PREFERENCES,

@@ -7,22 +7,23 @@ import {
   McpServerDialog,
   type McpServerDraft,
 } from "@/features/tools/McpServerDialog"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
-  useOrganizationContext,
   useUpdateWorkspaceMcpServer,
   useWorkspaceMcpServers,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+} from "@/shared/api/tools"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import {
-  Dot,
-  RowAction,
-  RowActionRow,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The MCP servers this workspace has registered, which a request reaches by

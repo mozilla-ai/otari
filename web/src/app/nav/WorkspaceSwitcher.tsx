@@ -10,9 +10,9 @@ import {
   useOrganizationMemberships,
   usePendingOrganizationInvitations,
   useSwitchOrganization,
-} from "@/shared/api/hooks"
+} from "@/shared/api/organizations"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { ProductMark } from "@/shared/components/ProductMark"
-import { ErrorBanner } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
 

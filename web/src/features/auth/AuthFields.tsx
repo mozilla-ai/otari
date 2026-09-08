@@ -1,5 +1,5 @@
 import { Description, Input, Label, TextField } from "@heroui/react"
-import { FieldMessages } from "@/shared/components/FieldMessages"
+import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 
 /**
  * The three fields the pages in front of a session are built from.

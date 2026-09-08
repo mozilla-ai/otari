@@ -16,7 +16,7 @@ wrong here.
 | Button intent | `color="danger"` | `variant="danger"` |
 | Disabled | `isLoading` for disabled | `isDisabled` / `isPending` |
 
-Real example from `shared/components/ui.tsx`:
+Real example from `shared/components/deprecated/StatCard.tsx`:
 
 ```tsx
 import { Button, Card } from "@heroui/react";
@@ -144,34 +144,36 @@ value, so a reader can tell a deliberate last resort from a shortcut.
 
 ## Check the shared primitives before hand-rolling
 
-`shared/components/ui/` is the rehomed design foundation's primitive directory and is where a
-new primitive goes. It holds `SettingsSection` (a settings page section's header + body) and
-`RowActions` (a table row's trailing button cluster) so far.
+`shared/components/` is a directory per design topic (`layout/`, `metrics/`, `feedback/`,
+`forms/`, `actions/`, `data/`, `navigation/`, `indicators/`, `access/`), named after the topic
+file in `web/design/` that documents each one, plus `deprecated/` for the four that must not
+be used in new code. A new primitive is a file of its own in the topic it belongs to.
+`web/design/DESIGN.md` maps every export to its module.
 
-Everything in the table below lives one level up, in `shared/components/`. These are
-hand-rolled rather than rehomed (they predate the foundation and have no otari-ai
-counterpart), but they are on the semantic tokens like everything else, so reuse them rather
+The table below gives each need its module. These are hand-rolled rather than rehomed (they
+predate the foundation and have no otari-ai counterpart), but they are on the semantic tokens
+like everything else, so reuse them rather
 than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 
 | Need | Use |
 |---|---|
-| Labeled metric tile | `StatCard` |
-| Error alert from an unknown thrown value | `ErrorBanner` (pairs with `errorMessage(error)`) |
-| Info/warning callout | `InfoBanner` (`tone="info" \| "warning"`) |
-| Page title + description + action | `PageHeader` |
-| Destructive action without a modal | `ConfirmButton` (two-click arm/confirm) |
-| Filter over a small fixed option set | `FilterSelect` (a HeroUI `Select`: the list is a popover anchored under the trigger) |
-| Filter over a large or open option set | `FilterMultiComboBox` (type-to-filter, holds a set of values; `allowsCustom` when the value space is not enumerable) |
-| Applied filters, each removable | `FilterChips` (`shared/components/FilterChips.tsx`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
-| Form field wrapper | `Field` (`shared/components/Field.tsx`) |
-| Tabular data | `DataTable` (`shared/components/DataTable.tsx`) |
-| What stands where a request snippet would be, when the deployment named no gateway | `MissingGatewayAddressNotice` (`shared/components/MissingGatewayAddressNotice.tsx`); pairs with `resolveSnippetBaseUrl` answering `undefined` |
-| Settings page section (header + body) | `SettingsSection` (`shared/components/ui/`, rehomed) |
-| Table row's trailing icon-button cluster | `RowActions` (`shared/components/ui/`, rehomed) |
+| Labeled metric tile | `KpiStrip` + `KpiCell` (`metrics/`). **Not** `StatCard`, which is in `deprecated/` |
+| Error alert from an unknown thrown value | `ErrorBanner` (`feedback/`; pairs with `errorMessage(error)` from `feedback/errorMessage`) |
+| Info/warning callout | `InfoBanner` (`feedback/`; `tone="info" \| "warning"`) |
+| Page title + description + action | `PageIntro` (`layout/`). **Not** `PageHeader`, which is in `deprecated/` |
+| Destructive action without a modal | `ConfirmButton` (`actions/`; two-click arm/confirm), or `ConfirmRowAction` inside a table row |
+| Filter over a small fixed option set | `FilterSelect` (`navigation/`; a HeroUI `Select`, so the list is a popover anchored under the trigger) |
+| Filter over a large or open option set | `FilterMultiComboBox` (`navigation/`; type-to-filter, holds a set of values; `allowsCustom` when the value space is not enumerable) |
+| Applied filters, each removable | `FilterChips` (`navigation/`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
+| Form field wrapper | `Field` (`forms/`), or `SecretField` for a credential |
+| Tabular data | `DataTable` (`data/`), with `TablePagination` and `BulkActionBar` beside it |
+| What stands where a request snippet would be, when the deployment named no gateway | `MissingGatewayAddressNotice` (`access/`); pairs with `resolveSnippetBaseUrl` answering `undefined` |
+| Settings page section (header + body) | `SettingsGroup` (`layout/`). **Not** `SettingsSection`, which is in `deprecated/` and has no call site left |
+| Table row's trailing icon-button cluster | `RowActionRow` (`actions/`). **Not** `RowActions`, which is in `deprecated/` |
 
 ### The divided surface's own vocabulary
 
-`shared/components/surface.tsx` holds the pieces the pages are built from. They are here rather
+The topic directories under `shared/components/` hold the pieces the pages are built from. They are there rather
 than in a feature because the second page to want one was the proof that it is the system
 rather than that screen's layout, and because a copy per page is how two pages come to disagree
 about what a thing is. Every one of them was extracted after the duplication had already
@@ -180,7 +182,7 @@ the page header eight times with the same arbitrary type values.
 
 | Need | Use |
 |---|---|
-| A band of the page: rules to the edge, content in the column | `Section` (or `FULL_BLEED` + `BLEED_INSET` where the band is not a `<section>`) |
+| A band of the page: rules to the edge, content in the column | `Section`, with `bleed={false}` when it is nested inside a column |
 | Page title + description + one action | `PageIntro` |
 | A heading between rules over rows on the page ground | `SettingsGroup` |
 | A row of filter controls above a table | `Toolbar` (its controls take the dense field height; see design-tokens.md) |
@@ -238,5 +240,5 @@ for genuinely external destinations (documentation, otari.ai).
   widths for anything that should reflow (`min-w-[11.25rem]` on a wrapping stat card is fine:
   it is a floor, not a fixed width).
 - One component per file for pages and standalone components, colocated with its test.
-  `shared/components/ui.tsx` is the one place several closely related primitives share a
-  file; a new primitive under `shared/components/ui/` gets its own.
+  That holds for the shared primitives too: a new one is a file of its own under the topic
+  directory it belongs to.

@@ -2,23 +2,24 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateOrganizationPricing,
   useDeleteOrganizationPricing,
-  useOrganizationContext,
   useOrganizationPricing,
   useReplaceOrganizationPricing,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+} from "@/shared/api/pricing"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import {
-  Dot,
-  RowAction,
-  RowActionRow,
-  Section,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatCost, formatDateTime } from "@/shared/helpers/format"
 import {
   PricingOverrideDialog,

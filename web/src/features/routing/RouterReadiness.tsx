@@ -1,9 +1,11 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 import { UserComboBox } from "@/features/users/UserComboBox"
-import { useRouterStatus, useUsers } from "@/shared/api/hooks"
-import { Dot, Meter } from "@/shared/components/surface"
-import { ErrorBanner } from "@/shared/components/ui"
+import { useRouterStatus } from "@/shared/api/routing"
+import { useUsers } from "@/shared/api/users"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { Meter } from "@/shared/components/metrics/Meter"
 
 /** Records against the seed count, as a bar plus the plain numbers.
  *

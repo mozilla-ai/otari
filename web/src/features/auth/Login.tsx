@@ -9,7 +9,7 @@ import {
   signInWithPasskey,
   startOAuthSignIn,
 } from "@/shared/api/client"
-import { errorMessage } from "@/shared/components/ui"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
 import {
   PasskeyCancelledError,
   supportsPasskeys,

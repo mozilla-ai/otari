@@ -1,10 +1,10 @@
 import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 
-import { useSetPassword } from "@/shared/api/hooks"
-import { FieldMessages } from "@/shared/components/FieldMessages"
-import { Section } from "@/shared/components/surface"
-import { ErrorBanner } from "@/shared/components/ui"
+import { useSetPassword } from "@/shared/api/auth"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { FieldMessages } from "@/shared/components/forms/FieldMessages"
+import { Section } from "@/shared/components/layout/Section"
 import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,

@@ -3,25 +3,23 @@ import { useEffect, useState } from "react"
 
 import type { OrganizationGuardrail, Workspace } from "@/client"
 import { canManage } from "@/features/organization/roles"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateOrganizationGuardrail,
   useDeleteOrganizationGuardrail,
-  useOrganizationContext,
   useOrganizationGuardrails,
   useUpdateOrganizationGuardrail,
-  useWorkspaces,
-} from "@/shared/api/hooks"
-import { SettingsGroup } from "@/shared/components/surface"
-import {
-  Badge,
-  Checkbox,
-  ConfirmButton,
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  INPUT_CLASS,
-  InfoBanner,
-} from "@/shared/components/ui"
+} from "@/shared/api/tools"
+import { useWorkspaces } from "@/shared/api/workspaces"
+import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Checkbox } from "@/shared/components/forms/Checkbox"
+import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
+import { Badge } from "@/shared/components/indicators/Badge"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // The layer above the deployment-wide guardrail settings this card sits under.
 // The settings above say where guardrails run; these say which ones run whether

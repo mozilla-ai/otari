@@ -12,21 +12,20 @@ import {
   useOrganizationDomains,
   useUpdateOrganizationDomain,
   useVerifyOrganizationDomain,
-} from "@/shared/api/hooks"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
+} from "@/shared/api/organizations"
+import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
+import { CopyField } from "@/shared/components/actions/CopyField"
 import {
-  PageIntro,
-  Section,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import {
-  ConfirmButton,
-  CopyField,
-  ErrorBanner,
-  FilterSelect,
-  InfoBanner,
-} from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Field } from "@/shared/components/forms/Field"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage, membershipLabel } from "./roles"

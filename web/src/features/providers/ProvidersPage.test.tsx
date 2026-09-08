@@ -14,7 +14,7 @@ import type {
   TestProviderResult,
 } from "@/client"
 import { ProvidersPage } from "@/features/providers/ProvidersPage"
-import { PROVIDER_HEALTH_REFRESH_MS } from "@/shared/api/hooks"
+import { PROVIDER_HEALTH_REFRESH_MS } from "@/shared/api/queryKeys"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 

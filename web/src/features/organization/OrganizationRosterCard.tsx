@@ -7,7 +7,10 @@ import {
   memberRowKey,
   membershipLabel,
 } from "@/features/organization/roles"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import {
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
 
 // Who belongs to the caller's organization, read-only, for a caller who is not
 // offered Organization > Members & roles: the roles matrix has the members list

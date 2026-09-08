@@ -1,7 +1,7 @@
 import { Button } from "@heroui/react"
 import { useRef, useState } from "react"
 
-import { useDashboardBuild } from "@/shared/api/hooks"
+import { useDashboardBuild } from "@/shared/api/deployment"
 
 // True once the gateway starts serving a different bundle than the one this tab
 // loaded. The comparison is against the first build this tab ever saw rather

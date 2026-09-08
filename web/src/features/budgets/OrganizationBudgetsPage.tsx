@@ -1,5 +1,5 @@
 import type { OrganizationContext } from "@/client"
-import { PageHeader } from "@/shared/components/ui"
+import { PageHeader } from "@/shared/components/deprecated/PageHeader"
 
 import { OrganizationBudgetsCard } from "./OrganizationBudgetsCard"
 import { SpendCeilingsCard } from "./SpendCeilingsCard"

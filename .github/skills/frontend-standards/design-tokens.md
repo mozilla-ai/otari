@@ -299,7 +299,7 @@ class name needs something that reads class names.
 
 - **Add a token, don't scatter a hex.** A one-off hex in a component is a second source of
   truth for a color the tokens already name; the next person can't retheme the app from one
-  place. `src/styles/foundation.test.ts` rejects one outright under `shared/components/ui/`.
+  place. `src/styles/foundation.test.ts` rejects one outright, anywhere under `web/src`.
 - **Add it to both theme blocks.** Each block owns the complete set it needs rather than
   inheriting from its sibling, so a token declared in one only falls back to the other
   theme's value, which shows up as a contrast bug pages away from the edit. The same test

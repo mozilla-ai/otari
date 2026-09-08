@@ -44,10 +44,20 @@ function* walk(dir: string): Generator<string> {
  * is being held is which prop a call site may pass unconditionally.
  */
 describe("row actions", () => {
+  it("covers the source tree", () => {
+    // A guard on the guard, in the spelling its neighbors use: both rules below
+    // assert only that an offender list is empty, so a path that resolved to
+    // the wrong directory would scan nothing and pass. The exception below
+    // names a file this change moved, which is exactly when that goes unnoticed.
+    expect([...walk(SRC)].length).toBeGreaterThan(50)
+  })
+
   it("never paint danger at rest", () => {
     const offenders: string[] = []
     for (const file of walk(SRC)) {
-      if (file.endsWith("surface.tsx")) continue
+      // `RowAction`'s own definition, which names the prop in its type, its
+      // docstring and its className ternary. The rule is about call sites.
+      if (file.endsWith(join("actions", "RowAction.tsx"))) continue
       const source = readFileSync(file, "utf8")
       for (const [index, line] of source.split("\n").entries()) {
         // A bare `isDanger` or one bound to something other than an armed

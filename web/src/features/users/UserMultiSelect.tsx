@@ -3,8 +3,8 @@ import { type ReactNode, useMemo, useState } from "react"
 
 import type { User } from "@/client"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { ControlField } from "@/shared/components/FieldMessages"
-import { DismissChip } from "@/shared/components/surface"
+import { ControlField } from "@/shared/components/forms/FieldMessages"
+import { DismissChip } from "@/shared/components/indicators/DismissChip"
 
 interface Option {
   id: string

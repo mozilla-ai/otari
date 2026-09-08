@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -2246,14 +2246,30 @@ describe("ActivityPage live traffic", () => {
       return jsonResponse([])
     })
 
-    renderPage(<ActivityPage />, "/activity?range=24h")
-    await waitFor(() => expect(liveControl()).toBeInTheDocument())
+    // The wait is jumped rather than slept through. `useInFlightRequests`
+    // declares its own `retry` (three attempts, since a 503 is a gateway
+    // restarting and worth re-asking), which overrides the harness's
+    // `retry: false`, so reaching the error arm costs the 2s poll plus
+    // TanStack's 1s/2s/4s backoffs. On real timers that was 9.1s, a third of
+    // this whole suite's wall clock in one case, and the 20s and 30s ceilings
+    // above were sized to survive it.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      renderPage(<ActivityPage />, "/activity?range=24h")
+      await waitFor(() => expect(liveControl()).toBeInTheDocument())
 
-    failing = true
-    await waitFor(() => expect(liveControl()).not.toBeInTheDocument(), {
-      timeout: 20000,
-    })
-  }, 30_000)
+      failing = true
+      // Past the poll and all three backoffs. `...Async` rather than the
+      // synchronous form because each attempt is a fetch: the awaits between
+      // timers are what let those promises settle and schedule the next one.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000 + 1_000 + 2_000 + 4_000 + 500)
+      })
+      expect(liveControl()).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it("reports live traffic gateway-wide, whatever the table is filtered to", async () => {
     // The endpoint takes no filters (a request in progress has no status, cost, or

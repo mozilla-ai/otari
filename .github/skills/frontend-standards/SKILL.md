@@ -67,7 +67,8 @@ can link Vite's esbuild binary at all.
   ships that look like ours and are not.
 - Space siblings with `gap-*` on the parent, and write arbitrary values in `rem`. See
   [responsiveness.md](./responsiveness.md).
-- Fetch server state through the TanStack Query hooks in `web/src/shared/api/hooks.ts`, guard
+- Fetch server state through the TanStack Query hooks in `web/src/shared/api/` (one module per
+  domain, with every query key in `queryKeys.ts`), guard
   on `isPending && !data`, keep the previous page with `placeholderData` on a filtered query,
   and bound every "fetch everything" walk with a hard page cap. See
   [data-fetching.md](./data-fetching.md).

@@ -1,7 +1,7 @@
 import { ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo } from "react"
 import type { DiscoverableModel } from "@/client"
-import { useDiscoverableModels } from "@/shared/api/hooks"
+import { useDiscoverableModels } from "@/shared/api/models"
 
 // How many matches to render at once. A single provider can report a few hundred
 // models, and past this the popover is a wall of text nobody scrolls; typing one

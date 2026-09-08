@@ -5,22 +5,20 @@ import {
   useDeploymentAdminAccess,
   useDeploymentUsers,
   useUpdateDeploymentUser,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+} from "@/shared/api/deployment"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import {
-  Dot,
-  PageIntro,
-  RowAction,
-  RowActionRow,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import {
-  EmptyState,
-  ErrorBanner,
-  InfoBanner,
-  PageLoading,
-} from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatRelative } from "@/shared/helpers/format"
 
 import {

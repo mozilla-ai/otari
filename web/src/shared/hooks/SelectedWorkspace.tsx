@@ -9,7 +9,7 @@ import {
 } from "react"
 
 import type { CallerWorkspaceMembership } from "@/client"
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 
 const STORAGE_KEY = "otari.dashboard.selectedWorkspace"
 

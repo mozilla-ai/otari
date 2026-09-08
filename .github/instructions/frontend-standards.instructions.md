@@ -55,7 +55,8 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    [design-tokens.md](../skills/frontend-standards/design-tokens.md).
 
 4. **Server state goes through TanStack Query + `apiFetch`.** Fetch via the hooks in
-   `web/src/shared/api/hooks.ts`; keep query keys as module constants, set a deliberate `staleTime`,
+   `web/src/shared/api/` (one module per domain); keep query keys in `shared/api/queryKeys.ts`,
+   set a deliberate `staleTime`,
    and invalidate only the keys a mutation changes. Guard with `isPending && !data` (never bare
    `isPending`, never `isLoading`) and give a filtered or paginated query
    `placeholderData: (prev) => prev`, or the page blanks on every filter change. Don't call

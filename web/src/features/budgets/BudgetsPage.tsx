@@ -13,38 +13,36 @@ import type {
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import {
-  useAllWorkspaceBudgetDefaults,
   useBudgetResetLogs,
   useBudgets,
   useCreateBudget,
   useDeleteBudget,
-  useOrganizationContext,
   useUpdateBudget,
-  useUpdateUser,
-  useUsers,
+} from "@/shared/api/budgets"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import { useUpdateUser, useUsers } from "@/shared/api/users"
+import {
+  useAllWorkspaceBudgetDefaults,
   useWorkspaces,
-} from "@/shared/api/hooks"
-import { BulkActionBar } from "@/shared/components/BulkActionBar"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
+} from "@/shared/api/workspaces"
+import { CopyableValue } from "@/shared/components/actions/CopyField"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
+import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
 import {
-  PageIntro,
-  RowAction,
-  RowActionRow,
-  Section,
-  Segmented,
-  SpendMeter,
-  spendState,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import {
-  CopyableValue,
-  EmptyState,
-  ErrorBanner,
-  InfoBanner,
-  PageLoading,
-} from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Field } from "@/shared/components/forms/Field"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
+import { SpendMeter, spendState } from "@/shared/components/metrics/SpendMeter"
+import { Segmented } from "@/shared/components/navigation/Segmented"
 import {
   resolveSelectedIds,
   useTableSelection,

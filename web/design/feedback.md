@@ -24,7 +24,7 @@ Is it loading?
  ├── The whole route -> PageLoading
  └── One section    -> the section's own isLoading, which keeps the heading
 Is the action destructive and does it need more than a second click?
- └── ConfirmDialog          (otherwise ConfirmButton; see buttons.md)
+ └── ConfirmDialog          (otherwise ConfirmButton; see actions.md)
 ```
 
 ## Signatures

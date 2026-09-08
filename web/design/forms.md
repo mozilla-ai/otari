@@ -111,5 +111,5 @@ the control.
 
 ## Buttons in a form
 
-One `primary` at the foot of the group it saves. See [buttons.md](buttons.md).
+One `primary` at the foot of the group it saves. See [actions.md](actions.md).
 Never a floating page-level Save; see [layout.md](layout.md).

@@ -7,10 +7,13 @@ import {
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
   useUpdateOrganizationBudget,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { ErrorBanner } from "@/shared/components/ui"
+} from "@/shared/api/budgets"
+import {
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import {
   OrganizationBudgetDialog,
   type OrganizationBudgetDraft,

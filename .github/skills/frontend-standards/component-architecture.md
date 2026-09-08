@@ -58,19 +58,21 @@ their markup will not stay in step.
 
 ## Check the primitives before writing one
 
-`shared/components/` already holds the recurring pieces (`DataTable`, `PageHeader`,
-`StatCard`, `Field`, `ErrorBanner`, `InfoBanner`, `ConfirmButton`, the filter controls), and
-`shared/components/ui/` holds the two rehomed foundation primitives (`SettingsSection`,
-`RowActions`). The table in [components.md](./components.md) is the inventory. Extend a
-primitive rather than forking it, and add a row to that table in the same change when you add
+`shared/components/` already holds the recurring pieces, in a directory per design topic:
+`layout/`, `metrics/`, `feedback/`, `forms/`, `actions/`, `data/`, `navigation/`,
+`indicators/`, `access/`, plus `deprecated/` for the four that must not be used in new code.
+`web/design/DESIGN.md` maps every export to its module and is the inventory. Extend a
+primitive rather than forking it, and add it to that table in the same change when you add
 one.
 
 ## One component per file
 
 A page or standalone component gets its own file, named for it, with its test beside it.
-`shared/components/ui.tsx` is the one place several closely related primitives share a file,
-and it is not a precedent to extend: a new primitive goes in `shared/components/ui/` under its
-own name.
+That now holds for the shared primitives too: `surface.tsx` and `ui.tsx` were the two
+exceptions, 42 exports between them, and they are gone. A new primitive is a file of its own
+under the topic directory it belongs to. Where a module carries a second export it is because
+the two are useless apart (`RowAction` and the lane it sits in, `SpendMeter` and the
+classifier that decides how it draws).
 
 ## No IIFEs in JSX
 

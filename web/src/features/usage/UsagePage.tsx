@@ -23,35 +23,36 @@ import {
   type UsageScope,
   useUsageGroupedSeries,
   useUsageSummary,
-  useWorkspaces,
-} from "@/shared/api/hooks"
+} from "@/shared/api/usage"
+import { useWorkspaces } from "@/shared/api/workspaces"
+import { RefreshButton } from "@/shared/components/actions/RefreshButton"
+import {
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { EmptyMessage } from "@/shared/components/feedback/EmptyMessage"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import {
   ChartLegend,
   type SeriesDef,
   Sparkline,
   type StackedPoint,
   TrendChart,
-} from "@/shared/components/charts"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+} from "@/shared/components/metrics/charts"
+import { KpiCell } from "@/shared/components/metrics/KpiCell"
+import { KpiStrip } from "@/shared/components/metrics/KpiStrip"
+import { TrendChip } from "@/shared/components/metrics/TrendChip"
 import {
-  EmptyMessage,
-  KpiCell,
-  KpiStrip,
-  PageIntro,
-  Section,
-  Tab,
-  TableScrollFrame,
-  TabRow,
-} from "@/shared/components/surface"
-import { TrendChip } from "@/shared/components/TrendChip"
-import {
-  EmptyState,
-  ErrorBanner,
-  FilterMultiComboBox,
-  FilterSelect,
-  RefreshButton,
-} from "@/shared/components/ui"
+  type FilterChip,
+  FilterChips,
+} from "@/shared/components/navigation/FilterChips"
+import { FilterMultiComboBox } from "@/shared/components/navigation/FilterMultiComboBox"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import {
   deltaFraction,
   formatNumber,

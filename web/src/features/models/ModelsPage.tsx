@@ -20,33 +20,37 @@ import {
 } from "@/features/models/SetPriceDialog"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import {
-  useDeletePricing,
   useDiscoverableModels,
   useModelMetadata,
   useModels,
-  useOrganizationContext,
+} from "@/shared/api/models"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeletePricing,
   usePricing,
   useSetPricing,
-  useSettings,
-} from "@/shared/api/hooks"
-import { BulkActionBar } from "@/shared/components/BulkActionBar"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+} from "@/shared/api/pricing"
+import { useSettings } from "@/shared/api/settings"
+import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
+import { CopyableValue } from "@/shared/components/actions/CopyField"
+import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
 import {
-  Dot,
-  PageIntro,
-  Section,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import { TablePagination } from "@/shared/components/TablePagination"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { TablePagination } from "@/shared/components/data/TablePagination"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import {
-  ConfirmButton,
-  CopyableValue,
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  INPUT_CLASS,
-} from "@/shared/components/ui"
+  type FilterChip,
+  FilterChips,
+} from "@/shared/components/navigation/FilterChips"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import {
   formatContext,
   formatCost,

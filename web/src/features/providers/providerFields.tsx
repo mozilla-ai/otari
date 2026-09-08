@@ -10,8 +10,8 @@ import {
 } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
 
-import { useProviderCatalog } from "@/shared/api/hooks"
-import { FieldMessages } from "@/shared/components/FieldMessages"
+import { useProviderCatalog } from "@/shared/api/providers"
+import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 
 // The two form controls a provider credential needs wherever it is edited, and
 // the parsing that goes with one of them.

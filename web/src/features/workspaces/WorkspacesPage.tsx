@@ -3,38 +3,36 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { useBudgets } from "@/shared/api/budgets"
 import { ApiError } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import { useProviders } from "@/shared/api/providers"
 import {
   useAllWorkspaceBudgetDefaults,
-  useBudgets,
   useCreateWorkspace,
   useCreateWorkspaceBudgetDefault,
   useDeleteWorkspace,
   useDeleteWorkspaceBudgetDefault,
-  useOrganizationContext,
-  useProviders,
   useUpdateWorkspace,
   useUpdateWorkspaceBudgetDefault,
   useWorkspaceBudgetDefaults,
   useWorkspaces,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
+} from "@/shared/api/workspaces"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import {
-  PageIntro,
-  RowAction,
-  RowActionRow,
-  Section,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import {
-  EmptyState,
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  InfoBanner,
-} from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Field } from "@/shared/components/forms/Field"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatDate } from "@/shared/helpers/format"
 
 // Workspaces are the unit inside an organization that work is scoped to. This

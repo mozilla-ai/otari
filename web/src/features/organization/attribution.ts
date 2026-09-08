@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 
 import type { OrganizationMember } from "@/client"
-import { useOrganizationMembers } from "@/shared/api/hooks"
+import { useOrganizationMembers } from "@/shared/api/organizations"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { memberLabel } from "./roles"

@@ -1,7 +1,7 @@
 import { Fragment } from "react"
 
 import { navContextForPath, navLabelForPath } from "@/app/nav/registry"
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 

@@ -1,9 +1,11 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
-import { useMailSettings, useSendTestMail } from "@/shared/api/hooks"
-import { Field } from "@/shared/components/Field"
-import { SettingsGroup } from "@/shared/components/surface"
-import { ErrorBanner, InfoBanner, PageLoading } from "@/shared/components/ui"
+import { useMailSettings, useSendTestMail } from "@/shared/api/settings"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Field } from "@/shared/components/forms/Field"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
 
 // What each transport means to an operator reading this page. Keyed by the
 // server's value rather than derived from it, so an unknown transport (a build

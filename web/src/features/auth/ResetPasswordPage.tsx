@@ -1,8 +1,8 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 
-import { useResetPassword } from "@/shared/api/hooks"
-import { ErrorBanner } from "@/shared/components/ui"
+import { useResetPassword } from "@/shared/api/auth"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,

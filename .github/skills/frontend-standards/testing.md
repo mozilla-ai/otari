@@ -33,7 +33,7 @@ vi.spyOn(apiClient, "apiFetch").mockImplementation(async (input) => {
 
 Mocking `useModels` or `formatCost` instead hides exactly the regressions worth catching: a
 changed query key, a loading state nobody renders, a formatter that rounds wrong. There is no
-`vi.mock("@/shared/api/hooks")` anywhere in this tree, and adding the first one needs a reason
+`vi.mock("@/shared/api/<domain>")` anywhere in this tree, and adding the first one needs a reason
 in the diff.
 
 **Render what the app renders.** A component that reads the URL needs a real router:
@@ -91,6 +91,76 @@ suite's critical path while other workers idle, and `ActivityPage.test.tsx` is c
 exactly that. Split by concern (`Page.test.tsx`, `Page.deletion.test.tsx`,
 `Page.filters.test.tsx`) when a file grows several independent `describe` blocks or needs
 different mock setups per block.
+
+### Never wait a component's timer out in real time
+
+Two cases used to sleep through a real delay, and between them they were **10.6s
+of a 22s suite**: `CopyButton`'s 1.5s confirmation dismissal, and the Activity
+page's in-flight poll, which cost 9.1s because `useInFlightRequests` declares its
+own `retry` (three attempts, since a 503 is a gateway restarting and worth
+re-asking) and that overrides the harness's `retry: false`, so reaching the error
+arm meant the 2s poll plus TanStack's 1s/2s/4s backoffs. Both now jump the clock
+and run in 44ms and 85ms.
+
+The pattern, which this tree already used in three places before it was applied
+to these:
+
+```tsx
+vi.useFakeTimers({ shouldAdvanceTime: true })
+try {
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+  // …
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000)
+  })
+  expect(screen.queryByText("Copied!")).not.toBeInTheDocument()
+} finally {
+  vi.useRealTimers()
+}
+```
+
+`advanceTimers` is the answer to the deadlock a previous note in `CopyButton`
+described (a clipboard write is a promise, and fake timers stall userEvent's own
+waits), so "real timers because userEvent deadlocks" is not a reason to sleep.
+Use `advanceTimersByTimeAsync` when each tick triggers a fetch: the awaits
+between timers are what let those promises settle and schedule the next one.
+
+**Prove the conversion is not vacuous.** A fake-timer test that passes because it
+no longer exercises anything is worse than a slow one. Break the behavior in the
+component and confirm the test goes red before keeping it; both of the above were
+checked that way (remove `CopyButton`'s reset, remove the `inFlight.isError` arm).
+
+### A timeout expiring usually means a starved worker
+
+`findBy*` and `waitFor` are wall-clock bound, and RTL's fake-timer path checks
+for `jest` globals that do not exist under Vitest, so no amount of correct
+awaiting makes them independent of machine load. Measured on a page test: the DOM
+received the text at 204ms and `findByText` reported it at 209ms, so the notice
+latency is ~5ms and the rest is genuine React work under jsdom. `vi.waitFor` on a
+fetch-call array cost 1ms, and `userEvent.setup({ delay: null })` changed nothing.
+None of those is the problem.
+
+What does break is contention. Bisected at the default 1000ms, full suite: a cold
+transform cache alone passes, CPU saturation alone passes (load average 50 on 14
+cores), and the two together fail a random handful with
+`Unable to find an element with the text ...`. So when one expires, suspect the
+machine first: run the file alone (`pnpm --dir web test <file>`) before changing
+anything about the component. `--maxWorkers=4` also clears it, at roughly 1.5x
+the wall clock, if a machine needs that.
+
+This has not been observed in CI, whose test step has been green across the last
+25 runs of `otari-dashboard.yml`.
+
+**`user.type` is where the remaining time goes, and it stays.** After the two
+real-timer cases above were converted, the slowest tests are 400-800ms and are
+dominated by typing: `user.type` fires roughly three events per character on a
+controlled input, so the MCP URL-validation case spends most of its 717ms
+re-rendering a form through 38 characters. `user.click` + `user.paste` is one
+event instead, and would cut that, but it is 267 call sites across 29 files and
+trades away the per-keystroke path a real operator takes. Deliberately not
+done: `user.type` is one line and it is the library's own API. Revisit only if
+the suite gets slow enough to be worth the churn, and measure one file before
+committing to the rest.
 
 ## Playwright: behavioral
 

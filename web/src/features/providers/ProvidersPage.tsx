@@ -10,36 +10,37 @@ import type {
   UpdateStoredProviderRequest,
 } from "@/client"
 import {
+  useOrganizationContext,
+  useProviderKeyEncryption,
+} from "@/shared/api/organizations"
+import {
   useCreateStoredProvider,
   useDeleteStoredProvider,
-  useOrganizationContext,
   useProviderDetail,
   useProviderHealth,
-  useProviderKeyEncryption,
   useProviders,
   useRecheckProviderHealth,
-  useSettings,
   useStoredProviders,
   useTestProviderCredentials,
   useTestStoredProvider,
-  useUpdateSettings,
   useUpdateStoredProvider,
-} from "@/shared/api/hooks"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
-import { SecretField } from "@/shared/components/SecretField"
+} from "@/shared/api/providers"
+import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { ConfirmRowAction } from "@/shared/components/actions/ConfirmRowAction"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import {
-  ConfirmRowAction,
-  Dot,
-  PageIntro,
-  RowAction,
-  RowActionRow,
-  Section,
-  Tab,
-  TableScrollFrame,
-  TabRow,
-} from "@/shared/components/surface"
-import { ErrorBanner, errorMessage } from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { Field } from "@/shared/components/forms/Field"
+import { SecretField } from "@/shared/components/forms/SecretField"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
+import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import { formatRelative } from "@/shared/helpers/format"
 
 import {

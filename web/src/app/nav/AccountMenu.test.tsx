@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import type { DeploymentBootstrap, OrganizationContext } from "@/client"
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,

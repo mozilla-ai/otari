@@ -4,15 +4,14 @@ import { useState } from "react"
 import {
   useOrganizationContext,
   useUpdateOrganization,
-} from "@/shared/api/hooks"
-import { Field } from "@/shared/components/Field"
-import { PageIntro, Section } from "@/shared/components/surface"
-import {
-  CopyableValue,
-  ErrorBanner,
-  InfoBanner,
-  PageLoading,
-} from "@/shared/components/ui"
+} from "@/shared/api/organizations"
+import { CopyableValue } from "@/shared/components/actions/CopyField"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Field } from "@/shared/components/forms/Field"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
 
 import { canManage } from "./roles"
 

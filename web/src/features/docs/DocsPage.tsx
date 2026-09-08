@@ -4,7 +4,7 @@ import type { Components, ExtraProps } from "react-markdown"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
-import { PageIntro } from "@/shared/components/surface"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
 // The operator user guide is bundled straight from the repo's docs so the
 // running dashboard ships the guide that matches it, instead of pointing at a
 // docs site that may describe a different version. Rebuilding the dashboard

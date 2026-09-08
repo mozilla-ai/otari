@@ -8,7 +8,8 @@ import {
   rasterize,
   shareFilename,
 } from "@/features/usage/shareImage"
-import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { CARD_SIZES, type CardRatio, ShareCard } from "./ShareCard"
 import {
   availableStats,

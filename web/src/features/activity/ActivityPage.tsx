@@ -15,34 +15,40 @@ import {
   type ManualRates,
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
+import { useSetPricing } from "@/shared/api/pricing"
 import {
   useDeleteUsage,
   useInFlightRequests,
   useLiveUsageCount,
   useRequestGroups,
-  useSetPricing,
   useSetUsagePrice,
   useUsageCount,
   useUsageLogs,
   useUsageScope,
   useUsageSummary,
-} from "@/shared/api/hooks"
-import { BulkActionBar } from "@/shared/components/BulkActionBar"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
-import { Dot, PageIntro, TableScrollFrame } from "@/shared/components/surface"
+} from "@/shared/api/usage"
+import { CopyableValue } from "@/shared/components/actions/CopyField"
+import { RefreshButton } from "@/shared/components/actions/RefreshButton"
+import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
+import {
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
-} from "@/shared/components/TablePagination"
+} from "@/shared/components/data/TablePagination"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import {
-  CopyableValue,
-  ErrorBanner,
-  FilterMultiComboBox,
-  FilterSelect,
-  RefreshButton,
-} from "@/shared/components/ui"
+  type FilterChip,
+  FilterChips,
+} from "@/shared/components/navigation/FilterChips"
+import { FilterMultiComboBox } from "@/shared/components/navigation/FilterMultiComboBox"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatRelative } from "@/shared/helpers/format"
 import {
   resolveSelectedIds,

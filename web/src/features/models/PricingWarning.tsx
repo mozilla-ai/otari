@@ -3,13 +3,10 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { isDeploymentOperator } from "@/features/organization/roles"
-import {
-  useFailureCount,
-  useOrganizationContext,
-  useSettings,
-  useUpdateSettings,
-} from "@/shared/api/hooks"
-import { InfoBanner } from "@/shared/components/ui"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useFailureCount } from "@/shared/api/usage"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { HOUR_S } from "@/shared/helpers/timeRange"
 
 // A gateway-wide alarm, shown on every management page: when `require_pricing` is

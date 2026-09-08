@@ -13,23 +13,22 @@ import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import { usePricing, useSetPricing } from "@/shared/api/pricing"
 import {
-  useOrganizationContext,
-  usePricing,
-  useSetPricing,
   useTestService,
   useToolSettings,
   useTools,
   useUpdateToolSettings,
-} from "@/shared/api/hooks"
-import { Dot, PageIntro, SettingsGroup } from "@/shared/components/surface"
-import {
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  INPUT_CLASS,
-  PageLoading,
-} from "@/shared/components/ui"
+} from "@/shared/api/tools"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).

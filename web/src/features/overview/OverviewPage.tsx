@@ -12,39 +12,37 @@ import {
   providerHealthStatus,
   toStatStatus,
 } from "@/features/overview/overview"
+import { useKeys } from "@/shared/api/apiKeys"
+import { useBudgets } from "@/shared/api/budgets"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import {
   NO_BREAKDOWNS,
-  useBudgets,
-  useKeys,
-  useOrganizationContext,
-  useProviderHealth,
-  useProviders,
   useUsageLogs,
   useUsageSummary,
-  useUsers,
-  useWorkspaceMembers,
-} from "@/shared/api/hooks"
-import { Sparkline } from "@/shared/components/charts"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+} from "@/shared/api/usage"
+import { useUsers } from "@/shared/api/users"
+import { useWorkspaceMembers } from "@/shared/api/workspaces"
+import { RefreshButton } from "@/shared/components/actions/RefreshButton"
 import {
-  Dot,
-  KpiCell,
-  KpiStrip,
-  PageIntro,
-  Section,
-  SpendMeter,
-} from "@/shared/components/surface"
-import { TrendChip } from "@/shared/components/TrendChip"
-import {
-  ErrorBanner,
-  PageHeader,
-  PageLoading,
-  RefreshButton,
-  // Still reached by `UsageStatTiles`, which the organization overview seats
-  // beside its own tiles. The operator overview's KPI strip replaced its use
-  // of these, the organization one's has not been rebuilt yet.
-  StatCard,
-} from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+// Still reached by `UsageStatTiles`, which the organization overview seats
+// beside its own tiles. The operator overview's KPI strip replaced its use of
+// these, the organization one's has not been rebuilt yet.
+import { PageHeader } from "@/shared/components/deprecated/PageHeader"
+import { StatCard } from "@/shared/components/deprecated/StatCard"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { Sparkline } from "@/shared/components/metrics/charts"
+import { KpiCell } from "@/shared/components/metrics/KpiCell"
+import { KpiStrip } from "@/shared/components/metrics/KpiStrip"
+import { SpendMeter } from "@/shared/components/metrics/SpendMeter"
+import { TrendChip } from "@/shared/components/metrics/TrendChip"
 import {
   deltaFraction,
   formatNumber,

@@ -31,28 +31,26 @@ import {
   useKeysScope,
   useRotateKey,
   useUpdateKey,
-  useUsers,
-} from "@/shared/api/hooks"
-import { BulkActionBar } from "@/shared/components/BulkActionBar"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
-import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
+} from "@/shared/api/apiKeys"
+import { useUsers } from "@/shared/api/users"
+import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
+import { CopyField } from "@/shared/components/actions/CopyField"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
+import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
 import {
-  Dot,
-  PageIntro,
-  RowAction,
-  RowActionRow,
-  Section,
-  TableScrollFrame,
-} from "@/shared/components/surface"
-import {
-  Checkbox,
-  CopyField,
-  EmptyState,
-  ErrorBanner,
-  FilterSelect,
-} from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { Checkbox } from "@/shared/components/forms/Checkbox"
+import { Field } from "@/shared/components/forms/Field"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatDate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,

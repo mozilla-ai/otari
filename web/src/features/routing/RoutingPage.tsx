@@ -12,6 +12,7 @@ import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import { UserComboBox } from "@/features/users/UserComboBox"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useAliases,
   useCreateAlias,
@@ -21,29 +22,29 @@ import {
   useDeleteOrganizationRoutingPolicy,
   useDeleteRoutingPolicy,
   useOrganizationAliases,
-  useOrganizationContext,
   useOrganizationRoutingPolicies,
   useRoutingPolicies,
   useSetOrganizationRoutingPolicy,
   useSetRoutingPolicy,
-  useToolSettings,
-  useUsers,
-} from "@/shared/api/hooks"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
-import { ControlField } from "@/shared/components/FieldMessages"
+} from "@/shared/api/routing"
+import { useToolSettings } from "@/shared/api/tools"
+import { useUsers } from "@/shared/api/users"
+import { ConfirmRowAction } from "@/shared/components/actions/ConfirmRowAction"
+import { CopyableValue } from "@/shared/components/actions/CopyField"
+import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import {
-  ConfirmRowAction,
-  Dot,
-  PageIntro,
-  RowAction,
-  RowActionRow,
-  Section,
-  Tab,
-  TableScrollFrame,
-  TabRow,
-} from "@/shared/components/surface"
-import { CopyableValue, EmptyState, ErrorBanner } from "@/shared/components/ui"
+  DataTable,
+  type DataTableColumn,
+} from "@/shared/components/data/DataTable"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { Field } from "@/shared/components/forms/Field"
+import { ControlField } from "@/shared/components/forms/FieldMessages"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
+import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
+import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import { useUrlValue } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 

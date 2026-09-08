@@ -39,8 +39,11 @@ import {
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
 import { isPublicAuthPageAvailable } from "@/features/auth/publicAuthPaths"
-import { useAcceptInvitation, useValidateInvitation } from "@/shared/api/hooks"
-import { ErrorBanner } from "@/shared/components/ui"
+import {
+  useAcceptInvitation,
+  useValidateInvitation,
+} from "@/shared/api/organizations"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 

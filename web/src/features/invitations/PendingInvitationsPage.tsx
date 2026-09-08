@@ -26,10 +26,13 @@ import {
   useAcceptPendingMembership,
   useDeclinePendingMembership,
   usePendingOrganizationInvitations,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { PageIntro, Section } from "@/shared/components/surface"
-import { EmptyState, ErrorBanner, PageLoading } from "@/shared/components/ui"
+} from "@/shared/api/organizations"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Section } from "@/shared/components/layout/Section"
 import { formatDateTime } from "@/shared/helpers/format"
 
 export function PendingInvitationsPage() {

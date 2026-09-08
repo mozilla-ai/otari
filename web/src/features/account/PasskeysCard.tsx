@@ -8,12 +8,12 @@ import {
   usePasskeys,
   useRegisterPasskey,
   useRenamePasskey,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { FieldMessages } from "@/shared/components/FieldMessages"
-import { Section } from "@/shared/components/surface"
-import { ErrorBanner } from "@/shared/components/ui"
-import { RowActions } from "@/shared/components/ui/RowActions"
+} from "@/shared/api/auth"
+import { RowActions } from "@/shared/components/deprecated/RowActions"
+import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { FieldMessages } from "@/shared/components/forms/FieldMessages"
+import { Section } from "@/shared/components/layout/Section"
 import { formatDateTime } from "@/shared/helpers/format"
 import {
   MAX_PASSKEY_NAME_LENGTH,

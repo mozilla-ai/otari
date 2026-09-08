@@ -11,16 +11,14 @@ import {
   useSearchProviders,
   useSearchTools,
   useUpdateSearchTool,
-} from "@/shared/api/hooks"
-import { SettingsGroup } from "@/shared/components/surface"
-import {
-  Badge,
-  ConfirmButton,
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  INPUT_CLASS,
-} from "@/shared/components/ui"
+} from "@/shared/api/tools"
+import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
+import { Badge } from "@/shared/components/indicators/Badge"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // Search tools are what POST /v1/search dispatches against. They used to be
 // declarable only in a config file, so a deployment configured entirely through

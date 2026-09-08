@@ -1,12 +1,11 @@
 import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
-import {
-  useAliases,
-  useDiscoverableModels,
-  useProviders,
-} from "@/shared/api/hooks"
-import { ControlField } from "@/shared/components/FieldMessages"
-import { DismissChip, Tab, TabRow } from "@/shared/components/surface"
+import { useDiscoverableModels } from "@/shared/api/models"
+import { useProviders } from "@/shared/api/providers"
+import { useAliases } from "@/shared/api/routing"
+import { ControlField } from "@/shared/components/forms/FieldMessages"
+import { DismissChip } from "@/shared/components/indicators/DismissChip"
+import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 
 // The per-key model access-list is a tri-state:
 //   null  -> "any"   (unrestricted, the default)
