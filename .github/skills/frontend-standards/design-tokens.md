@@ -140,9 +140,28 @@ through `--radius-4xl` calculated from it in `dist/themes/shared/theme.css`, so 
 is `calc(var(--radius) * 2)`), `--field-radius`, `--spacing`, `--border-width`,
 `--field-border-width`, `--ring-offset-width`, `--disabled-opacity`, `--cursor-interactive` /
 `--cursor-disabled` and the `--scrollbar-*` family, all declared in
-`dist/themes/default/variables.css`. This repo aliases none of them, so a component's corner
-radius, its disabled dimming and its pointer all come from HeroUI's defaults rather than from
-anything we name.
+`dist/themes/default/variables.css`. This repo declares three of them, all in `globals.css`:
+`--radius` (`0px`, the square corners), `--disabled-opacity` (`0.4`) and `--field-border-width`
+(`1px`, once per theme block). The rest are not aliased, so a component's pointer, its ring
+offset and its scrollbars still come from HeroUI's defaults rather than from anything we name.
+
+**Our variable block must stay unlayered.**
+
+`@heroui/styles` declares many of the same variables we do, from inside `@layer`. Ours are
+declared in a bare `:root` at the end of `globals.css`, and being unlayered is what makes them
+win: an unlayered declaration outranks a layered one regardless of source order, so it is not
+position in the file that is holding this up. Wrap the theme blocks in `@layer` and `--radius`
+goes from `0px` to `8px` (every corner in the app rounds), the weight ladder shifts up a step
+(`medium` 400 to 500, `semibold` 550 to 600, `bold` 600 to 700), the four `--shadow-*` tokens
+stop being `none` so elevation returns on top of the hairline edges that replaced it,
+`--tracking-tight` doubles, and the 12px and 18px line-heights move by 2px each way. The font
+sizes are the trap: `--text-xs` and `--text-sm` revert to `.75rem` and `.875rem`, which compute
+to the same 12px and 14px at our 16px root, so the sizes hold and only the leading around them
+moves. Nothing fails either way: Ruff is silent, the dashboard builds, `foundation.test.ts`
+passes, and the only place the change is visible is the screen.
+
+`--spacing` is the one variable in that set we deliberately do not override; the 4px step is
+Tailwind's own.
 
 **Only the color half belongs in both theme blocks.** A color token is declared twice because
 its whole job is to hold a light value and a dark one, which is what lets a component adapt
@@ -153,7 +172,8 @@ share is the rule that matters: the value lives in one named place, and a compon
 Never a hex, never a numbered Tailwind palette class, never `bg-white`, because those three do
 not adapt and nothing downstream can make them.
 
-That is a gap rather than a decision, and it decides how much work a visual fix is. A value
+The ones we have not aliased are a gap rather than a decision, and the gap decides how
+much work a visual fix is. A value
 computed from a variable is one alias away from being ours; the same value chased through the
 rules that read it is a selector to keep in sync with somebody else's internals, forever. A
 table whose body corners are drawn at `min(32px, var(--radius-2xl))`, which is 16px, inside a

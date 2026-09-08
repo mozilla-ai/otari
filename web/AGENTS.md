@@ -175,8 +175,11 @@ review output until the suite becomes a pull-request gate.
 
 ## Measuring the running dashboard
 
-Three ways a probe reports a real number that answers the wrong question. Each
-has produced a wrong finding here more than once, and none of them errors.
+Ways a probe reports a real number that answers the wrong question. Each has
+produced a wrong finding here more than once, and none of them errors. Left
+uncounted deliberately: the sentence said "three" while eight followed it,
+because a total in the prose has to be edited by every later addition and was
+not.
 
 **Check which bundle the tab is on first.** A gateway serves the last bundle
 built into `src/gateway/static/dashboard/`, and a browser tab holds the one it
@@ -227,6 +230,13 @@ nothing. Reproduced on a two-file project: a real `TS2322` is reported alone and
 disappears entirely once one unresolved file is added. Resolve the last conflict
 before believing a typecheck, and treat lint and per-file test runs as the only
 checks that hold before that.
+
+**A bare `tsc --noEmit` checks nothing.** The root `tsconfig.json` is
+`{"files": [], "references": [...]}`, so invoking `tsc` without `-b` resolves a
+config that owns no files and exits clean over a tree the real typecheck rejects,
+test files included. Use the command in Checks above. The tell that found this:
+an `@ts-expect-error` whose error had been deliberately removed still reported
+success, where `pnpm --dir web run typecheck` reports `TS2578`.
 
 **And absence from the built CSS proves nothing on its own.** Tailwind emits
 only the utilities something in the tree asks for, so checking whether a
