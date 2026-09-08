@@ -19,6 +19,7 @@ from mcp.types import Tool as MCPTool
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import (
+    DISCOVERY_MAX_TOOLS,
     DISCOVERY_RESPONSE_MAX_BYTES,
     SCHEMA_MAX_BYTES,
     ConcurrencyGate,
@@ -83,6 +84,35 @@ async def test_one_unusable_descriptor_is_omitted_and_labeled(opened: dict[str, 
 
     assert [t.name for t in catalog.tools] == ["create_issue"]
     assert catalog.warnings == [("broken", "mcp_tool_schema_unsupported")]
+
+
+@pytest.mark.asyncio
+async def test_an_omitted_descriptor_does_not_count_toward_the_returned_tool_ceiling(
+    opened: dict[str, Any],
+) -> None:
+    external_schema = {"type": "object", "$ref": "https://example.com/schema"}
+    opened["session"] = _FakeSession(
+        [_tool(f"valid{i}") for i in range(DISCOVERY_MAX_TOOLS)]
+        + [_tool("broken", inputSchema=external_schema)]
+    )
+
+    catalog = await discover_stored_tools(SERVER)
+
+    assert len(catalog.tools) == DISCOVERY_MAX_TOOLS
+    assert catalog.warnings == [("broken", "mcp_tool_schema_unsupported")]
+
+
+@pytest.mark.asyncio
+async def test_more_than_the_returned_tool_ceiling_refuses_the_whole_response(
+    opened: dict[str, Any],
+) -> None:
+    opened["session"] = _FakeSession([_tool(f"tool{i}") for i in range(DISCOVERY_MAX_TOOLS + 1)])
+
+    with pytest.raises(McpExecutionError) as raised:
+        await discover_stored_tools(SERVER)
+
+    assert raised.value.code == "mcp_discovery_limit_exceeded"
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
 
 
 @pytest.mark.asyncio

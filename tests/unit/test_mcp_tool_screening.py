@@ -17,6 +17,7 @@ from gateway.services.mcp_stateless import (
     SCHEMA_MAX_DEPTH,
     TOOL_ANNOTATIONS_MAX_BYTES,
     TOOL_DESCRIPTION_MAX_BYTES,
+    TOOL_NAME_MAX_LENGTH,
     screen_tool,
 )
 
@@ -33,6 +34,15 @@ def _tool(**overrides: object) -> MCPTool:
 
 def test_an_ordinary_tool_is_admitted() -> None:
     assert screen_tool(_tool()) is None
+
+
+def test_a_tool_name_at_the_execution_limit_is_admitted() -> None:
+    assert screen_tool(_tool(name="x" * TOOL_NAME_MAX_LENGTH)) is None
+
+
+@pytest.mark.parametrize("name", ["", "x" * (TOOL_NAME_MAX_LENGTH + 1)])
+def test_a_tool_name_execution_cannot_accept_is_omitted(name: str) -> None:
+    assert screen_tool(_tool(name=name)) == "mcp_tool_name_unsupported"
 
 
 def test_an_unknown_dialect_or_keyword_is_admitted_unchanged() -> None:

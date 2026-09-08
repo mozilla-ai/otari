@@ -212,6 +212,31 @@ def test_an_unusable_descriptor_is_omitted_and_labeled(
     assert "attacker.example.com" not in response.text
 
 
+def test_an_unexecutable_tool_name_is_omitted_and_labeled(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+) -> None:
+    session.tools.append(
+        MCPTool(
+            name="x" * (mcp_stateless.TOOL_NAME_MAX_LENGTH + 1),
+            description="too long to execute",
+            inputSchema={"type": "object"},
+        )
+    )
+
+    response = client.get(TOOLS_PATH, headers=USER_AUTH)
+
+    assert response.status_code == 200, response.text
+    assert [tool["name"] for tool in response.json()["tools"]] == ["create_issue"]
+    assert response.json()["warnings"] == [
+        {
+            "tool_name": "x" * (mcp_stateless.TOOL_NAME_MAX_LENGTH + 1),
+            "code": "mcp_tool_name_unsupported",
+        }
+    ]
+
+
 def test_the_response_ceiling_includes_warnings_and_envelope(
     client: TestClient,
     platform: _Platform,

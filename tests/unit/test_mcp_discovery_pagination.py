@@ -17,7 +17,6 @@ from mcp.types import Tool as MCPTool
 from gateway.services.mcp_stateless import (
     DISCOVERY_MAX_EXAMINED,
     DISCOVERY_MAX_PAGES,
-    DISCOVERY_MAX_TOOLS,
     McpDiscoveryRefused,
     collect_tools,
 )
@@ -126,14 +125,6 @@ async def test_the_examined_descriptor_ceiling_counts_allowlist_removals_too() -
 
     with pytest.raises(McpDiscoveryRefused):
         await collect_tools(session, allowed_tools=["a"])
-
-
-@pytest.mark.asyncio
-async def test_the_returned_tool_ceiling_fails_the_whole_request() -> None:
-    session = _FakeSession([_page([_tool(f"t{i}") for i in range(DISCOVERY_MAX_TOOLS + 1)])])
-
-    with pytest.raises(McpDiscoveryRefused):
-        await collect_tools(session, allowed_tools=None)
 
 
 @pytest.mark.asyncio

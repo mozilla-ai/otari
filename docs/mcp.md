@@ -114,6 +114,10 @@ one with a `$ref` pointing outside itself:
 {"tool_name": "create_issue", "code": "mcp_tool_schema_unsupported"}
 ```
 
+A tool name outside the 1–256-character execution limit is omitted with
+`mcp_tool_name_unsupported`, so every tool returned by discovery can be sent
+back to the execution endpoint.
+
 Otari does not validate an `inputSchema` against a JSON Schema dialect, and never
 truncates, rewrites, or drops a keyword. It bounds the size, depth and property
 count it will carry, and it refuses a schema that would have to be fetched over

@@ -110,6 +110,7 @@ EXECUTION_ADMISSION_TIMEOUT_S = 5.0
 # --------------------------------------------------------------------------- #
 
 # Per-tool omission codes, reported in a discovery response's ``warnings``.
+WARN_NAME_UNSUPPORTED = "mcp_tool_name_unsupported"
 WARN_SCHEMA_UNSUPPORTED = "mcp_tool_schema_unsupported"
 WARN_DESCRIPTION_TOO_LARGE = "mcp_tool_description_too_large"
 WARN_ANNOTATIONS_TOO_LARGE = "mcp_tool_annotations_too_large"
@@ -283,10 +284,12 @@ def screen_tool(tool: MCPTool) -> str | None:
 
     Structural and size checks only (R-SCHEMA-1). The schema is untrusted data
     rather than something Otari executes, so an unrecognized dialect or keyword
-    is carried through untouched; what is refused is a schema Otari cannot
-    safely hold in memory, or one that would make it fetch a second schema over
-    the network to be understood at all.
+    is carried through untouched; what is refused is a descriptor Otari cannot
+    safely return or execute, or a schema that would make it fetch another
+    schema over the network to be understood at all.
     """
+    if not tool.name or len(tool.name) > TOOL_NAME_MAX_LENGTH:
+        return WARN_NAME_UNSUPPORTED
     if _oversized(tool.description, TOOL_DESCRIPTION_MAX_BYTES):
         return WARN_DESCRIPTION_TOO_LARGE
     if tool.annotations is not None and _oversized(tool.annotations, TOOL_ANNOTATIONS_MAX_BYTES):
@@ -543,6 +546,8 @@ async def _discover_once(server: ResolvedMcpServer) -> DiscoveredCatalog:
             else:
                 warnings.append((tool.name, code))
 
+        if len(tools) > DISCOVERY_MAX_TOOLS:
+            raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
         if _oversized(tools, DISCOVERY_RESPONSE_MAX_BYTES):
             raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
         return DiscoveredCatalog(tools=tools, warnings=warnings)
@@ -560,7 +565,8 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
 
     Pagination stops early once every allowlisted name has been seen. A server
     with thousands of tools and a three-name allowlist is then one or two pages,
-    not twenty, and the ceiling below stays a defense rather than a routine cost.
+    not twenty. The returned-tool ceiling is applied after descriptor screening,
+    so omitted tools do not take valid siblings away from the caller.
 
     Raises:
         McpDiscoveryRefused: on a pagination validation failure (R-DISC-4) or a
@@ -579,7 +585,7 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
             raise McpDiscoveryRefused
         for tool in tools:
             name = getattr(tool, "name", None)
-            if not isinstance(name, str) or not name:
+            if not isinstance(name, str):
                 raise McpDiscoveryRefused
             examined += 1
             if examined > DISCOVERY_MAX_EXAMINED:
@@ -596,8 +602,6 @@ async def collect_tools(session: Any, *, allowed_tools: list[str] | None) -> lis
                     raise McpDiscoveryRefused
                 continue
             collected[name] = tool
-            if len(collected) > DISCOVERY_MAX_TOOLS:
-                raise McpDiscoveryRefused
 
         if allowed is not None and allowed.issubset(collected):
             break
