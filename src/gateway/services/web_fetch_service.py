@@ -39,6 +39,7 @@ WEB_RETRIEVAL_ACCEPT = (
     "application/json,application/xml;q=0.9,*/*;q=0.1"
 )
 WEB_RETRIEVAL_USER_AGENT = "otari-web-retrieval/1.0"
+WEB_RETRIEVAL_ACCEPT_ENCODING = "gzip, deflate"
 
 _HTML_MIME_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 _PDF_MIME_TYPE = "application/pdf"
@@ -241,6 +242,7 @@ class WebFetchService:
                 target.url,
                 headers={
                     "Accept": WEB_RETRIEVAL_ACCEPT,
+                    "Accept-Encoding": WEB_RETRIEVAL_ACCEPT_ENCODING,
                     "User-Agent": WEB_RETRIEVAL_USER_AGENT,
                     "Host": target.origin.authority,
                 },

@@ -127,6 +127,29 @@ def test_no_row_leaves_the_request_exactly_as_it_was(
     assert "blocked_domains" not in seen.backend_kwargs
 
 
+@pytest.mark.parametrize("field", ["allowed_domains", "blocked_domains"])
+def test_invalid_request_domain_rule_is_rejected_before_dispatch(
+    field: str,
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    body = {
+        **_REQUEST,
+        "tools": [{"type": "otari_web_search", field: ["https://example.com/path"]}],
+    }
+
+    response, seen = _post_with_search_patched(client, api_key_header, body)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["message"] == (
+        "Web search allowed_domains and blocked_domains must contain only bare valid hostnames"
+    )
+    assert seen.ran is False
+    assert seen.backend_kwargs == {}
+
+
 def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -677,6 +700,40 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     assert len(rows) == 1
     assert rows[0]["status"] == "error"
     assert rows[0]["status_code"] == 403
+
+
+def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _stored_search_tool(client, master_key_header, "invalid-config-search")
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_config(client, master_key_header, workspace_id, enabled=True, allowed_domains=["example.com"])
+
+    with db_session_factory() as db:
+        row = db.get(WorkspaceWebSearchConfig, uuid.UUID(workspace_id))
+        assert row is not None
+        row.allowed_domains = ["https://example.com/private"]
+        db.commit()
+
+    client.post("/v1/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
+    key = client.post(
+        "/v1/keys",
+        json={"key_name": "invalid-config-search-key", "user_id": "invalid-config-search-user"},
+        headers=master_key_header,
+    ).json()
+
+    with patch("gateway.api.routes.search.run_search", new=AsyncMock()) as ran:
+        response = client.post(
+            "/v1/search/invalid-config-search",
+            json={"query": "anything"},
+            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+        )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "Web search configuration contains an invalid domain rule"
+    assert ran.await_count == 0
 
 
 def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
