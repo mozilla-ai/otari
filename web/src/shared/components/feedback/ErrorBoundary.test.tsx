@@ -43,6 +43,46 @@ describe("ErrorBoundary", () => {
     expect(container).not.toBeEmptyDOMElement()
   })
 
+  it("clears the panel when the reset key changes", () => {
+    // The panel would otherwise latch: App picks its branch from the hash, so a
+    // throw on one public-auth link would survive following the next one.
+    vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const { rerender } = render(
+      <ErrorBoundary resetKey="#/verify-email">
+        <Throws />
+      </ErrorBoundary>,
+    )
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+
+    rerender(
+      <ErrorBoundary resetKey="#/reset-password">
+        <p>the next link</p>
+      </ErrorBoundary>,
+    )
+
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByText("the next link")).toBeInTheDocument()
+  })
+
+  it("keeps the panel while the reset key holds", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const { rerender } = render(
+      <ErrorBoundary resetKey="#/verify-email">
+        <Throws />
+      </ErrorBoundary>,
+    )
+    rerender(
+      <ErrorBoundary resetKey="#/verify-email">
+        <p>never reached</p>
+      </ErrorBoundary>,
+    )
+
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+    expect(screen.queryByText("never reached")).toBeNull()
+  })
+
   it("catches a falsy thrown value rather than re-rendering the thrower", () => {
     // A boundary keyed on the thrown value's truthiness renders the child
     // again, and React answers a second throw by blanking the document.

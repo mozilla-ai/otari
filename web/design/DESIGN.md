@@ -52,7 +52,7 @@ classifier and the meter that reads it).
 | `metrics/SeverityMark` | `SeverityMark`, and the `Severity` type |
 | `metrics/TrendChip` | `TrendChip`, `trendState`, and the `Trend*` types |
 | `metrics/charts` | `TrendChart`, `Sparkline`, `ChartLegend`, and the `SeriesDef` / `StackedPoint` types |
-| `feedback/ErrorBanner` · `/InfoBanner` · `/EmptyState` · `/EmptyMessage` · `/PageLoading` · `/ConfirmDialog` · `/ErrorBoundary` · `/errorMessage` | one each |
+| `feedback/ErrorBanner` · `/InfoBanner` · `/EmptyState` · `/EmptyMessage` · `/PageLoading` · `/PageError` · `/ConfirmDialog` · `/ErrorBoundary` · `/errorMessage` | one each |
 | `forms/Field` · `/SecretField` | `Field` · `SecretField` |
 | `forms/FieldMessages` | `FieldMessages`, `ControlField` |
 | `forms/Checkbox` | `Checkbox`, `CheckboxVisual` |

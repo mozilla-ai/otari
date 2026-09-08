@@ -1,6 +1,7 @@
 import { createHashHistory, createRouter } from "@tanstack/react-router"
 import { PendingPage } from "@/app/PendingPage"
 import { routeTree } from "@/routeTree.gen"
+import { PageError } from "@/shared/components/feedback/PageError"
 import { parseSearch, stringifySearch } from "@/shared/helpers/search"
 
 export const router = createRouter({
@@ -19,6 +20,18 @@ export const router = createRouter({
   defaultPendingComponent: PendingPage,
   defaultPendingMs: 0,
   defaultPendingMinMs: 0,
+  // The router wraps its whole match tree in a catch boundary already, so a
+  // throw inside the shell was never a blank page. What it fell back to was
+  // TanStack's built-in `ErrorComponent`, which paints its own inline-styled
+  // box and a red `<pre>` of the raw error: outside the design system, and the
+  // one thing `feedback.md` says never to render. Same panel as the boundary
+  // above the router now, so the two failures look like one product.
+  defaultErrorComponent: ({ error }) => (
+    <PageError error={error}>
+      This page could not finish rendering. Try another destination from the
+      sidebar, or reload.
+    </PageError>
+  ),
 })
 
 declare module "@tanstack/react-router" {

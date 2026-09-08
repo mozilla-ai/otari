@@ -36,14 +36,20 @@ EmptyState: { title, description?, actionLabel?, onAction?, isActionDisabled?,
   children? }
 EmptyMessage: { children, minHeight? }
 PageLoading: { label = "Loading…" }
+PageError: { error: unknown, children? }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
 ErrorBoundary: { children }
 ```
 
+`PageError` is `PageLoading`'s counterpart, for a failure that took the whole page
+rather than a band inside one: a gateway that never answered, and the two catch
+boundaries below. Its `children` is the sentence about what to do next.
+
 `ErrorBoundary` is not one a page reaches for: it is the catch above the router in
 `App.tsx`, and the only one the pre-session screens have. Everything inside
-`RouterProvider` is already covered by TanStack Router's own catch boundary.
+`RouterProvider` is covered by TanStack Router's own catch boundary, which
+`router.tsx` points at the same `PageError` so the two look like one product.
 
 `EmptyState` takes `actionLabel` plus `onAction`, not a rendered button:
 it owns the variant so no empty state can pick the wrong one. `ErrorBanner` takes the

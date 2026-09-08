@@ -21,7 +21,7 @@
  * it arrived, and `DeploymentRoot` falls through to the sign-in screen.
  */
 
-import type { DeploymentBootstrap } from "@/client"
+import type { Defaulted, DeploymentBootstrap } from "@/client"
 
 /**
  * The fields whose absence has a safe reading, which is the same reading in
@@ -45,13 +45,12 @@ type SkewProne =
 /**
  * A bootstrap as received rather than as promised.
  *
- * The response-side twin of `Defaulted` in `src/client/index.ts`: that one
- * loosens a request body the dashboard may send partially, this one loosens a
- * response an older server may send partially. Both exist because the generator
- * emits one shape for a contract that has two.
+ * `Defaulted` itself, applied to a response rather than to a request body: that
+ * use loosens what the dashboard may send partially, this one what an older
+ * gateway may answer partially. Both exist because the generator emits one
+ * shape for a contract that has two.
  */
-export type WireBootstrap = Omit<DeploymentBootstrap, SkewProne> &
-  Partial<Pick<DeploymentBootstrap, SkewProne>>
+export type WireBootstrap = Defaulted<DeploymentBootstrap, SkewProne>
 
 /** Complete a received bootstrap, so nothing below reads an absent field. */
 export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {

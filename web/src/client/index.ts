@@ -18,14 +18,19 @@ export type { components, operations, paths } from "./schema"
 type Schemas = components["schemas"]
 
 /**
- * Make the fields the gateway defaults optional on the way in.
+ * Make a named set of fields optional, where the generator promised them.
  *
  * The generator marks a property with a schema default as always present, which
  * is true of a response and false of a request body: the point of a default is
  * that a client may omit it. Applied only where the dashboard actually omits
  * one, so it stays a correction rather than a blanket loosening.
+ *
+ * Exported because the response side has the same problem from the other
+ * direction: a gateway older than a field does not send it, whatever the
+ * current schema says. `WireBootstrap` in `shared/helpers/bootstrap.ts` is that
+ * case, and reuses this rather than restating it.
  */
-type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
+export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 // ---------------------------------------------------------------------------
 // Deployment bootstrap
