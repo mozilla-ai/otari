@@ -145,6 +145,41 @@ def test_locally_generated_messages_are_not_imported(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "line",
+    [
+        json.dumps(
+            {"message": "a string, not an object", "usage": {"input_tokens": 1}, "timestamp": "2026-07-22T12:34:56Z"}
+        ),
+        json.dumps({"message": {"id": "msg_01", "usage": "not-a-dict"}, "timestamp": "2026-07-22T12:34:56Z"}),
+        json.dumps({"message": {"usage": {"input_tokens": 1}}, "timestamp": "2026-07-22T12:34:56Z"}),
+        json.dumps({"message": {"id": 17, "usage": {"input_tokens": 1}}, "timestamp": "2026-07-22T12:34:56Z"}),
+        json.dumps({"message": {"id": "msg_01", "usage": {"input_tokens": 1}}}),
+        json.dumps(["usage", "in a list rather than an object"]),
+    ],
+)
+def test_malformed_usage_lines_are_skipped_without_failing_the_scan(tmp_path: Path, line: str) -> None:
+    """A transcript is a log, not a schema. One odd line must not cost the other thousands."""
+    _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [line, _assistant_line("msg_ok")])
+
+    result = scan_transcripts(tmp_path, label_prefix="host")
+
+    assert [event.source_event_id for event in result.events] == ["msg_ok"]
+
+
+def test_an_unreadable_transcript_does_not_abort_the_scan(tmp_path: Path) -> None:
+    """One file being rewritten or unreadable must not lose the rest of the corpus."""
+    (tmp_path / "-Users-alice-Projects-otari").mkdir(parents=True)
+    # A directory named like a transcript: rglob matches it, opening it raises OSError.
+    (tmp_path / "-Users-alice-Projects-otari" / "unreadable.jsonl").mkdir()
+    _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
+
+    result = scan_transcripts(tmp_path, label_prefix="host")
+
+    assert [event.source_event_id for event in result.events] == ["msg_01"]
+    assert result.files_scanned == 2
+
+
+@pytest.mark.parametrize(
     ("raw", "expected"),
     [
         ("claude-sonnet-4-5[1m]", "claude-sonnet-4-5"),

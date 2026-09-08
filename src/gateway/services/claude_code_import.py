@@ -201,8 +201,6 @@ def _usage_event(record: dict[str, Any], label: str) -> UsageEvent | None:
     timestamp = record.get("timestamp")
     if not isinstance(usage, dict) or not isinstance(response_id, str) or not isinstance(timestamp, str):
         return None
-    if message.get("model") == _SYNTHETIC_MODEL:
-        return None
     # Anthropic splits cache writes by TTL. ``cache_creation_input_tokens`` is the
     # total; the 1h share is priced differently, so it is reported separately and
     # subtracted rather than counted twice.
