@@ -28,19 +28,17 @@ import type { Defaulted, DeploymentBootstrap } from "@/client"
  * every case: offer nothing, claim nothing, link nowhere. A gateway too old to
  * publish a field is a gateway that cannot serve what the field describes, so
  * the empty answer is not a guess about it.
+ *
+ * Derived rather than listed, because a listed one is the same bug again: the
+ * next field added to the bootstrap would be absent from an older gateway,
+ * absent from the list, and dereferenced unguarded, with nothing failing to say
+ * so. Subtracting instead means a new field arrives in `WireBootstrap` optional
+ * and `normalizeBootstrap` stops compiling until it is given a default.
  */
-type SkewProne =
-  | "surfaces"
-  | "sign_in_methods"
-  | "oauth_providers"
-  | "management_url"
-  | "data_plane_url"
-  | "docs_url"
-  | "terms_url"
-  | "privacy_url"
-  | "maintenance_mode"
-  | "passkeys_ready"
-  | "mail_ready"
+type SkewProne = Exclude<
+  keyof DeploymentBootstrap,
+  "deployment_type" | "session_type"
+>
 
 /**
  * A bootstrap as received rather than as promised.

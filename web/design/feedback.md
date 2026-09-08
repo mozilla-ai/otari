@@ -39,7 +39,7 @@ PageLoading: { label = "Loading…" }
 PageError: { error: unknown, children? }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
-ErrorBoundary: { children }
+ErrorBoundary: { children, resetKey? }
 ```
 
 `PageError` is `PageLoading`'s counterpart, for a failure that took the whole page

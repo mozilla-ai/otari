@@ -63,9 +63,8 @@ describe("normalizeBootstrap", () => {
   })
 
   it("keeps a false flag rather than treating it as absent", () => {
-    // The trap `??` exists to avoid and `||` would fall into: a gateway that
-    // publishes `maintenance_mode: false` has answered, and an empty
-    // `sign_in_methods` is an answer too.
+    // A published `false` and a published empty list are answers, not absences,
+    // and neither may be overwritten by the default that stands in for one.
     const completed = normalizeBootstrap(
       bootstrap({ maintenance_mode: false, sign_in_methods: [] }),
     )

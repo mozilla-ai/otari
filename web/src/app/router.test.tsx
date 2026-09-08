@@ -6,7 +6,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { router } from "@/app/router"
 
@@ -30,6 +30,10 @@ const throwingRoute = createRoute({
 })
 
 describe("router error handling", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("renders a routed throw on our own panel", async () => {
     // React logs a caught render error whatever catches it, and the router
     // warns about an uncaught one in development.

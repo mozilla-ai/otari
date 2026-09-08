@@ -280,6 +280,22 @@ describe("a bootstrap from an older gateway", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows the boundary's panel when a page above the router throws", () => {
+    // React logs a caught render error whatever catches it, so the assertion is
+    // about what is on screen rather than about silence.
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    // Present but not the shape the type promises, which is the half of skew a
+    // default cannot complete: `Login` throws where only the boundary in `App`
+    // can catch it, and without one the document is empty.
+    const { container } = renderApp({
+      ...bootstrap(),
+      oauth_providers: 3 as unknown as string[],
+    })
+
+    expect(container).not.toBeEmptyDOMElement()
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+  })
+
   it("still renders a public auth page, which reads it on the no-mail path", () => {
     window.location.hash = "#/recover-password"
 
