@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
+from collections.abc import Callable
 from concurrent.futures import Future
 from multiprocessing.connection import Connection
 from time import monotonic
@@ -35,6 +37,28 @@ def _hang_worker(_connection: Connection, _memory_bytes: int) -> None:
     import time
 
     time.sleep(10)
+
+
+class _PausedQueueDrainSupervisor(ExtractionSupervisor):
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float,
+        worker_target: Callable[[Connection, int], None],
+    ) -> None:
+        self.drain_started = threading.Event()
+        self.allow_drain = threading.Event()
+        super().__init__(timeout_seconds=timeout_seconds, worker_target=worker_target)
+
+    def _fail_queued(
+        self,
+        error: ExtractionError,
+        *,
+        up_to_identifier: int | None = None,
+    ) -> None:
+        self.drain_started.set()
+        self.allow_drain.wait(timeout=2)
+        super()._fail_queued(error, up_to_identifier=up_to_identifier)
 
 
 class _CancelOnCompletionFuture(Future[ExtractedText]):
@@ -112,10 +136,7 @@ async def test_submission_deadline_includes_worker_startup_and_recovers() -> Non
 @pytest.mark.asyncio
 async def test_timeout_fails_current_and_queued_jobs_then_recovers() -> None:
     supervisor = ExtractionSupervisor(timeout_seconds=0.05, worker_target=_hang_worker)
-    jobs = [
-        asyncio.create_task(supervisor.extract_html(f"<html><body>{index}</body></html>"))
-        for index in range(3)
-    ]
+    jobs = [asyncio.create_task(supervisor.extract_html(f"<html><body>{index}</body></html>")) for index in range(3)]
     try:
         results = await asyncio.gather(*jobs, return_exceptions=True)
         assert all(isinstance(result, ExtractionError) for result in results)
@@ -183,6 +204,27 @@ async def test_max_sized_payload_cannot_block_past_its_deadline() -> None:
         supervisor._timeout_seconds = WEB_FETCH_EXTRACTION_TIMEOUT_SECONDS  # noqa: SLF001
         recovered = await supervisor.extract_html("<html><body><p>recovered</p></body></html>")
     finally:
+        supervisor.close()
+
+    assert "recovered" in recovered.text
+
+
+@pytest.mark.asyncio
+async def test_recovery_submitted_after_timeout_is_not_failed_with_queued_batch() -> None:
+    supervisor = _PausedQueueDrainSupervisor(timeout_seconds=0.05, worker_target=_hang_worker)
+    try:
+        with pytest.raises(ExtractionError, match="deadline"):
+            await supervisor.extract_html("<html><body>too late</body></html>")
+        assert supervisor.drain_started.wait(timeout=1)
+
+        supervisor._worker_target = _worker_main  # noqa: SLF001
+        supervisor._timeout_seconds = WEB_FETCH_EXTRACTION_TIMEOUT_SECONDS  # noqa: SLF001
+        recovery = asyncio.create_task(supervisor.extract_html("<html><body><p>recovered</p></body></html>"))
+        await asyncio.sleep(0)
+        supervisor.allow_drain.set()
+        recovered = await asyncio.wait_for(recovery, timeout=10)
+    finally:
+        supervisor.allow_drain.set()
         supervisor.close()
 
     assert "recovered" in recovered.text

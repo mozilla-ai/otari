@@ -163,23 +163,19 @@ def test_invalid_request_domain_rules_are_rejected_before_dispatch(
     ("path", "body"),
     [
         (
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             {
                 "model": "openai:gpt-4o",
                 "messages": [{"role": "user", "content": "search"}],
-                "tools": [
-                    {"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}
-                ],
+                "tools": [{"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}],
             },
         ),
         (
-            "/v1/responses",
+            f"{API_ROOT}/responses",
             {
                 "model": "openai:gpt-4o",
                 "input": "search",
-                "tools": [
-                    {"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}
-                ],
+                "tools": [{"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}],
             },
         ),
     ],
@@ -221,11 +217,9 @@ def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
     response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
     assert response.status_code == 503
-    assert response.json()["detail"]["error"]["message"] == (
-        "Web search configuration contains an invalid domain rule"
-    )
+    assert response.json()["detail"]["error"]["message"] == ("Web search configuration contains an invalid domain rule")
     assert seen.ran is False
-    stored = client.get(f"/v1/workspaces/{workspace_id}/web-search", headers=master_key_header)
+    stored = client.get(f"{API_ROOT}/workspaces/{workspace_id}/web-search", headers=master_key_header)
     assert stored.status_code == 200
     assert stored.json()["allowed_domains"] == ["https://example.com/private"]
 
@@ -768,16 +762,16 @@ def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
         row.allowed_domains = ["https://example.com/private"]
         db.commit()
 
-    client.post("/v1/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
     key = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "invalid-config-search-key", "user_id": "invalid-config-search-user"},
         headers=master_key_header,
     ).json()
 
     with patch("gateway.api.routes.search.run_search", new=AsyncMock()) as ran:
         response = client.post(
-            "/v1/search/invalid-config-search",
+            f"{API_ROOT}/search/invalid-config-search",
             json={"query": "anything"},
             headers={API_KEY_HEADER: f"Bearer {key['key']}"},
         )

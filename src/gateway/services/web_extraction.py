@@ -219,15 +219,37 @@ class ExtractionSupervisor:
         else:
             pending.future.set_exception(ExtractionError("extraction worker failed"))
 
-    def _fail_queued(self, error: ExtractionError) -> None:
+    def _failure_cutoff(self) -> int:
+        """Return the last job submitted before the current failure is published."""
+        with self._state_lock:
+            return self._next_identifier - 1
+
+    def _fail_queued(
+        self,
+        error: ExtractionError,
+        *,
+        up_to_identifier: int | None = None,
+    ) -> None:
+        queued: list[_PendingExtraction] = []
+        retained: list[_PendingExtraction] = []
+        stopped = False
         while True:
             try:
                 pending = self._queue.get_nowait()
             except queue.Empty:
-                return
+                break
             if pending is None:
-                self._queue.put(None)
-                return
+                stopped = True
+                break
+            if up_to_identifier is not None and pending.identifier > up_to_identifier:
+                retained.append(pending)
+            else:
+                queued.append(pending)
+        for pending in retained:
+            self._queue.put(pending)
+        if stopped:
+            self._queue.put(None)
+        for pending in queued:
             self._finish(pending, error=error)
 
     @staticmethod
@@ -268,11 +290,12 @@ class ExtractionSupervisor:
                     return
                 if monotonic() >= pending.expires_at:
                     error = ExtractionError("extraction deadline exceeded")
+                    failure_cutoff = self._failure_cutoff()
                     self._stop_worker(process, connection)
                     process = None
                     connection = None
                     self._finish(pending, error=error)
-                    self._fail_queued(error)
+                    self._fail_queued(error, up_to_identifier=failure_cutoff)
                     continue
                 if process is None or not process.is_alive() or connection is None:
                     self._stop_worker(process, connection)
@@ -282,8 +305,9 @@ class ExtractionSupervisor:
                         process = None
                         connection = None
                         error = ExtractionError("extraction worker could not start")
+                        failure_cutoff = self._failure_cutoff()
                         self._finish(pending, error=error)
-                        self._fail_queued(error)
+                        self._fail_queued(error, up_to_identifier=failure_cutoff)
                         continue
                 shared: SharedMemory | None = None
                 try:
@@ -313,11 +337,12 @@ class ExtractionSupervisor:
                         if isinstance(exc, TimeoutError)
                         else ExtractionError("content extraction failed")
                     )
+                    failure_cutoff = self._failure_cutoff()
                     self._stop_worker(process, connection)
                     process = None
                     connection = None
                     self._finish(pending, error=error)
-                    self._fail_queued(error)
+                    self._fail_queued(error, up_to_identifier=failure_cutoff)
                     continue
                 finally:
                     if shared is not None:
