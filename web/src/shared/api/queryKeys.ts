@@ -91,9 +91,6 @@ export const BUILD_POLL_MS = 60_000
 // the build check. The gateway bounds its own upstream probe (`resolve_timeout_ms`),
 // so a stalled control plane answers "no" rather than piling up requests.
 export const HEALTH_POLL_MS = 15_000
-// Checking provider health lists models for every configured provider. Keep the
-// automatic probe infrequent; operators can still force an immediate re-check.
-export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are

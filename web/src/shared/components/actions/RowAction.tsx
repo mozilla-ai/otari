@@ -10,9 +10,9 @@ import type { ReactNode, RefObject } from "react"
  * out because it was got wrong at six sites on the first pass: a destructive
  * action at rest is the same muted text as its neighbors, and the ink arrives
  * only once the next click commits something. A row that paints Remove red
- * before anybody has touched it spends the colour on a state nothing is in, and
+ * before anybody has touched it spends the color on a state nothing is in, and
  * by the time it means something the reader has stopped seeing it. Same rule
- * the spend figure follows: the colour marks what you are about to do, never
+ * the spend figure follows: the color marks what you are about to do, never
  * the control that offers it.
  *
  * An action whose confirmation is a dialog rather than an inline arm stays

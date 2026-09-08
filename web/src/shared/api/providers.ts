@@ -16,7 +16,6 @@ import {
   MODELS,
   NO_RETRY,
   PROVIDER_HEALTH,
-  PROVIDER_HEALTH_REFRESH_MS,
   PROVIDERS,
   STORED_PROVIDERS,
 } from "@/shared/api/queryKeys"
@@ -65,6 +64,10 @@ export function useProviderDetail(providerId: string) {
 // every configured provider, so automatic checks run at most hourly. The
 // response's healthy/total counts are reused by the overview summary tile
 // (issue #302).
+// Checking provider health lists models for every configured provider. Keep the
+// automatic probe infrequent; operators can still force an immediate re-check.
+export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000
+
 export function useProviderHealth() {
   return useQuery({
     ...NO_RETRY,

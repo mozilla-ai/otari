@@ -5,11 +5,11 @@ from DESIGN.md's topics table, because it describes work rather than a rule.
 Delete it once the follow-ups at the bottom are closed; the durable half (where a
 component lives) is already in DESIGN.md's "Where things come from" table.
 
-**Status: executed.** `surface.tsx` (848 lines, 22 exports), `ui.tsx` (1,075
+**Status: executed.** `surface.tsx` (876 lines, 22 exports), `ui.tsx` (1,075
 lines, 20 exports) and `shared/api/hooks.ts` (3,638 lines, 172 exports) are gone,
 replaced by 10 topic directories under `shared/components/` and 17 domain modules
-under `shared/api/`. Verified with `lint`, `typecheck`, 132 test files / 3,573
-tests, and a production build. Six things came out differently from the plan
+under `shared/api/`. Verified with `lint`, `typecheck`, 135 test files / 3,844
+tests, and a production build. Several things came out differently from the plan
 below; each is marked **revised** where it applies.
 
 ## What was wrong
@@ -17,10 +17,10 @@ below; each is marked **revised** where it applies.
 `shared/components/` was a flat directory of 40 entries in which two files held 42
 exports between them:
 
-| File | Lines | Exports | Call sites |
+| File | Lines | Exports | Call sites rewritten |
 | --- | --- | --- | --- |
-| `ui.tsx` | 1,075 | 20 | 61 files |
-| `surface.tsx` | 848 | 22 | 35 files |
+| `ui.tsx` | 1,075 | 20 | 60 files |
+| `surface.tsx` | 876 | 22 | 48 files |
 
 Neither name says anything. `ui` names the whole layer it sits in. `surface` is
 worse than uninformative: `--color-surface` and `bg-surface` are a *token* meaning
@@ -327,12 +327,12 @@ Three traps worth recording, all of which cost a cycle:
 
 ## Verification
 
-`lint`, `typecheck`, 132 test files / 3,573 tests, and a production build, all
+`lint`, `typecheck`, 135 test files / 3,844 tests, and a production build, all
 green. Two notes on reading those runs:
 
-- The test count **rose** (3,353 to 3,573) rather than staying flat. Splitting adds
-  no cases; several gates are `it.each(sources)` over the source tree, so 34 more
-  files means more generated cases.
+- The test count **rises** rather than staying flat, which is expected and not a
+  sign that cases were added: several gates are `it.each(sources)` over the source
+  tree, so 34 more files means more generated cases.
 - A full-suite run mid-refactor reported five failures in `ActivityPage`,
   `UsagePage` and `UsagePageScope` that passed in isolation and passed on the next
   full run. That is **pre-existing load-dependent flakiness**, not the refactor:
@@ -354,12 +354,14 @@ and is the remaining check.
   shape. One page at a time, which is what DESIGN.md already invites.
 - **Split `tabs.test.tsx`** if its header docstring is ever separable per
   component.
-- **Move the poll cadences out of `queryKeys.ts`.** `BUILD_POLL_MS`,
+- **Move the remaining poll cadences out of `queryKeys.ts`.** `BUILD_POLL_MS`,
   `HEALTH_POLL_MS`, `MAINTENANCE_MODE_POLL_MS`, `PROVIDER_HEALTH_REFRESH_MS` and
   `NO_RETRY` are query *options*, not keys, and each is read by exactly one domain
   module. They stayed because the constant block moved whole, with its comments,
   and cutting it into 43 individually-bounded pieces was the one place where the
-  risk was not worth the tidiness. The keys themselves must not be split: 109
+  risk was not worth the tidiness. `PROVIDER_HEALTH_REFRESH_MS` already moved to
+  `providers.ts`, because it was the one constant a page reached for and so the one
+  blocking the boundary rule below. The keys themselves must not be split: 109
   invalidations reach 39 of them across domains.
 - **`web/design/actions.md` still opens on `Button`.** The file is now named for
   the whole action family; its first section is about the three variants only.

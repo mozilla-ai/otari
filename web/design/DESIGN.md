@@ -131,10 +131,12 @@ not already in its list, naming what to use instead.
 | `deprecated/SettingsSection` | `layout/SettingsGroup` | **nothing. Dead code** |
 | HeroUI `Card` | `Section`, or a bare band | 6 components |
 
-The counts are the tree's, not this table's memory of it: the gate test derives
-them, which is how the previous two were found to have drifted (`StatCard` was
-listed on Usage after Usage stopped using it, and `RowActions` on two call sites
-when it had one).
+The gate derives **which files** import each one, so a row naming a page that no
+longer reaches for it fails. It does not count usages, so the "one use each" and
+"4 uses" figures are prose and can drift the way the previous two did (`StatCard`
+was listed on Usage after Usage stopped using it, and `RowActions` on two call
+sites when it had one). Check them against the tree rather than against this
+table.
 
 `SettingsSection` is the row to act on: it has no call site anywhere, and it
 shadowed `layout/SettingsGroup` while diverging from this tree's
