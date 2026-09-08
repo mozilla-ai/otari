@@ -16,8 +16,9 @@
  *
  * `deployment_type` and `session_type` take no default, because they say what
  * this deployment *is* and `web/AGENTS.md` is explicit that the app must not
- * guess that. A payload missing them is passed through as it arrived, where it
- * selects no mode rather than the wrong one.
+ * guess that. Both have been on this route since it was added, so no gateway
+ * that answers it at all omits one; a payload missing them is passed through as
+ * it arrived, and `DeploymentRoot` falls through to the sign-in screen.
  */
 
 import type { DeploymentBootstrap } from "@/client"

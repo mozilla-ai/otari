@@ -20,18 +20,22 @@ import { ErrorBanner } from "./ErrorBanner"
  * Nothing is logged here on purpose: `src/` writes to no console anywhere, and
  * the error is on screen, which is the whole point of the panel.
  */
-export class ErrorBoundary extends Component<
-  { children: ReactNode },
-  { error: unknown }
-> {
-  state: { error: unknown } = { error: null }
+type Caught = { caught: boolean; error: unknown }
 
-  static getDerivedStateFromError(error: unknown): { error: unknown } {
-    return { error }
+// `throw null` is legal, and a boundary that keys on the thrown value's truthiness
+// re-renders the child that threw it, which React answers by giving up and
+// blanking the document: the failure this file exists to prevent.
+const UNTYPED_FAILURE = new Error("Something went wrong.")
+
+export class ErrorBoundary extends Component<{ children: ReactNode }, Caught> {
+  state: Caught = { caught: false, error: undefined }
+
+  static getDerivedStateFromError(error: unknown): Caught {
+    return { caught: true, error }
   }
 
   render() {
-    if (!this.state.error) {
+    if (!this.state.caught) {
       return this.props.children
     }
     // The same shape as `App`'s unreachable-gateway panel, because they are the
@@ -40,7 +44,7 @@ export class ErrorBoundary extends Component<
     return (
       <div className="flex min-h-full items-center justify-center p-6">
         <div className="flex w-full max-w-md flex-col gap-3">
-          <ErrorBanner error={this.state.error} />
+          <ErrorBanner error={this.state.error ?? UNTYPED_FAILURE} />
           <p className="text-caption">
             The dashboard could not finish rendering this page. Reload to try
             again. If it keeps happening, this gateway and the dashboard it

@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client"
 
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
-import type { DeploymentBootstrap } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
 const container = document.getElementById("root")
@@ -30,8 +30,8 @@ if (!container) {
 // decides. Both land on the same screen, which says the gateway is unreachable.
 const BOOTSTRAP_TIMEOUT_MS = 8_000
 
-function loadBootstrap(): Promise<DeploymentBootstrap | null> {
-  return apiFetch<DeploymentBootstrap>("/v1/bootstrap", {
+function loadBootstrap(): Promise<WireBootstrap | null> {
+  return apiFetch<WireBootstrap>("/v1/bootstrap", {
     signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
   }).catch(() => null)
 }

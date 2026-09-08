@@ -38,7 +38,12 @@ EmptyMessage: { children, minHeight? }
 PageLoading: { label = "Loading…" }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
+ErrorBoundary: { children }
 ```
+
+`ErrorBoundary` is not one a page reaches for: it is the catch above the router in
+`App.tsx`, and the only one the pre-session screens have. Everything inside
+`RouterProvider` is already covered by TanStack Router's own catch boundary.
 
 `EmptyState` takes `actionLabel` plus `onAction`, not a rendered button:
 it owns the variant so no empty state can pick the wrong one. `ErrorBanner` takes the

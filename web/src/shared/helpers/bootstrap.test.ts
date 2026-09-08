@@ -76,7 +76,7 @@ describe("normalizeBootstrap", () => {
 
   it("does not invent the two fields that say what the deployment is", () => {
     // web/AGENTS.md: do not guess a deployment. Absent here means absent below,
-    // where it selects no mode rather than the wrong one.
+    // rather than a deployment identity this file made up.
     const completed = normalizeBootstrap(
       omitting("deployment_type", "session_type"),
     )
