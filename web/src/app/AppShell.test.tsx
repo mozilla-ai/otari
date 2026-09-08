@@ -484,6 +484,40 @@ describe("AppShell responsive layout", () => {
   })
 })
 
+describe("the rail's closing rules", () => {
+  // The footer block and the closing band each draw a rule. Between them sits
+  // one row, the way onto the organization rail, and on that rail it is gated
+  // out: the two rules then land 4px apart and read as a single doubled
+  // hairline, which is what a reader reported. The band's rule is the
+  // unconditional one, mirroring the scope band at the head of the rail, so the
+  // footer's is the one that gives way.
+  const footerOf = (container: HTMLElement) =>
+    container.querySelector('[class*="pb-[env(safe-area-inset-bottom)]"]')
+
+  it("keeps the footer rule where a row sits below it", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell(bootstrap(), { url: "/" })
+
+    expect(
+      await screen.findByRole("link", { name: "Organization" }),
+    ).toBeInTheDocument()
+    expect(footerOf(container)).toHaveClass("border-t")
+  })
+
+  it("drops it on the organization rail, where that row is gone", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell(bootstrap(), {
+      url: "/organization/members",
+    })
+
+    expect(
+      await screen.findByRole("link", { name: /^Back to/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+    expect(footerOf(container)).not.toHaveClass("border-t")
+  })
+})
+
 describe("AppShell surface gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()

@@ -526,6 +526,12 @@ function AppShellChrome() {
   // where the drawer can be one level down inside the organization rail while
   // the page behind it is still a workspace page.
   const showOrganizationRail = inOrganization || (isMobile && mobileOrgNavOpen)
+  // Whether the footer holds a row above its closing band. The organization row
+  // is the only one left in there, so when it is gated out the footer's own rule
+  // and the band's rule land 4px apart and read as one doubled hairline. The
+  // band's rule is the unconditional one (it mirrors the scope band at the top
+  // of the rail), so it is the footer's that gives way.
+  const footerHasRowAboveBand = !showOrganizationRail && managesOrganization
   // Filtered before it is indexed, so the divider and top margin below key off
   // the first *rendered* section rather than the first registered one.
   const visibleSections = visibleNavSections(
@@ -869,7 +875,11 @@ function AppShellChrome() {
               right border, while the rows inside keep the rail's padding. A
               divider that stops short of the edge reads as a box's top border
               rather than as a division of the rail. */}
-            <div className="-mx-3 flex flex-col gap-1 border-t border-border px-3 pt-1 pb-[env(safe-area-inset-bottom)]">
+            <div
+              className={`-mx-3 flex flex-col gap-1 px-3 pt-1 pb-[env(safe-area-inset-bottom)] ${
+                footerHasRowAboveBand ? "border-t border-border" : ""
+              }`}
+            >
               {/* The way into the organization rail. Only in the workspace
                 context, since the organization one has its own way back, and
                 only for someone who manages the organization: it is the single
@@ -894,7 +904,7 @@ function AppShellChrome() {
                 and a destination in it is what dismisses the drawer. That is
                 also what earns the trailing chevron back: it promises a submenu
                 only where one now opens. */}
-              {!showOrganizationRail && managesOrganization ? (
+              {footerHasRowAboveBand ? (
                 isMobile ? (
                   // `cursor-pointer` because a bare button resolves to the default
                   // arrow, which is the one thing `navRowClass` leaves to its call
