@@ -64,6 +64,7 @@ from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedErr
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import (
+    CanonicalHost,
     DomainRuleValidationError,
     canonicalize_domain_rule,
     domain_rule_matches,
@@ -77,7 +78,8 @@ _MAX_RESULTS = MAX_RESULTS_CAP
 # Bound the two lists and the opaque bag so one workspace's row cannot grow
 # without limit; the same numbers the hosted `WorkspaceWebSearchConfigUpdate`
 # uses, since this is the same configuration.
-_MAX_DOMAINS = 100
+MAX_WEB_SEARCH_DOMAINS = 100
+_MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
 # The longest a DNS name can be. Not a policy, just the point past which a
@@ -405,6 +407,16 @@ def _union(requested: list[str] | None, workspace: tuple[str, ...]) -> list[str]
     return list(merged)
 
 
+def _canonical_rules(values: list[str] | tuple[str, ...]) -> list[tuple[str, CanonicalHost]]:
+    rules: list[tuple[str, CanonicalHost]] = []
+    for value in dict.fromkeys(values):
+        try:
+            rules.append((value, canonicalize_domain_rule(value)))
+        except DomainRuleValidationError:
+            continue
+    return rules
+
+
 def _intersect(requested: list[str], workspace: tuple[str, ...]) -> list[str]:
     """The domains both sides permit, in the request's order.
 
@@ -417,24 +429,16 @@ def _intersect(requested: list[str], workspace: tuple[str, ...]) -> list[str]:
     overlapping pair is the one that survives; genuinely disjoint lists still
     intersect to nothing, which is what the caller refuses.
     """
+    requested_rules = _canonical_rules(requested)
+    workspace_rules = _canonical_rules(workspace)
     kept: dict[str, None] = {}
-    for host in dict.fromkeys(requested):
-        for allowed in workspace:
-            if _covers(allowed, host):
+    for host, candidate in requested_rules:
+        for allowed, rule in workspace_rules:
+            if domain_rule_matches(rule, candidate):
                 kept.setdefault(host, None)
-            elif _covers(host, allowed):
+            elif domain_rule_matches(candidate, rule):
                 kept.setdefault(allowed, None)
     return list(kept)
-
-
-def _covers(suffix: str, host: str) -> bool:
-    """Whether one canonical domain rule admits the other identity."""
-    try:
-        rule = canonicalize_domain_rule(suffix)
-        candidate = canonicalize_domain_rule(host)
-    except DomainRuleValidationError:
-        return False
-    return domain_rule_matches(rule, candidate)
 
 
 class WorkspaceWebSearchService:

@@ -159,6 +159,48 @@ def test_invalid_request_domain_rules_are_rejected_before_dispatch(
     assert seen.backend_kwargs == {}
 
 
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/chat/completions",
+            {
+                "model": "openai:gpt-4o",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [
+                    {"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}
+                ],
+            },
+        ),
+        (
+            "/v1/responses",
+            {
+                "model": "openai:gpt-4o",
+                "input": "search",
+                "tools": [
+                    {"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}
+                ],
+            },
+        ),
+    ],
+)
+def test_invalid_request_domain_rules_are_rejected_for_other_completion_shapes(
+    path: str,
+    body: dict[str, Any],
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+
+    response = client.post(path, json=body, headers=api_key_header)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Web search allowed_domains and blocked_domains must each contain at most 100 bare valid hostnames"
+    )
+
+
 def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
     client: TestClient,
     api_key_header: dict[str, str],
