@@ -507,18 +507,16 @@ async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
         McpExecutionError: with the code and status the route returns.
     """
     try:
-        async with asyncio.timeout(DISCOVERY_TOTAL_TIMEOUT_S):
-            async with DISCOVERY_GATE.slot():
-                return await _discover_once(server)
+        async with DISCOVERY_GATE.slot():
+            return await _discover_once(server)
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
-    except TimeoutError:
-        # This deadline, converted by ``asyncio.timeout`` on the way out, which
-        # is why the arm below cannot mistake it for the server cancelling us.
-        raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502) from None
     except McpExecutionError:
         raise
     except BaseException as exc:
+        task = asyncio.current_task()
+        if isinstance(exc, asyncio.CancelledError) and task is not None and task.cancelling():
+            raise
         # Everything the transport can throw, in the shapes it actually throws
         # them: a bare ``CancelledError`` when the SDK's task group cancels its
         # caller, or a group when it collects several. Neither is an

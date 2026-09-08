@@ -8,6 +8,7 @@ stored URL, the credential, nor the allowlist itself (R-DISC-2).
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -65,9 +66,11 @@ class _FakeSession:
             )
         ]
         self.pages = 0
+        self.delay_s = 0.0
 
     async def list_tools(self, cursor: str | None = None) -> ListToolsResult:
         self.pages += 1
+        await asyncio.sleep(self.delay_s)
         return ListToolsResult(tools=self.tools)
 
 
@@ -88,6 +91,7 @@ class _Platform:
         self.servers: list[dict[str, Any]] | None = [_stored().model_dump(mode="json")]
         self.status_code = 200
         self.bodies: list[dict[str, Any]] = []
+        self.delay_s = 0.0
 
 
 @pytest.fixture
@@ -96,6 +100,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
 
     async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
         fake.bodies.append(body)
+        await asyncio.sleep(fake.delay_s)
         payload = {"servers": fake.servers} if fake.status_code == 200 else {"detail": "refused"}
         return httpx.Response(fake.status_code, json=payload)
 
@@ -188,6 +193,58 @@ def test_an_explicit_empty_allowlist_denies_every_tool_without_connecting(
         "warnings": [],
     }
     assert session.pages == 0
+
+
+def test_the_total_deadline_includes_authentication(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def slow_authentication(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(mcp_route, "_authenticate", slow_authentication)
+
+    response = client.get(TOOLS_PATH, headers=USER_AUTH)
+
+    assert response.status_code == 502, response.text
+    assert response.json()["code"] == "mcp_discovery_limit_exceeded"
+    assert platform.bodies == []
+    assert session.pages == 0
+
+
+def test_the_total_deadline_includes_platform_resolution(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
+    platform.delay_s = 10
+
+    response = client.get(TOOLS_PATH, headers=USER_AUTH)
+
+    assert response.status_code == 502, response.text
+    assert response.json()["code"] == "mcp_discovery_limit_exceeded"
+    assert session.pages == 0
+
+
+def test_the_total_deadline_includes_mcp_discovery(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
+    session.delay_s = 10
+
+    response = client.get(TOOLS_PATH, headers=USER_AUTH)
+
+    assert response.status_code == 502, response.text
+    assert response.json()["code"] == "mcp_discovery_limit_exceeded"
+    assert session.pages == 1
 
 
 def test_an_unusable_descriptor_is_omitted_and_labeled(

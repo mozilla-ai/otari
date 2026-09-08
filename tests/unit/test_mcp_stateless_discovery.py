@@ -146,43 +146,6 @@ async def test_an_oversized_serialized_response_refuses_the_whole_response(opene
 
 
 @pytest.mark.asyncio
-async def test_the_total_deadline_refuses_the_whole_response(
-    opened: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
-    opened["session"].delay = 5
-
-    with pytest.raises(McpExecutionError) as raised:
-        await discover_stored_tools(SERVER)
-
-    assert raised.value.code == "mcp_discovery_limit_exceeded"
-    assert raised.value.execution_state is ExecutionState.NOT_STARTED
-
-
-@pytest.mark.asyncio
-async def test_the_total_deadline_includes_admission_and_discovery(
-    opened: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _DelayedGate:
-        @asynccontextmanager
-        async def slot(self) -> Any:
-            await asyncio.sleep(0.03)
-            yield
-
-    monkeypatch.setattr(mcp_stateless, "DISCOVERY_GATE", _DelayedGate())
-    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.05)
-    opened["session"].delay = 0.03
-
-    with pytest.raises(McpExecutionError) as raised:
-        await discover_stored_tools(SERVER)
-
-    assert raised.value.code == "mcp_discovery_limit_exceeded"
-    assert raised.value.execution_state is ExecutionState.NOT_STARTED
-
-
-@pytest.mark.asyncio
 async def test_a_connection_failure_is_reported_as_one(opened: dict[str, Any]) -> None:
     opened["connect_error"] = RuntimeError("server-secret refused")
 

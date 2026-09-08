@@ -494,24 +494,58 @@ async def list_mcp_tools(
     A tool the server removes after discovery may still be proposed from the
     run's snapshot; execution then returns the remote server's own typed error.
     """
-    principal = await _authenticate(raw_request, db, config)
-    server = await _resolve_server(principal, db, config, mcp_server_id)
-
-    if server.allowed_tools == []:
-        # An operator's explicit deny-all is a complete answer already, so this
-        # opens no connection at all (R-RES-4).
-        response = McpToolsResponse(server_id=server.id, server_revision=server.revision, tools=[], warnings=[])
-        if discovery_response_exceeds_bound(response):  # pragma: no cover - fixed-size response
-            raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
-        return response
-
-    await release_session(db)
-    await _require_safe_url(server)
-    track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
-
     started = time.monotonic()
     try:
-        catalog = await discover_stored_tools(server)
+        async with asyncio.timeout(mcp_stateless.DISCOVERY_TOTAL_TIMEOUT_S):
+            principal = await _authenticate(raw_request, db, config)
+            server = await _resolve_server(principal, db, config, mcp_server_id)
+
+            if server.allowed_tools == []:
+                # An operator's explicit deny-all is a complete answer already,
+                # so this opens no connection at all (R-RES-4).
+                response = McpToolsResponse(
+                    server_id=server.id,
+                    server_revision=server.revision,
+                    tools=[],
+                    warnings=[],
+                )
+                if discovery_response_exceeds_bound(response):  # pragma: no cover - fixed-size response
+                    raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+                return response
+
+            await release_session(db)
+            await _require_safe_url(server)
+            track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
+            catalog = await discover_stored_tools(server)
+
+            response = McpToolsResponse(
+                server_id=server.id,
+                server_revision=server.revision,
+                tools=[
+                    McpToolDefinition(
+                        name=tool.name,
+                        description=tool.description,
+                        input_schema=tool.inputSchema,
+                        annotations=tool.annotations.model_dump(mode="json", exclude_none=True)
+                        if tool.annotations is not None
+                        else None,
+                    )
+                    for tool in catalog.tools
+                ],
+                warnings=[McpToolWarning(tool_name=name, code=code) for name, code in catalog.warnings],
+            )
+            if discovery_response_exceeds_bound(response):
+                raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+    except TimeoutError:
+        exc = McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
+        logger.info(
+            "Stateless MCP discovery request_id=%s server_id=%s outcome=%s duration_ms=%.2f",
+            getattr(raw_request.state, "otari_request_id", "-"),
+            mcp_server_id,
+            exc.code,
+            (time.monotonic() - started) * 1000,
+        )
+        raise exc from None
     except McpExecutionError as exc:
         logger.info(
             "Stateless MCP discovery request_id=%s server_id=%s outcome=%s duration_ms=%.2f",
@@ -522,24 +556,6 @@ async def list_mcp_tools(
         )
         raise
 
-    response = McpToolsResponse(
-        server_id=server.id,
-        server_revision=server.revision,
-        tools=[
-            McpToolDefinition(
-                name=tool.name,
-                description=tool.description,
-                input_schema=tool.inputSchema,
-                annotations=tool.annotations.model_dump(mode="json", exclude_none=True)
-                if tool.annotations is not None
-                else None,
-            )
-            for tool in catalog.tools
-        ],
-        warnings=[McpToolWarning(tool_name=name, code=code) for name, code in catalog.warnings],
-    )
-    if discovery_response_exceeds_bound(response):
-        raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
     logger.info(
         "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
         getattr(raw_request.state, "otari_request_id", "-"),
