@@ -223,9 +223,10 @@ Called when a request references workspace-scoped MCP server ids (a
 hybrid-only feature). Otari swaps those ids for the inline server configs it
 needs to open the connections. The caller-orchestrated endpoints,
 `GET /v1/mcp/servers/{mcp_server_id}/tools` and `POST /v1/mcp/execute`, call the
-same endpoint with the one id they were asked about, and read the answer more
-strictly than the tool loop does: exactly one entry, whose `id` is the id that
-was requested.
+same endpoint with the one id they were asked about. They accept the legacy
+response shape, which returns one enabled connection config without `id` or
+`enabled` and omits disabled servers, while validating either field when a newer
+peer supplies it.
 
 ### Request
 
@@ -262,22 +263,30 @@ The caller-orchestrated endpoints send exactly one id:
 ```
 
 Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
-`allowed_tools` off each entry in `servers`; a missing `servers` key is treated
-as an empty list. The same URL-safety rules as inline MCP configs apply once the
-configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
+`allowed_tools` off each entry in `servers`; for the tool loop, a missing
+`servers` key is treated as an empty list. The same URL-safety rules as inline
+MCP configs apply once the configs are resolved (SSRF guard, no bearer token
+over cleartext `http://`).
 
-`id` and `enabled` are required by the caller-orchestrated endpoints and unused
-by the tool loop. `id` is what lets those endpoints confirm they resolved the
-server the caller named, and `enabled` is what turns a decommissioned server
-into their `404` rather than a live connection. A peer that omits either answers
-those two endpoints with `502 mcp_resolution_failed`; the tool loop keeps
-working, since it reads neither.
+For a caller-orchestrated request, exactly one returned entry is bound to the
+one id Otari requested. A legacy entry may omit `id` and `enabled`; Otari uses
+the requested id and treats a returned config as enabled. An empty `servers`
+list is the legacy representation of a disabled server and becomes
+`404 mcp_server_not_found`, the same public result as any inaccessible server.
+A missing or malformed `servers` list, multiple entries, malformed recognized
+fields, or an explicit id that does not match remain
+`502 mcp_resolution_failed`.
+
+New peers should return `id` and `enabled`. When present, `id` must match the
+request and `enabled` must be a JSON boolean; `enabled: false` becomes the same
+404 without opening an MCP connection. These fields remain unused by the
+managed tool loop.
 
 Otari derives the `server_revision` those endpoints publish from the resolved
-URL, a digest of the resolved credential, `enabled`, and the sorted
-`allowed_tools`. `name` and `purpose_hint` are excluded, so retitling a server
-does not invalidate an authorization an application is still holding. Nothing
-platform-side stores or returns a revision.
+URL, a digest of the resolved credential, the effective enabled state, and the
+sorted `allowed_tools`. `name` and `purpose_hint` are excluded, so retitling a
+server does not invalidate an authorization an application is still holding.
+Nothing platform-side stores or returns a revision.
 
 ### Failure
 

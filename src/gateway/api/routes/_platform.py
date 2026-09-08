@@ -40,6 +40,7 @@ from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.mcp_stateless import (
     CODE_RESOLUTION_FAILED,
+    CODE_SERVER_NOT_FOUND,
     ExecutionState,
     McpExecutionError,
 )
@@ -955,19 +956,21 @@ async def _resolve_platform_mcp_server(
 ) -> ResolvedMcpServer:
     """Resolve one stored MCP server for the stored-server endpoints.
 
-    The same platform resolver `_resolve_platform_mcp_servers` calls, read
-    strictly instead of leniently. The tool-loop caller resolves a list and can
-    reasonably work with whatever came back; here the answer authorizes one
-    caller-authorized call, so exactly one entry whose id matches the requested id
-    is the only acceptable shape (R-RES-1). Zero, several, a different id, or a
-    field Otari cannot read is a resolution failure.
+    The same platform resolver `_resolve_platform_mcp_servers` calls, with a
+    one-id request. A current peer may echo ``id`` and ``enabled``; an older peer
+    returns only the connection config and omits a disabled server. Exactly one
+    legacy entry is therefore bound to the only id requested and treated as
+    enabled. An explicit id must still match, and an explicit enabled value must
+    still be a strict boolean (R-RES-1).
 
-    ``enabled`` is returned rather than acted on: the disabled-server 404 is one
-    row of an outcome ladder both modes share, and it belongs in the route that
-    owns that ladder.
+    An empty list is the legacy disabled-server answer and is indistinguishable
+    here from an inaccessible server, which is also the public 404 contract.
+    Several entries, a mismatched id, a missing ``servers`` list, or a field
+    Otari cannot read remain resolution failures.
 
     Raises:
-        McpExecutionError: the answer was not one matching, well-formed entry.
+        McpExecutionError: the server was inaccessible, or the answer was not a
+            matching, well-formed entry.
         HTTPException: the platform itself refused, for the route to classify.
     """
     payload = await _post_resolve(
@@ -978,10 +981,20 @@ async def _resolve_platform_mcp_server(
         client_error_detail="MCP server resolution failed",
     )
     servers = payload.get("servers") if isinstance(payload, dict) else None
-    if not isinstance(servers, list) or len(servers) != 1:
+    if not isinstance(servers, list):
         raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
+    if not servers:
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
+    if len(servers) != 1:
+        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
+
+    entry = servers[0]
+    if isinstance(entry, dict):
+        entry = dict(entry)
+        entry.setdefault("id", mcp_server_id)
+        entry.setdefault("enabled", True)
     try:
-        resolved = ResolvedMcpServer.model_validate(servers[0])
+        resolved = ResolvedMcpServer.model_validate(entry)
     except ValidationError:
         # No detail from the validator travels: it would quote the resolver's
         # own payload, which carries the stored URL and credential.

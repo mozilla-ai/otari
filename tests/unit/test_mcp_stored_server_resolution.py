@@ -1,10 +1,9 @@
 """Hybrid resolution of one stored MCP server (R-RES-1, R-RES-2, R-RES-3).
 
 The resolver answer is the authorization input for both stored-server
-endpoints, so it is parsed strictly: exactly one entry, whose id is the id that
-was asked for. Anything else is a resolution failure rather than a best guess,
-because the alternative is executing a caller-authorized call against a server
-the caller did not name.
+endpoints. A current peer can echo the requested id and enabled state; a legacy
+peer returns one enabled connection config or an empty list for a disabled
+server. Malformed or ambiguous answers still fail closed.
 """
 
 from __future__ import annotations
@@ -73,6 +72,19 @@ async def test_the_matching_entry_is_resolved(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
+async def test_a_legacy_entry_is_bound_to_the_only_requested_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    entry = _entry()
+    del entry["id"]
+    del entry["enabled"]
+    _platform_returns({"servers": [entry]}, monkeypatch)
+
+    server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+
+    assert server.id == SERVER_ID
+    assert server.enabled is True
+
+
+@pytest.mark.asyncio
 async def test_a_disabled_server_resolves_and_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
     """The 404 belongs to the route's outcome ladder, which both modes share."""
     _platform_returns({"servers": [_entry(enabled=False)]}, monkeypatch)
@@ -80,6 +92,19 @@ async def test_a_disabled_server_resolves_and_says_so(monkeypatch: pytest.Monkey
     server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
 
     assert server.enabled is False
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_empty_answer_is_server_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy peers omit a disabled server, which has the same public outcome."""
+    _platform_returns({"servers": []}, monkeypatch)
+
+    with pytest.raises(McpExecutionError) as raised:
+        await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+
+    assert raised.value.code == "mcp_server_not_found"
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+    assert raised.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -98,7 +123,6 @@ async def test_an_absent_allowlist_stays_absent(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.parametrize(
     "payload",
     [
-        {"servers": []},
         {"servers": [_entry(), _entry(id=str(OTHER_ID))]},
         {"servers": [_entry(id=str(OTHER_ID))]},
         {"servers": [_entry(id="not-a-uuid")]},

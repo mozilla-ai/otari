@@ -176,6 +176,22 @@ def test_the_exact_authorized_call_runs_and_the_native_result_comes_back(
     assert platform.bodies == [{"mcp_server_ids": [str(SERVER_ID)]}]
 
 
+def test_the_legacy_resolver_shape_executes_the_authorized_call(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+) -> None:
+    stored = _stored().model_dump(mode="json")
+    del stored["id"]
+    del stored["enabled"]
+    platform.servers = [stored]
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 200, response.text
+    assert session.calls == [("create_issue", {"title": "Approved title", "body": "Approved body"})]
+
+
 def test_the_request_id_is_returned_on_success_without_touching_the_result(
     client: TestClient,
     platform: _Platform,
@@ -328,14 +344,26 @@ def test_a_server_the_platform_refuses_is_not_found(
     assert session.calls == []
 
 
-@pytest.mark.parametrize("servers", [[], [_stored().model_dump(mode="json")] * 2])
-def test_an_unusable_resolver_answer_is_a_resolution_failure(
+def test_a_legacy_empty_resolver_answer_is_not_found(
     client: TestClient,
     platform: _Platform,
     session: _FakeSession,
-    servers: list[dict[str, Any]],
 ) -> None:
-    platform.servers = servers
+    platform.servers = []
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 404, response.text
+    assert _error(response)["code"] == "mcp_server_not_found"
+    assert session.calls == []
+
+
+def test_multiple_resolver_entries_are_a_resolution_failure(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+) -> None:
+    platform.servers = [_stored().model_dump(mode="json")] * 2
 
     response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
 

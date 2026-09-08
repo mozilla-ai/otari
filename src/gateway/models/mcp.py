@@ -63,9 +63,9 @@ class ResolvedMcpServer(BaseModel):
     """
 
     # Extra keys are ignored so a platform that grows a field does not break a
-    # gateway that has not learned about it, but ``enabled`` is strict: lax
-    # coercion would read a resolver that answered ``"no"`` as enabled, and this
-    # flag is what stands between a decommissioned server and a live execution.
+    # gateway that has not learned about it. ``enabled`` defaults true for legacy
+    # peers that return only enabled server configs, but an explicit value is
+    # strict: lax coercion would read a resolver that answered ``"no"`` as enabled.
     model_config = ConfigDict(extra="ignore")
 
     id: uuid.UUID
