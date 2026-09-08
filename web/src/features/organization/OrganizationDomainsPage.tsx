@@ -166,19 +166,23 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
         </p>
       </div>
       <ErrorBanner error={verify.error} />
+      {/* The verify action sits in the field's row rather than under it: the
+          record is one line an operator copies and then acts on, so the copy
+          affordance moved inside the field and the button it hands off to is
+          beside it. */}
       <CopyField
         label={`TXT record for ${row.domain}`}
         value={row.verification_record}
+        action={
+          <Button
+            variant="primary"
+            isPending={verify.isPending}
+            onPress={() => verify.mutate(row.id)}
+          >
+            {expired ? "Re-verify domain" : "Verify domain"}
+          </Button>
+        }
       />
-      <div>
-        <Button
-          variant="primary"
-          isPending={verify.isPending}
-          onPress={() => verify.mutate(row.id)}
-        >
-          {expired ? "Re-verify domain" : "Verify domain"}
-        </Button>
-      </div>
     </Section>
   )
 }

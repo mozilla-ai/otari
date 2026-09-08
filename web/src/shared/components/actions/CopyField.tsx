@@ -68,17 +68,39 @@ export function CopyableValue({
 // values are handed over in pairs and threes (a key and two snippets), so
 // "which field is this" has to be answerable by a screen reader and by a test
 // that queries the way an operator reads.
+type CopyFieldProps = {
+  label: string
+  value: string
+  fieldRef?: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>
+} & (
+  | {
+      multiline?: boolean
+      /**
+       * Excluded here rather than guarded at runtime, so a call site that passes
+       * both fails to compile. The multiline field is a `<textarea>`, where the
+       * right padding an in-field control needs indents every line instead of
+       * making room on the first, which is a different design.
+       */
+      action?: never
+    }
+  | {
+      multiline?: false
+      /**
+       * A control to sit beside the field, which moves the copy affordance
+       * inside the field and drops the button from the label row. Absent, the
+       * field renders the arrangement it always has.
+       */
+      action: ReactNode
+    }
+)
+
 export function CopyField({
   label,
   value,
   multiline = false,
   fieldRef,
-}: {
-  label: string
-  value: string
-  multiline?: boolean
-  fieldRef?: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>
-}) {
+  action,
+}: CopyFieldProps) {
   const internalRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(
     null,
   )
@@ -117,6 +139,47 @@ export function CopyField({
 
   const shared =
     "w-full rounded-lg border border-border bg-surface-alt px-3 py-2 font-mono text-xs text-foreground"
+
+  if (action) {
+    return (
+      <div className="flex flex-col gap-1">
+        {/* The label keeps its own row and stays a real `<label>`: it is what
+            names the in-field control to a screen reader ("Copy TXT record for
+            example.com"), not just a caption over the value. */}
+        <label htmlFor={fieldId} className="text-caption">
+          {label}
+        </label>
+        {/* Wraps below `xl`, where 757px of content does not fit beside the
+            rail, so `action` drops to its own line rather than squeezing the
+            field below the width the whole record needs. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full xl:w-[37.5rem] xl:shrink-0">
+            <input
+              id={fieldId}
+              ref={ref as React.RefObject<HTMLInputElement>}
+              readOnly
+              value={value}
+              onFocus={(e) => e.currentTarget.select()}
+              // Right padding clears the control rather than the value running
+              // under it, and the field grows below `md` so the 44px touch
+              // floor fits between its borders. The value is never truncated:
+              // it scrolls inside the input and stays wholly selectable.
+              className={`${shared} min-h-[2.875rem] pr-14 md:min-h-0 md:pr-11`}
+            />
+            {/* `CopyButton` rather than this component's own button: it falls
+                back to `execCommand`, so it actually copies on the plain-HTTP
+                origins where the async Clipboard API does not exist. It owns the
+                acknowledgement too, which is why the field's own `aria-live`
+                line and select hint are absent from this arrangement. */}
+            <span className="absolute top-1/2 right-1 -translate-y-1/2">
+              <CopyButton value={value} label={label} selectOnFailure={ref} />
+            </span>
+          </div>
+          {action}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-1">

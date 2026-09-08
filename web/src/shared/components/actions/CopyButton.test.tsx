@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useRef } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { CopyButton } from "@/shared/components/actions/CopyButton"
 
@@ -117,5 +118,60 @@ describe("CopyButton", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("selects a field it was given only after a failed attempt", async () => {
+    const user = userEvent.setup()
+    // Both paths refused: the async API throws, and the legacy fallback fails on
+    // its own because jsdom defines no `document.execCommand`. The attempt is
+    // recorded so the ordering can be asserted, not just the end state.
+    const order: string[] = []
+    vi.spyOn(navigator.clipboard, "writeText").mockImplementation(() => {
+      order.push("attempt")
+      return Promise.reject(new Error("not a secure context"))
+    })
+
+    function Harness() {
+      const ref = useRef<HTMLInputElement | null>(null)
+      return (
+        <>
+          <input ref={ref} readOnly defaultValue="otari-verify=abc" />
+          <CopyButton
+            value="otari-verify=abc"
+            label="TXT record"
+            selectOnFailure={ref}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+    const field = screen.getByDisplayValue(
+      "otari-verify=abc",
+    ) as HTMLInputElement
+    field.addEventListener("focus", () => order.push("focus"))
+
+    await user.click(screen.getByRole("button", { name: "Copy TXT record" }))
+
+    await waitFor(() => expect(document.activeElement).toBe(field))
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe("otari-verify=abc".length)
+    // The order is the point: the legacy path restores the selection and focus
+    // it found on its way out, so selecting before the attempt is undone by it.
+    expect(order).toEqual(["attempt", "focus"])
+  })
+
+  it("leaves focus alone when no field was given", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(
+      new Error("not a secure context"),
+    )
+    render(<CopyButton value="openai:gpt-4o" label="model id" />)
+    const button = screen.getByRole("button", { name: "Copy model id" })
+
+    await user.click(button)
+    await screen.findByText(/Copy blocked/)
+
+    // The default: a table cell has no field to select, so nothing is moved.
+    expect(document.activeElement).toBe(button)
   })
 })

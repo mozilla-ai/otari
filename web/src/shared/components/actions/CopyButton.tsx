@@ -17,7 +17,22 @@ import { copyToClipboard } from "@/shared/helpers/clipboard"
 // controlled (never hover-opened) because it reports an event, not a hint, and it
 // renders in an overlay so it is not clipped by the table's scroll container and
 // does not reflow the row it reports on.
-export function CopyButton({ value, label }: { value: string; label: string }) {
+export function CopyButton({
+  value,
+  label,
+  selectOnFailure,
+}: {
+  value: string
+  label: string
+  /**
+   * A field to focus and select if the copy fails, so the operator can reach
+   * Ctrl/Cmd-C without hunting for the value. Off by default: a table cell has
+   * no field to select, which is the majority of this button's call sites.
+   */
+  selectOnFailure?: React.RefObject<
+    HTMLInputElement | HTMLTextAreaElement | null
+  >
+}) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle")
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -27,6 +42,13 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
 
   const copy = async () => {
     const copied = await copyToClipboard(value)
+    if (!copied) {
+      // After the attempt, never before it: `copyToClipboard`'s legacy path
+      // restores the selection and focus it found on the way out, so a
+      // selection made first is undone by the very fallback this exists for.
+      selectOnFailure?.current?.focus()
+      selectOnFailure?.current?.select()
+    }
     setState(copied ? "copied" : "failed")
     clearTimeout(resetTimer.current)
     // A failure has something to read and act on, so it lingers longer.
