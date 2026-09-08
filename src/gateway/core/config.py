@@ -73,6 +73,12 @@ DEFAULT_PLATFORM_MANAGEMENT_URL = "https://otari.ai"
 # is an otari.ai route, so a deployment resolving against any other peer sets
 # platform.health_path (PLATFORM_HEALTH_PATH) to one that peer serves.
 DEFAULT_PLATFORM_HEALTH_PATH = "/utils/health-check/"
+# health_path is always joined onto base_url, which only works when the peer's
+# health route lives under the same path prefix as the rest of its API. Some
+# peers serve health outside that prefix entirely (an unversioned /health
+# beside a versioned /v1 API): no join of base_url and a relative path reaches
+# that. platform.health_url (PLATFORM_HEALTH_URL) is a full URL that bypasses
+# the join and is checked first, for exactly that peer shape.
 PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.
@@ -2466,6 +2472,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         "PLATFORM_BASE_URL": ("base_url", str),
         "PLATFORM_MANAGEMENT_URL": ("management_url", str),
         "PLATFORM_HEALTH_PATH": ("health_path", str),
+        "PLATFORM_HEALTH_URL": ("health_url", str),
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
         # Budget for the one usage report the response path waits on. Expiry

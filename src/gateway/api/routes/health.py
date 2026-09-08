@@ -26,9 +26,15 @@ async def _check_platform_reachability(config: GatewayConfig) -> bool:
     if not platform_base_url:
         return False
 
-    health_path = config.platform.get("health_path", DEFAULT_PLATFORM_HEALTH_PATH)
     timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    health_url = f"{platform_base_url.rstrip('/')}/{health_path.lstrip('/')}"
+
+    # health_url, when set, names the peer's health route directly rather than
+    # joining health_path onto base_url -- the only way to reach a health route
+    # that does not live under base_url's own path (see its definition).
+    health_url = config.platform.get("health_url")
+    if not health_url:
+        health_path = config.platform.get("health_path", DEFAULT_PLATFORM_HEALTH_PATH)
+        health_url = f"{platform_base_url.rstrip('/')}/{health_path.lstrip('/')}"
 
     try:
         async with httpx.AsyncClient(timeout=timeout_ms / 1000, follow_redirects=False) as client:
