@@ -22,7 +22,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from time import monotonic
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
 from mcp import ClientSession
@@ -31,7 +31,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from gateway.log_config import logger
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, MutableMapping
+    from collections.abc import AsyncIterator, Callable, Coroutine, MutableMapping
 
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
@@ -130,13 +130,19 @@ CODE_TOOL_NOT_ALLOWED = "mcp_tool_not_allowed"
 CODE_UNSAFE_URL = "unsafe_mcp_url"
 CODE_CREDENTIALS_UNAVAILABLE = "mcp_credentials_unavailable"
 CODE_AUTHENTICATION_FAILED = "authentication_failed"
+CODE_PAYMENT_REQUIRED = "payment_required"
+CODE_FORBIDDEN = "forbidden"
 CODE_RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
+CODE_SERVICE_UNAVAILABLE = "service_unavailable"
 CODE_INVALID_REQUEST = "invalid_request"
 
 
 # --------------------------------------------------------------------------- #
 # Failure types
 # --------------------------------------------------------------------------- #
+
+
+T = TypeVar("T")
 
 
 class McpDiscoveryRefused(Exception):
@@ -453,6 +459,16 @@ DISCOVERY_GATE = ConcurrencyGate(limit=DISCOVERY_CONCURRENCY, admission_timeout_
 EXECUTION_GATE = ConcurrencyGate(limit=EXECUTION_CONCURRENCY, admission_timeout_s=EXECUTION_ADMISSION_TIMEOUT_S)
 
 
+async def _run_in_owner_task(operation: Coroutine[Any, Any, T]) -> T:
+    """Run an anyio-backed context entirely in one task and await its cleanup."""
+    owner = asyncio.create_task(operation)
+    try:
+        return await asyncio.shield(owner)
+    except asyncio.CancelledError:
+        owner.cancel()
+        return await owner
+
+
 @asynccontextmanager
 async def open_session(server: ResolvedMcpServer) -> AsyncIterator[ClientSession]:
     """Open one size-bounded, redirect-disabled MCP session on a stored server.
@@ -508,7 +524,7 @@ async def discover_stored_tools(server: ResolvedMcpServer) -> DiscoveredCatalog:
     """
     try:
         async with DISCOVERY_GATE.slot():
-            return await _discover_once(server)
+            return await _run_in_owner_task(_discover_once(server))
     except McpCapacityUnavailable:
         raise McpExecutionError(CODE_DISCOVERY_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except McpExecutionError:
@@ -653,7 +669,7 @@ async def execute_stored_tool(
     try:
         async with EXECUTION_GATE.slot():
             record["admission_ms"] = (monotonic() - admission_started) * 1000
-            return await _execute_once(server, tool_name, arguments, on_dispatch, record)
+            return await _run_in_owner_task(_execute_once(server, tool_name, arguments, on_dispatch, record))
     except McpCapacityUnavailable:
         record["admission_ms"] = (monotonic() - admission_started) * 1000
         raise McpExecutionError(CODE_CAPACITY_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
@@ -722,20 +738,13 @@ async def _execute_once(
 async def _close_bounded(stack: AsyncExitStack) -> None:
     """Close the transport without letting shutdown outlive or replace a result.
 
-    Shielded and bounded (R-EXEC-1). A definitive result is already in hand by
-    the time this runs, so a transport that will not close, or a request whose
-    task is being cancelled, must not turn a completed mutation into an error
-    the caller might retry. A close that overruns its deadline is cancelled and
-    awaited so stalled shutdowns cannot accumulate detached transport tasks.
+    Bounded and run in the same owner task that entered the transport
+    (R-EXEC-1). A definitive result is already in hand by the time this runs, so
+    a transport that will not close must not replace it. The timeout cancels and
+    awaits cleanup in place, so no transport task is detached.
     """
-    closer = asyncio.ensure_future(stack.aclose())
     try:
         async with asyncio.timeout(CLEANUP_TIMEOUT_S):
-            await asyncio.shield(closer)
+            await stack.aclose()
     except BaseException as exc:
         logger.warning("Stateless MCP cleanup failed error_class=%s", failure_class(exc))
-        closer.cancel()
-        try:
-            await closer
-        except BaseException:
-            pass

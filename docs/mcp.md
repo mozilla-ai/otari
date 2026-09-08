@@ -234,6 +234,8 @@ exception text.
 |---|---:|---|---|
 | Invalid request body | 422 | `invalid_request` | `not_started` |
 | Authentication failure | 401 | `authentication_failed` | `not_started` |
+| Payment required or insufficient funds | 402 | `payment_required` | `not_started` |
+| Platform authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
 | Server inaccessible to caller, or disabled | 404 | `mcp_server_not_found` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
@@ -244,6 +246,7 @@ exception text.
 | Discovery bound or pagination failure | 502 | `mcp_discovery_limit_exceeded` | `not_started` |
 | Discovery admission deadline exceeded | 503 | `mcp_discovery_capacity_unavailable` | `not_started` |
 | Execution admission deadline exceeded | 503 | `mcp_capacity_unavailable` | `not_started` |
+| Local service temporarily unavailable | 503 | `service_unavailable` | `not_started` |
 | Connection or initialization failure | 502 | `mcp_connection_failed` | `not_started` |
 | Tool-call deadline exceeded after dispatch | 504 | `mcp_outcome_unknown` | `outcome_unknown` |
 | Transport, cancellation, protocol or parse failure after dispatch | 502 | `mcp_outcome_unknown` | `outcome_unknown` |
@@ -281,8 +284,10 @@ reading their bodies, preventing a small encoded response from expanding past
 the ceiling during decompression. The decoded MCP result is measured again
 before it is returned.
 
-Redirects are disabled. Otari returns a redirect response rather than following
-it, so no credential and no call data is ever sent to a redirect destination.
+Redirects are disabled and never forwarded to the caller. A redirect during
+connection or initialization becomes `502 mcp_connection_failed`; after tool
+dispatch it becomes `502 mcp_outcome_unknown`. No credential or call data is
+sent to the redirect destination.
 
 ### Availability
 
@@ -333,7 +338,7 @@ to hide this activity because they have no equivalent server-owned MCP vocabular
 - `url`: streamable HTTP MCP endpoint, reachable from the gateway
 - `authorization_token`: optional bearer token; when set, the `url` must use `https://`
 - `purpose_hint`: optional hint Otari prepends to the system message to help the model choose the tool
-- `allowed_tools`: optional allow-list; only these tools are exposed from that server
+- `allowed_tools`: optional allow-list with three states: omit it or send `null` to expose every listed tool, send `[]` to expose none, or send a non-empty list to expose only those named tools
 
 ## Workspace-scoped servers
 

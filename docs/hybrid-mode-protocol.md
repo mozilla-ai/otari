@@ -297,10 +297,11 @@ Nothing platform-side stores or returns a revision.
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
 
 The caller-orchestrated endpoints publish their own error contract instead of
-forwarding any of this, because a platform `detail` may name a workspace, a plan,
-or a stored server. A `401`, `402` or `403` becomes `401 authentication_failed`,
-a `404` becomes `404 mcp_server_not_found`, a `429` keeps its status and
-`Retry-After` as `rate_limit_exceeded`, and everything else becomes
+forwarding any detail, because a platform `detail` may name a workspace, a plan,
+or a stored server. Statuses remain meaningful: `401` becomes
+`authentication_failed`, `402` becomes `payment_required`, `403` becomes
+`forbidden`, `404` becomes `mcp_server_not_found`, and `429` keeps its status and
+`Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
 `502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Web search resolution

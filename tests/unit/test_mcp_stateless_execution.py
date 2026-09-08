@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 from unittest.mock import Mock
 
+import anyio
 import pytest
 from httpx import ConnectError
+from mcp import ClientSession
 from mcp.types import CallToolResult, TextContent
 
 from gateway import log_config
@@ -89,6 +92,36 @@ async def test_the_exact_tool_is_called_once_without_live_discovery(session: _Fa
     assert result == RESULT
     assert session.calls == [("create_issue", {"title": "Approved"})]
     assert session.listed == 0
+
+
+@pytest.mark.asyncio
+async def test_a_real_client_session_closes_without_cancelling_its_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def call_tool(
+        _session: ClientSession,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> CallToolResult:
+        assert (name, arguments) == ("create_issue", {"title": "Approved"})
+        return RESULT
+
+    @asynccontextmanager
+    async def open_real_session(*args: Any, **kwargs: Any) -> AsyncIterator[ClientSession]:
+        incoming_writer, incoming_reader = anyio.create_memory_object_stream(1)
+        outgoing_writer, outgoing_reader = anyio.create_memory_object_stream(1)
+        async with incoming_writer, incoming_reader, outgoing_writer, outgoing_reader:
+            async with ClientSession(incoming_reader, outgoing_writer) as real_session:
+                yield real_session
+
+    monkeypatch.setattr(ClientSession, "call_tool", call_tool)
+    monkeypatch.setattr(mcp_stateless, "open_session", open_real_session)
+
+    result = await execute_stored_tool(SERVER, "create_issue", {"title": "Approved"})
+
+    assert result == RESULT
+    task = asyncio.current_task()
+    assert task is not None and task.cancelling() == 0
 
 
 @pytest.mark.asyncio

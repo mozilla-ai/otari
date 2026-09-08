@@ -18731,6 +18731,16 @@
             },
             "description": "Unauthorized"
           },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Payment Required"
+          },
           "403": {
             "content": {
               "application/json": {
@@ -18882,6 +18892,26 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Payment Required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {

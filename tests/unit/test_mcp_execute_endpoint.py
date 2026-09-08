@@ -22,6 +22,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, TextContent
 
@@ -389,6 +390,34 @@ def test_a_malformed_successful_resolver_response_is_a_resolution_failure(
     assert session.calls == []
 
 
+@pytest.mark.parametrize(
+    ("platform_status", "expected_code", "expected_detail"),
+    [
+        (402, "payment_required", "Payment required"),
+        (403, "forbidden", "Request forbidden"),
+    ],
+)
+def test_platform_payment_and_authorization_refusals_keep_their_status(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    platform_status: int,
+    expected_code: str,
+    expected_detail: str,
+) -> None:
+    platform.status_code = platform_status
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == platform_status, response.text
+    assert _error(response) == {
+        "detail": expected_detail,
+        "code": expected_code,
+        "execution_state": "not_started",
+    }
+    assert session.calls == []
+
+
 def test_the_platforms_rate_limit_is_preserved(
     client: TestClient,
     platform: _Platform,
@@ -456,6 +485,56 @@ def test_an_invalid_request_is_refused_before_resolution_or_logging(
     assert _error(response) == {
         "detail": "MCP request is invalid",
         "code": "invalid_request",
+        "execution_state": "not_started",
+    }
+    assert platform.bodies == []
+    assert session.calls == []
+
+
+def test_a_non_json_parse_failure_uses_the_shared_invalid_request_error(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_to_parse(_request: Request) -> Any:
+        raise RecursionError
+
+    monkeypatch.setattr(Request, "json", fail_to_parse)
+
+    response = client.post(
+        "/v1/mcp/execute",
+        headers={**USER_AUTH, "Content-Type": "application/json"},
+        content=b"{}",
+    )
+
+    assert response.status_code == 422, response.text
+    assert _error(response) == {
+        "detail": "MCP request is invalid",
+        "code": "invalid_request",
+        "execution_state": "not_started",
+    }
+    assert platform.bodies == []
+    assert session.calls == []
+
+
+def test_a_local_service_unavailability_keeps_its_status(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unavailable(*args: Any, **kwargs: Any) -> Any:
+        raise HTTPException(status_code=503, detail="internal detail")
+
+    monkeypatch.setattr("gateway.api.routes.mcp._authenticate", unavailable)
+
+    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 503, response.text
+    assert _error(response) == {
+        "detail": "MCP service is unavailable",
+        "code": "service_unavailable",
         "execution_state": "not_started",
     }
     assert platform.bodies == []
@@ -553,12 +632,14 @@ def test_a_deadline_after_dispatch_is_an_unknown_outcome(
     assert _error(response)["execution_state"] == "outcome_unknown"
 
 
-def test_the_total_deadline_includes_platform_resolution(
+def test_the_total_deadline_includes_platform_resolution_and_logs_the_outcome(
     client: TestClient,
     platform: _Platform,
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    info = Mock()
+    monkeypatch.setattr(log_config.logger, "info", info)
     monkeypatch.setattr(mcp_stateless, "EXECUTION_TOTAL_TIMEOUT_S", 0.01)
     platform.delay_s = 10
 
@@ -570,6 +651,8 @@ def test_the_total_deadline_includes_platform_resolution(
         "code": "mcp_connection_failed",
         "execution_state": "not_started",
     }
+    info.assert_called_once()
+    assert info.call_args.args[4:6] == ("mcp_connection_failed", "not_started")
     assert session.calls == []
 
 

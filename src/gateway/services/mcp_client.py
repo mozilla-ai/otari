@@ -187,7 +187,7 @@ class MCPClientPool:
         """Return the configured server that owns ``name``, if connected."""
         return self._tool_owner.get(name)
 
-    async def call_tool_result(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+    async def _call_tool_result(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
         """Execute an MCP call and return the server's native typed result."""
         owner = self._tool_owner.get(name)
         if owner is None:
@@ -211,7 +211,7 @@ class MCPClientPool:
         if name not in self._tool_owner:
             raise KeyError(f"No MCP server owns tool {name!r}")
         try:
-            result = await self.call_tool_result(name, arguments)
+            result = await self._call_tool_result(name, arguments)
         except Exception as exc:
             logger.warning("MCP tool %s execution failed: %s", name, type(exc).__name__)
             return MCPToolCallOutcome(

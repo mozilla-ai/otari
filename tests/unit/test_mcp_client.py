@@ -153,7 +153,7 @@ async def test_call_tool_sanitizes_transport_failure(
 
 
 @pytest.mark.asyncio
-async def test_call_tool_result_returns_native_mcp_result() -> None:
+async def test_call_tool_result_extraction_returns_native_mcp_result() -> None:
     result = CallToolResult(
         content=[TextContent(type="text", text="fixture result")],
         structuredContent={"issue": 791},
@@ -167,7 +167,7 @@ async def test_call_tool_result_returns_native_mcp_result() -> None:
     )
     pool._tool_owner["lookup"] = "fixture"
 
-    returned = await pool.call_tool_result("lookup", {"id": 791})
+    returned = await pool._call_tool_result("lookup", {"id": 791})  # noqa: SLF001
 
     assert returned is result
     assert returned.structuredContent == {"issue": 791}

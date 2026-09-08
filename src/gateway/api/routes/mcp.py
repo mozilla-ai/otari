@@ -37,6 +37,7 @@ from fastapi.routing import APIRoute
 from mcp.types import CallToolResult
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.api.routes._platform import (
@@ -68,13 +69,16 @@ from gateway.services.mcp_stateless import (
     CODE_CREDENTIALS_UNAVAILABLE,
     CODE_DISCOVERY_CAPACITY_UNAVAILABLE,
     CODE_DISCOVERY_LIMIT_EXCEEDED,
+    CODE_FORBIDDEN,
     CODE_INVALID_REQUEST,
     CODE_OUTCOME_UNKNOWN,
+    CODE_PAYMENT_REQUIRED,
     CODE_RATE_LIMIT_EXCEEDED,
     CODE_RESOLUTION_FAILED,
     CODE_RESULT_TOO_LARGE,
     CODE_SERVER_CHANGED,
     CODE_SERVER_NOT_FOUND,
+    CODE_SERVICE_UNAVAILABLE,
     CODE_TOOL_NOT_ALLOWED,
     CODE_UNSAFE_URL,
     DISCOVERY_MAX_TOOLS,
@@ -114,7 +118,10 @@ TOOLS_LABEL = "mcp.list_tools"
 SAFE_DETAILS: dict[str, str] = {
     CODE_INVALID_REQUEST: "MCP request is invalid",
     CODE_AUTHENTICATION_FAILED: "Authentication failed",
+    CODE_PAYMENT_REQUIRED: "Payment required",
+    CODE_FORBIDDEN: "Request forbidden",
     CODE_RATE_LIMIT_EXCEEDED: "Rate limit exceeded",
+    CODE_SERVICE_UNAVAILABLE: "MCP service is unavailable",
     CODE_SERVER_NOT_FOUND: "MCP server not found",
     CODE_SERVER_CHANGED: "MCP server configuration changed, rediscover its tools",
     CODE_TOOL_NOT_ALLOWED: "The requested tool is not allowed for this MCP server",
@@ -178,7 +185,7 @@ class _McpRoute(APIRoute):
                     request_id,
                     headers=RETRY_AFTER_ONE if exc.code in _RETRYABLE_CAPACITY_CODES else None,
                 )
-            except HTTPException as exc:
+            except StarletteHTTPException as exc:
                 code, execution_state, status_code = _classify(exc)
                 retry_after = (exc.headers or {}).get("Retry-After")
                 return _error_response(
@@ -214,7 +221,7 @@ def _error_response(
     return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"), headers=response_headers)
 
 
-def _classify(exc: HTTPException) -> tuple[str, ExecutionState, int]:
+def _classify(exc: StarletteHTTPException) -> tuple[str, ExecutionState, int]:
     """Map an authentication or platform refusal onto this contract's enums.
 
     Every one of these is raised before dispatch, so all of them are
@@ -222,12 +229,20 @@ def _classify(exc: HTTPException) -> tuple[str, ExecutionState, int]:
     it may describe a workspace, a plan, or a stored server, and R-ERR-1 lets
     nothing platform-side through.
     """
-    if exc.status_code in {401, 402, 403}:
+    if exc.status_code in {400, 422}:
+        return CODE_INVALID_REQUEST, ExecutionState.NOT_STARTED, 422
+    if exc.status_code == 401:
         return CODE_AUTHENTICATION_FAILED, ExecutionState.NOT_STARTED, 401
+    if exc.status_code == 402:
+        return CODE_PAYMENT_REQUIRED, ExecutionState.NOT_STARTED, 402
+    if exc.status_code == 403:
+        return CODE_FORBIDDEN, ExecutionState.NOT_STARTED, 403
     if exc.status_code == 404:
         return CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404
     if exc.status_code == 429:
         return CODE_RATE_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 429
+    if exc.status_code == 503:
+        return CODE_SERVICE_UNAVAILABLE, ExecutionState.NOT_STARTED, 503
     return CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502
 
 
@@ -465,6 +480,8 @@ class McpToolsResponse(BaseModel):
     responses={
         400: {"model": McpErrorBody},
         401: {"model": McpErrorBody},
+        402: {"model": McpErrorBody},
+        403: {"model": McpErrorBody},
         404: {"model": McpErrorBody},
         422: {"model": McpErrorBody},
         429: {"model": McpErrorBody},
@@ -574,6 +591,7 @@ async def list_mcp_tools(
     responses={
         400: {"model": McpErrorBody},
         401: {"model": McpErrorBody},
+        402: {"model": McpErrorBody},
         403: {"model": McpErrorBody},
         404: {"model": McpErrorBody},
         409: {"model": McpErrorBody},
@@ -641,11 +659,13 @@ async def execute_mcp_tool(
         # The total deadline can only be reached before dispatch here: past it,
         # the call's own deadline is the shorter of the two and classifies the
         # failure itself.
-        raise McpExecutionError(
+        exc = McpExecutionError(
             CODE_OUTCOME_UNKNOWN if dispatched else CODE_CONNECTION_FAILED,
             ExecutionState.OUTCOME_UNKNOWN if dispatched else ExecutionState.NOT_STARTED,
             504 if dispatched else 502,
-        ) from None
+        )
+        _log_outcome(raw_request, request, exc.execution_state, exc.code, started, timings)
+        raise exc from None
     except McpExecutionError as exc:
         _log_outcome(raw_request, request, exc.execution_state, exc.code, started, timings)
         raise

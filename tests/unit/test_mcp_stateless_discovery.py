@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import anyio
 import pytest
+from mcp import ClientSession
 from mcp.types import ListToolsResult
 from mcp.types import Tool as MCPTool
 
@@ -73,6 +76,32 @@ async def test_the_admitted_catalog_is_returned(opened: dict[str, Any]) -> None:
 
     assert [t.name for t in catalog.tools] == ["create_issue"]
     assert catalog.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_a_real_client_session_closes_without_cancelling_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def list_tools(_session: ClientSession, cursor: str | None = None) -> ListToolsResult:
+        assert cursor is None
+        return ListToolsResult(tools=[_tool("create_issue")])
+
+    @asynccontextmanager
+    async def open_real_session(*args: Any, **kwargs: Any) -> AsyncIterator[ClientSession]:
+        incoming_writer, incoming_reader = anyio.create_memory_object_stream(1)
+        outgoing_writer, outgoing_reader = anyio.create_memory_object_stream(1)
+        async with incoming_writer, incoming_reader, outgoing_writer, outgoing_reader:
+            async with ClientSession(incoming_reader, outgoing_writer) as real_session:
+                yield real_session
+
+    monkeypatch.setattr(ClientSession, "list_tools", list_tools)
+    monkeypatch.setattr(mcp_stateless, "open_session", open_real_session)
+
+    catalog = await discover_stored_tools(SERVER)
+
+    assert [tool.name for tool in catalog.tools] == ["create_issue"]
+    task = asyncio.current_task()
+    assert task is not None and task.cancelling() == 0
 
 
 @pytest.mark.asyncio
