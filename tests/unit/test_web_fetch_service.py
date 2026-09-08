@@ -96,6 +96,7 @@ async def test_fetches_html_with_fixed_headers_and_validated_target() -> None:
     request = requests[0]
     assert request.headers["host"] == "example.com"
     assert request.headers["user-agent"] == "otari-web-retrieval/1.0"
+    assert request.headers["accept-encoding"] == "gzip, deflate"
     assert "text/html" in request.headers["accept"]
     assert isinstance(request.extensions[PINNED_TARGET_EXTENSION], ValidatedTarget)
     assert "signature=secret" in str(request.url)

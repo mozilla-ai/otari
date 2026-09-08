@@ -200,6 +200,7 @@ from gateway.services.tool_usage import (
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
+from gateway.services.web_retrieval_policy import DomainRuleValidationError, canonicalize_domain_rules
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
@@ -288,6 +289,9 @@ MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed 
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
 WEB_SEARCH_CONFIG_INVALID_DETAIL = "Web search configuration contains an invalid domain rule"
+WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL = (
+    "Web search allowed_domains and blocked_domains must contain only bare valid hostnames"
+)
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
@@ -2386,6 +2390,17 @@ async def _resolve_mcp_server_ids(
         raise adapter.error(500, MCP_SERVER_TOKEN_UNREADABLE_DETAIL, ErrorKind.API) from exc
 
 
+def _canonicalize_web_search_request_domains(tool_entry: dict[str, Any]) -> None:
+    """Validate and canonicalize caller-supplied Search domain rules in place."""
+    for field in ("allowed_domains", "blocked_domains"):
+        values = tool_entry.get(field)
+        if values is None:
+            continue
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise DomainRuleValidationError(f"{field} must be a list of hostnames")
+        tool_entry[field] = [rule.value for rule in canonicalize_domain_rules(values)]
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2625,6 +2640,14 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
             if use_sandbox or mcp_servers:
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            try:
+                _canonicalize_web_search_request_domains(web_search_tool_entry)
+            except DomainRuleValidationError as exc:
+                raise adapter.error(
+                    400,
+                    WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL,
+                    ErrorKind.INVALID_REQUEST,
+                ) from exc
             use_web_search = True
 
             # Both modes carry a per-workspace web-search configuration (whether
