@@ -125,6 +125,25 @@ def test_a_cache_total_below_its_1h_share_never_goes_negative(tmp_path: Path) ->
     assert event.cache_write_tokens == 0
 
 
+def test_locally_generated_messages_are_not_imported(tmp_path: Path) -> None:
+    """Claude Code writes an API error notice itself, with a usage block and no request behind it."""
+    _write_transcript(
+        tmp_path,
+        "-Users-alice-Projects-otari",
+        "session-a",
+        [
+            _assistant_line("msg_01"),
+            _assistant_line("msg_syn", model="<synthetic>", usage={"input_tokens": 0, "output_tokens": 0}),
+        ],
+    )
+
+    result = scan_transcripts(tmp_path, label_prefix="host")
+
+    assert [event.source_event_id for event in result.events] == ["msg_01"]
+    assert result.synthetic_skipped == 1
+    assert all(event.model != "synthetic" for event in result.events)
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

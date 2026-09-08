@@ -465,7 +465,8 @@ def import_claude_code(
 
     click.echo(
         f"Scanned {result.files_scanned} transcript(s): {len(result.events)} event(s), "
-        f"{result.duplicates_skipped} repeated response id(s) collapsed."
+        f"{result.duplicates_skipped} repeated response id(s) collapsed, "
+        f"{result.synthetic_skipped} local (non-API) message(s) skipped."
     )
     for model, tokens in sorted(result.tokens_by_model.items(), key=lambda item: -item[1]):
         click.echo(f"  {model}: {tokens:,} tokens")

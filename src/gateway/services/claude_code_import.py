@@ -13,7 +13,9 @@ Claude Code writes one JSONL transcript per session under
 the API response id, the model, and the Anthropic usage block. The same response
 id repeats once per content block of a single reply, so the walk is deduplicated
 by response id: counting every line would multiply a session's tokens by the
-number of blocks its replies happened to contain.
+number of blocks its replies happened to contain. Lines whose model is
+``<synthetic>`` are dropped: those are messages Claude Code wrote itself, such as
+an API error notice, and no request was ever sent for them.
 
 Pure and offline. No network, no database, and no prompt or completion text is
 read out of a transcript: a line is decoded, its usage numbers and identifiers
@@ -45,6 +47,12 @@ _CONTEXT_TAG = re.compile(r"\[[^\]]*\]")
 # anyway, because a dash in a real directory name is indistinguishable from a
 # separator.
 _LEADING_DASH = re.compile(r"^-+")
+# Claude Code writes an assistant line with this model for text it produced
+# locally rather than fetched, most often an API error notice shown in the
+# transcript. It carries a usage block like any other line, but no request was
+# ever made, so importing one invents a call that never happened and puts a
+# model nobody can price into the breakdown.
+_SYNTHETIC_MODEL = "<synthetic>"
 _DURATION = re.compile(r"^(\d+)([hdw])$")
 _DURATION_UNITS = {"h": "hours", "d": "days", "w": "weeks"}
 
@@ -106,6 +114,7 @@ class ScanResult:
     files_scanned: int = 0
     duplicates_skipped: int = 0
     unparsable_lines: int = 0
+    synthetic_skipped: int = 0
 
     @property
     def tokens_by_model(self) -> dict[str, int]:
@@ -192,6 +201,8 @@ def _usage_event(record: dict[str, Any], label: str) -> UsageEvent | None:
     timestamp = record.get("timestamp")
     if not isinstance(usage, dict) or not isinstance(response_id, str) or not isinstance(timestamp, str):
         return None
+    if message.get("model") == _SYNTHETIC_MODEL:
+        return None
     # Anthropic splits cache writes by TTL. ``cache_creation_input_tokens`` is the
     # total; the 1h share is priced differently, so it is reported separately and
     # subtracted rather than counted twice.
@@ -213,6 +224,12 @@ def _usage_event(record: dict[str, Any], label: str) -> UsageEvent | None:
         cache_write_1h_tokens=write_1h,
         session_label=label,
     )
+
+
+def _is_synthetic(record: dict[str, Any]) -> bool:
+    """Whether a line is Claude Code's own text rather than a provider response."""
+    message = record.get("message")
+    return isinstance(message, dict) and message.get("model") == _SYNTHETIC_MODEL
 
 
 def _int(value: Any) -> int:
@@ -244,6 +261,9 @@ def scan_transcripts(projects_dir: Path, *, label_prefix: str, since: datetime |
                         result.unparsable_lines += 1
                         continue
                     if not isinstance(record, dict):
+                        continue
+                    if _is_synthetic(record):
+                        result.synthetic_skipped += 1
                         continue
                     event = _usage_event(record, label)
                     if event is None:
