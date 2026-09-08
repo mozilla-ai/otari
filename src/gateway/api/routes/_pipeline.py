@@ -187,6 +187,7 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
 )
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
 from gateway.services.tenancy.workspace_web_search_service import (
+    MAX_WEB_SEARCH_DOMAINS,
     InvalidStoredWebSearchDomainError,
     narrow_web_search_tool_entry,
     resolve_workspace_web_search_config,
@@ -289,10 +290,9 @@ MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed 
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
 WEB_SEARCH_CONFIG_INVALID_DETAIL = "Web search configuration contains an invalid domain rule"
-WEB_SEARCH_REQUEST_MAX_DOMAINS = 100
 WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL = (
     "Web search allowed_domains and blocked_domains must each contain at most "
-    f"{WEB_SEARCH_REQUEST_MAX_DOMAINS} bare valid hostnames"
+    f"{MAX_WEB_SEARCH_DOMAINS} bare valid hostnames"
 )
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
@@ -2398,8 +2398,8 @@ def _canonicalize_web_search_request_domains(tool_entry: dict[str, Any]) -> None
         values = tool_entry.get(field)
         if values is None:
             continue
-        if not isinstance(values, list) or len(values) > WEB_SEARCH_REQUEST_MAX_DOMAINS:
-            raise DomainRuleValidationError(f"{field} must contain at most {WEB_SEARCH_REQUEST_MAX_DOMAINS} hostnames")
+        if not isinstance(values, list) or len(values) > MAX_WEB_SEARCH_DOMAINS:
+            raise DomainRuleValidationError(f"{field} must contain at most {MAX_WEB_SEARCH_DOMAINS} hostnames")
         if any(not isinstance(value, str) for value in values):
             raise DomainRuleValidationError(f"{field} must be a list of hostnames")
         tool_entry[field] = [rule.value for rule in canonicalize_domain_rules(values)]

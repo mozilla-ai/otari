@@ -28,6 +28,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
     _normalize_domains,
     narrow_web_search_tool_entry,
 )
+from gateway.services.web_retrieval_policy import canonicalize_domain_rule
 
 
 def _config(**overrides: object) -> ResolvedWebSearchConfig:
@@ -144,6 +145,25 @@ def test_an_allow_list_is_intersected_rather_than_replaced() -> None:
     narrowed = _narrow(entry, _config(allowed_domains=("arxiv.org", "wikipedia.org")))
 
     assert narrowed["allowed_domains"] == ["arxiv.org"]
+
+
+def test_allow_list_intersection_canonicalizes_each_unique_rule_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def counted(value: str) -> Any:
+        calls.append(value)
+        return canonicalize_domain_rule(value)
+
+    monkeypatch.setattr(
+        "gateway.services.tenancy.workspace_web_search_service.canonicalize_domain_rule",
+        counted,
+    )
+    _narrow(
+        {"type": "otari_web_search", "allowed_domains": ["a.example", "b.example", "a.example"]},
+        _config(allowed_domains=("example", "other.example", "example")),
+    )
+
+    assert calls == ["a.example", "b.example", "example", "other.example"]
 
 
 def test_an_allow_list_applies_whole_to_a_request_that_named_none() -> None:
