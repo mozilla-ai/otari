@@ -11,6 +11,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
+from multiprocessing.shared_memory import SharedMemory
 from time import monotonic
 from typing import Callable, Literal
 
@@ -106,11 +107,18 @@ def _worker_main(connection: Connection, memory_bytes: int) -> None:
             message = connection.recv()
             if message is None:
                 return
-            identifier, kind, payload = message
+            identifier, kind, shared_name, payload_size = message
             try:
-                if kind == "html" and isinstance(payload, str):
-                    result = _extract_html(payload)
-                elif kind == "pdf" and isinstance(payload, bytes):
+                shared = SharedMemory(name=shared_name, track=False)
+                try:
+                    buffer = shared.buf
+                    assert buffer is not None
+                    payload = bytes(buffer[:payload_size])
+                finally:
+                    shared.close()
+                if kind == "html":
+                    result = _extract_html(payload.decode("utf-8"))
+                elif kind == "pdf":
                     result = _extract_pdf(payload)
                 else:
                     raise ExtractionError("invalid extraction job")
@@ -202,7 +210,7 @@ class ExtractionSupervisor:
     ) -> None:
         with self._state_lock:
             self._pending_count -= 1
-        if pending.future.cancelled():
+        if not pending.future.set_running_or_notify_cancel():
             return
         if error is not None:
             pending.future.set_exception(error)
@@ -277,8 +285,19 @@ class ExtractionSupervisor:
                         self._finish(pending, error=error)
                         self._fail_queued(error)
                         continue
+                shared: SharedMemory | None = None
                 try:
-                    connection.send((pending.identifier, pending.kind, pending.payload))
+                    if pending.kind == "html" and isinstance(pending.payload, str):
+                        payload = pending.payload.encode("utf-8")
+                    elif pending.kind == "pdf" and isinstance(pending.payload, bytes):
+                        payload = pending.payload
+                    else:
+                        raise ExtractionError("invalid extraction job")
+                    shared = SharedMemory(create=True, size=max(1, len(payload)))
+                    buffer = shared.buf
+                    assert buffer is not None
+                    buffer[: len(payload)] = payload
+                    connection.send((pending.identifier, pending.kind, shared.name, len(payload)))
                     remaining = pending.expires_at - monotonic()
                     if remaining <= 0 or not connection.poll(remaining):
                         raise TimeoutError
@@ -300,6 +319,13 @@ class ExtractionSupervisor:
                     self._finish(pending, error=error)
                     self._fail_queued(error)
                     continue
+                finally:
+                    if shared is not None:
+                        shared.close()
+                        try:
+                            shared.unlink()
+                        except OSError:
+                            pass
                 self._finish(pending, result=ExtractedText(str(text), bool(truncated)))
         finally:
             self._stop_worker(process, connection)

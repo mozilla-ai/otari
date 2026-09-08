@@ -127,9 +127,18 @@ def test_no_row_leaves_the_request_exactly_as_it_was(
     assert "blocked_domains" not in seen.backend_kwargs
 
 
-@pytest.mark.parametrize("field", ["allowed_domains", "blocked_domains"])
-def test_invalid_request_domain_rule_is_rejected_before_dispatch(
+@pytest.mark.parametrize(
+    ("field", "values"),
+    [
+        ("allowed_domains", ["https://example.com/path"]),
+        ("blocked_domains", ["https://example.com/path"]),
+        ("allowed_domains", [f"{index}.example.com" for index in range(101)]),
+        ("blocked_domains", [f"{index}.example.com" for index in range(101)]),
+    ],
+)
+def test_invalid_request_domain_rules_are_rejected_before_dispatch(
     field: str,
+    values: list[str],
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -137,14 +146,14 @@ def test_invalid_request_domain_rule_is_rejected_before_dispatch(
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
     body = {
         **_REQUEST,
-        "tools": [{"type": "otari_web_search", field: ["https://example.com/path"]}],
+        "tools": [{"type": "otari_web_search", field: values}],
     }
 
     response, seen = _post_with_search_patched(client, api_key_header, body)
 
     assert response.status_code == 400
     assert response.json()["detail"]["error"]["message"] == (
-        "Web search allowed_domains and blocked_domains must contain only bare valid hostnames"
+        "Web search allowed_domains and blocked_domains must each contain at most 100 bare valid hostnames"
     )
     assert seen.ran is False
     assert seen.backend_kwargs == {}
