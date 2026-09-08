@@ -131,6 +131,30 @@ describe("navRowClass", () => {
     }
   })
 
+  describe("expandedJustify", () => {
+    it("start-aligns an expanded row that asks for it", () => {
+      expect(navRowClass({ expandedJustify: "start" })).toContain(
+        "justify-start",
+      )
+    })
+
+    it("still centers that row when the rail is collapsed", () => {
+      // The collapsed icon column outranks the request: a monogram or icon sits
+      // in the same lane as every other collapsed row.
+      const collapsed = navRowClass({
+        collapsed: true,
+        expandedJustify: "start",
+      })
+      expect(collapsed).toContain("justify-center")
+      expect(collapsed).not.toContain("justify-start")
+    })
+
+    it("adds no justification when it is left unset", () => {
+      expect(navRowClass()).not.toContain("justify-")
+      expect(navRowClass({ band: true })).not.toContain("justify-")
+    })
+  })
+
   it("keeps the 44px floor and the shared shape on every variant", () => {
     for (const row of [
       resting,

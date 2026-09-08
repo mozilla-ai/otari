@@ -231,6 +231,7 @@ export function navRowClass({
   collapsed = false,
   nested = false,
   band = false,
+  expandedJustify,
 }: {
   isActive?: boolean
   /** This row is the group holding the selected row, not the selected row. */
@@ -239,12 +240,30 @@ export function navRowClass({
   nested?: boolean
   /** This row is the whole of a chrome band rather than one row in a list. */
   band?: boolean
+  /**
+   * How the row's contents sit along its main axis while the rail is expanded.
+   * Collapsed rows are always centered, so the icon column holds whether or not
+   * a row asks for anything here.
+   *
+   * Only a row whose element arrives already centered needs it: HeroUI's
+   * `Button` carries `justify-content: center`, so the account control's name
+   * and chevron would sit mid-rail without `"start"`. Left unset the row adds
+   * no justification of its own, which is what every plain link and button in
+   * the rail wants. Asking at the helper rather than appending a utility at the
+   * call site is deliberate: both land on the element, and the later-emitted one
+   * wins regardless of the order they are written in.
+   */
+  expandedJustify?: "start"
 } = {}): string {
   return [
     ROW_BASE,
     isActive ? ROW_SELECTED : ancestor ? ROW_ANCESTOR : ROW_RESTING,
     nested ? "pl-[3.125rem]" : "",
-    collapsed ? "min-w-11 justify-center" : "",
+    collapsed
+      ? "min-w-11 justify-center"
+      : expandedJustify === "start"
+        ? "justify-start"
+        : "",
     band ? navBandRowClass({ collapsed }) : collapsed ? "px-0" : "px-3",
   ]
     .filter(Boolean)

@@ -303,9 +303,16 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
         // place it could reach anybody there. `AppearanceControl` folds its own
         // visible state in for the same reason.
         aria-label={`Account: ${identity.name}`}
-        className={`${navRowClass({ collapsed, band: true })} justify-start`}
+        // `expandedJustify` rather than a `justify-start` appended here: this is
+        // a HeroUI `Button`, which arrives centered, and the collapsed rail
+        // wants the monogram in the icon column instead.
+        className={navRowClass({
+          collapsed,
+          band: true,
+          expandedJustify: "start",
+        })}
       >
-        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-control-border bg-surface-alt text-chrome-initials font-semibold text-muted">
+        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-control-border bg-surface-alt text-shell-monogram font-semibold text-muted">
           {identity.initials}
         </span>
         {collapsed ? null : (
