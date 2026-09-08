@@ -29,7 +29,7 @@ from gateway.api.routes._tools import Tool, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.services.sandbox_backend import code_execution_tool_definition
-from gateway.services.web_search_backend import web_search_tool_definition
+from gateway.services.web_retrieval_backend import web_search_tool_definition
 
 router = APIRouter(
     tags=["tools"],

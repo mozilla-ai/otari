@@ -22,7 +22,10 @@ from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedErr
 from gateway.services.tenancy.workspace_web_search_service import (
     _MAX_DOMAINS,
     _MAX_RESULTS,
+    InvalidStoredWebSearchDomainError,
     ResolvedWebSearchConfig,
+    _as_tuple,
+    _normalize_domains,
     narrow_web_search_tool_entry,
 )
 
@@ -55,6 +58,25 @@ def _narrow(
     # literal entry whose values are all lists infers as `dict[str, Sequence[str]]`
     # and would not be assignable to the narrower annotation.
     return narrow_web_search_tool_entry(entry, config, baseline_max_results=baseline)
+
+
+def test_new_domain_rules_are_stored_in_canonical_form() -> None:
+    assert _normalize_domains(["EXAMPLE.com.", "bücher.example", "xn--bcher-kva.example"]) == [
+        "example.com",
+        "xn--bcher-kva.example",
+    ]
+
+
+def test_valid_legacy_domain_rules_are_canonicalized_in_memory() -> None:
+    assert _as_tuple(["EXAMPLE.com.", "bücher.example"], stored=True) == (
+        "example.com",
+        "xn--bcher-kva.example",
+    )
+
+
+def test_invalid_legacy_domain_rule_fails_closed() -> None:
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _as_tuple(["https://example.com/path"], stored=True)
 
 
 def test_a_row_that_narrows_nothing_leaves_the_entry_alone() -> None:
@@ -181,6 +203,21 @@ def test_a_domain_that_merely_ends_in_another_is_not_a_subdomain_of_it() -> None
 
     with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
         _narrow(entry, _config(allowed_domains=("example.com",)))
+
+
+def test_ip_literal_allow_lists_intersect_by_exact_address_only() -> None:
+    entry: dict[str, object] = {"type": "otari_web_search", "allowed_domains": ["host.192.0.2.1"]}
+
+    with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
+        _narrow(entry, _config(allowed_domains=("192.0.2.1",)))
+
+
+def test_unicode_and_punycode_rules_intersect_as_one_identity() -> None:
+    entry: dict[str, object] = {"type": "otari_web_search", "allowed_domains": ["bücher.example"]}
+
+    narrowed = _narrow(entry, _config(allowed_domains=("xn--bcher-kva.example",)))
+
+    assert narrowed["allowed_domains"] == ["bücher.example"]
 
 
 def test_domains_are_compared_case_insensitively() -> None:

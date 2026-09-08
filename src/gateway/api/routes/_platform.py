@@ -45,7 +45,7 @@ from gateway.services.mcp_stateless import (
     McpExecutionError,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.web_search_backend import WebSearchNotReachableError
+from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
 T = TypeVar("T")
 
