@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import click
 import uvicorn
@@ -384,6 +385,125 @@ def routing_explain(
             "/v1/chat/completions, /v1/messages and /v1/responses; on the other model-taking endpoints "
             "(embeddings, images, moderations, rerank, batches) it is not a resolvable model name."
         )
+
+
+@cli.group(name="import")
+def import_group() -> None:
+    """Import usage that Otari did not proxy."""
+
+
+@import_group.command(name="claude-code")
+@click.option("--url", envvar="OTARI_URL", default="http://localhost:8000", help="Base URL of the Otari gateway.")
+@click.option(
+    "--api-key",
+    envvar="OTARI_API_KEY",
+    required=True,
+    help="A budget-exempt API key (exclude_from_budget: true). Imported usage is never enforceable.",
+)
+@click.option(
+    "--projects-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path.home() / ".claude" / "projects",
+    show_default=True,
+    help="Where Claude Code keeps its transcripts.",
+)
+@click.option(
+    "--since",
+    default=None,
+    help="Only read transcripts modified since this ISO date or duration (7d, 24h, 2w).",
+)
+@click.option(
+    "--user-id",
+    default=None,
+    help="Default user for the batch. Required when authenticating with the master key.",
+)
+@click.option(
+    "--label-prefix",
+    default=None,
+    help="First half of session_label. Defaults to this machine's short hostname.",
+)
+@click.option("--batch-size", type=click.IntRange(1, 1000), default=1000, show_default=True, help="Events per request.")
+@click.option("--dry-run", is_flag=True, help="Parse and summarize without sending anything.")
+def import_claude_code(
+    url: str,
+    api_key: str,
+    projects_dir: Path,
+    since: str | None,
+    user_id: str | None,
+    label_prefix: str | None,
+    batch_size: int,
+    dry_run: bool,
+) -> None:
+    """Backfill historical Claude Code usage from this machine's transcripts.
+
+    The OTLP exporter documented in docs/use-with-claude-code.md only carries
+    sessions that run after it is configured. This reads the transcripts Claude
+    Code has already written and posts them to /v1/usage/external-events, which
+    is idempotent on (source, source_event_id): re-running imports only what is
+    new and reports the rest as duplicates.
+
+    Do not backfill sessions that were routed through Otari. Their usage is
+    already recorded, and the proxied and imported rows cannot be correlated, so
+    the cost would appear twice.
+    """
+    import socket
+
+    import httpx
+
+    from gateway.services.claude_code_import import parse_since, scan_transcripts
+
+    try:
+        cutoff = parse_since(since) if since is not None else None
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--since") from exc
+
+    prefix = label_prefix or socket.gethostname().split(".")[0]
+    result = scan_transcripts(projects_dir, label_prefix=prefix, since=cutoff)
+    if not result.events:
+        click.echo(f"No usage found in {projects_dir}. Nothing to import.")
+        return
+
+    click.echo(
+        f"Scanned {result.files_scanned} transcript(s): {len(result.events)} event(s), "
+        f"{result.duplicates_skipped} repeated response id(s) collapsed."
+    )
+    for model, tokens in sorted(result.tokens_by_model.items(), key=lambda item: -item[1]):
+        click.echo(f"  {model}: {tokens:,} tokens")
+    if dry_run:
+        click.echo("Dry run: nothing was sent.")
+        return
+
+    endpoint = f"{url.rstrip('/')}/v1/usage/external-events"
+    accepted = duplicate = rejected = 0
+    with httpx.Client(timeout=120.0) as client:
+        for start in range(0, len(result.events), batch_size):
+            body: dict[str, object] = {
+                "source": "claude_code",
+                "events": [event.as_payload() for event in result.events[start : start + batch_size]],
+            }
+            if user_id is not None:
+                body["user_id"] = user_id
+            response = client.post(endpoint, json=body, headers={"Authorization": f"Bearer {api_key}"})
+            if response.status_code >= 400:
+                # The whole batch failed validation or auth. Show what the server
+                # said rather than a count, because the reason is the fix.
+                click.echo(
+                    f"Batch starting at event {start} was refused "
+                    f"({response.status_code}): {response.text[:500]}"
+                )
+                rejected += len(body["events"]) if isinstance(body["events"], list) else 0
+                continue
+            outcome = response.json()
+            accepted += int(outcome.get("accepted", 0))
+            duplicate += int(outcome.get("duplicate", 0))
+            rejected += int(outcome.get("rejected", 0))
+            for error in outcome.get("errors", [])[:5]:
+                click.echo(f"  rejected: {error.get('detail')}")
+
+    click.echo(f"Imported {accepted} event(s); {duplicate} already present; {rejected} rejected.")
+    if rejected:
+        raise SystemExit(1)
+
 
 
 def main() -> None:

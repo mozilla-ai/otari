@@ -87,3 +87,34 @@ Imported events are priced for analytics and never count toward budgets. Do not
 both route and export one session, or its cost will appear twice. See
 [Importing external usage](external-usage.md) for attribution, privacy,
 idempotency, and pricing behavior.
+
+## Backfill history from local transcripts
+
+The exporter above carries sessions that run after it is configured. Everything
+Claude Code did before that is already on disk, one JSONL transcript per session
+under `~/.claude/projects`. `otari import claude-code` reads those transcripts and
+posts them to the same import endpoint:
+
+```bash
+export OTARI_URL="https://otari.example.com"
+export OTARI_API_KEY="gw-your-import-key"
+otari import claude-code --user-id alice
+```
+
+The key must be budget-exempt (`exclude_from_budget: true`), the same requirement
+every import has. Use `--dry-run` first to see the event and token counts without
+sending anything, and `--since 7d` (or an ISO date) to read only recently modified
+transcripts.
+
+Only token counts and identifiers are read. Prompts, completions, and tool
+payloads are never opened out of a transcript, and the endpoint rejects them.
+
+Rows are unique on `(source, source_event_id)`, and the source event id here is the
+Anthropic response id, so re-running imports only what is new and reports the rest
+as duplicates. A single reply spans several transcript lines under one response id;
+those collapse to the one API call they were.
+
+The same warning applies as above, and it matters more for a backfill: do not
+import sessions that were routed through Otari. Those are already recorded, and the
+proxied and imported rows cannot be correlated, so the cost would count twice.
+
