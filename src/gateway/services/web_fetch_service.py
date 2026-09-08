@@ -248,7 +248,9 @@ class WebFetchService:
                 },
                 extensions={PINNED_TARGET_EXTENSION: target},
             )
-            response = await deadline.run(self._client.send(request, stream=True, follow_redirects=False))
+            response = await deadline.run(
+                lambda: self._client.send(request, stream=True, follow_redirects=False)
+            )
             try:
                 if is_redirect_status(response.status_code):
                     location = response.headers.get("location")

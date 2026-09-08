@@ -76,7 +76,7 @@ _DEFAULT_PURPOSE_HINT = (
 def web_search_tool_definition() -> dict[str, Any]:
     """The OpenAI-shaped function definition the model is given for web search.
 
-    Module-level, and returning a fresh dict per call, so the ``/v1/tools``
+    Module-level, and returning a fresh dict per call, so the ``/api/v1/tools``
     discovery endpoint can advertise the same schema the tool loop injects without
     constructing a backend (or risking a shared mutable constant).
     """
