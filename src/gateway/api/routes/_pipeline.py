@@ -187,6 +187,7 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
 )
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
 from gateway.services.tenancy.workspace_web_search_service import (
+    InvalidStoredWebSearchDomainError,
     narrow_web_search_tool_entry,
     resolve_workspace_web_search_config,
 )
@@ -198,7 +199,7 @@ from gateway.services.tool_usage import (
 )
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
-from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
@@ -286,6 +287,7 @@ SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins 
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
+WEB_SEARCH_CONFIG_INVALID_DETAIL = "Web search configuration contains an invalid domain rule"
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
@@ -2702,7 +2704,10 @@ async def prepare_gateway_tools(
                     # says `enabled=False`, silently, on the day one of those
                     # invariants stops holding.
                     raise adapter.error(500, WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL, ErrorKind.API)
-                workspace_search = await resolve_workspace_web_search_config(ctx.db, ctx.workspace_id)
+                try:
+                    workspace_search = await resolve_workspace_web_search_config(ctx.db, ctx.workspace_id)
+                except InvalidStoredWebSearchDomainError as exc:
+                    raise adapter.error(503, WEB_SEARCH_CONFIG_INVALID_DETAIL, ErrorKind.API) from exc
                 if workspace_search is not None:
                     if not workspace_search.enabled:
                         raise adapter.error(403, WEB_SEARCH_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)

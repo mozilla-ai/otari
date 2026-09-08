@@ -1,20 +1,16 @@
 """Return freed heap to the kernel after allocation-heavy work.
 
 glibc's allocator keeps freed chunks in its per-thread arenas instead of handing
-them back, so a burst of large, short-lived allocations leaves the process
-resident at its high-water mark long after the memory is dead. Web-search
-extraction is the gateway's worst case: each search parses up to
-``web_search_max_results`` pages of HTML (capped at 5 MB each) through libxml2,
-whose allocations are large enough to strand tens of megabytes per search. The
-resident set climbs to a plateau and stays there, which reads as a leak on a
-memory graph even though nothing is reachable.
+them back, so a burst of large, short-lived allocations leaves a process at its
+high-water mark. The supervised web-extraction worker calls
+:func:`release_free_heap` after every parser job so its bounded, long-lived
+process does not retain libxml2's freed allocations.
 
-:func:`release_free_heap` asks glibc to give that back. It is a mitigation, not
-a repair: the churn itself is libxml2's, and this only stops the allocator from
-hoarding what is already free.
+This is a mitigation rather than a repair: it returns already-free memory held
+by the allocator.
 
-Availability is resolved once, at import. ``malloc_trim`` is a GNU extension, so
-this is a no-op on musl and macOS rather than an error: callers treat releasing
+Availability is resolved once at import. ``malloc_trim`` is a GNU extension, so
+this is a no-op on musl and macOS rather than an error. Callers treat releasing
 memory as best-effort and must not branch on whether it happened.
 """
 

@@ -57,6 +57,15 @@ class ExtractionResult:
     detail: str
 
 
+@dataclass(frozen=True)
+class BoundedPDFExtractionResult:
+    """Text-bearing PDF output for the remote retrieval worker."""
+
+    text: str
+    ok: bool
+    truncated: bool = False
+
+
 def _resolve_extension(mime_type: str, filename: str | None) -> str:
     if filename and (suffix := Path(filename).suffix):
         return suffix.lower()
@@ -130,6 +139,73 @@ async def extract_text_from_file(data: bytes, mime_type: str, filename: str | No
     """
     extension = _resolve_extension(mime_type, filename)
     return await asyncio.to_thread(_extract_sync, data, extension)
+
+
+def _append_text_with_byte_limit(parts: list[str], value: str, remaining: int) -> tuple[int, bool]:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= remaining:
+        parts.append(value)
+        return remaining - len(encoded), False
+    parts.append(encoded[:remaining].decode("utf-8", errors="ignore"))
+    return 0, True
+
+
+def extract_bounded_pdf_text_sync(
+    data: bytes,
+    *,
+    max_pages: int,
+    max_text_bytes: int,
+) -> BoundedPDFExtractionResult:
+    """Extract bounded PDF text synchronously inside the retrieval worker.
+
+    This path is deliberately separate from uploaded-file extraction. It checks
+    the page count before reading page text, never rasterizes, and stops building
+    output at the fixed intermediate UTF-8 byte ceiling.
+    """
+    if max_pages <= 0 or max_text_bytes <= 0:
+        raise ValueError("PDF extraction limits must be positive")
+
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return BoundedPDFExtractionResult("", False)
+
+    pdf = pdfium.PdfDocument(data)
+    try:
+        if len(pdf) > max_pages:
+            return BoundedPDFExtractionResult("", False)
+
+        parts: list[str] = []
+        remaining = max_text_bytes
+        truncated = False
+        for index in range(len(pdf)):
+            page = pdf[index]
+            try:
+                text_page = page.get_textpage()
+                try:
+                    page_text = text_page.get_text_range().strip()
+                finally:
+                    text_page.close()
+            finally:
+                page.close()
+            if not page_text:
+                continue
+            prefix = "\n\n" if parts else ""
+            remaining, prefix_truncated = _append_text_with_byte_limit(parts, prefix, remaining)
+            if prefix_truncated or remaining == 0:
+                truncated = index < len(pdf) - 1 or bool(page_text)
+                break
+            remaining, page_truncated = _append_text_with_byte_limit(parts, page_text, remaining)
+            if page_truncated or remaining == 0:
+                truncated = page_truncated or index < len(pdf) - 1
+                break
+    finally:
+        pdf.close()
+
+    text = "".join(parts).strip()
+    if not text:
+        return BoundedPDFExtractionResult("", False)
+    return BoundedPDFExtractionResult(text, True, truncated)
 
 
 def _rasterize_sync(data: bytes, max_pages: int) -> list[bytes]:
