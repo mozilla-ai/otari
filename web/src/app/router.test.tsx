@@ -10,16 +10,15 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { router } from "@/app/router"
 
-// Which boundary catches a routed throw is not obvious from the config, and it
-// decides whether the failure wears the design system or the library's own
-// inline-styled red `<pre>`. Two paths exist in @tanstack/react-router: the
-// global one (`Matches.tsx`) renders its CatchBoundary with no errorComponent
-// and therefore always falls back to the built-in, while the per-match one
-// (`Match.tsx`) wraps each match only when `errorComponent ?? defaultErrorComponent`
-// is set, and sits inside the global one so it catches first. Setting
-// `defaultErrorComponent` is what turns the inner boundary on, and this asserts
-// the outcome rather than the config, so a library upgrade that rewires it fails
-// here instead of silently returning the red `<pre>`.
+// Which boundary catches a routed throw, kept here because this is what breaks
+// when a library upgrade rewires it, and because reading the config gets it
+// backwards. @tanstack/react-router has two: the global one (`Matches.tsx`)
+// renders its CatchBoundary with no `errorComponent` and so always falls back to
+// the built-in, while the per-match one (`Match.tsx`) wraps a match only when
+// `errorComponent ?? defaultErrorComponent` is set, and sits inside the global
+// one, so it catches first. Setting `defaultErrorComponent` is therefore what
+// turns a usable boundary on rather than what styles an existing one. Asserted
+// as a rendered outcome for the same reason.
 const rootRoute = createRootRoute()
 const throwingRoute = createRoute({
   getParentRoute: () => rootRoute,

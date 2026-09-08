@@ -225,8 +225,8 @@ describe("App", () => {
 
 // otari#806: a dashboard from `main` served by a gateway built before a field
 // was added. The field is absent rather than null, the generated type says it is
-// always there, and every one of these pages renders above the router's own
-// catch boundary, so a throw here is a blank document with no error text in it.
+// always there, and these pages render above the router's own catch boundary, so
+// a throw here was a blank document.
 describe("a bootstrap from an older gateway", () => {
   afterEach(() => {
     vi.restoreAllMocks()

@@ -20,12 +20,10 @@ export const router = createRouter({
   defaultPendingComponent: PendingPage,
   defaultPendingMs: 0,
   defaultPendingMinMs: 0,
-  // The router wraps its whole match tree in a catch boundary already, so a
-  // throw inside the shell was never a blank page. What it fell back to was
-  // TanStack's built-in `ErrorComponent`, which paints its own inline-styled
-  // box and a red `<pre>` of the raw error: outside the design system, and the
-  // one thing `feedback.md` says never to render. Same panel as the boundary
-  // above the router now, so the two failures look like one product.
+  // Without this a routed throw lands on TanStack's built-in component, which
+  // paints its own inline-styled box and a red `<pre>` of the raw error: the one
+  // thing `design/feedback.md` says never to render. `router.test.tsx` covers
+  // why setting it is what makes a boundary catch the throw at all.
   defaultErrorComponent: ({ error }) => (
     <PageError error={error}>
       This page could not finish rendering. Try another destination from the

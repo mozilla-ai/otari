@@ -5,15 +5,13 @@ import { PageError } from "./PageError"
 /**
  * The catch above the router, and the only one the pre-session pages have.
  *
- * TanStack Router wraps its whole match tree in a `CatchBoundary` of its own
- * (`Matches.tsx`, unless `disableGlobalCatchBoundary`), so a throw inside the
- * shell already renders `router.tsx`'s `defaultErrorComponent`. `App`'s four
- * branches above `RouterProvider` (the sign-in screen, the public auth pages,
- * the invitation page, and the hybrid landing page) sit outside that, and a
- * throw in any of them unmounts to a blank document with nothing in it but a
- * console line. That is the worst place in the app to lose, because the sign-in
- * screen is the only page an operator can reach before every other one
- * (otari#806).
+ * Everything inside `RouterProvider` is already caught, so this covers only
+ * `App`'s four branches above it: the sign-in screen, the public auth pages,
+ * the invitation page, and the hybrid landing page. A throw in one of those
+ * unmounts to a blank document with nothing in it but a console line, which is
+ * the worst place in the app to lose, because the sign-in screen is the only
+ * page an operator can reach before every other one (otari#806).
+ * `router.test.tsx` has which boundary answers where.
  *
  * A class because React offers no hook for this; `getDerivedStateFromError` and
  * `componentDidCatch` are still the only way to catch a render.
