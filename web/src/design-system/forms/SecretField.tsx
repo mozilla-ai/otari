@@ -21,6 +21,8 @@ export function SecretField({
   isInvalid,
   errorMessage,
   reserveMessage,
+  isDisabled,
+  isRequired,
 }: {
   value: string
   onChange: (next: string) => void
@@ -34,11 +36,17 @@ export function SecretField({
   /** See `Field`: holds one caption line open so a message does not move the
       form. Off for a field in a table row or a toolbar. */
   reserveMessage?: boolean
+  /** Renders the input read-only and dimmed, as `Field`'s own does. */
+  isDisabled?: boolean
+  /** Marks the field required, so the label carries the same marker `Field` shows. */
+  isRequired?: boolean
 }) {
   return (
     <TextField
       value={value}
       onChange={onChange}
+      isDisabled={isDisabled}
+      isRequired={isRequired}
       isInvalid={isInvalid}
       className="flex max-w-md flex-col gap-1"
     >

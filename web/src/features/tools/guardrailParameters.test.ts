@@ -29,9 +29,15 @@ describe("seedParameters", () => {
 
   it("leaves a field blank rather than prefilling the profile's own default", () => {
     const seeded = seedParameters(
-      [spec({ name: "threshold", type: "number", default: 0.5 })],
+      [
+        spec({ name: "threshold", type: "number", default: 0.5 }),
+        spec({ name: "strict", type: "boolean", default: true }),
+      ],
       null,
     )
+    // A boolean included: blank is what tells a later save that the operator
+    // has expressed no opinion, which `false` cannot.
+    expect(seeded.values.strict).toBe("")
 
     // Prefilling would store an explicit value where the guardrails service's
     // own default was meant to apply, and the two stop tracking each other.
@@ -117,24 +123,53 @@ describe("buildValidateKwargs", () => {
     })
   })
 
-  it("omits an optional box nobody ticked, so the profile's default stands", () => {
+  it("omits an optional box nobody touched, so the profile's default stands", () => {
+    const specs = [spec({ name: "strict", type: "boolean", default: true })]
+    expect(
+      buildValidateKwargs(specs, seedParameters(specs, null).values, ""),
+    ).toBeNull()
+  })
+
+  it("keeps an optional box the operator turned off", () => {
+    const specs = [spec({ name: "strict", type: "boolean", default: true })]
+
+    // Untouched and turned-off are different answers, and seeding both as
+    // `false` made the next save of a row drop the operator's own "off".
     expect(
       buildValidateKwargs(
-        [spec({ name: "strict", type: "boolean", default: true })],
-        { strict: false },
+        specs,
+        seedParameters(specs, { strict: false }).values,
         "",
       ),
-    ).toBeNull()
+    ).toEqual({ strict: false })
+    expect(buildValidateKwargs(specs, { strict: false }, "")).toEqual({
+      strict: false,
+    })
   })
 
   it("sends a required boolean either way, because it has no unset state", () => {
     expect(
       buildValidateKwargs(
         [spec({ name: "strict", type: "boolean", required: true })],
-        { strict: false },
+        {},
         "",
       ),
     ).toEqual({ strict: false })
+  })
+
+  it("sends the number the validator approved, not a parsed prefix of it", () => {
+    // `parseInt("1e3", 10)` is 1 while `Number("1e3")` is 1000, so the two steps
+    // have to agree on a parser or a value nobody typed reaches the service.
+    const specs = [
+      spec({ name: "count", type: "integer" }),
+      spec({ name: "threshold", type: "number" }),
+    ]
+    expect(parameterErrors(specs, { count: "1e3", threshold: "0x10" })).toEqual(
+      {},
+    )
+    expect(
+      buildValidateKwargs(specs, { count: "1e3", threshold: "0x10" }, ""),
+    ).toEqual({ count: 1000, threshold: 16 })
   })
 
   it("lets a typed field win the key it shares with the raw editor", () => {

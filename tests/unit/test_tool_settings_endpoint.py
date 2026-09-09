@@ -1,6 +1,6 @@
 """Endpoint tests for /v1/tool-settings (sqlite-backed TestClient)."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -208,29 +208,29 @@ def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
     assert "sandbox_allowed_session_images" not in fields
 
 
-def _profiles_response(rows: Any, status_code: int = 200) -> Any:
-    """Stand in for the guardrails service's ``GET /profiles`` answer."""
+def _stub_guardrails_service(
+    monkeypatch: pytest.MonkeyPatch, handler: Callable[[httpx.Request], httpx.Response]
+) -> None:
+    """Answer the guardrails service's ``GET /profiles`` from ``handler``.
 
-    class _Resp:
-        def __init__(self) -> None:
-            self.status_code = status_code
+    Through the transport rather than by patching a method, because the catalog
+    streams the body to cap its size and so calls no single request method.
+    """
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient  # captured before patching, to avoid recursion
 
-        def raise_for_status(self) -> None:
-            if self.status_code >= 400:
-                raise httpx.HTTPStatusError("boom", request=None, response=None)  # type: ignore[arg-type]
+    def factory(*_args: object, **_kwargs: object) -> httpx.AsyncClient:
+        return real_async_client(transport=transport)
 
-        def json(self) -> Any:
-            return rows
-
-    return _Resp()
+    monkeypatch.setattr("gateway.services.guardrail_catalog.httpx.AsyncClient", factory)
 
 
 def test_guardrail_profiles_lists_what_the_service_built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_get(self: Any, url: str) -> Any:  # noqa: ARG001
-        assert url == "http://anyguardrails:8000/profiles"
-        return _profiles_response([{"name": "house-policy", "guardrail_name": "any_llm"}])
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "http://anyguardrails:8000/profiles"
+        return httpx.Response(200, json=[{"name": "house-policy", "guardrail_name": "any_llm"}])
 
-    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    _stub_guardrails_service(monkeypatch, handler)
     with _client(tmp_path, guardrails_url="http://anyguardrails:8000") as client:
         resp = client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH)
 
@@ -260,10 +260,10 @@ def test_guardrail_profiles_reports_an_unconfigured_service(tmp_path: Path) -> N
 def test_guardrail_profiles_never_returns_the_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The reader router serves a tenant, from whom the GET above withholds URLs."""
 
-    async def fake_get(self: Any, url: str) -> Any:  # noqa: ARG001
+    def handler(_request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    _stub_guardrails_service(monkeypatch, handler)
     with _client(tmp_path, guardrails_url="https://guardrails.internal.example") as client:
         resp = client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH)
 
@@ -274,3 +274,20 @@ def test_guardrail_profiles_never_returns_the_endpoint(tmp_path: Path, monkeypat
 def test_guardrail_profiles_requires_master_key(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles").status_code == 401
+        
+
+def test_guardrail_profiles_refuses_an_oversized_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The timeout bounds how long the answer takes, not how much of it is held."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        row = {"name": "x" * 200, "guardrail_name": "injec_guard"}
+        return httpx.Response(200, json=[row] * 20_000)
+
+    _stub_guardrails_service(monkeypatch, handler)
+    with _client(tmp_path, guardrails_url="http://anyguardrails:8000") as client:
+        resp = client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is False
+    assert body["profiles"] == []

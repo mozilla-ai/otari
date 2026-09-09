@@ -31,6 +31,7 @@ away the page that configures guardrails.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 import httpx
@@ -45,6 +46,14 @@ from gateway.services.url_safety import redact_url_secrets
 # sidecar answers `/profiles` out of memory (it holds its built guardrails), so a
 # slow answer means the host is struggling rather than the work being large.
 _CATALOG_TIMEOUT_S = 5.0
+
+# The timeout bounds how long the answer may take and not how large it may be, so
+# a fast oversized body would be read into a worker whole and then turned into
+# one model per row. A real deployment configures a handful of profiles; these
+# are two orders of magnitude above that, and an answer past either is a service
+# that is not the one this expects rather than a catalog worth truncating.
+_MAX_CATALOG_BYTES = 1024 * 1024
+_MAX_PROFILES = 500
 
 ParameterType = Literal["string", "integer", "number", "boolean", "enum", "json"]
 
@@ -112,6 +121,11 @@ _NOT_CONFIGURED = "No guardrails service is configured, so its profiles cannot b
 _UNREACHABLE = "The guardrails service could not be reached, so its profiles cannot be listed."
 _UNSUPPORTED = "The guardrails service does not publish a profile catalog. It may predate the /profiles endpoint."
 _MALFORMED = "The guardrails service answered its profile catalog in a shape this gateway does not understand."
+_TOO_LARGE = "The guardrails service answered with more profiles than this gateway will list."
+
+
+class _CatalogTooLargeError(Exception):
+    """The answer went past a size this gateway is willing to hold."""
 
 
 def _parameter_specs(guardrail: str) -> tuple[list[GuardrailParameterSpec], bool]:
@@ -167,6 +181,16 @@ def _profile_spec(entry: object) -> GuardrailProfileSpec | None:
     )
 
 
+async def _read_capped(response: httpx.Response) -> bytes:
+    """The response body, or :class:`_CatalogTooLargeError` once it passes the cap."""
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        body.extend(chunk)
+        if len(body) > _MAX_CATALOG_BYTES:
+            raise _CatalogTooLargeError
+    return bytes(body)
+
+
 async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
     """List the profiles the guardrails service at ``base_url`` has built.
 
@@ -187,12 +211,17 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
 
     try:
         async with httpx.AsyncClient(timeout=_CATALOG_TIMEOUT_S) as client:
-            response = await client.get(f"{url}/profiles")
-        if response.status_code == httpx.codes.NOT_FOUND:
-            logger.info("Guardrails service at %s serves no /profiles endpoint", shown)
-            return GuardrailCatalog(available=False, reason=_UNSUPPORTED)
-        response.raise_for_status()
-        body = response.json()
+            # Streamed rather than read whole, so the cap is applied to what
+            # arrives instead of after a worker has already held it.
+            async with client.stream("GET", f"{url}/profiles") as response:
+                if response.status_code == httpx.codes.NOT_FOUND:
+                    logger.info("Guardrails service at %s serves no /profiles endpoint", shown)
+                    return GuardrailCatalog(available=False, reason=_UNSUPPORTED)
+                response.raise_for_status()
+                body = json.loads(await _read_capped(response))
+    except _CatalogTooLargeError:
+        logger.warning("Guardrail catalog from %s exceeded %d bytes", shown, _MAX_CATALOG_BYTES)
+        return GuardrailCatalog(available=False, reason=_TOO_LARGE)
     except httpx.HTTPError as exc:
         # The address goes to the log and not to the response, for the reason
         # `services/guardrails.py` keeps it out of a 502 body.
@@ -205,6 +234,10 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
     if not isinstance(body, list):
         logger.warning("Guardrail catalog from %s was not a list", shown)
         return GuardrailCatalog(available=False, reason=_MALFORMED)
+
+    if len(body) > _MAX_PROFILES:
+        logger.warning("Guardrail catalog from %s held %d profiles", shown, len(body))
+        return GuardrailCatalog(available=False, reason=_TOO_LARGE)
 
     # A row this gateway cannot read is dropped rather than failing the whole
     # catalog: one unrecognized entry must not cost the operator the picker.

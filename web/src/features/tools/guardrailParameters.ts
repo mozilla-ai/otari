@@ -62,12 +62,18 @@ function asFieldValue(
   return String(stored)
 }
 
-function defaultFieldValue(spec: GuardrailParameterSpec): ParameterValue {
-  if (spec.type === "boolean") return spec.default === true
+function defaultFieldValue(_spec: GuardrailParameterSpec): ParameterValue {
   // A default is shown only as the placeholder, never prefilled: writing it into
   // the field would store an explicit value where the profile's own default was
   // meant to apply, and the two stop tracking each other the moment the operator
   // upgrades the guardrails service.
+  //
+  // A boolean is blank here for the same reason and not because a checkbox has
+  // three states: it has two, and blank is the third thing the *stored entry*
+  // has, which is no opinion at all. Seeding an unset optional boolean as
+  // `false` made a stored `false` indistinguishable from an absent key, so the
+  // next save of the row dropped the operator's own "off" and handed the
+  // profile's default back.
   return ""
 }
 
@@ -178,8 +184,10 @@ function coerce(
 ): unknown {
   if (spec.type === "boolean") return value === true
   const text = String(value)
-  if (spec.type === "integer") return Number.parseInt(text, 10)
-  if (spec.type === "number") return Number.parseFloat(text)
+  // `Number` for both, which is the parser `parameterErrors` approved the input
+  // with. `parseInt` and `parseFloat` read a prefix instead of the whole string,
+  // so "1e3" validates as the integer 1000 and would then be sent as 1.
+  if (spec.type === "integer" || spec.type === "number") return Number(text)
   if (spec.type === "json") return parseJsonValue(text).value
   return text
 }
@@ -205,11 +213,11 @@ export function buildValidateKwargs(
   }
   for (const spec of specs) {
     const value = values[spec.name]
-    // A boolean has no blank state, so an unchecked optional box would write
-    // `false` over a profile whose own default is true. Only send one the
-    // operator turned on, or one the guardrail requires either way.
-    if (spec.type === "boolean" && value !== true && !spec.required) continue
-    if (spec.type !== "boolean" && isBlank(value)) continue
+    // Blank is "no opinion" for every type, a boolean included: an optional box
+    // nobody has touched leaves the profile's own default in force, while one
+    // the operator turned off sends `false` and keeps it off. A required
+    // parameter has no such state, so its blank still sends.
+    if (isBlank(value) && !spec.required) continue
     kwargs[spec.name] = coerce(spec, value)
   }
   return Object.keys(kwargs).length > 0 ? kwargs : null

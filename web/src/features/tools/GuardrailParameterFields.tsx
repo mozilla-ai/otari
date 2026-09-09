@@ -74,6 +74,10 @@ function ParameterControl({
         onChange={onChange}
         placeholder="value"
         description={description}
+        isDisabled={disabled}
+        isRequired={spec.required}
+        isInvalid={Boolean(error)}
+        errorMessage={error}
         reserveMessage
       />
     )

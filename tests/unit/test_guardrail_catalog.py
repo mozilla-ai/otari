@@ -200,3 +200,31 @@ async def test_the_log_line_masks_a_url_password(
     assert catalog.available is False
     assert "hunter2" not in caplog.text
     assert "guardrails.example" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_body_past_the_cap_is_not_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The five-second timeout bounds how long the answer takes, not its size."""
+    oversized = b'[{"name": "x", "guardrail_name": "injec_guard"}]' + b" " * (2 * 1024 * 1024)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=oversized)
+
+    _patch_transport(monkeypatch, handler)
+
+    catalog = await fetch_guardrail_catalog(_URL)
+
+    assert catalog.available is False
+    assert catalog.profiles == []
+    assert catalog.reason is not None
+
+
+@pytest.mark.asyncio
+async def test_more_profiles_than_a_picker_could_serve_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [{"name": f"p{index}", "guardrail_name": "injec_guard"} for index in range(501)]
+    _patch_transport(monkeypatch, _profiles_handler(rows))
+
+    catalog = await fetch_guardrail_catalog(_URL)
+
+    assert catalog.available is False
+    assert catalog.profiles == []

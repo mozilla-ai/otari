@@ -236,6 +236,7 @@ function GuardrailRow({
   const [error, setError] = useState("")
   const [isDeleteOpen, setDeleteOpen] = useState(false)
   const specs = parameterSpecs(catalog, guardrail.profile)
+  const describedProfile = findProfile(catalog, guardrail.profile) !== undefined
   const parameters = useParameterForm(specs, guardrail.validate_kwargs)
 
   // Rehydrate from whatever the server last said, so the row never drifts from
@@ -385,13 +386,18 @@ function GuardrailRow({
         }
       />
       <GuardrailParametersSection
+        // Remounted when the panel's shape changes, which is what recomputes
+        // whether it starts open: the section derives that once, and a catalog
+        // that lands after the card did would otherwise leave a raw value
+        // hidden behind a collapsed panel.
+        key={`${describedProfile}:${specs.length}`}
         specs={specs}
         scopeName={guardrail.profile}
         values={parameters.values}
         errors={parameters.issues}
         extraJson={parameters.extraJson}
         extraJsonError={parameters.rawError}
-        described={findProfile(catalog, guardrail.profile) !== undefined}
+        described={describedProfile}
         disabled={busy}
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
@@ -475,8 +481,12 @@ function AddGuardrailForm({
   const [scope, setScope] = useState<string[]>([])
   const [error, setError] = useState("")
   const specs = parameterSpecs(catalog, profile)
-  // Nothing stored yet, so the fields start at the profile's own defaults and
-  // re-seed when the picker moves to a profile with a different schema.
+  // An empty picker describes nothing, but its panel should not open on that
+  // account: there is no profile yet for a raw parameter to belong to.
+  const describedProfile =
+    profile === "" || findProfile(catalog, profile) !== undefined
+  // Nothing stored yet, so the fields start blank and re-seed when the picker
+  // moves to a profile with a different schema.
   const parameters = useParameterForm(specs, undefined)
 
   const submit = () => {
@@ -561,15 +571,17 @@ function AddGuardrailForm({
         }
       />
       <GuardrailParametersSection
+        // See the row above: the picker moving to a profile the catalog cannot
+        // describe has to open the editor that is then the only place its
+        // parameters can go.
+        key={`${describedProfile}:${specs.length}`}
         specs={specs}
         scopeName={profile === "" ? "the new guardrail" : profile}
         values={parameters.values}
         errors={parameters.issues}
         extraJson={parameters.extraJson}
         extraJsonError={parameters.rawError}
-        described={
-          profile === "" || findProfile(catalog, profile) !== undefined
-        }
+        described={describedProfile}
         disabled={create.isPending}
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
