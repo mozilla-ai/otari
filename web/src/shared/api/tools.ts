@@ -249,10 +249,12 @@ export function useSetWorkspaceCodeExecutionPolicy() {
         `/v1/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
         { method: "PUT", body: JSON.stringify(body) },
       ),
-    onSuccess: (_data, { workspaceId }) => {
-      void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
-      })
+    onSuccess: (data, { workspaceId }) => {
+      // Same as the web-search write above: the response is the stored row.
+      queryClient.setQueryData(
+        [WORKSPACES, workspaceId, "code-execution-policy"],
+        data,
+      )
     },
   })
 }
@@ -306,10 +308,12 @@ export function useSetWorkspaceWebSearchConfig() {
         `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
         { method: "PUT", body: JSON.stringify(body) },
       ),
-    onSuccess: (_data, { workspaceId }) => {
-      void queryClient.invalidateQueries({
-        queryKey: [WORKSPACES, workspaceId, "web-search"],
-      })
+    onSuccess: (data, { workspaceId }) => {
+      // The PUT answers with the row it just stored, so seeding the cache with
+      // it is both fresher and cheaper than refetching: without this the query
+      // holds the pre-write row until a GET lands, and each save costs two
+      // requests instead of one.
+      queryClient.setQueryData([WORKSPACES, workspaceId, "web-search"], data)
     },
   })
 }

@@ -27,14 +27,17 @@ describe("DisclosureRow", () => {
 
     const row = screen.getByRole("button", { name: /Configure search tools/ })
     expect(row).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByText("The panel")).toBeNull()
+    // Present but hidden, not unmounted: `aria-controls` has to name an element
+    // that exists even while the row is closed.
+    expect(screen.getByText("The panel")).not.toBeVisible()
 
     await user.click(row)
     expect(row).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getByText("The panel")).toBeInTheDocument()
+    expect(screen.getByText("The panel")).toBeVisible()
 
     await user.click(row)
     expect(row).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText("The panel")).not.toBeVisible()
   })
 
   it("opens from the keyboard on Enter and on Space", async () => {
@@ -57,13 +60,16 @@ describe("DisclosureRow", () => {
     render(<Harness />)
     const row = screen.getByRole("button", { name: /Configure search tools/ })
 
-    await user.click(row)
-
+    // Named before it is opened, which is the point: a collapsed row must not
+    // point `aria-controls` at an id nothing has.
     const panelId = row.getAttribute("aria-controls")
     expect(panelId).toBeTruthy()
     expect(document.getElementById(String(panelId))).toHaveTextContent(
       "The panel",
     )
+
+    await user.click(row)
+    expect(document.getElementById(String(panelId))).toBeVisible()
   })
 
   it("makes the whole row the target, not the chevron", () => {

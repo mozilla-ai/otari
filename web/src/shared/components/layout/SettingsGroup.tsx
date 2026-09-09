@@ -79,11 +79,9 @@ export function SettingsGroup({
           </div>
         )}
         {/* `otari-settings` is the dense place, the way `otari-toolbar` is:
-            it declares `--field-height` and `--field-font-size` for everything
-            inside, so a row's control is 32px beside its label on a desk and
-            36px at 16px where it goes full width on a phone. globals.css
-            carries the argument for why a place declares a variable rather
-            than restyling its descendants. */}
+            globals.css sizes `.input` and `.select__trigger` inside it, so a
+            row's control is 32px beside its label on a desk and 44px at 16px
+            where it stacks full width on a phone. A row never picks a height. */}
         <div className="otari-settings flex flex-col divide-y divide-border-subtle border border-border">
           {children}
         </div>

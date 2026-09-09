@@ -82,7 +82,7 @@ export function PolicyRow<T>({
             if (parsed.error || draft.trim() === committed) return
             void save.run(() => commit(parsed.value))
           }}
-          className={`w-full ${machine || numeric ? "field-machine" : ""} ${
+          className={`w-full ${machine || numeric ? "otari-machine-field" : ""} ${
             numeric
               ? "text-right tabular-nums md:w-[5.5rem]"
               : "md:w-[13.75rem]"

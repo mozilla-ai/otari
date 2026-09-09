@@ -56,7 +56,13 @@ export function DisclosureRow({
           />
         </span>
       </button>
-      {isOpen ? <div id={panelId}>{children}</div> : null}
+      {/* Rendered whether or not it is open, so `aria-controls` above always
+          names an element that exists. `hidden` rather than unmounting: an
+          attribute pointing at nothing is worse than a hidden panel, and the
+          rows inside cost nothing when the browser is not painting them. */}
+      <div id={panelId} hidden={!isOpen}>
+        {children}
+      </div>
     </>
   )
 }

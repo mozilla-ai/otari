@@ -13,8 +13,8 @@ import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 // so a jump from the tool panel lands the field in the page rather than under
 // the 56px top bar.
 const TEXT_INPUT = `w-full scroll-mt-16 md:w-[13.75rem] ${INPUT_CLASS}`
-const MACHINE_INPUT = `field-machine ${TEXT_INPUT}`
-const NUMBER_INPUT = `field-machine w-full scroll-mt-16 text-right tabular-nums md:w-[5.5rem] ${INPUT_CLASS}`
+const MACHINE_INPUT = `otari-machine-field ${TEXT_INPUT}`
+const NUMBER_INPUT = `otari-machine-field w-full scroll-mt-16 text-right tabular-nums md:w-[5.5rem] ${INPUT_CLASS}`
 
 /**
  * The mono caption beside a row's label, if the key is not already the label.
@@ -466,7 +466,7 @@ export function ToolPriceRow({
               // 70000.00000000001 in binary floating point.
               void save.run(() => commit(Math.round(parsed * PER_MILLION)))
             }}
-            className={`field-machine w-full text-right tabular-nums md:w-[7rem] ${INPUT_CLASS}`}
+            className={`otari-machine-field w-full text-right tabular-nums md:w-[7rem] ${INPUT_CLASS}`}
           />
         </div>
       }

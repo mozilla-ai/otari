@@ -95,7 +95,10 @@ export function ToolStatusGroup({
                       })
                       input?.focus({ preventScroll: true })
                     }}
-                    className="text-caption text-link transition-colors duration-150 ease-out hover:text-link-hover focus-visible:otari-focus-ring motion-reduce:transition-none"
+                    // The only control in this row's lane, so it carries the
+                    // 44px floor itself; a bare `<button>` also keeps Tailwind's
+                    // reset cursor without this.
+                    className="inline-flex min-h-11 cursor-pointer items-center text-caption text-link transition-colors duration-150 ease-out hover:text-link-hover focus-visible:otari-focus-ring motion-reduce:transition-none"
                   >
                     Set backend URL ↓
                   </button>

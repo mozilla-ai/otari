@@ -122,7 +122,7 @@ function StoredToolLine({
               write({ api_base: next === "" ? null : next }),
             )
           }}
-          className={`field-machine w-full md:w-[15rem] ${INPUT_CLASS}`}
+          className={`otari-machine-field w-full md:w-[15rem] ${INPUT_CLASS}`}
         />
         <input
           type="password"
@@ -143,7 +143,7 @@ function StoredToolLine({
               setApiKey("")
             })
           }}
-          className={`field-machine w-full md:w-[10rem] ${INPUT_CLASS}`}
+          className={`otari-machine-field w-full md:w-[10rem] ${INPUT_CLASS}`}
         />
         <ConfirmButton
           confirmLabel="Remove permanently"
@@ -248,7 +248,7 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
           placeholder="local"
           disabled={create.isPending}
           onChange={(event) => setName(event.target.value)}
-          className={`field-machine w-full md:w-[7.5rem] ${INPUT_CLASS}`}
+          className={`otari-machine-field w-full md:w-[7.5rem] ${INPUT_CLASS}`}
         />
         <FilterSelect
           ariaLabel="Search provider"
@@ -274,7 +274,7 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
                 : "backend URL"
           }
           onChange={(event) => setApiBase(event.target.value)}
-          className={`field-machine w-full md:w-[15rem] ${INPUT_CLASS}`}
+          className={`otari-machine-field w-full md:w-[15rem] ${INPUT_CLASS}`}
         />
         <input
           type="password"
@@ -286,7 +286,7 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
             keyRequired ? "API key (required)" : "API key (optional)"
           }
           onChange={(event) => setApiKey(event.target.value)}
-          className={`field-machine w-full md:w-[10rem] ${INPUT_CLASS}`}
+          className={`otari-machine-field w-full md:w-[10rem] ${INPUT_CLASS}`}
         />
         <Button
           size="sm"
@@ -340,6 +340,13 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
       description="Named tools behind the direct endpoint, POST /v1/search. A searxng tool with no URL of its own reuses the backend above."
       docsHref={docsHref}
     >
+      {tools.error || providers.error ? (
+        // Outside the disclosure: a read that failed is the thing the operator
+        // most needs to see, and the row is collapsed by default.
+        <div className="px-4 py-3">
+          <ErrorBanner error={tools.error ?? providers.error} />
+        </div>
+      ) : null}
       <DisclosureRow
         label="Configure search tools"
         help={
@@ -360,7 +367,6 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
         }
       >
         <div className="flex flex-col divide-y divide-border-subtle">
-          <ErrorBanner error={tools.error ?? providers.error} />
           {stored.map((tool) => (
             <StoredToolLine key={tool.name} tool={tool} providers={known} />
           ))}

@@ -1936,21 +1936,27 @@ main {
    the form height each row comes out taller than the sentence explaining it, so
    a column of them reads as a stack of boxes.
 
-   Below `md` the control stops sharing the row and stacks full width, so it
-   takes the form size back and 16px with it: iOS zooms the page when a field
-   under 16px takes focus, and a full-width field is the one shape where that
-   zoom has nowhere to go. */
+   On a phone the control stops sharing the row and stacks full width, and it
+   comes up to 44px with the two places above rather than stopping at the form
+   height: 44px is the floor everywhere, and a dense place that keeps its
+   desktop height there is the one thing `design/motion-and-access.md` says
+   needs an argument in writing. Same 767px boundary as those, so a settings
+   row's fields and the button floor arrive together.
+
+   It takes 16px with it, which is a separate rule from the height: iOS zooms
+   the page when a field under 16px takes focus, and a full-width field is the
+   one shape where that zoom has nowhere to go. */
 .otari-settings .input,
 .otari-settings .select__trigger {
   height: 32px;
   min-height: 32px;
   padding-block: 4px;
 }
-@media (width < 48rem) {
+@media (max-width: 767px) {
   .otari-settings .input,
   .otari-settings .select__trigger {
-    height: 36px;
-    min-height: 36px;
+    height: 44px;
+    min-height: 44px;
     padding-block: 6px;
   }
   .otari-settings .input {
@@ -1972,8 +1978,17 @@ main {
 /* A field holding a machine value (a URL, an engine list, a domain list, a
    number) takes the mono family a step down, so a long value fits the lane and
    reads as data rather than as prose. The rule above hands it 16px back where
-   the field goes full width. */
-.field-machine {
+   the field goes full width.
+
+   Unlayered and `otari-` namespaced, both deliberately. `INPUT_CLASS` carries
+   `text-sm`, so a `@utility` here would be settled by Tailwind's emit order
+   rather than by the call site, and `text-sm` wins that. And this is the same
+   kind of escape hatch as `.otari-toolbar` and `.otari-settings`, which is what
+   the namespace says. Unlike those it is opted into per field rather than per
+   place, because the family is a property of the value in the box (a URL, a
+   domain list) and not of the row it sits in: two fields in one settings row
+   legitimately differ, a prose hint beside a mono domain list. */
+.otari-machine-field {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
