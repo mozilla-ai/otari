@@ -203,9 +203,10 @@ class _DatabaseStateStore:
 
         ``provider`` is compared after the row is claimed rather than added to
         the WHERE clause, so a state minted for one provider and returned to
-        another is refused as itself rather than as an unknown state. It is
-        still claimed, because a state that arrived at the wrong callback is
-        spent either way.
+        another is refused as itself rather than as an unknown state. The
+        delete is staged on the request's transaction and the refusal keeps
+        that transaction from committing, so the row survives for the
+        callback it was minted for.
         """
         row = (
             await self._db.execute(

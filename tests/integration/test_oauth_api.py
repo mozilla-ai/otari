@@ -501,6 +501,10 @@ def test_a_state_minted_for_one_provider_does_not_answer_the_other(
     response = client.post("/v1/auth/oauth/github/callback", json={"code": "c", "state": state})
 
     assert response.status_code == 400
+    # The refusal rolled the claim back with the rest of the request, so the
+    # callback the state was minted for still has a flow to finish.
+    finished = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    assert finished.status_code == 200, finished.text
 
 
 def test_the_exchange_sends_the_verifier_the_authorize_call_minted(

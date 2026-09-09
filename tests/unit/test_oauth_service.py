@@ -33,7 +33,7 @@ class FakeSession:
     """Enough ``AsyncSession`` for the state store to stage a row against.
 
     The store's two statements are exercised for real against PostgreSQL in
-    ``tests/integration/test_oauth_state.py``; what these tests need is a
+    ``tests/integration/test_oauth_api.py``; what these tests need is a
     session that accepts them, so that building an authorization URL can be
     asserted on without a database.
     """
