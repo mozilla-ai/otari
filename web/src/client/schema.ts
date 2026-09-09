@@ -5009,7 +5009,7 @@ export interface components {
         AlertRuleCreate: {
             /**
              * Destination
-             * @description Apprise destination URL, for example slack://token/channel, discord://webhook_id/webhook_token, pagerduty://key@apikey, or json://host/path for a plain webhook. Encrypted at rest and never returned
+             * @description Apprise destination URL, for example slack://token/channel, discord://webhook_id/webhook_token, pagerduty://key@apikey, or json://host/path for a plain webhook. Only the schemas Otari has classified are accepted, because whether the URL names a host decides whether the SSRF check applies; a rejection lists them. Encrypted at rest and never returned
              */
             destination: string;
             /**

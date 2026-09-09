@@ -2,29 +2,21 @@
 
 One ``alert_rules`` row is one destination an organization wants its budget
 alerts sent to, plus the thresholds that reach it. The destination is an Apprise
-URL, so Slack, Discord, PagerDuty, mail and a plain webhook are one column
-rather than one column per vendor, and it is stored encrypted because such a URL
-embeds a bot token or basic-auth credentials.
+URL, so Slack, Discord, PagerDuty and a plain webhook are one column rather than
+one per vendor, and it is stored encrypted because such a URL embeds a token.
 
 ``alert_deliveries`` is what makes the feature send each alert once. A crossed
 threshold stays crossed for the rest of the budget period and every refresher in
 ``gateway.main`` runs once per worker, so both a repeat over time and a repeat
 across workers are settled by one unique constraint that a claim inserts against
-before dispatching. ``period_start`` is part of the key, which is what re-arms an
-alert when a budget period rolls without anything having to clear the table.
+before dispatching. ``period_start`` is part of the key, which re-arms an alert
+when a period rolls without anything having to clear the table.
 
-The partial unique index alongside the constraint covers a budget with no period
-at all: PostgreSQL treats two NULL ``period_start`` values as distinct, so the
-constraint alone would let a never-rolling ceiling alert on every tick.
+The partial unique index alongside it covers a budget with no period at all:
+PostgreSQL treats two NULL ``period_start`` values as distinct.
 
-``alert_rules.organization_id`` cascades, matching the other tenant-owned
-configuration tables (``organization_guardrails``, ``workspace_mcp_servers``):
-these rows are configuration, not durable request-plane history.
 ``scoped_budget_id`` is deliberately not a foreign key, matching
 ``scoped_budgets``' own columns, which declare none.
-
-A deployment that creates no alert rules is unaffected: the evaluator returns on
-its first query when the table is empty.
 
 Revision ID: e4c9a2f7b1d8
 Revises: d5b7f9a1c3e6
@@ -45,7 +37,6 @@ _RULES_UNIQUE_NAME = "uq_alert_rules_org_name"
 _RULES_WARN_CHECK = "ck_alert_rules_warn_percent_range"
 _DELIVERIES_UNIQUE_NAME = "uq_alert_deliveries_rule_budget_period_kind"
 _DELIVERIES_NO_PERIOD_INDEX = "uq_alert_deliveries_rule_budget_kind_no_period"
-_DELIVERIES_LOOKUP_INDEX = "ix_alert_deliveries_rule_period"
 
 
 def upgrade() -> None:
@@ -108,15 +99,9 @@ def upgrade() -> None:
         sqlite_where=sa.text("period_start IS NULL"),
         postgresql_where=sa.text("period_start IS NULL"),
     )
-    op.create_index(
-        _DELIVERIES_LOOKUP_INDEX,
-        "alert_deliveries",
-        ["alert_rule_id", "period_start"],
-    )
 
 
 def downgrade() -> None:
-    op.drop_index(_DELIVERIES_LOOKUP_INDEX, table_name="alert_deliveries")
     op.drop_index(_DELIVERIES_NO_PERIOD_INDEX, table_name="alert_deliveries")
     op.drop_index(op.f("ix_alert_deliveries_alert_rule_id"), table_name="alert_deliveries")
     op.drop_table("alert_deliveries")

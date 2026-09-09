@@ -212,10 +212,10 @@ _DELIBERATELY_OMITTED: tuple[str, ...] = (
     # Not shown today, and each could be. Nothing below is a secret or an
     # unrenderable shape; no page has needed it yet.
     "activation_guide",
+    "alert_evaluation_interval_sec",
     "bootstrap",
     "budget_reservation_retention_sec",
     "budget_reservation_sweep_batch",
-    "alert_evaluation_interval_sec",
     "budget_reservation_sweep_interval_sec",
     "budget_reservation_ttl_sec",
     "capture_agent_telemetry",

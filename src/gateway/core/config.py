@@ -846,7 +846,7 @@ class GatewayConfig(BaseSettings):
         description=(
             "How often to check the organization budget ceilings against their alert rules' "
             "thresholds and send what has crossed one. 0 disables alert evaluation entirely, "
-            "leaving configured rules in place and sending nothing. Standalone mode only."
+            "leaving configured rules in place and sending nothing. Not used in hybrid mode."
         ),
     )
     budget_reservation_sweep_interval_sec: int = Field(
@@ -1189,11 +1189,12 @@ class GatewayConfig(BaseSettings):
     alert_allow_private_hosts: bool = Field(
         default=False,
         description=(
-            "SSRF gate: allow a webhook-style alert destination (the json/jsons/xml/xmls/form/forms "
-            "Apprise schemas) that resolves to a private/loopback/reserved host. Off by default. "
-            "Enable it to alert an internal chat server or webhook receiver on the deployment's own "
-            "network. Vendor schemas with fixed endpoints (slack, discord, pagerduty and the rest) "
-            "are unaffected either way. Also settable via OTARI_ALERT_ALLOW_PRIVATE_HOSTS."
+            "SSRF gate: allow an alert destination whose URL names a host (json, mailto, gotify, "
+            "ntfy, matrix and the rest of that group) that resolves to a private/loopback/reserved "
+            "host. Off by default. Enable it to alert an internal chat server or webhook receiver "
+            "on the deployment's own network. Schemas with endpoints compiled into Apprise (slack, "
+            "discord, pagerduty and the rest) have no address to check and are unaffected. "
+            "Also settable via OTARI_ALERT_ALLOW_PRIVATE_HOSTS."
         ),
     )
     provider_allow_private_hosts: bool = Field(

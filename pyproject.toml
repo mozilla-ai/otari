@@ -16,15 +16,12 @@ dependencies = [
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     # Notification fan-out for budget alerts (`services/alerts/`). One library
-    # rather than an adapter per destination: an alert rule stores an Apprise
-    # URL, so Slack, Discord, PagerDuty, Telegram, a plain webhook and mail are
-    # all the same column and the same code path. Taken as a core dependency,
-    # not an extra, because an alert rule an operator configured through the
-    # dashboard must not silently deliver nothing on a deployment that resolved
-    # dependencies without it. The 100-plus transports are pure Python; the ones
-    # needing a compiled or protocol-specific package (paho-mqtt, slixmpp, PGPy,
-    # hidapi) live behind Apprise's own "all-plugins" extra, which is
-    # deliberately not taken.
+    # rather than an adapter per destination: a rule stores an Apprise URL, so
+    # Slack, Discord, PagerDuty and a plain webhook are one column and one code
+    # path. A core dependency rather than an extra, because a rule an operator
+    # configured through the dashboard must not silently deliver nothing on a
+    # deployment that resolved dependencies without it. The transports needing a
+    # compiled package sit behind Apprise's "all-plugins" extra, not taken here.
     "apprise>=1.9.0,<2.0.0",
     # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the
     # code exchange, and the userinfo fetch that normalizes a provider response

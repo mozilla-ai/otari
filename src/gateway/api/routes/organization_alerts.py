@@ -1,4 +1,4 @@
-"""The caller's organization's budget alert rules (standalone mode only).
+"""The caller's organization's budget alert rules.
 
 Thin composition over `gateway.services.tenancy.organization_alert_service`:
 resolve the caller's identity, call the service, return its typed result. The

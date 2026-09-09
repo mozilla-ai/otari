@@ -30,28 +30,22 @@ import { canManage } from "./roles"
 
 // Where this organization's budget alerts go.
 //
-// The page is built around one asymmetry, the same shape the email-domains page
-// has: creating a rule is free and proves nothing, and the thing that decides
-// whether an alert ever arrives is whether the destination actually accepts a
-// delivery. So "Send test" is a first-class action on every row rather than
-// something buried in an edit form. A destination that silently accepts nothing
-// is indistinguishable from a budget that never crossed a threshold, and the
-// moment to discover that is while setting the rule up, not during the overspend
-// it was meant to warn about.
+// The page is built around one asymmetry: creating a rule is free and proves
+// nothing, and what decides whether an alert ever arrives is whether the
+// destination actually accepts a delivery. So "Send test" is a first-class
+// action on every row. A destination that silently accepts nothing looks
+// exactly like a budget that never crossed a threshold.
 //
 // The destination is write-only in both directions. The server stores it
-// encrypted and returns only a redaction (scheme and host, path and query
-// masked), because an Apprise URL carries its credentials in the path. So the
-// table shows the redaction, the create form takes the URL once through a
-// `SecretField`, and editing a rule never prefills it: an empty destination box
-// on an edit form means "keep the stored one", which is exactly what the API's
+// encrypted and returns only a redaction, because an Apprise URL carries its
+// credentials in the path. The table shows the redaction, the create form takes
+// the URL once through a `SecretField`, and the edit form never prefills it: an
+// empty destination box means "keep the stored one", which is what the API's
 // omit-to-keep contract expects.
 //
-// What a rule watches is not configurable here, and that is deliberate rather
-// than unfinished: a rule covers every one of the organization's budget
-// ceilings. Picking ceilings per rule would be a second scoping model on top of
-// the one `budgets` already has, and the useful default is "tell me about all of
-// my caps".
+// What a rule watches is not configurable, and that is deliberate: a rule covers
+// every one of the organization's ceilings. Picking ceilings per rule would be a
+// second scoping model on top of the one `budgets` already has.
 
 /**
  * The warning thresholds offered, plus the "no warning" case.
@@ -83,25 +77,64 @@ function destinationKind(destination: string): string {
   return "Custom"
 }
 
-function RuleForm({ onClose }: { onClose: () => void }) {
+/**
+ * The create and edit form, which are the same fields over two verbs.
+ *
+ * Editing prefills everything except the destination, which cannot be prefilled
+ * because the server never returns it. An empty box therefore means "keep the
+ * stored one", and the PATCH omits the field entirely.
+ */
+function RuleForm({
+  rule,
+  onClose,
+}: {
+  rule?: AlertRule
+  onClose: () => void
+}) {
   const create = useCreateAlertRule()
-  const [name, setName] = useState("")
+  const update = useUpdateAlertRule()
+  const [name, setName] = useState(rule?.name ?? "")
   const [destination, setDestination] = useState("")
-  const [warnAt, setWarnAt] = useState("80")
-  const [notifyOnExceeded, setNotifyOnExceeded] = useState(true)
+  const [warnAt, setWarnAt] = useState(
+    rule ? (rule.warn_at_percent?.toString() ?? "") : "80",
+  )
+  const [notifyOnExceeded, setNotifyOnExceeded] = useState(
+    rule?.notify_on_exceeded ?? true,
+  )
+
+  const editing = rule !== undefined
+  const mutation = editing ? update : create
 
   // A rule with neither threshold can never produce a message, which the server
   // refuses too. Caught here so the button is simply unavailable rather than
   // the operator submitting into a 422.
   const inert = warnAt === "" && !notifyOnExceeded
-  const incomplete = name.trim() === "" || destination.trim() === ""
+  const incomplete =
+    name.trim() === "" || (!editing && destination.trim() === "")
 
   const submit = () => {
-    const body: CreateAlertRuleRequest = {
+    const shared = {
       name: name.trim(),
-      destination: destination.trim(),
       warn_at_percent: warnAt === "" ? null : Number(warnAt),
       notify_on_exceeded: notifyOnExceeded,
+    }
+    if (editing) {
+      update.mutate(
+        {
+          ruleId: rule.id,
+          // Omitted, not sent empty: the server reads an absent destination as
+          // "keep the stored one".
+          body: destination.trim()
+            ? { ...shared, destination: destination.trim() }
+            : shared,
+        },
+        { onSuccess: onClose },
+      )
+      return
+    }
+    const body: CreateAlertRuleRequest = {
+      ...shared,
+      destination: destination.trim(),
       enabled: true,
     }
     create.mutate(body, {
@@ -118,8 +151,10 @@ function RuleForm({ onClose }: { onClose: () => void }) {
       className="border-y border-border py-5"
       contentClassName="flex flex-col gap-4"
     >
-      <h2 className="text-title">Add an alert destination</h2>
-      <ErrorBanner error={create.error} />
+      <h2 className="text-title">
+        {editing ? `Edit ${rule.name}` : "Add an alert destination"}
+      </h2>
+      <ErrorBanner error={mutation.error} />
       <Field
         label="Name"
         value={name}
@@ -134,7 +169,11 @@ function RuleForm({ onClose }: { onClose: () => void }) {
         value={destination}
         onChange={setDestination}
         placeholder="slack://token/channel"
-        description="An Apprise URL. slack://token/channel, discord://webhook_id/webhook_token, pagerduty://key@apikey, mailto://user@example.com, or json://host/path for a plain webhook. Stored encrypted and never shown again."
+        description={
+          editing
+            ? "Leave empty to keep the stored destination. Type a new Apprise URL to replace it."
+            : "An Apprise URL. slack://token/channel, discord://webhook_id/webhook_token, pagerduty://key@apikey, mailto://user:password@smtp.example.com, or json://host/path for a plain webhook. Stored encrypted and never shown again."
+        }
       />
       <FilterSelect
         label="Warn early at"
@@ -159,10 +198,10 @@ function RuleForm({ onClose }: { onClose: () => void }) {
         <Button
           variant="primary"
           isDisabled={incomplete || inert}
-          isPending={create.isPending}
+          isPending={mutation.isPending}
           onPress={submit}
         >
-          Add destination
+          {editing ? "Save changes" : "Add destination"}
         </Button>
         <Button variant="ghost" onPress={onClose}>
           Cancel
@@ -227,8 +266,10 @@ export function OrganizationAlertsPage() {
   const update = useUpdateAlertRule()
   const remove = useDeleteAlertRule()
   const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const rows = rules.data?.data ?? []
+  const editingRule = rows.find((row) => row.id === editingId)
 
   const columns: DataTableColumn<AlertRule>[] = [
     {
@@ -302,6 +343,16 @@ export function OrganizationAlertsPage() {
           <Button
             size="sm"
             variant="ghost"
+            onPress={() => {
+              setAdding(false)
+              setEditingId(row.id)
+            }}
+          >
+            Edit
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
             isDisabled={update.isPending}
             onPress={() =>
               update.mutate({
@@ -329,7 +380,7 @@ export function OrganizationAlertsPage() {
       <PageIntro
         title="Budget alerts"
         action={
-          canEdit && !adding ? (
+          canEdit && !adding && editingId === null ? (
             <Button variant="primary" onPress={() => setAdding(true)}>
               Add destination
             </Button>
@@ -355,6 +406,13 @@ export function OrganizationAlertsPage() {
       ) : null}
 
       {adding ? <RuleForm onClose={() => setAdding(false)} /> : null}
+      {editingRule ? (
+        <RuleForm
+          key={editingRule.id}
+          rule={editingRule}
+          onClose={() => setEditingId(null)}
+        />
+      ) : null}
 
       {canEdit || context.isPending ? (
         <TableScrollFrame className="otari-alert-rules-table">

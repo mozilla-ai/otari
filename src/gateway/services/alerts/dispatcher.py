@@ -3,30 +3,22 @@
 This module knows nothing about budgets. It takes a destination URL, a title and
 a body, and reports whether the send worked.
 
-**Why Apprise.** An alert destination is the kind of thing every operator wants
-spelled differently: Slack here, PagerDuty there, a plain webhook into somebody
-else's internal tooling. Apprise turns that into one string, so the schema is one
-column, and a destination this codebase has never heard of needs no adapter and
-no migration. That is also why there is no port here, unlike
-``ports/growth_signal_port.py``: a port exists to keep a *vendor* choice out of
-the core, and Apprise is itself the vendor-neutral layer, so wrapping it in one
-would be a seam with a single possible implementation on either side.
+**Why Apprise.** One string covers Slack, PagerDuty, mail and a plain webhook,
+so the schema is one column rather than one per vendor. There is no port over it
+because Apprise is itself the vendor-neutral layer, so a port would be a seam
+with one possible implementation on either side.
 
-**Threads, not the event loop.** ``Apprise.async_notify`` is a real coroutine but
-its plugins are synchronous ``requests`` calls that it offloads with
-``run_in_executor(None, ...)`` (Apprise's ``plugins/base.py``). So a send never
-blocks the loop, but it does occupy a default-executor thread for the length of
-an HTTP round trip. Bounded by :data:`SEND_TIMEOUT_SECONDS` and by the evaluator
-never fanning out more than one send per rule per tick, which is what keeps a
-slow destination from starving the executor the rest of the process shares.
+**Threads, not the event loop.** ``Apprise.async_notify`` is a coroutine but its
+plugins are synchronous ``requests`` calls it offloads with
+``run_in_executor(None, ...)``. A send never blocks the loop; it does hold a
+default-executor thread for an HTTP round trip, which is what
+:data:`SEND_TIMEOUT_SECONDS` and :func:`_bound_sockets` between them bound.
 
-**Logging.** The destination is a credential: a ``slack://`` URL embeds a bot
-token and a ``json://`` one can embed basic-auth. Nothing here passes a URL to
-the gateway logger; callers log the stored redaction instead. Apprise's own
-logger redacts credentials (its ``AppriseAsset.secure_logging`` defaults true and
-its CWE-312 handling routes failures through ``cwe312_url``), and
-:data:`_ASSET` sets that flag explicitly rather than inheriting it, so the
-guarantee survives a change to Apprise's defaults.
+**Logging.** The destination is a credential: ``slack://`` embeds a bot token,
+``json://`` can embed basic-auth. Nothing here passes a URL to the gateway
+logger; callers log the stored redaction. :data:`_ASSET` sets
+``secure_logging`` explicitly so Apprise's own redaction survives a change to
+its defaults.
 """
 
 import asyncio
@@ -40,33 +32,38 @@ from gateway.log_config import logger
 # How long this coroutine waits for a send before giving up on it.
 SEND_TIMEOUT_SECONDS: Final = 15.0
 
-# The socket bounds that make the number above mean something.
-#
-# ``asyncio.wait_for`` cancels the *await*, not the work: ``async_notify`` runs
-# each plugin's blocking ``requests`` call through ``run_in_executor``, and a
-# thread already inside a socket read cannot be cancelled. So the timeout alone
-# stops this coroutine waiting while leaving the thread occupied, and the thing
-# that actually bounds the thread is the socket timeout the plugin uses.
-#
-# Apprise defaults both to 4 seconds, but they are per-plugin values an operator
-# can raise from the destination URL itself (``?cto=600&rto=600``), which would
-# park a shared executor thread for ten minutes per tick. :func:`_bound_sockets`
-# clamps them instead of trusting the URL.
+# ``asyncio.wait_for`` cancels the await, not the work: a thread already inside
+# a socket read cannot be cancelled. Apprise defaults both timeouts to 4s but
+# lets the destination URL raise them (``?cto=600``), which would park a shared
+# executor thread for ten minutes a tick, so :func:`_bound_sockets` clamps them.
 SOCKET_CONNECT_TIMEOUT_SECONDS: Final = 5.0
 SOCKET_READ_TIMEOUT_SECONDS: Final = 10.0
 
-# Explicit rather than inherited: see the module docstring. ``secure_logging``
-# is what keeps a bot token out of Apprise's own log records.
+# ``secure_logging`` keeps a bot token out of Apprise's own log records.
 _ASSET: Final = apprise.AppriseAsset(secure_logging=True)
 
 
 class UnsupportedAlertDestinationError(ValueError):
-    """Apprise cannot parse the destination, or its schema is not built in.
+    """Apprise cannot parse the destination, or Otari does not accept its schema.
 
-    Raised by :func:`parse_destination` at rule-write time, so an operator
-    learns their URL is unusable while they are looking at the form rather than
-    when a budget crosses a threshold three weeks later.
+    Raised at rule-write time, so an operator learns their URL is unusable while
+    the form is open rather than when a budget crosses a threshold weeks later.
     """
+
+
+@dataclass(frozen=True)
+class ParsedDestination:
+    """What a destination URL turned out to be, before any policy is applied.
+
+    ``host`` is the address the plugin will actually connect to, or None when
+    the plugin has none because its endpoint is compiled in. It is the value the
+    SSRF gate checks; deciding *whether* to check it is the caller's job, since
+    the netloc of a vendor schema is a token rather than a host.
+    """
+
+    scheme: str
+    service_name: str
+    host: str | None
 
 
 @dataclass(frozen=True)
@@ -74,24 +71,23 @@ class AlertDispatchResult:
     """Whether one send succeeded, and a short reason when it did not.
 
     ``detail`` is stored on the delivery row and shown to the operator, so it
-    says what happened without naming the destination: the row already carries
-    the redaction, and the reason is the part that is missing.
+    says what happened without naming the destination.
     """
 
     delivered: bool
     detail: str | None = None
 
 
-def parse_destination(destination: str) -> str:
-    """Check a destination is one Apprise can deliver to, and name its schema.
-
-    Returns the plugin's service name, which the create path stores nothing of
-    but the API echoes back so a form can confirm it understood ``slack://`` as
-    Slack.
+def parse_destination(destination: str) -> ParsedDestination:
+    """Check a destination is one Apprise can deliver to, and report what it is.
 
     ``suppress_exceptions`` keeps a malformed URL from surfacing as whatever the
     plugin's constructor happened to raise, so every rejection reaches the caller
     as one domain error.
+
+    ``smtp_host`` before ``host`` because Apprise's mail plugin maps a well-known
+    domain onto its provider's server (``mailto://u:p@gmail.com`` sends to
+    ``smtp.gmail.com``), and the gate has to check the address that is dialed.
     """
     stripped = destination.strip()
     if not stripped:
@@ -104,33 +100,25 @@ def parse_destination(destination: str) -> str:
             "Apprise does not recognize this destination. Expected a URL such as "
             "slack://token/channel, discord://webhook_id/webhook_token, or json://host/path"
         )
+    host = getattr(plugin, "smtp_host", None) or getattr(plugin, "host", None)
     service_name = getattr(plugin, "service_name", None)
-    return str(service_name) if service_name else "Unknown"
-
+    return ParsedDestination(
+        scheme=stripped.split(":", 1)[0].lower(),
+        service_name=str(service_name) if service_name else "Unknown",
+        host=str(host) if host else None,
+    )
 
 def _bound_sockets(client: apprise.Apprise) -> None:
     """Clamp every loaded plugin's socket timeouts to this module's ceilings.
 
-    Set on the plugin objects rather than appended to the URL as ``?cto=&rto=``,
-    which is what an Apprise reader would reach for first: a destination can
-    already carry a query string and a fragment (``slack://tok/#channel``), so
-    concatenating parameters onto an operator's URL risks corrupting a
-    destination that worked. The attributes are ``URLBase``'s own and are what
-    ``cto``/``rto`` set anyway.
+    Set on the plugin objects rather than appended to the URL as ``?cto=&rto=``:
+    a destination can already carry a query string and a fragment
+    (``slack://tok/#channel``), so concatenating onto an operator's URL risks
+    corrupting one that worked. Clamped rather than overwritten, so a shorter
+    timeout survives.
 
-    Clamped, not overwritten, so an operator who asked for a *shorter* timeout
-    keeps it and only an unreasonably long one is brought down.
-
-    The bound is per socket operation rather than per send: Apprise may retry a
-    plugin, so the guarantee here is that no single operation parks a thread
-    indefinitely, not that a send finishes within
-    :data:`SEND_TIMEOUT_SECONDS`. Closing the remaining gap would mean owning
-    Apprise's retry loop, which is not worth the coupling.
-
-    Defensive about the attributes existing: they come from ``URLBase``, so
-    every built-in plugin has them, but an entry loaded from a custom plugin
-    path need not, and a missing one must not turn one bad rule into a failed
-    pass.
+    The bound is per socket operation, not per send, because Apprise may retry a
+    plugin. Closing that gap would mean owning Apprise's retry loop.
     """
     for server in client:
         for attribute, ceiling in (

@@ -187,6 +187,54 @@ describe("OrganizationAlertsPage", () => {
     expect(patch?.body).toEqual({ enabled: false })
   })
 
+  it("edits a rule without resending its destination", async () => {
+    const requests = mockApi({
+      rules: [alertRule({ warn_at_percent: 80 })],
+    })
+    renderPage(<OrganizationAlertsPage />)
+
+    await screen.findByText("Platform team Slack")
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await screen.findByText("Edit Platform team Slack")
+
+    await userEvent.clear(screen.getByLabelText("Name"))
+    await userEvent.type(screen.getByLabelText("Name"), "Platform team pager")
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true)
+    })
+    const patch = requests.find((request) => request.method === "PATCH")
+    // No `destination` key at all. The box was left empty, and the server reads
+    // an absent destination as "keep the stored one"; sending the redaction
+    // back would overwrite a working rule with a mask.
+    expect(patch?.body).toEqual({
+      name: "Platform team pager",
+      warn_at_percent: 80,
+      notify_on_exceeded: true,
+    })
+  })
+
+  it("replaces the destination when the edit form is given a new one", async () => {
+    const requests = mockApi({ rules: [alertRule()] })
+    renderPage(<OrganizationAlertsPage />)
+
+    await screen.findByText("Platform team Slack")
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await userEvent.type(
+      screen.getByLabelText("Destination"),
+      "discord://1/tok",
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true)
+    })
+    expect(
+      requests.find((request) => request.method === "PATCH")?.body,
+    ).toMatchObject({ destination: "discord://1/tok" })
+  })
+
   it("reports a successful test send", async () => {
     mockApi({ rules: [alertRule()] })
     renderPage(<OrganizationAlertsPage />)

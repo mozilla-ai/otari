@@ -428,10 +428,9 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
 
             # Budget alerts are read off the ceilings on a timer rather than
             # fired from the reserve/settle path, which is deliberately left
-            # untouched: see `services/alerts/__init__.py`. Standalone only, for
-            # the same reason the sweeper above is, and skipped entirely when the
-            # interval is zero, which is the operator's off switch for the
-            # feature as a whole.
+            # untouched: see `services/alerts/__init__.py`. Wherever local
+            # ceilings exist, so standalone and hosted but not hybrid, and
+            # skipped when the interval is zero, which is the off switch.
             if config.alert_evaluation_interval_sec > 0:
                 alert_evaluator = asyncio.create_task(
                     run_budget_alert_evaluator(config.alert_evaluation_interval_sec)

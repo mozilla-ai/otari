@@ -123,16 +123,32 @@ organization rail holds the destinations; each one covers every ceiling the
 organization owns.
 
 A destination is an [Apprise](https://github.com/caronc/apprise) URL, which is
-what makes Slack, Discord, PagerDuty, Telegram, email and a plain webhook one
-field rather than one integration each:
+what makes Slack, Discord, PagerDuty, email and a plain webhook one field rather
+than one integration each:
 
 ```text
 slack://token/channel
 discord://webhook_id/webhook_token
 pagerduty://integration_key@api_key
-mailto://alerts@example.com
+mailto://user:password@smtp.example.com
 json://hooks.example.com/incoming
 ```
+
+Otari accepts these schemas:
+
+| Group | Schemas |
+| --- | --- |
+| Webhooks and self-hosted services | `json`, `jsons`, `xml`, `xmls`, `form`, `forms`, `mailto`, `mailtos`, `gotify`, `gotifys`, `ntfy`, `matrix`, `matrixs`, `mmost`, `mmosts`, `rocket`, `rockets`, `ncloud`, `nclouds`, `apprise`, `apprises` |
+| Hosted services | `slack`, `discord`, `msteams`, `pagerduty`, `opsgenie`, `pover`, `pbul`, `tgram`, `twilio`, `sns`, `ses`, `signal` |
+
+Anything else is refused. Apprise supports many more, but the two groups differ
+in whether the URL names a host Otari will dial, and that decides whether the
+SSRF check below applies, so a schema has to be classified before it can be
+accepted. Ask for one and it is a one-line addition.
+
+`mailto://` carries its own SMTP credentials and does not use the deployment's
+configured mail settings, which is a separate thing entirely. If you already
+have mail set up, a webhook or a chat destination is usually less to maintain.
 
 Each rule sends at two points, either of which can be turned off: a warning at
 a percentage of the limit (80 by default), and a message when a ceiling reaches
@@ -156,11 +172,11 @@ Three things are worth knowing before relying on it:
   by default; `0` turns alerting off deployment-wide while leaving the rules in
   place). An alert therefore arrives within about a minute of a crossing rather
   than instantly.
-- A webhook-shaped destination (`json`, `jsons`, `xml`, `xmls`, `form` or
-  `forms`) is refused if it resolves to a private, loopback or reserved
-  address. Set `alert_allow_private_hosts` to alert an internal receiver on the
-  deployment's own network. Vendor schemas post to their own endpoints and are
-  unaffected.
+- A destination in the first group above names a host, and is refused if that
+  host resolves to a private, loopback or reserved address. Set
+  `alert_allow_private_hosts` to alert an internal receiver on the deployment's
+  own network. The second group posts to endpoints compiled into Apprise, so
+  there is no address to check and the setting does not apply.
 
 Budgets with no owning organization are the deployment's own and are not covered
 by these rules.

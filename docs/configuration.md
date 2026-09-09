@@ -267,13 +267,14 @@ govern how the deployment acts on them:
 - `alert_evaluation_interval_sec` (default `60`): how often the organization's
   budget ceilings are checked against their alert rules' thresholds. `0`
   disables alert evaluation entirely, leaving configured rules in place and
-  sending nothing. Standalone mode only.
-- `alert_allow_private_hosts` (default `false`): an SSRF gate. A
-  webhook-shaped destination (the `json`, `jsons`, `xml`, `xmls`, `form` and
-  `forms` Apprise schemas) is refused when it resolves to a private, loopback or
+  sending nothing. Not used in hybrid mode, which holds no local ceilings.
+- `alert_allow_private_hosts` (default `false`): an SSRF gate. An alert
+  destination whose URL names a host (`json`, `mailto`, `gotify`, `ntfy`,
+  `matrix`, `rocket` and the rest of that group; see the dashboard guide for the
+  full list) is refused when that host resolves to a private, loopback or
   reserved address. Enable it to alert an internal chat server or webhook
-  receiver on the deployment's own network. Vendor schemas such as `slack://`
-  post to their own endpoints and are unaffected either way. Like the other
+  receiver on the deployment's own network. Schemas such as `slack://` post to
+  endpoints compiled into Apprise and have no address to check. Like the other
   outbound network gates, this is a startup setting rather than a dashboard
   toggle.
 

@@ -38,22 +38,65 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit, urluns
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 
-# Apprise schemas whose netloc is a host the operator picked rather than a
-# credential Apprise parses into that position. These are the webhook-shaped
-# ones, and the only ones an SSRF check can meaningfully apply to: every other
-# schema posts to a vendor endpoint compiled into its plugin.
-_HOST_BEARING_ALERT_SCHEMES = frozenset({"json", "jsons", "xml", "xmls", "form", "forms"})
+# Which Apprise schemas Otari accepts as an alert destination, split by what
+# their netloc means.
+#
+# The split is the whole SSRF gate, so it is an allowlist in both directions: a
+# schema nobody has classified is refused rather than assumed safe. The earlier
+# shape here assumed the opposite, and that was wrong in a way that mattered:
+# `mailto://`, `gotify://`, `ntfy://`, `matrix://`, `rocket://` and `mmost://`
+# all dial a host the operator wrote, so treating everything outside the webhook
+# schemas as "posts to a vendor endpoint" let them through unchecked.
+#
+# Adding a schema is one line here plus a note in docs/dashboard.md.
 
-# What each of those maps onto on the wire, so the SSRF gate checks the address
-# Apprise will actually connect to.
-ALERT_SCHEME_TRANSPORT = {
-    "json": "http",
-    "jsons": "https",
-    "xml": "http",
-    "xmls": "https",
-    "form": "http",
-    "forms": "https",
-}
+# The netloc is a host the operator chose, so it is address-checked.
+ALERT_SCHEMES_WITH_OPERATOR_HOST = frozenset(
+    {
+        "apprise",
+        "apprises",
+        "form",
+        "forms",
+        "gotify",
+        "gotifys",
+        "json",
+        "jsons",
+        "mailto",
+        "mailtos",
+        "matrix",
+        "matrixs",
+        "mmost",
+        "mmosts",
+        "ncloud",
+        "nclouds",
+        "ntfy",
+        "rocket",
+        "rockets",
+        "xml",
+        "xmls",
+    }
+)
+
+# The netloc is a credential: the plugin posts to an endpoint compiled into it,
+# so there is no operator-chosen address to check.
+ALERT_SCHEMES_WITH_FIXED_ENDPOINT = frozenset(
+    {
+        "discord",
+        "msteams",
+        "opsgenie",
+        "pagerduty",
+        "pbul",
+        "pover",
+        "ses",
+        "signal",
+        "slack",
+        "sns",
+        "tgram",
+        "twilio",
+    }
+)
+
+SUPPORTED_ALERT_SCHEMES = ALERT_SCHEMES_WITH_OPERATOR_HOST | ALERT_SCHEMES_WITH_FIXED_ENDPOINT
 
 
 def redact_url_secrets(value: str) -> str:
@@ -106,21 +149,16 @@ def redact_url_secrets(value: str) -> str:
 def redact_alert_destination(value: str) -> str:
     """Mask an Apprise destination down to the part that is safe to display.
 
-    Stricter than :func:`redact_url_secrets`, and the difference is the whole
-    reason this exists: Apprise carries credentials in the URL **path**, not
-    only in the userinfo and query. ``slack://botA/botB/botC/#channel`` and
-    ``discord://webhook_id/webhook_token`` are both entirely path, so passing
-    one through :func:`redact_url_secrets` would return the token untouched.
+    Stricter than :func:`redact_url_secrets`, which is why it exists: Apprise
+    carries credentials in the URL **path**, not only in the userinfo and query.
+    ``discord://webhook_id/webhook_token`` is entirely path, so
+    :func:`redact_url_secrets` would return the token untouched.
 
-    Scheme and host survive, because those are what makes a row recognizable in
-    a list ("the Slack one", "the webhook at hooks.internal"). Everything that
-    can carry a secret is replaced wholesale rather than inspected: userinfo,
-    every path segment, and every query value. A vendor schema like ``slack://``
-    parses its first token into the netloc, so that is masked too, which is why
-    the result is ``slack://***`` rather than ``slack://botA``.
-
-    Not reversible and not meant to be: the ciphertext beside it is what the
-    dispatcher reads.
+    Scheme and host survive, because those are what make a row recognizable in a
+    list. Everything that can carry a secret is replaced wholesale: userinfo,
+    every path segment, every query value. A schema whose netloc is a token
+    rather than a host loses that too, so ``slack://botA/botB`` reads
+    ``slack://***``.
     """
     try:
         parts = urlsplit(value)
@@ -130,7 +168,7 @@ def redact_alert_destination(value: str) -> str:
     if not scheme:
         return "***"
 
-    host = parts.hostname if scheme in _HOST_BEARING_ALERT_SCHEMES else None
+    host = parts.hostname if scheme in ALERT_SCHEMES_WITH_OPERATOR_HOST else None
     netloc = host or "***"
     path = "/***" if parts.path.strip("/") else ""
     query = "***" if parts.query else ""
@@ -306,39 +344,33 @@ def _allow_alert_private_hosts() -> bool:
     return otari_env("ALERT_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
 
 
-async def validate_alert_destination_url(url: str) -> None:
-    """Reject an alert webhook destination that points inside the deployment.
+async def validate_alert_destination(scheme: str, host: str | None) -> None:
+    """Reject an alert destination that points inside the deployment.
 
-    A gate of its own rather than reusing :func:`validate_outbound_fetch_url`,
-    whose override is ``OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS``: an operator
-    turning on private alert destinations must not thereby let the web-search
-    backend fetch internal hosts, and the reverse. The behavior is the same
-    fail-closed shape as the other gates, and the loop itself is shared through
+    Takes the schema and the address Apprise resolved rather than a URL, because
+    only the plugin knows which of the two the netloc was: ``slack://tokA/tokB``
+    parses ``tokA`` into the host slot and it is not one.
+
+    A gate of its own rather than :func:`validate_outbound_fetch_url`, whose
+    override is ``OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS``: an operator turning on
+    private alert destinations must not thereby let the web-search backend fetch
+    internal hosts. The loop itself is shared through
     :func:`_reject_internal_host`.
 
-    Loopback and private ranges are refused by default because the destination
-    is stored through a management API and then posted to by a background
-    worker, which is the shape that turns a configuration surface into an SSRF
-    primitive. The override exists because posting to an internal chat server is
-    a legitimate self-hosted setup, and it is deliberately a startup config flag
-    rather than a dashboard toggle, matching the rule
-    ``services/runtime_settings_service.py`` states about SSRF gates.
+    The check is at write time and Apprise re-resolves when it sends, so this is
+    TOCTOU-vulnerable to rebinding, the same as the MCP and web-search write
+    paths. It is fail-closed by default with a startup-only override
+    (``OTARI_ALERT_ALLOW_PRIVATE_HOSTS``) rather than a dashboard toggle,
+    matching what ``services/runtime_settings_service.py`` says about SSRF gates.
 
-    Only the Apprise schemas that carry an operator-chosen host reach this; see
-    ``services/tenancy/organization_alert_service._validate_destination``.
     Raises :class:`UnsafeURLError` on rejection.
     """
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    if scheme not in {"http", "https"}:
-        raise UnsafeURLError(f"alert destination must use http or https, got {scheme!r}")
-    host = parsed.hostname
+    if scheme.lower() in ALERT_SCHEMES_WITH_FIXED_ENDPOINT:
+        return
     if not host:
-        raise UnsafeURLError("alert destination must include a hostname")
-
+        raise UnsafeURLError(f"alert destination {scheme!r} must name a host")
     if _allow_alert_private_hosts():
         return
-
     await _reject_internal_host(host, host_label="alert destination", override_var="OTARI_ALERT_ALLOW_PRIVATE_HOSTS")
 
 

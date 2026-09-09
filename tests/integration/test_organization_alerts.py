@@ -7,7 +7,7 @@ member refused, another organization's rule invisible) are only reachable by
 calling the service with identities built at whatever role a case needs.
 
 Webhook destinations here use IP literals in public ranges, or are rejected
-before any lookup happens. ``validate_alert_destination_url`` resolves a
+before any lookup happens. ``validate_alert_destination`` resolves a
 hostname through DNS, so a test naming one would pass or fail on whether the
 runner has egress.
 
@@ -257,9 +257,19 @@ async def test_an_unparseable_destination_is_refused(async_db: AsyncSession) -> 
         "json://10.0.0.5/hook",
         "jsons://192.168.1.10/hook",
         "json://169.254.169.254/latest/meta-data",
+        # The self-hosted schemas. Every one of these dials the host in the URL,
+        # and every one of them used to skip the gate: the earlier split checked
+        # the webhook schemas and assumed everything else posted to a vendor
+        # endpoint compiled into its plugin.
+        "mailto://user:pw@10.0.0.5",
+        "gotify://192.168.1.9/token",
+        "ntfy://169.254.169.254/topic",
+        "matrixs://user:pw@127.0.0.1/",
+        "rocket://user:pw@10.1.2.3/#channel",
+        "mmost://10.0.0.7/token",
     ],
 )
-async def test_a_webhook_pointed_inside_the_deployment_is_refused(
+async def test_a_destination_pointed_inside_the_deployment_is_refused(
     async_db: AsyncSession, destination: str
 ) -> None:
     """Fail-closed by default. The cloud metadata endpoint is the case that matters."""
@@ -278,17 +288,34 @@ async def test_a_public_webhook_is_accepted(async_db: AsyncSession) -> None:
     assert await service.create_rule(user=owner, request=_create(destination=PUBLIC_WEBHOOK))
 
 
-async def test_a_vendor_schema_skips_the_address_check(async_db: AsyncSession) -> None:
+async def test_a_fixed_endpoint_schema_skips_the_address_check(async_db: AsyncSession) -> None:
     """A slack:// URL's first token parses into the netloc and is not a host.
 
-    Address-checking it would reject a perfectly good rule (and, worse, could
-    resolve a token as a hostname), which is why only the webhook-shaped
-    schemas are checked.
+    Address-checking it would reject a perfectly good rule and, worse, could
+    resolve a token as a hostname. Which schemas are in this group is an
+    explicit list rather than "everything not a webhook"; see
+    `url_safety.ALERT_SCHEMES_WITH_FIXED_ENDPOINT`.
     """
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     service = OrganizationAlertService(async_db)
     assert await service.create_rule(user=owner, request=_create(destination="slack://10/0/0/1"))
+
+
+async def test_an_unclassified_schema_is_refused_rather_than_assumed_safe(async_db: AsyncSession) -> None:
+    """The allowlist is the gate, so a schema nobody has classified does not get in.
+
+    ``zulip://`` is a real Apprise schema that parses cleanly. Whether its netloc
+    is a host Otari would dial has not been decided, and the safe answer to that
+    is no rather than a guess. Accepting it is one line in
+    `url_safety.SUPPORTED_ALERT_SCHEMES`.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationAlertService(async_db)
+
+    with pytest.raises(AlertRuleUnsupportedDestinationError):
+        await service.create_rule(user=owner, request=_create(destination="zulip://bot@org/token"))
 
 
 async def test_the_private_host_override_opens_the_gate(

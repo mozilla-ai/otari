@@ -1864,27 +1864,22 @@ class AlertRule(Base):
     One row is one destination plus the thresholds that reach it. The
     destination is an `Apprise <https://github.com/caronc/apprise>`_ URL, which
     is what keeps this table one column wide instead of one column per vendor:
-    ``slack://``, ``discord://``, ``pagerduty://``, ``mailto://`` and a plain
-    ``json://`` webhook are all the same string, and adding a destination Otari
-    has never heard of needs no migration and no code.
+    ``slack://``, ``discord://``, ``pagerduty://`` and a plain ``json://``
+    webhook are all the same string.
 
-    **Organization-scoped, so a tenant is told about its own budgets.** The
-    ceilings a rule watches are the ``scoped_budgets`` rows whose ``budgets``
-    row carries this ``organization_id``. A budget with a NULL
-    ``organization_id`` is therefore never alerted on, which is not an
-    oversight: ``entities.Budget`` records that NULL means the deployment's own
-    and that the organization-scoped surface never lists, offers or repoints
-    one, so from a tenant's side it does not exist. Deployment-wide rules for
-    those are the operator's plane and are deliberately not in this table yet;
-    ``alert_deliveries`` keys on ``alert_rule_id``, so adding them later needs
-    no change to the dedupe shape.
+    **Organization-scoped, so a tenant is told about its own budgets.** A rule
+    watches the ``scoped_budgets`` rows whose ``budgets`` row carries this
+    ``organization_id``. A budget with a NULL one is therefore never alerted on,
+    which is not an oversight: ``entities.Budget`` records that NULL means the
+    deployment's own and that the organization-scoped surface never lists,
+    offers or repoints one. Deployment-wide rules are the operator's plane and
+    would need a column here saying what a rule watches.
 
-    The URL is a credential. A ``slack://`` URL embeds a bot token and a
-    ``json://`` one can embed basic-auth, so it is encrypted at rest with
-    ``OTARI_SECRET_KEY`` and never returned over the API, the same convention
-    ``ProviderCredential`` and ``OrganizationGuardrail`` use. The API returns
-    ``redact_url_secrets`` output instead, which keeps the scheme and host a
-    reader needs to recognize the row without echoing the secret in it.
+    The URL is a credential, so it is encrypted at rest with
+    ``OTARI_SECRET_KEY`` and never returned, the same convention
+    ``ProviderCredential`` uses. The API returns ``redact_alert_destination``
+    output instead, which masks path segments as well as userinfo because
+    Apprise puts its tokens in the path.
     """
 
     __tablename__ = "alert_rules"
@@ -1903,13 +1898,10 @@ class AlertRule(Base):
     name: Mapped[str] = mapped_column(nullable=False)
     encrypted_destination: Mapped[str] = mapped_column(Text, nullable=False)
     # Kept in the clear beside the ciphertext so the list endpoint and the
-    # evaluator's log lines can name the destination without holding the secret
-    # key. `redact_url_secrets` output, so it carries scheme and host and no
-    # userinfo, token or query string.
+    # evaluator's log lines can name the destination without the secret key.
     redacted_destination: Mapped[str] = mapped_column(nullable=False)
     # Percent of the cap at which a warning fires, or NULL for no warning. The
-    # useful half of this feature: a refusal is already too late to act on,
-    # where 80 percent is a number somebody can still do something about.
+    # useful half of this feature: a refusal is already too late to act on.
     #
     # **No column default, deliberately.** A scalar ``default=80`` here fires
     # whenever the attribute is None at INSERT, and SQLAlchemy cannot tell an
@@ -1920,12 +1912,11 @@ class AlertRule(Base):
     # belongs to the request schema (``AlertRuleCreate``), which is the layer
     # that can distinguish "not sent" from "sent as null".
     warn_at_percent: Mapped[int | None] = mapped_column(default=None)
-    # Whether reaching the cap itself fires. Separable from the warning because
-    # a deployment that routes refusals through its own error monitoring wants
-    # the warning and not the duplicate.
+    # Whether reaching the cap itself fires. Separable because a deployment that
+    # routes refusals through its own error monitoring wants only the warning.
     notify_on_exceeded: Mapped[bool] = mapped_column(default=True, nullable=False)
-    # The organization's kill switch, matching `OrganizationGuardrail.enabled`:
-    # stop the alerts without losing the destination it took to set up.
+    # Kill switch, matching `OrganizationGuardrail.enabled`: stop the alerts
+    # without losing the destination it took to set up.
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
@@ -1939,27 +1930,23 @@ class AlertDelivery(Base):
     """One alert that has already been sent, so it is not sent again.
 
     **This table is the load-bearing part of the feature, and the unique
-    constraint is the mechanism.** Two separate duplicate sources collapse into
-    one answer here. A threshold stays crossed for the rest of the budget
-    period, so an evaluator that only compared spend against the cap would
-    re-alert on every tick; and every refresher in ``gateway.main`` runs once
-    per worker, so N workers would each send the same alert at the same time.
-    Both are settled by inserting this row *before* dispatching and treating an
-    ``IntegrityError`` as "somebody already did it": the database is the only
-    thing all the workers agree on. No advisory lock and no leader election,
-    matching ``services/budget_reservation_ledger.py``'s no-row-locks stance.
+    constraint is the mechanism.** Two duplicate sources collapse into it. A
+    threshold stays crossed for the rest of the budget period, so comparing
+    spend against the cap alone would re-alert every tick; and every refresher
+    in ``gateway.main`` runs once per worker, so N workers would each send the
+    same alert at once. Both are settled by inserting this row *before*
+    dispatching and treating an ``IntegrityError`` as "somebody already did it".
+    No advisory lock and no leader election, matching
+    ``services/budget_reservation_ledger.py``.
 
     ``period_start`` is copied off the ``scoped_budgets`` row rather than
     referenced, which is what re-arms an alert after a budget resets: a new
-    period is a different key, so the next crossing inserts rather than
-    colliding, and nothing has to go back and clear this table. It also means a
-    row here outlives the period it describes, which is why
-    ``purge_delivered_before`` exists.
+    period is a different key. It also means a row outlives the period it
+    describes, which is why ``purge_delivered_before`` exists.
 
-    Nullable ``period_start`` is a budget with no period at all (neither
-    ``budget_duration_sec`` nor ``reset_alignment``), whose ceiling never rolls.
-    NULL in a unique constraint does not collide on PostgreSQL, so those rows
-    are deduped by the partial index below instead of by the constraint.
+    A NULL ``period_start`` is a budget with no period at all. NULLs do not
+    collide in a unique constraint on PostgreSQL, so those rows are deduped by
+    the partial index below instead.
     """
 
     __tablename__ = "alert_deliveries"
@@ -1983,31 +1970,26 @@ class AlertDelivery(Base):
             sqlite_where=text("period_start IS NULL"),
             postgresql_where=text("period_start IS NULL"),
         ),
-        # The evaluator asks "which of these ceilings have I already alerted
-        # on", so the lookup is by rule and period, not by id.
-        Index("ix_alert_deliveries_rule_period", "alert_rule_id", "period_start"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     alert_rule_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("alert_rules.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # Not a foreign key, matching ``scoped_budgets``' own columns: that table
-    # declares none because the rows its scopes name live in four tables and a
-    # provider instance may be configured in ``config.yml`` with no row at all.
-    # A ceiling that is deleted leaves its delivery rows to ``purge_delivered_before``.
+    # Not a foreign key, matching ``scoped_budgets``' own columns, which declare
+    # none. A deleted ceiling leaves its rows to ``purge_delivered_before``.
     scoped_budget_id: Mapped[str] = mapped_column(nullable=False)
     # ``warning`` or ``exceeded``. A plain string rather than a database enum,
     # for the reason ``ScopedBudget.scope_type`` is one: a third kind should not
     # need an enum migration.
     kind: Mapped[str] = mapped_column(nullable=False)
     period_start: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
-    # Whether the send itself succeeded. The row is claimed before dispatch, so
-    # a false here is an alert that was suppressed and never arrived, which is
-    # the state an operator debugging a silent destination needs to see.
+    # The row is claimed before dispatch, so a false here is an alert that was
+    # suppressed and never arrived: what an operator debugging silence needs.
     delivered: Mapped[bool] = mapped_column(default=False, nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+
 
 class OrganizationGuardrail(Base):
     """A guardrail an organization runs over the requests of its workspaces.

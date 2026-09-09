@@ -1,43 +1,33 @@
 """Organization-scoped alert rules: CRUD, and the on-demand test send.
 
 Where a tenant says how it wants to be told that one of its budgets is running
-out. The rules themselves are acted on by
-:mod:`gateway.services.alerts.evaluator`, which runs on a timer and never
-touches this module; the two meet only at the ``alert_rules`` table.
+out. The rules are acted on by :mod:`gateway.services.alerts.evaluator`, which
+runs on a timer and never touches this module; the two meet at the
+``alert_rules`` table.
 
-**Why this lives with the tenancy services.** It shares their role gate
+Lives with the tenancy services because it shares their role gate
 (``require_active_organization_management_access``) and their error family, so a
-route over it stays thin and raises nothing, exactly as
-`organization_guardrail_service` next door does.
+route over it stays thin and raises nothing.
 
-**What a rule may watch.** The ceilings whose ``budgets`` row carries this
-organization's id. A budget with a NULL ``organization_id`` is the deployment's
-own, and `entities.Budget` records that the organization-scoped surface never
-lists, offers or repoints one, so a tenant's rule cannot reach it and is not
-meant to. Alerting on those is the deployment operator's plane and is
-deliberately not in this surface; nothing in the schema has to change to add it,
-because the dedupe key is per rule.
+A rule watches the ceilings whose ``budgets`` row carries this organization's
+id. A budget with a NULL ``organization_id`` is the deployment's own and is out
+of reach here by design; see `entities.AlertRule`.
 
-**The destination is a credential.** ``slack://`` embeds a bot token,
-``discord://`` a webhook token, ``json://`` optional basic-auth. It is encrypted
-with ``OTARI_SECRET_KEY`` before it is stored and never returned; reads get
+The destination is a credential (``slack://`` embeds a bot token), so it is
+encrypted with ``OTARI_SECRET_KEY`` and never returned. Reads get
 ``redact_alert_destination`` output, which masks path segments as well as
 userinfo because Apprise puts its tokens in the path.
 
-**SSRF.** Only the webhook-shaped schemas carry an operator-chosen host, so only
-those are address-checked (:func:`_validate_destination`). The check runs at
-write time, which is a real but partial guarantee: Apprise re-resolves DNS when
-it sends, so a name that was safe when stored can move afterwards. That is the
-same TOCTOU the MCP and web-search write paths carry, and it is why the gate is
-fail-closed by default with a startup-only override
-(``OTARI_ALERT_ALLOW_PRIVATE_HOSTS``) rather than a dashboard toggle.
+**SSRF.** Otari accepts an allowlist of Apprise schemas, split by whether the
+netloc is an operator-chosen host or a credential; the first group is
+address-checked at write time and the second has no address to check. See
+`url_safety.ALERT_SCHEMES_WITH_OPERATOR_HOST`.
 """
 
 from __future__ import annotations
 
 import uuid
 from typing import Annotated, Final
-from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -69,10 +59,10 @@ from gateway.services.tenancy.errors import (
 )
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import (
-    ALERT_SCHEME_TRANSPORT,
+    SUPPORTED_ALERT_SCHEMES,
     UnsafeURLError,
     redact_alert_destination,
-    validate_alert_destination_url,
+    validate_alert_destination,
 )
 
 # What one organization may configure. Every rule that matches a crossing is one
@@ -116,7 +106,9 @@ class AlertRuleCreate(BaseModel):
         description=(
             "Apprise destination URL, for example slack://token/channel, "
             "discord://webhook_id/webhook_token, pagerduty://key@apikey, or json://host/path for a "
-            "plain webhook. Encrypted at rest and never returned"
+            "plain webhook. Only the schemas Otari has classified are accepted, because whether the "
+            "URL names a host decides whether the SSRF check applies; a rejection lists them. "
+            "Encrypted at rest and never returned"
         ),
     )
     warn_at_percent: int | None = Field(
@@ -254,36 +246,28 @@ class AlertRuleTestResult(BaseModel):
     detail: str | None = None
 
 
-def _transport_url(destination: str) -> str | None:
-    """The http(s) URL a webhook-shaped destination will actually be posted to.
-
-    Returns None for a vendor schema, whose endpoint is compiled into its
-    Apprise plugin and is therefore not an operator-chosen address to check.
-    """
-    parts = urlsplit(destination)
-    transport = ALERT_SCHEME_TRANSPORT.get(parts.scheme.lower())
-    if transport is None:
-        return None
-    return urlunsplit((transport, parts.netloc, parts.path, parts.query, ""))
-
-
 async def _validate_destination(destination: str) -> None:
-    """Refuse a destination Apprise cannot use, or one pointed inside the deployment.
+    """Refuse a destination Apprise cannot use, one Otari does not accept, or one
+    pointed inside the deployment.
 
-    Two separate checks with two separate errors, because they mean different
-    things to whoever is filling in the form: the first is "this is not a URL I
-    can deliver to", the second is "this is a URL I will not deliver to".
+    Three rejections with two errors, because the first two mean the same thing
+    to whoever is filling in the form ("this is not a destination I can deliver
+    to") and the third means something else ("this is one I will not deliver
+    to").
     """
     try:
-        parse_destination(destination)
+        parsed = parse_destination(destination)
     except UnsupportedAlertDestinationError as exc:
         raise AlertRuleUnsupportedDestinationError(str(exc)) from exc
 
-    transport = _transport_url(destination)
-    if transport is None:
-        return
+    if parsed.scheme not in SUPPORTED_ALERT_SCHEMES:
+        raise AlertRuleUnsupportedDestinationError(
+            f"Otari does not accept {parsed.scheme!r} alert destinations. "
+            f"Supported schemas: {', '.join(sorted(SUPPORTED_ALERT_SCHEMES))}"
+        )
+
     try:
-        await validate_alert_destination_url(transport)
+        await validate_alert_destination(parsed.scheme, parsed.host)
     except UnsafeURLError as exc:
         raise AlertRuleUnsafeDestinationError(str(exc)) from exc
 

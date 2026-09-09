@@ -395,9 +395,12 @@ def test_worst_axis_picks_the_axis_closest_to_refusing() -> None:
         # A rule that only wants the refusal stays quiet through the warning band.
         (None, True, 90, None),
         (None, True, 100, KIND_EXCEEDED),
-        # A rule that only wants the warning does not also report the refusal.
+        # A rule that only wants the warning keeps warning past the cap. Going
+        # silent at 100 would lose the alert at the moment it matters, on the
+        # deployment that routes refusals through its own error monitoring.
         (80, False, 90, KIND_WARNING),
-        (80, False, 100, None),
+        (80, False, 100, KIND_WARNING),
+        (80, False, 250, KIND_WARNING),
     ],
 )
 def test_kind_for_picks_at_most_one_alert(
