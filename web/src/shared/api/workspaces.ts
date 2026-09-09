@@ -361,14 +361,14 @@ export function useWorkspaceProviderKeyModels(
       staleTime: 60_000,
     })),
     combine: (results) => ({
+      // A key whose read has not answered maps to `undefined`, not to `[]`:
+      // an empty list is the answer "every model is allowed", so defaulting to
+      // one would report a narrowed workspace as open for as long as the read
+      // takes, and a refused read as open forever.
       data: new Map(
-        results.map((result, index) => [keyIds[index], result.data ?? []]),
+        results.map((result, index) => [keyIds[index], result.data]),
       ),
-      isLoading: results.some((result) => result.isLoading),
-      // The first failure rather than a swallowed one, as the fan-outs above do:
-      // a refused read contributes an empty list, which is exactly what "every
-      // model is allowed" looks like, so silence here would report the opposite
-      // of a narrowing that is still in force.
+      // The first failure rather than a swallowed one, as the fan-outs above do.
       error: results.find((result) => result.error)?.error ?? null,
     }),
   })
@@ -377,7 +377,8 @@ export function useWorkspaceProviderKeyModels(
 // Pinning a key clears whichever of the provider's other keys this workspace had
 // pinned, and disabling one deletes its model allow-list server-side, so every
 // write here re-reads the workspace's whole provider-key subtree rather than
-// patching the row it acted on.
+// patching the row it acted on. The key is a prefix of each per-key allow-list
+// key, so invalidating it takes those with it.
 function invalidateWorkspaceProviderKeys(
   queryClient: ReturnType<typeof useQueryClient>,
   workspaceId: string,

@@ -53,6 +53,17 @@ function departureOf(row: WorkspaceProviderKeyOverride): Departure {
   return "inherited"
 }
 
+/**
+ * Narrow the picker's string back to the vocabulary above.
+ *
+ * A guard rather than a cast, following `asMembershipRole`: the options come
+ * from `DEPARTURE_OPTIONS`, and a value that is not one of them is a bug worth
+ * dropping the write for rather than sending and having refused.
+ */
+function asDeparture(value: string): Departure | undefined {
+  return DEPARTURE_OPTIONS.find((option) => option.value === value)?.value
+}
+
 /** How a key is named on screen: its provider and the name the organization gave it. */
 function keyLabel(key: OrgProviderKey | undefined, keyId: string): string {
   // A key the organization list does not carry is not a state the gateway
@@ -71,7 +82,8 @@ function ModelAllowList({
   workspaceId: string
   keyId: string
   keyName: string
-  models: string[]
+  /** Undefined until this key's own read answers; an empty list is a real answer. */
+  models: string[] | undefined
 }) {
   const add = useAddWorkspaceProviderKeyModel()
   const remove = useRemoveWorkspaceProviderKeyModel()
@@ -82,7 +94,12 @@ function ModelAllowList({
   return (
     <div className="flex flex-col gap-2">
       <ErrorBanner error={add.error ?? remove.error} />
-      {models.length === 0 ? (
+      {models === undefined ? (
+        // Not "every model is allowed", which is what an empty list means and
+        // what an unanswered read would otherwise be read as: a narrowed
+        // workspace would say it was open for as long as the read took.
+        <span className="text-caption">Loading allowed models…</span>
+      ) : models.length === 0 ? (
         <span className="text-caption">
           Every model this key serves is allowed.
         </span>
@@ -181,7 +198,7 @@ export function WorkspaceProviderKeys({
           resetOverride.error
         }
       />
-      {overrides.isPending ? (
+      {overrides.isPending && overrides.data === undefined ? (
         <span className="text-caption">Loading…</span>
       ) : rows.length === 0 ? (
         <span className="text-caption">
@@ -203,7 +220,10 @@ export function WorkspaceProviderKeys({
                   <FilterSelect
                     ariaLabel={`This workspace's use of ${name}`}
                     value={departure}
-                    onChange={(next) => choose(keyId, next as Departure)}
+                    onChange={(next) => {
+                      const chosen = asDeparture(next)
+                      if (chosen) choose(keyId, chosen)
+                    }}
                     options={DEPARTURE_OPTIONS}
                     disabled={pending}
                   />
@@ -227,7 +247,7 @@ export function WorkspaceProviderKeys({
                     workspaceId={workspaceId}
                     keyId={keyId}
                     keyName={name}
-                    models={models.data.get(keyId) ?? []}
+                    models={models.data.get(keyId)}
                   />
                 )}
               </li>

@@ -35,6 +35,8 @@ function mockApi(
     writeRefusal?: { method: string; status: number; detail: string }
     /** A refusal for the organization's own key list. */
     keysRefusal?: { status: number; detail: string }
+    /** A refusal for a key's allow-list read. */
+    modelsRefusal?: { status: number; detail: string }
   } = {},
 ) {
   const keys = opts.keys ?? [orgProviderKey()]
@@ -59,6 +61,12 @@ function mockApi(
     }
     if (url.includes("/models")) {
       if (method !== "GET") return jsonResponse({ message: "ok" })
+      if (opts.modelsRefusal) {
+        return jsonResponse(
+          { detail: opts.modelsRefusal.detail },
+          opts.modelsRefusal.status,
+        )
+      }
       const keyId = url.split("/provider-keys/")[1]?.split("/")[0] ?? ""
       return jsonResponse({ models: models[keyId] ?? [] })
     }
@@ -254,6 +262,21 @@ describe("WorkspaceProviderKeys", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /Organization admins only/,
     )
+  })
+
+  it("does not read an unanswered allow-list as an open one", async () => {
+    // An empty list is the answer "every model is allowed", so a read that
+    // failed must not borrow it: that would report a narrowing still in force
+    // as lifted.
+    mockApi({
+      modelsRefusal: { status: 403, detail: "Not a member of this workspace" },
+    })
+    renderSection()
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Not a member/)
+    expect(
+      screen.queryByText("Every model this key serves is allowed."),
+    ).toBeNull()
   })
 
   it("names a key the organization list does not carry by its id", async () => {
