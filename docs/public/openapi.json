@@ -33,6 +33,37 @@
         "title": "AcceptInvitationResultPublic",
         "type": "object"
       },
+      "AcceptedSnapshotResponse": {
+        "description": "One accepted genai-prices snapshot in the history.",
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "accepted_by": {
+            "description": "`operator` for a dashboard confirm, `schedule` for the auto policy.",
+            "title": "Accepted By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "accepted_at",
+          "accepted_by",
+          "model_count"
+        ],
+        "title": "AcceptedSnapshotResponse",
+        "type": "object"
+      },
       "ActivationApiKeyPublic": {
         "description": "The API key the guide hands out, with its plaintext.\n\nReturned once per call and never stored in plaintext, like every other key\nthis gateway mints: a page reload issues a new one and rotates the same row,\nwhich is what makes the guide able to show a working key without keeping a\nreadable secret anywhere.",
         "properties": {
@@ -2182,7 +2213,8 @@
             "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.",
             "enum": [
               "deployment",
-              "organization"
+              "organization",
+              "hosted"
             ],
             "title": "Credential",
             "type": "string"
@@ -2202,6 +2234,29 @@
               }
             ],
             "title": "Max Output Tokens"
+          },
+          "metadata_input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.",
+            "title": "Metadata Input Price Per Million"
+          },
+          "metadata_output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Output Price Per Million"
           },
           "price_reference": {
             "anyOf": [
@@ -2268,6 +2323,16 @@
             "description": "What to send as `model`, in `instance:model` form.",
             "title": "Selector",
             "type": "string"
+          },
+          "usage_30d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferingUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3895,6 +3960,12 @@
             ],
             "description": "Where this deployment's privacy notice lives. Set, the account menu's Data & Privacy row links to it; null, no address is configured and that row stays disabled, carrying the standing note that there is nothing to configure there yet. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Privacy Url"
+          },
+          "public_catalog": {
+            "default": false,
+            "description": "Whether the model catalog is served to a visitor with no session: GET /v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.",
+            "title": "Public Catalog",
+            "type": "boolean"
           },
           "session_type": {
             "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
@@ -6488,6 +6559,61 @@
         "title": "OAuthSessionResponse",
         "type": "object"
       },
+      "OfferingUsage": {
+        "description": "What the viewer's organization actually paid for one offering, last 30 days.\n\nThe listed rate is what a token costs; this is what the tokens cost, which is\nlower wherever prompt caching hit. Absent for a visitor and for an offering\nthe organization never called.",
+        "properties": {
+          "cache_hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cache-read tokens over prompt tokens. Null when no prompt tokens.",
+            "title": "Cache Hit Rate"
+          },
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "effective_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spend over every token served, per million. Null when no tokens were served.",
+            "title": "Effective Price Per Million"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "spend_usd": {
+            "title": "Spend Usd",
+            "type": "number"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "total_tokens",
+          "cache_read_tokens",
+          "spend_usd",
+          "cache_hit_rate",
+          "effective_price_per_million"
+        ],
+        "title": "OfferingUsage",
+        "type": "object"
+      },
       "OrgProviderKeyCreateRequest": {
         "description": "What a caller sends to create a key.\n\nThe plaintext key is never stored as sent: the service encrypts it\n(`services/secret_box.py`) and keeps only the ciphertext and ``last4``,\nthe same convention `entities.ProviderCredential` already uses.",
         "properties": {
@@ -8592,6 +8718,115 @@
           "warm"
         ],
         "title": "PoolStatus",
+        "type": "object"
+      },
+      "PricingDriftRow": {
+        "description": "A stored deployment rate beside the default it shadows.",
+        "properties": {
+          "default_input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What genai-prices would meter this key at today. Null when the dataset does not know it.",
+            "title": "Default Input Price Per Million"
+          },
+          "default_output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Output Price Per Million"
+          },
+          "default_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The genai-prices entry the default came from.",
+            "title": "Default Reference"
+          },
+          "effective_at": {
+            "title": "Effective At",
+            "type": "string"
+          },
+          "input_delta_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "(stored - default) / default, as a percentage.",
+            "title": "Input Delta Percent"
+          },
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "output_delta_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Delta Percent"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key",
+          "unit",
+          "origin",
+          "effective_at",
+          "input_price_per_million",
+          "output_price_per_million",
+          "default_input_price_per_million",
+          "default_output_price_per_million",
+          "default_reference",
+          "input_delta_percent",
+          "output_delta_percent"
+        ],
+        "title": "PricingDriftRow",
         "type": "object"
       },
       "PricingRefreshChangeResponse": {
@@ -11756,6 +11991,33 @@
               }
             ],
             "title": "Models Dev Metadata"
+          },
+          "pricing_refresh": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manual",
+                  "review",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Refresh"
+          },
+          "public_catalog": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Catalog"
           },
           "reject_user_mismatch": {
             "anyOf": [
@@ -17640,7 +17902,7 @@
     },
     "/v1/catalog/models": {
       "get": {
-        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing.",
+        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
         "operationId": "list_catalog_v1_catalog_models_get",
         "responses": {
           "200": {
@@ -17670,7 +17932,7 @@
     },
     "/v1/catalog/models/{model_id}": {
       "get": {
-        "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.",
+        "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
         "operationId": "get_catalog_model_v1_catalog_models__model_id__get",
         "parameters": [
           {
@@ -23583,6 +23845,40 @@
         ]
       }
     },
+    "/v1/pricing/drift": {
+      "get": {
+        "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
+        "operationId": "list_pricing_drift_v1_pricing_drift_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PricingDriftRow"
+                  },
+                  "title": "Response List Pricing Drift V1 Pricing Drift Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Pricing Drift",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
     "/v1/pricing/refresh": {
       "post": {
         "description": "Fetch the latest defaults and hold them for operator review.",
@@ -23643,6 +23939,36 @@
         ]
       }
     },
+    "/v1/pricing/refresh/pending": {
+      "get": {
+        "description": "The update the scheduled refresh has left waiting for review, if any.\n\nWhat the dashboard's notice reads. 404 when nothing is pending, so a page can\nask on load without treating the common case as an error banner.",
+        "operationId": "get_pending_pricing_refresh_v1_pricing_refresh_pending_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Pending Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
     "/v1/pricing/refresh/reject": {
       "post": {
         "description": "Discard a reviewed default-price snapshot without applying it.",
@@ -23661,6 +23987,64 @@
           }
         ],
         "summary": "Reject Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/snapshots": {
+      "get": {
+        "description": "The accepted default-price snapshots, newest first.",
+        "operationId": "list_pricing_snapshots_v1_pricing_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AcceptedSnapshotResponse"
+                  },
+                  "title": "Response List Pricing Snapshots V1 Pricing Snapshots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Pricing Snapshots",
         "tags": [
           "pricing"
         ]

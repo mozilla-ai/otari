@@ -519,6 +519,25 @@ class PricingSnapshot(Base):
     )
 
 
+class PricingSnapshotHistory(Base):
+    """One accepted upstream pricing snapshot, kept after a later one replaces it.
+
+    ``pricing_snapshots`` is the current state; this is the record. Written on
+    every accept, never updated. ``accepted_by`` says whether an operator
+    confirmed it or the scheduled refresh applied it on its own.
+    """
+
+    __tablename__ = "pricing_snapshot_history"
+    __table_args__ = (Index("ix_pricing_snapshot_history_source_accepted_at", "source", "accepted_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(64))
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    accepted_by: Mapped[str] = mapped_column(String(32))
+    model_count: Mapped[int] = mapped_column()
+    snapshot: Mapped[str] = mapped_column(Text)
+
+
 class ProviderCredential(Base):
     """A provider instance configured at runtime through the dashboard.
 

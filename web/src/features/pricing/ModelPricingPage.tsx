@@ -2,7 +2,11 @@ import { AlertDialog, Button } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
-import type { PricingRefreshPreview, PricingResponse } from "@/client"
+import type {
+  PricingDriftRow,
+  PricingRefreshPreview,
+  PricingResponse,
+} from "@/client"
 import { currentPricing } from "@/features/models/pricing"
 import {
   type ManualRates,
@@ -17,8 +21,11 @@ import { PriceEditor } from "@/features/pricing/PriceEditor"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useConfirmPricingRefresh,
+  usePendingPricingRefresh,
   usePreviewPricingRefresh,
   usePricing,
+  usePricingDrift,
+  usePricingSnapshots,
   useRejectPricingRefresh,
   useSetPricing,
 } from "@/shared/api/pricing"
@@ -129,18 +136,37 @@ function PricingRefreshDialog({
   )
 }
 
+// Who accepted a snapshot, as a word. The schedule is the only non-person.
+function acceptedBy(who: string): string {
+  return who === "schedule" ? "the scheduled check" : `an ${who}`
+}
+
 function PricingRefreshSection() {
   const previewRefresh = usePreviewPricingRefresh()
   const confirmRefresh = useConfirmPricingRefresh()
   const rejectRefresh = useRejectPricingRefresh()
-  const preview = previewRefresh.data
+  // What the scheduled check left for review under `pricing_refresh: review`.
+  // It is the same pending row a manual check writes, so the one dialog and
+  // the same confirm and reject serve both; the only difference is who fetched.
+  const pending = usePendingPricingRefresh()
+  const snapshots = usePricingSnapshots()
+  const [reviewingPending, setReviewingPending] = useState(false)
+  const preview =
+    previewRefresh.data ??
+    (reviewingPending ? pending.data : undefined) ??
+    undefined
   const isPending = confirmRefresh.isPending || rejectRefresh.isPending
+  const latest = snapshots.data?.[0]
 
+  const close = () => {
+    previewRefresh.reset()
+    setReviewingPending(false)
+  }
   const reject = () => {
     if (preview === undefined || isPending) {
       return
     }
-    rejectRefresh.mutate(undefined, { onSuccess: previewRefresh.reset })
+    rejectRefresh.mutate(undefined, { onSuccess: close })
   }
 
   return (
@@ -161,6 +187,16 @@ function PricingRefreshSection() {
               <code>genai-prices</code>; custom prices remain separate and
               always take precedence.
             </p>
+            {latest ? (
+              <p className="mt-1 text-caption">
+                Last accepted {formatRelative(latest.accepted_at)} by{" "}
+                {acceptedBy(latest.accepted_by)}, {latest.model_count} priced
+                models.
+                {snapshots.data && snapshots.data.length > 1
+                  ? ` ${snapshots.data.length} snapshots on record.`
+                  : ""}
+              </p>
+            ) : null}
           </div>
           <Button
             size="sm"
@@ -174,6 +210,25 @@ function PricingRefreshSection() {
           </Button>
         </div>
         <ErrorBanner error={previewRefresh.error} />
+        {pending.data ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <InfoBanner tone="warning">
+              The scheduled check found {pending.data.changed_count} changed,{" "}
+              {pending.data.added_count} added and {pending.data.removed_count}{" "}
+              removed default prices, fetched{" "}
+              {formatRelative(pending.data.fetched_at)}. Nothing changes until
+              you accept.
+            </InfoBanner>
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={isPending}
+              onPress={() => setReviewingPending(true)}
+            >
+              Review pending update
+            </Button>
+          </div>
+        ) : null}
       </Section>
       <AlertDialog
         isOpen={preview !== undefined}
@@ -189,7 +244,7 @@ function PricingRefreshSection() {
             isPending={isPending}
             onAccept={() =>
               confirmRefresh.mutate(undefined, {
-                onSuccess: previewRefresh.reset,
+                onSuccess: close,
               })
             }
             onReject={reject}
@@ -249,6 +304,10 @@ interface PriceRow {
   tiers: number
   unit: string
   updatedAt: string
+  /** Where this rate came from: `config`, `api`, or absent for a row older than the column. */
+  origin: string | null
+  /** How far the rate sits from today's genai-prices default, where one exists. */
+  drift?: PricingDriftRow
 }
 
 /**
@@ -260,7 +319,11 @@ interface PriceRow {
  * Models already uses, sorting included, so the two pages cannot disagree about
  * which rate is live.
  */
-function currentRows(all: PricingResponse[]): PriceRow[] {
+function currentRows(
+  all: PricingResponse[],
+  drift: readonly PricingDriftRow[] = [],
+): PriceRow[] {
+  const byKey = new Map(drift.map((row) => [row.model_key, row]))
   return currentPricing(all).map((live) => ({
     modelKey: live.model_key,
     input: live.input_price_per_million,
@@ -269,7 +332,44 @@ function currentRows(all: PricingResponse[]): PriceRow[] {
     tiers: live.pricing_tiers.length,
     unit: live.unit,
     updatedAt: live.updated_at,
+    origin: live.origin ?? null,
+    drift: byKey.get(live.model_key),
   }))
+}
+
+/** A signed percentage, or the dash for a rate with nothing to compare to. */
+export function formatDrift(delta: number | null | undefined): string {
+  if (delta == null) return "—"
+  const rounded = Math.round(delta)
+  if (rounded === 0) return "±0%"
+  return `${rounded > 0 ? "+" : "−"}${Math.abs(rounded)}%`
+}
+
+// Beyond this the stored rate is more than a rounding away from the default,
+// and the cell says so in the danger ink.
+const DRIFT_NOTICE_PERCENT = 10
+
+function DriftCell({ row }: { row: PriceRow }) {
+  const drift = row.drift
+  if (!drift || drift.default_input_price_per_million == null) {
+    return <span className="text-subtle">—</span>
+  }
+  const worst = Math.max(
+    Math.abs(drift.input_delta_percent ?? 0),
+    Math.abs(drift.output_delta_percent ?? 0),
+  )
+  const ink = worst > DRIFT_NOTICE_PERCENT ? "text-danger" : "text-muted"
+  return (
+    <span
+      className={`${ink} tabular-nums`}
+      title={`Default today: ${formatRate(drift.default_input_price_per_million)} in, ${formatRate(
+        drift.default_output_price_per_million ?? 0,
+      )} out${drift.default_reference ? `, from ${drift.default_reference}` : ""}`}
+    >
+      {formatDrift(drift.input_delta_percent)} /{" "}
+      {formatDrift(drift.output_delta_percent)}
+    </span>
+  )
 }
 
 // What a row's rates are per. A tool's row is per million requests, and the
@@ -320,6 +420,22 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
       <span className="text-muted">{UNIT_LABELS[row.unit] ?? row.unit}</span>
     ),
   },
+  // Where the rate was set: the config file or the API. A rate set in config
+  // comes back on every restart, and knowing that before editing it here is
+  // the difference between a change that sticks and one that does not.
+  {
+    id: "origin",
+    header: "Set by",
+    cell: (row) => (
+      <span className="text-muted">
+        {row.origin === "config"
+          ? "config"
+          : row.origin === "api"
+            ? "dashboard"
+            : "—"}
+      </span>
+    ),
+  },
   // The row has carried this since it was built and never rendered it. It earns
   // the lane now because something has to absorb the width this table does not
   // use, and the alternative was a gap: when a rate last moved is the question
@@ -356,13 +472,15 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
  */
 function PriceTable({ canPrice }: { canPrice: boolean }) {
   const pricing = usePricing()
+  // Operator-only read, so it is gated on the same axis as the editor.
+  const drift = usePricingDrift(canPrice)
   const navigate = useNavigate()
   const setPricing = useSetPricing()
   // The selector whose deployment rate is being edited, carried in the URL so
   // the catalog's "Edit rate" link lands here with it in hand.
   const editingKey = useUrlValue("model")
   const [customOpen, setCustomOpen] = useState(false)
-  const rows = pricing.data ? currentRows(pricing.data) : []
+  const rows = pricing.data ? currentRows(pricing.data, drift.data ?? []) : []
   const current = pricing.data
     ? currentPricing(pricing.data).find((row) => row.model_key === editingKey)
     : undefined
@@ -400,6 +518,12 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
   const columns = canPrice
     ? [
         ...COLUMNS.filter((column) => column.id !== "spacer"),
+        {
+          id: "drift",
+          header: "vs default",
+          align: "end" as const,
+          cell: (row: PriceRow) => <DriftCell row={row} />,
+        },
         {
           id: "actions",
           header: "Actions",

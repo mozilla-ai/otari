@@ -13,6 +13,9 @@ model_discovery: false
 models_dev_metadata: true
 require_pricing: false
 default_pricing: true
+# The catalog before sign-in, at #/models, for the smoke. Off by default in a
+# real deployment.
+public_catalog: true
 
 providers:
   openai:

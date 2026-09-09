@@ -29,12 +29,14 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_api_key_or_master_key,
     verify_catalog_reader,
+    verify_catalog_reader_or_public,
     verify_master_key,
 )
 from gateway.api.routes import (
     agent_telemetry,
     aliases,
     budgets,
+    catalog,
     keys,
     mail,
     maintenance_mode,
@@ -80,6 +82,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # plausible wrong fix, and it would take the dashboard's Models and Pricing
 # pages and a data-plane gateway's usage report with it.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
+    ("catalog", catalog.router, verify_catalog_reader_or_public),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
@@ -134,6 +137,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
         require_deployment_operator,
         verify_api_key_or_master_key,
         verify_catalog_reader,
+        verify_catalog_reader_or_public,
         verify_master_key,
     }
 )

@@ -251,6 +251,14 @@ class DeploymentBootstrap(BaseModel):
             "gateway, which issues no session."
         )
     )
+    public_catalog: bool = Field(
+        default=False,
+        description=(
+            "Whether the model catalog is served to a visitor with no session: GET /v1/catalog/models "
+            "answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid "
+            "gateway, which serves no catalog of its own."
+        ),
+    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -321,6 +329,7 @@ async def get_bootstrap(
         terms_url=config.terms_url,
         privacy_url=config.privacy_url,
         maintenance_mode=await _maintenance_mode(db),
+        public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
         mail_ready=config.mail_ready,

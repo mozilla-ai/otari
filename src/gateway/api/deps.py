@@ -21,6 +21,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.rate_limit import check_rate_limit
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
@@ -473,6 +474,34 @@ async def verify_catalog_reader(
     if session_identity is not None:
         return None, True
     return await verify_api_key_or_master_key(request, db, config)
+
+
+async def verify_catalog_reader_or_public(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> tuple[APIKey | None, bool] | None:
+    """As :func:`verify_catalog_reader`, and a visitor reads too while the catalog is public.
+
+    ``None`` is the anonymous caller, admitted only while ``public_catalog`` is on
+    and only when the request carries no credential at all: a credential that is
+    present and wrong is refused as it always was, never downgraded to a visitor.
+    The route is what narrows an anonymous read (the configured instances, the
+    deployment price list, no tenant rows); this only decides who is asking.
+
+    Rate-limited by client address under the deployment's ordinary limiter, so
+    an open catalog cannot be scraped faster than a signed-in user could read it.
+    """
+    if session_identity is not None:
+        return None, True
+    if _header_credentials_present(request) or not config.public_catalog:
+        return await verify_api_key_or_master_key(request, db, config)
+    # The limiter raises its own 429; the key is the address, since a visitor
+    # has no other identity.
+    client = request.client.host if request.client is not None else "unknown"
+    check_rate_limit(request, f"public-catalog:{client}")
+    return None
 
 
 async def get_db_if_needed(

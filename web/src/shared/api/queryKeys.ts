@@ -18,6 +18,13 @@ export const MODELS = "models"
 // invalidates both: a rate change moves a row in each.
 export const CATALOG = "catalog"
 export const PRICING = "pricing"
+// The three operator reads beside the price list: an update the scheduled
+// refresh left waiting, the accepted-snapshot history, and each stored rate
+// against today's default. Children of PRICING, so a confirm or a price write
+// refetches them with the list.
+export const PRICING_PENDING = [PRICING, "pending"] as const
+export const PRICING_SNAPSHOTS = [PRICING, "snapshots"] as const
+export const PRICING_DRIFT = [PRICING, "drift"] as const
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"
 export const MAINTENANCE_MODE = "maintenance-mode"

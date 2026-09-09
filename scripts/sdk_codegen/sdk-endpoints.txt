@@ -174,6 +174,12 @@ GET /v1/routing/status                          # not yet wrapped
 POST /v1/pricing/refresh                        # not yet wrapped
 POST /v1/pricing/refresh/confirm                # not yet wrapped
 POST /v1/pricing/refresh/reject                 # not yet wrapped
+GET /v1/pricing/refresh/pending                 # not yet wrapped
+GET /v1/pricing/snapshots                       # not yet wrapped
+GET /v1/pricing/drift                           # not yet wrapped
+# Model catalog, grouped by model
+GET /v1/catalog/models                          # not yet wrapped
+GET /v1/catalog/models/{model_id}               # not yet wrapped
 # Providers
 GET /v1/providers/catalog/{provider_id}         # not yet wrapped
 GET /v1/providers/health                        # not yet wrapped

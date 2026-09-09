@@ -53,6 +53,7 @@ from gateway.services.pricing_init_service import (
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
     run_price_snapshot_refresher,
+    run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 from gateway.services.provider_store_service import (
@@ -307,6 +308,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         org_provider_refresher: asyncio.Task[None] | None = None
         search_tool_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
+        price_poller: asyncio.Task[None] | None = None
         discovery_refresher: asyncio.Task[None] | None = None
         catalog_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
@@ -390,6 +392,11 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # served the confirm; reload it on a TTL so sibling workers and replicas
             # converge, the same way aliases and provider credentials do.
             price_refresher = asyncio.create_task(run_price_snapshot_refresher())
+            # The upstream half: checks genai-prices on a schedule and holds or
+            # applies what it finds per ``pricing_refresh``. Started whatever
+            # the policy, since the policy is runtime-settable and each tick
+            # re-reads it.
+            price_poller = asyncio.create_task(run_price_update_poller(config))
             # Discovery is the one cache that used to be filled on the request
             # path, which put model_discovery_timeout_seconds (10s per
             # unreachable provider) on a dashboard page load and held that
@@ -440,6 +447,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 (org_provider_refresher, "organization provider key"),
                 (search_tool_refresher, "search tool"),
                 (price_refresher, "price snapshot"),
+                (price_poller, "price update poll"),
                 (discovery_refresher, "model discovery"),
                 (catalog_refresher, "models.dev catalog"),
                 (reservation_sweeper, "budget reservation sweep"),

@@ -83,6 +83,8 @@ export interface PricingOverrideDialogProps {
   onOpenChange: (open: boolean) => void
   /** The row being edited; absent means this is an add. */
   editing?: OrganizationPricingOverride
+  /** A selector to open an add on, as the catalog's "Set your rate" link arrives with one. */
+  initialModelKey?: string
   /** Every stored override, so an overlapping period is refused before the request. */
   existing: readonly OrganizationPricingOverride[]
   isPending: boolean
@@ -94,6 +96,7 @@ export function PricingOverrideDialog({
   isOpen,
   onOpenChange,
   editing,
+  initialModelKey = "",
   existing,
   isPending,
   error,
@@ -113,7 +116,7 @@ export function PricingOverrideDialog({
   // last row's rates into a different model is the expensive kind of mistake.
   useEffect(() => {
     if (!isOpen) return
-    setModelKey(editing?.model_key ?? "")
+    setModelKey(editing?.model_key ?? initialModelKey)
     setInput(rateToInput(editing?.input_price_per_million))
     setOutput(rateToInput(editing?.output_price_per_million))
     setCacheRead(rateToInput(editing?.cache_read_price_per_million))
@@ -121,7 +124,7 @@ export function PricingOverrideDialog({
     setCacheWrite1h(rateToInput(editing?.cache_write_1h_price_per_million))
     setFrom(toLocalInput(editing?.effective_from))
     setTo(toLocalInput(editing?.effective_to))
-  }, [isOpen, editing])
+  }, [isOpen, editing, initialModelKey])
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)

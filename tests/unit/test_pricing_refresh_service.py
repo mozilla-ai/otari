@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.services.pricing_refresh_service as pricing_refresh_service
-from gateway.models.entities import PricingSnapshot
+from gateway.models.entities import PricingSnapshot, PricingSnapshotHistory
 
 _PERSISTED_SNAPSHOT = (
     '[{"id":"test","name":"Test","api_pattern":"","models":['
@@ -76,11 +76,16 @@ async def test_refresh_requires_confirmation_before_changing_active_prices(monke
     assert pricing_refresh_service._snapshot_prices(get_snapshot(), preview.fetched_at)[model_key] == (
         pricing_refresh_service._snapshot_prices(latest_snapshot, preview.fetched_at)[model_key]
     )
-    confirmation_session.add.assert_called_once()
-    stored = confirmation_session.add.call_args.args[0]
+    # The accepted snapshot, and the history row that says who accepted it.
+    added = [call.args[0] for call in confirmation_session.add.call_args_list]
+    assert [type(row) for row in added] == [PricingSnapshot, PricingSnapshotHistory]
+    stored, history = added
     assert isinstance(stored, PricingSnapshot)
     assert stored.source == pricing_refresh_service.GENAI_PRICES_SOURCE
     assert stored.snapshot == raw_snapshot
+    assert isinstance(history, PricingSnapshotHistory)
+    assert history.accepted_by == "operator"
+    assert history.snapshot == raw_snapshot
     confirmation_session.delete.assert_awaited_once_with(pending)
     confirmation_session.commit.assert_awaited_once()
 

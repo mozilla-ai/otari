@@ -81,7 +81,7 @@ function mockApi({
 // mounts, so a page that later grows a <Link> or URL state is already covered.
 // Awaited, because the router resolves its first location asynchronously and a
 // synchronous DOM read would race it.
-function renderPage() {
+function renderPage(url = "/organization/pricing") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -89,6 +89,7 @@ function renderPage() {
     <QueryClientProvider client={client}>
       <RateOverridesCard />
     </QueryClientProvider>,
+    { url },
   )
 }
 
@@ -193,6 +194,33 @@ describe("RateOverridesCard", () => {
         output_price_per_million: 15,
       })
     })
+  })
+
+  it("opens an add on the selector the catalog linked with", async () => {
+    mockApi({ overrides: [] })
+
+    await renderPage(
+      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
+    )
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      (within(dialog).getByLabelText(/model key/i) as HTMLInputElement).value,
+    ).toBe("nebius:zai-org/GLM-5.3")
+  })
+
+  it("does not open the linked editor for a member who cannot manage", async () => {
+    mockApi({
+      overrides: [],
+      context: organizationContext({ role: "member" }),
+    })
+
+    await renderPage(
+      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
+    )
+
+    await screen.findByText(/no override yet/i)
+    expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 
   it("refuses a model key with no provider prefix before sending it", async () => {

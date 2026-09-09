@@ -495,6 +495,7 @@ async def _catalog_scope(
     *,
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
+    anonymous: bool = False,
 ) -> _CatalogScope:
     """What this caller may be shown, by the rule that fits how they authenticated.
 
@@ -506,6 +507,11 @@ async def _catalog_scope(
     tenant's, and the workspace-scoped rows only where that workspace is theirs
     (otari-ai#1969).
     """
+    # A visitor, while the catalog is public: the deployment's configured
+    # instances and nothing that belongs to a tenant. Not a member of anything,
+    # so no BYO key, no workspace's aliases or policies.
+    if anonymous:
+        return _CatalogScope(allowlist=[f"{instance}:*" for instance in config.providers], reads_workspace_layer=False)
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
             return _CatalogScope(allowlist=None, reads_workspace_layer=True)
@@ -544,8 +550,13 @@ async def build_merged_catalog(
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
     provider: str | None = None,
+    anonymous: bool = False,
 ) -> MergedCatalog:
-    """Merge discovery, stored prices, defaults, aliases and policies for one caller."""
+    """Merge discovery, stored prices, defaults, aliases and policies for one caller.
+
+    ``anonymous`` is the public catalog's visitor, who is answered from the
+    configured instances alone; see :func:`_catalog_scope`.
+    """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
     # another user's and never another workspace's. A master-key caller has no key
@@ -556,7 +567,7 @@ async def build_merged_catalog(
     # Resolved before the alias and policy layers are read, not only before they
     # are filtered: it decides whether the workspace-scoped rows may be read at
     # all, which no filter over targets can decide afterwards.
-    scope = await _catalog_scope(db, config, auth=auth, session_identity=session_identity)
+    scope = await _catalog_scope(db, config, auth=auth, session_identity=session_identity, anonymous=anonymous)
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
     # alias pricing can still be looked up by the target's canonical key. Keys are

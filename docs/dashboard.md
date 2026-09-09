@@ -97,7 +97,10 @@ admin manages their own organization's budgets and the spend ceilings holding
 them, while a deployment operator gets the deployment-wide budgets and the
 gateway users assigned to them. Model pricing splits the same way, with the
 default pricing catalog kept to an operator and the organization's own rate
-overrides open to its admins.
+overrides open to its admins. For an operator that section also shows the
+update a scheduled genai-prices check has left for review, when the defaults
+were last accepted and by whom, and how far each stored rate sits from
+today's default.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.

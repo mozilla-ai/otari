@@ -15,6 +15,7 @@ import {
   type DataTableColumn,
 } from "@/shared/components/data/DataTable"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { PageLoading } from "@/shared/components/feedback/PageLoading"
 import { Dot } from "@/shared/components/indicators/Dot"
 import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
@@ -93,9 +94,56 @@ function rate(value: number | null | undefined): string {
   return value == null ? "—" : formatRate(value)
 }
 
-function offeringColumns(
-  canPrice: boolean,
-): DataTableColumn<CatalogOffering>[] {
+// How far the metered rate may sit from the provider's published list price
+// before the row says so. models.dev and genai-prices round differently, so a
+// hair's width of disagreement is noise; a real gap is a stale stored price or
+// a deliberate markup, and either is worth a glance.
+const LIST_PRICE_TOLERANCE = 0.02
+
+/** The provider's list price, where it disagrees with what is metered. */
+export function listPriceNote(
+  metered: number | null | undefined,
+  listed: number | null | undefined,
+): string | null {
+  if (metered == null || listed == null || listed <= 0) return null
+  if (Math.abs(metered - listed) / listed <= LIST_PRICE_TOLERANCE) return null
+  return `list ${formatRate(listed)}`
+}
+
+function RateCell({
+  metered,
+  listed,
+}: {
+  metered: number | null | undefined
+  listed: number | null | undefined
+}) {
+  const note = listPriceNote(metered, listed)
+  return (
+    <span className="flex flex-col items-end">
+      <span className="text-mono-caption">{rate(metered)}</span>
+      {note ? <span className="text-caption text-subtle">{note}</span> : null}
+    </span>
+  )
+}
+
+function percent(value: number | null): string {
+  return value == null ? "—" : `${Math.round(value * 100)}%`
+}
+
+/** Whether any offering carries the organization's own last-30-day figures. */
+function hasUsage(offerings: readonly CatalogOffering[]): boolean {
+  return offerings.some((offering) => offering.usage_30d != null)
+}
+
+function offeringColumns({
+  canPrice,
+  canOverride,
+  withUsage,
+}: {
+  canPrice: boolean
+  canOverride: boolean
+  withUsage: boolean
+}): DataTableColumn<CatalogOffering>[] {
   const columns: DataTableColumn<CatalogOffering>[] = [
     {
       id: "provider",
@@ -148,9 +196,10 @@ function offeringColumns(
       header: "Input / 1M",
       align: "end",
       cell: (row) => (
-        <span className="text-mono-caption">
-          {rate(row.pricing?.input_price_per_million)}
-        </span>
+        <RateCell
+          metered={row.pricing?.input_price_per_million}
+          listed={row.metadata_input_price_per_million}
+        />
       ),
     },
     {
@@ -158,9 +207,10 @@ function offeringColumns(
       header: "Output / 1M",
       align: "end",
       cell: (row) => (
-        <span className="text-mono-caption">
-          {rate(row.pricing?.output_price_per_million)}
-        </span>
+        <RateCell
+          metered={row.pricing?.output_price_per_million}
+          listed={row.metadata_output_price_per_million}
+        />
       ),
     },
     {
@@ -179,6 +229,30 @@ function offeringColumns(
       cell: (row) => <SourceMark source={row.price_source} />,
     },
   ]
+  if (withUsage) {
+    // What the organization was charged for this offering, after cache reads
+    // and tiers: the number that says whether the sticker price is the one
+    // that matters.
+    columns.push({
+      id: "usage",
+      header: "Yours, 30d",
+      align: "end",
+      cell: (row) =>
+        row.usage_30d ? (
+          <span className="flex flex-col items-end">
+            <span className="text-mono-caption">
+              {rate(row.usage_30d.effective_price_per_million)}
+            </span>
+            <span className="text-caption text-subtle">
+              {row.usage_30d.requests} req · cache{" "}
+              {percent(row.usage_30d.cache_hit_rate)}
+            </span>
+          </span>
+        ) : (
+          <span className="text-mono-caption text-subtle">—</span>
+        ),
+    })
+  }
   if (canPrice) {
     columns.push({
       id: "actions",
@@ -190,6 +264,22 @@ function offeringColumns(
           className="text-link hover:text-link-hover"
         >
           Edit rate
+        </Link>
+      ),
+    })
+  } else if (canOverride) {
+    // An organization admin cannot touch the deployment's price, but may set
+    // what their own organization is billed above it.
+    columns.push({
+      id: "actions",
+      header: "Actions",
+      cell: (row) => (
+        <Link
+          to="/organization/pricing"
+          search={{ override: row.selector }}
+          className="text-link hover:text-link-hover"
+        >
+          Set your rate
         </Link>
       ),
     })
@@ -228,6 +318,8 @@ export function ModelDetailPanel({
   isLoading,
   error,
   canPrice,
+  canOverride = false,
+  publicView = false,
   defaultPricing,
 }: {
   model: CatalogModelDetail | undefined
@@ -235,11 +327,16 @@ export function ModelDetailPanel({
   error: unknown
   /** Whether this caller may edit a deployment rate; adds the link that leaves the page. */
   canPrice: boolean
+  /** Whether this caller may set their organization's own rate above the deployment's. */
+  canOverride?: boolean
+  /** Ahead of a session: nothing to link through, and the rates are the deployment's list. */
+  publicView?: boolean
   /** Whether an unpriced offering is metered at the genai-prices default. */
   defaultPricing: boolean | undefined
 }) {
   if (error) return <ErrorBanner error={error} />
   if (isLoading || !model) return <PageLoading label="Loading model…" />
+  const withUsage = !publicView && hasUsage(model.offerings)
 
   const capabilities = CAPABILITY_LABELS.filter(
     ({ key }) => model.capabilities[key],
@@ -335,7 +432,7 @@ export function ModelDetailPanel({
         <TableScrollFrame className="otari-offerings-table">
           <DataTable
             ariaLabel={`Offerings of ${model.name}`}
-            columns={offeringColumns(canPrice)}
+            columns={offeringColumns({ canPrice, canOverride, withUsage })}
             rows={model.offerings}
             getRowKey={(row) => row.selector}
             emptyContent="No provider you can use serves this model."
@@ -367,6 +464,23 @@ export function ModelDetailPanel({
             ) : null}
           </p>
         ) : null}
+        {model.offerings.some(
+          (o) =>
+            listPriceNote(
+              o.pricing?.input_price_per_million,
+              o.metadata_input_price_per_million,
+            ) !== null ||
+            listPriceNote(
+              o.pricing?.output_price_per_million,
+              o.metadata_output_price_per_million,
+            ) !== null,
+        ) ? (
+          <InfoBanner>
+            A rate marked <em>list</em> differs from the price the provider
+            publishes on models.dev. What is metered here is the rate shown; the
+            list price is what the provider would charge you directly.
+          </InfoBanner>
+        ) : null}
       </section>
 
       {first ? (
@@ -378,7 +492,7 @@ export function ModelDetailPanel({
             <span className="text-caption">
               Through{" "}
               <code className="text-mono-caption">{first.selector}</code>
-              {model.offerings.length > 1 ? (
+              {model.offerings.length > 1 && !publicView ? (
                 <>
                   , or{" "}
                   <Link

@@ -13,7 +13,8 @@ import {
   vendorOptions,
 } from "@/features/models/catalog"
 import { ModelDetailPanel } from "@/features/models/ModelDetailPanel"
-import { isDeploymentOperator } from "@/features/organization/roles"
+import { publicCatalogHref } from "@/features/models/publicCatalog"
+import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { useCatalog, useCatalogModel } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
@@ -46,6 +47,11 @@ import { useUrlValue } from "@/shared/helpers/urlState"
 // Read-only for every caller. A price is set on Model pricing, which the
 // detail's "Edit rate" link reaches with the selector in hand, so the catalog
 // cannot be used to reprice anything by accident (otari-ai#2095, #2096).
+//
+// `ModelCatalogView` is the page with its navigation handed in; `ModelCatalogPage`
+// binds it to the router. The split lets the same page render ahead of a
+// session as the public catalog (`PublicCatalogPage`), where there is no
+// router to link through and no organization to ask about.
 
 const DEFAULT_PAGE_SIZE = 25
 const CAPABILITY_OPTIONS = [
@@ -124,19 +130,32 @@ const COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
   },
 ]
 
-export function ModelCatalogPage({ modelId }: { modelId?: string }) {
-  const navigate = useNavigate()
-  const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
+export function ModelCatalogView({
+  modelId,
+  onOpen,
+  publicView = false,
+  initialProvider = "",
+}: {
+  modelId?: string
+  /** Where a pressed row goes. */
+  onOpen: (modelId: string) => void
+  /**
+   * Ahead of a session: no organization to price for, no operator affordance,
+   * and plain hash links because there is no router to link through.
+   */
+  publicView?: boolean
+  /** A provider instance to start filtered on. */
+  initialProvider?: string
+}) {
+  const organization = useOrganizationContext(!publicView)
+  const isOperator = !publicView && isDeploymentOperator(organization.data)
+  const canOverride = !publicView && canManage(organization.data)
   const catalog = useCatalog()
   const selected = useCatalogModel(modelId)
 
-  // A provider clicked on the Providers page arrives as ?provider=<instance>,
-  // pre-selecting that provider's filter so the list shows only its models.
-  const providerParam = useUrlValue("provider")
   const [search, setSearch] = useState("")
   const [vendor, setVendor] = useState("all")
-  const [provider, setProvider] = useState(providerParam || "all")
+  const [provider, setProvider] = useState(initialProvider || "all")
   const [capability, setCapability] = useState("all")
   const [minContext, setMinContext] = useState("0")
   const [page, setPage] = useState(0)
@@ -181,10 +200,6 @@ export function ModelCatalogPage({ modelId }: { modelId?: string }) {
     setPage(0)
   }
 
-  const open = (id: string) => {
-    void navigate({ to: "/models/$modelId", params: { modelId: id } })
-  }
-
   const defaultsAsOf = catalog.data?.defaults_as_of
 
   return (
@@ -193,9 +208,10 @@ export function ModelCatalogPage({ modelId }: { modelId?: string }) {
         {catalog.data ? (
           <>
             {models.length} {models.length === 1 ? "model" : "models"} across{" "}
-            {providerCount} {providerCount === 1 ? "provider" : "providers"}.
-            Prices are what your organization is charged, cheapest offering
-            first.{" "}
+            {providerCount} {providerCount === 1 ? "provider" : "providers"}.{" "}
+            {publicView
+              ? "Prices are this deployment's list rates, cheapest offering first."
+              : "Prices are what your organization is charged, cheapest offering first."}{" "}
             {defaultsAsOf
               ? `Default rates as of ${formatRelative(defaultsAsOf)}.`
               : catalog.data.default_pricing
@@ -256,7 +272,7 @@ export function ModelCatalogPage({ modelId }: { modelId?: string }) {
               isLoading={catalog.isPending && !catalog.data}
               sortDescriptor={sortDescriptor}
               onSortChange={onSortChange}
-              onRowAction={open}
+              onRowAction={onOpen}
               rowClassName={(row) =>
                 row.id === modelId ? "bg-primary-subtle" : undefined
               }
@@ -290,17 +306,28 @@ export function ModelCatalogPage({ modelId }: { modelId?: string }) {
         >
           {modelId ? (
             <div className="flex flex-col gap-4">
-              <Link
-                to="/models"
-                className="text-caption text-link hover:text-link-hover lg:hidden"
-              >
-                ← All models
-              </Link>
+              {publicView ? (
+                <a
+                  href={publicCatalogHref()}
+                  className="text-caption text-link hover:text-link-hover lg:hidden"
+                >
+                  ← All models
+                </a>
+              ) : (
+                <Link
+                  to="/models"
+                  className="text-caption text-link hover:text-link-hover lg:hidden"
+                >
+                  ← All models
+                </Link>
+              )}
               <ModelDetailPanel
                 model={selected.data}
                 isLoading={selected.isPending}
                 error={selected.error}
                 canPrice={isOperator}
+                canOverride={canOverride}
+                publicView={publicView}
                 defaultPricing={catalog.data?.default_pricing}
               />
             </div>
@@ -312,5 +339,22 @@ export function ModelCatalogPage({ modelId }: { modelId?: string }) {
         </aside>
       </div>
     </>
+  )
+}
+
+/** The catalog on the router: a pressed row navigates to `/models/$modelId`. */
+export function ModelCatalogPage({ modelId }: { modelId?: string }) {
+  const navigate = useNavigate()
+  // A provider clicked on the Providers page arrives as ?provider=<instance>,
+  // pre-selecting that provider's filter so the list shows only its models.
+  const providerParam = useUrlValue("provider")
+  return (
+    <ModelCatalogView
+      modelId={modelId}
+      initialProvider={providerParam}
+      onOpen={(id) => {
+        void navigate({ to: "/models/$modelId", params: { modelId: id } })
+      }}
+    />
   )
 }

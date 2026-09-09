@@ -154,6 +154,9 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
+    // Off by default, matching the config default; the public-catalog tests
+    // turn it on.
+    public_catalog: false,
     ...overrides,
   }
 }

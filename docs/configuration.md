@@ -75,6 +75,8 @@ the corresponding startup value after the database is available.
 | `auto_migrate` | Apply Alembic migrations at startup. |
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
+| `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
+| `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -174,6 +176,44 @@ review and accept newer snapshots.
 Default pricing is off because provider catalogs and reseller rates change.
 With `require_pricing: true`, a budgeted request with no effective price is
 rejected instead of bypassing the budget.
+
+### Keeping the defaults current
+
+`pricing_refresh` decides what the gateway does with a newer genai-prices
+snapshot on its own:
+
+- `manual` (the default) never fetches. An operator checks for updates on Model
+  pricing and accepts or rejects what it finds.
+- `review` fetches every `pricing_refresh_interval_seconds` (default one day,
+  minimum five minutes) and holds a changed snapshot for review. Model pricing
+  shows the pending update; nothing is metered differently until an operator
+  accepts it.
+- `auto` fetches on the same schedule and applies a changed snapshot at once.
+
+Every accepted snapshot is recorded with who accepted it, `operator` or
+`schedule`, and how many models it priced; `GET /v1/pricing/snapshots` lists
+the history. `GET /v1/pricing/drift` puts every stored deployment rate beside
+the default it shadows, so a config-file price that has fallen behind the
+provider's list is visible before it costs anyone. Both are operator reads, and
+`pricing_refresh` can be changed at runtime through `PATCH /v1/settings`.
+
+Each stored rate also carries its `unit` (`tokens`, `requests`, or `images`)
+and its `origin` (`config` or `api`), so a rate the config file re-seeds on
+every restart is distinguishable from one set in the dashboard.
+
+### A public catalog
+
+`public_catalog: true` serves `GET /v1/catalog/models` and the dashboard's
+Models page to a visitor with no credential, so a deployment can show what it
+serves before anyone signs up. A visitor sees the configured `providers:`
+instances only, priced at the deployment's rates, and never an organization's
+override, key-scoped allow-list, or usage; the read is rate-limited per client
+address. A caller who sends a credential is served as that caller, valid or
+not. The setting is off by default, off in hybrid mode, and can be changed at
+runtime.
+
+The instance names `otari` and `hosted` are reserved for a managed platform's
+own offerings and are refused in `providers:`.
 
 ### Cache and tiered pricing
 

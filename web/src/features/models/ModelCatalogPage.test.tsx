@@ -276,6 +276,85 @@ describe("ModelCatalogPage", () => {
     expect(within(panel).queryByRole("button", { name: /price/i })).toBeNull()
   })
 
+  it("points an organization admin at its own rate override, not the deployment's price", async () => {
+    mockApi({
+      context: organizationContext({
+        role: "admin",
+        deployment_operator: false,
+      }),
+    })
+    renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
+
+    const panel = await screen.findByRole("complementary", {
+      name: "Model details",
+    })
+    const links = await within(panel).findAllByRole("link", {
+      name: "Set your rate",
+    })
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
+    )
+    expect(within(panel).queryByRole("link", { name: "Edit rate" })).toBeNull()
+  })
+
+  it("shows what the organization was charged for an offering beside its sticker price", async () => {
+    mockApi()
+    GLM_DETAIL.offerings[0] = offering({
+      usage_30d: {
+        requests: 42,
+        total_tokens: 1_000_000,
+        cache_read_tokens: 250_000,
+        spend_usd: 0.4,
+        cache_hit_rate: 0.25,
+        effective_price_per_million: 0.4,
+      },
+    })
+    try {
+      renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
+
+      const panel = await screen.findByRole("complementary", {
+        name: "Model details",
+      })
+      const grid = await within(panel).findByRole("grid", {
+        name: "Offerings of GLM-5.3",
+      })
+      expect(
+        within(grid).getByRole("columnheader", { name: "Yours, 30d" }),
+      ).toBeInTheDocument()
+      expect(within(grid).getByText("42 req · cache 25%")).toBeInTheDocument()
+    } finally {
+      GLM_DETAIL.offerings[0] = offering({})
+    }
+  })
+
+  it("marks a metered rate that differs from the provider's list price", async () => {
+    mockApi()
+    GLM_DETAIL.offerings[0] = offering({
+      metadata_input_price_per_million: 1,
+      metadata_output_price_per_million: 2.01,
+    })
+    try {
+      renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
+
+      const panel = await screen.findByRole("complementary", {
+        name: "Model details",
+      })
+      await within(panel).findByRole("grid", { name: "Offerings of GLM-5.3" })
+      // Input is metered at half the list price and says so; output is within
+      // rounding of it and does not.
+      expect(within(panel).getByText("list $1.00")).toBeInTheDocument()
+      expect(within(panel).queryByText("list $2.01")).toBeNull()
+      expect(
+        within(panel).getByText(
+          /differs from the price the provider publishes/,
+        ),
+      ).toBeInTheDocument()
+    } finally {
+      GLM_DETAIL.offerings[0] = offering({})
+    }
+  })
+
   it("keeps the catalog read-only for a member", async () => {
     mockApi({ context: organizationContext({ deployment_operator: false }) })
     renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")

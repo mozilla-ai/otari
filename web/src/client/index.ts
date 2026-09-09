@@ -267,6 +267,7 @@ export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
 export type CatalogElsewhere = Schemas["CatalogElsewhere"]
+export type CatalogOfferingUsage = Schemas["OfferingUsage"]
 /** A tier as stored, which may be a shape this client cannot read (see the spec). */
 export type StoredPricingTier = NonNullable<
   ModelPricingInfo["pricing_tiers"]
@@ -313,6 +314,8 @@ export type UpdateOrganizationSpendCeiling =
   Schemas["OrganizationScopedBudgetUpdate"]
 export type PricingRefreshChange = Schemas["PricingRefreshChangeResponse"]
 export type PricingRefreshPreview = Schemas["PricingRefreshPreviewResponse"]
+export type AcceptedPricingSnapshot = Schemas["AcceptedSnapshotResponse"]
+export type PricingDriftRow = Schemas["PricingDriftRow"]
 export type ProviderInfo = Schemas["ProviderInfoSchema"]
 export type ProviderCapabilities = Schemas["ProviderCapabilitiesSchema"]
 export type ProvidersResponse = Schemas["ProvidersResponse"]

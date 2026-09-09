@@ -17,6 +17,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
 }> = [
   { route: "/", name: "overview", heading: /overview/i },
   { route: "/models", name: "models", heading: /models/i },
+  {
+    route: "/models/gpt-parity-priced",
+    name: "model-detail",
+    heading: /models/i,
+  },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },

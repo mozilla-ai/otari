@@ -128,6 +128,42 @@ describe("App", () => {
     ).toBeNull()
   })
 
+  it("renders the public catalog ahead of the sign-in screen where the deployment opens it", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (String(path).startsWith("/v1/catalog/models")) {
+        return {
+          default_pricing: true,
+          defaults_as_of: null,
+          metadata_available: false,
+          models: [],
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/models"
+
+    renderApp(bootstrap({ public_catalog: true }))
+
+    expect(
+      await screen.findByRole("heading", { name: "Models" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Otari Dashboard" }),
+    ).toBeNull()
+  })
+
+  it("keeps the catalog behind the sign-in screen by default", () => {
+    window.location.hash = "#/models"
+
+    renderApp(bootstrap())
+
+    expect(
+      screen.getByRole("heading", { name: "Otari Dashboard" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Models" })).toBeNull()
+  })
+
   it("renders a public auth page ahead of the sign-in screen", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
     window.location.hash = "#/verify-email?token=abc123"

@@ -194,9 +194,20 @@ reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /v1/models/metadata` stays operator-only.
 
+Each offering also carries the provider's own list price from models.dev,
+where it has one, and for a signed-in caller the organization's last thirty
+days on that offering: requests, cache hit rate, and the effective price per
+million tokens after cache reads and tiers.
+
 The dashboard's Models page is this catalog: the list on the left, the selected
 model's offerings on the right. It is read-only; a deployment rate is set on
-Organization pricing, which the offering rows link to.
+Model pricing, which the offering rows link to for an operator, and an
+organization admin is linked to its own rate override instead. A metered rate
+that differs from the provider's list price is marked with the list price.
+
+With `public_catalog: true` (see [Configuration](configuration.md)), the same
+two routes and the same page are served to a visitor with no session, at the
+deployment's rates and for the configured providers only.
 
 ## Listing available models
 

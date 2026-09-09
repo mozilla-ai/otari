@@ -71,7 +71,8 @@ cat <<EOF
   Master key  $MASTER_KEY
   State       $STATE
 
-  Sign in with the master key. Ctrl-C stops the gateway.
+  Sign in with the master key, or open #/models signed out for the public
+  catalog. Ctrl-C stops the gateway.
 
 EOF
 

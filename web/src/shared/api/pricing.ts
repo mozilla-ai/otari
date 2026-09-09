@@ -1,21 +1,71 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  AcceptedPricingSnapshot,
   CreateOrganizationPricingOverride,
   OrganizationPricingOverride,
+  PricingDriftRow,
   PricingRefreshPreview,
   PricingResponse,
   SetPricingRequest,
   UpdateOrganizationPricingOverride,
 } from "@/client"
-import { apiFetch, longRequestSignal } from "@/shared/api/client"
+import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   CATALOG,
   MODELS,
+  NO_RETRY,
   ORGANIZATION_PRICING,
   PRICING,
+  PRICING_DRIFT,
+  PRICING_PENDING,
+  PRICING_SNAPSHOTS,
   PROVIDERS,
 } from "@/shared/api/queryKeys"
+
+// The update the scheduled refresh has left for review, or null when there is
+// none: the gateway answers 404 for the common case and that is not an error
+// here. Operator-only, so `enabled` is the caller's gate.
+export function usePendingPricingRefresh(enabled = true) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: PRICING_PENDING,
+    queryFn: async (): Promise<PricingRefreshPreview | null> => {
+      try {
+        return await apiFetch<PricingRefreshPreview>(
+          "/v1/pricing/refresh/pending",
+        )
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null
+        throw error
+      }
+    },
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function usePricingSnapshots(enabled = true) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: PRICING_SNAPSHOTS,
+    queryFn: () => apiFetch<AcceptedPricingSnapshot[]>("/v1/pricing/snapshots"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+// Every stored rate against today's default. Resolves each key through
+// genai-prices gateway-side, so it is kept warm like the other fan-out reads.
+export function usePricingDrift(enabled = true) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: PRICING_DRIFT,
+    queryFn: () => apiFetch<PricingDriftRow[]>("/v1/pricing/drift"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
 
 const PRICING_PAGE_SIZE = 1000
 
@@ -103,10 +153,16 @@ export function useConfirmPricingRefresh() {
   })
 }
 
+// Rejecting also clears anything the scheduled check had left for review, so
+// the pending read is refetched rather than left offering a review of nothing.
 export function useRejectPricingRefresh() {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () =>
       apiFetch<void>("/v1/pricing/refresh/reject", { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PRICING_PENDING })
+    },
   })
 }
 

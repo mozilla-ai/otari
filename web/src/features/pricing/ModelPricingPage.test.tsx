@@ -5,8 +5,11 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  AcceptedPricingSnapshot,
   GatewaySettings,
   OrganizationContext,
+  PricingDriftRow,
+  PricingRefreshPreview,
   PricingResponse,
 } from "@/client"
 import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
@@ -55,9 +58,9 @@ function price(overrides: Partial<PricingResponse> = {}): PricingResponse {
   }
 }
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   })
 }
@@ -70,11 +73,17 @@ function mockApi(
     settings?: Partial<GatewaySettings>
     pricing?: PricingResponse[]
     context?: OrganizationContext
+    /** What the scheduled check left for review; none by default. */
+    pending?: PricingRefreshPreview
+    snapshots?: AcceptedPricingSnapshot[]
+    drift?: PricingDriftRow[]
   } = {},
 ) {
   const settings = { ...SETTINGS, ...options.settings }
   const pricing = options.pricing ?? [price()]
   const context = options.context ?? organizationContext()
+  const snapshots = options.snapshots ?? []
+  const drift = options.drift ?? []
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input, init) => {
@@ -89,6 +98,13 @@ function mockApi(
       if (url.includes("/v1/pricing/refresh") && method === "POST") {
         return jsonResponse(PRICE_REFRESH)
       }
+      if (url.includes("/v1/pricing/refresh/pending")) {
+        return options.pending
+          ? jsonResponse(options.pending)
+          : jsonResponse({ detail: "No pending price refresh" }, 404)
+      }
+      if (url.includes("/v1/pricing/snapshots")) return jsonResponse(snapshots)
+      if (url.includes("/v1/pricing/drift")) return jsonResponse(drift)
       // Before the bare `/v1/pricing` arm below and before the context one: the
       // organization's own overrides are a different surface from the catalog,
       // and they answer the paged tenancy shape rather than a list.
@@ -295,6 +311,124 @@ describe("ModelPricingPage", () => {
           init?.method === "POST",
       ),
     ).toBe(true)
+  })
+
+  it("offers the update the scheduled check left for review, and accepts it", async () => {
+    const fetchMock = mockApi({ pending: PRICE_REFRESH })
+    const user = userEvent.setup()
+
+    renderPage(<ModelPricingPage />)
+
+    expect(
+      await screen.findByText(/The scheduled check found 2 changed, 1 added/),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Review pending update" }),
+    )
+    expect(
+      await screen.findByRole("alertdialog", {
+        name: "Review default price updates",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText("openai:gpt-5: added")).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "Accept price updates" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("alertdialog", {
+          name: "Review default price updates",
+        }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/v1/pricing/refresh/confirm") &&
+          init?.method === "POST",
+      ),
+    ).toBe(true)
+  })
+
+  it("says when the defaults were last accepted and by whom", async () => {
+    mockApi({
+      snapshots: [
+        {
+          id: "s2",
+          accepted_at: "2026-09-01T00:00:00Z",
+          accepted_by: "schedule",
+          model_count: 1450,
+        },
+        {
+          id: "s1",
+          accepted_at: "2026-08-01T00:00:00Z",
+          accepted_by: "operator",
+          model_count: 1400,
+        },
+      ],
+    })
+
+    renderPage(<ModelPricingPage />)
+
+    expect(
+      await screen.findByText(
+        /Last accepted .* by the scheduled check, 1450 priced models\. 2 snapshots on record\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows how far a stored rate sits from today's default", async () => {
+    mockApi({
+      pricing: [
+        price({ model_key: "openai:gpt-5", origin: "config" }),
+        price({ model_key: "openai:gpt-4o-mini", origin: "api" }),
+      ],
+      drift: [
+        {
+          model_key: "openai:gpt-5",
+          unit: "tokens",
+          origin: "config",
+          effective_at: "2026-01-01T00:00:00Z",
+          input_price_per_million: 1.25,
+          output_price_per_million: 10,
+          default_input_price_per_million: 1,
+          default_output_price_per_million: 10,
+          default_reference: "openai:gpt-5",
+          input_delta_percent: 25,
+          output_delta_percent: 0,
+        },
+        {
+          model_key: "openai:gpt-4o-mini",
+          unit: "tokens",
+          origin: "api",
+          effective_at: "2026-01-01T00:00:00Z",
+          input_price_per_million: 1.25,
+          output_price_per_million: 10,
+          default_input_price_per_million: null,
+          default_output_price_per_million: null,
+          default_reference: null,
+          input_delta_percent: null,
+          output_delta_percent: null,
+        },
+      ],
+    })
+
+    renderPage(<ModelPricingPage />)
+
+    const grid = await screen.findByRole("grid", { name: "Model prices" })
+    expect(
+      within(grid).getByRole("columnheader", { name: "vs default" }),
+    ).toBeInTheDocument()
+    // The drift read lands after the price list, so the cell is waited on.
+    await within(grid).findByText("+25% / ±0%")
+    const gpt5 = within(grid).getByRole("row", { name: /openai:gpt-5/ })
+    expect(gpt5).toHaveTextContent("config")
+    const mini = within(grid).getByRole("row", { name: /gpt-4o-mini/ })
+    expect(mini).toHaveTextContent("dashboard")
+    // A key genai-prices does not know has nothing to drift from.
+    expect(mini).not.toHaveTextContent("%")
   })
 
   it("gives an organization admin the prices and its own overrides, not the catalog", async () => {

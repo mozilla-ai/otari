@@ -299,3 +299,104 @@ def test_a_session_is_priced_at_its_organizations_override(
         _NEBIUS_GLM: "deployment",
         _FIREWORKS_GLM: "deployment",
     }
+
+
+# ---------------------------------------------------------------------------
+# The public catalog
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_visitor_reads_the_catalog_only_while_it_is_public(
+    catalog_client: TestClient, public_client: TestClient, master_header: dict[str, str]
+) -> None:
+    # Off (the default): a visitor is refused as before.
+    assert catalog_client.get("/v1/catalog/models").status_code in (
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+    )
+
+    _price(public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+    body = _get(public_client, "/v1/catalog/models")
+    assert [model["id"] for model in body["models"]] == ["glm-5-3"]
+    detail = _get(public_client, "/v1/catalog/models/glm-5-3")
+    offering = detail["offerings"][0]
+    assert offering["credential"] == "deployment"
+    assert offering["price_source"] == "deployment"
+    # A visitor has no organization, so nothing of a tenant's is rolled up.
+    assert offering["usage_30d"] is None
+
+    # A credential that is present and wrong is still a wrong credential.
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+        refused = public_client.get("/v1/catalog/models", headers={"Authorization": "Bearer not-a-key"})
+    assert refused.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
+    priced: TestClient, master_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The listed rate is what a token costs; this is what the tokens cost."""
+    from sqlmodel import select
+
+    from gateway.models.entities import UsageLog
+    from gateway.models.tenancy import Workspace
+
+    # The master key acts in the default workspace, which boot provisioned.
+    assert priced.get("/v1/organizations/me", headers=master_header).status_code == status.HTTP_200_OK
+    session = db_session_factory()
+    try:
+        workspace_id = session.execute(select(Workspace.id)).scalars().first()
+        assert workspace_id is not None
+        for cached in (0, 800):
+            session.add(
+                UsageLog(
+                    workspace_id=workspace_id,
+                    timestamp=datetime.now(UTC) - timedelta(days=1),
+                    model="zai-org/GLM-5.3",
+                    provider="nebius",
+                    endpoint="/v1/chat/completions",
+                    status="success",
+                    prompt_tokens=1000,
+                    completion_tokens=500,
+                    total_tokens=1500,
+                    cache_read_tokens=cached,
+                    cost=0.0015,
+                )
+            )
+        # Too old to count, and a failure that never billed.
+        session.add(
+            UsageLog(
+                workspace_id=workspace_id,
+                timestamp=datetime.now(UTC) - timedelta(days=45),
+                model="zai-org/GLM-5.3",
+                provider="nebius",
+                endpoint="/v1/chat/completions",
+                status="success",
+                prompt_tokens=1_000_000,
+                completion_tokens=0,
+                total_tokens=1_000_000,
+                cost=1,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    body = _get(priced, "/v1/catalog/models/glm-5-3", headers=master_header)
+    by_selector = {offering["selector"]: offering for offering in body["offerings"]}
+    usage = by_selector[_NEBIUS_GLM]["usage_30d"]
+    assert usage["requests"] == 2
+    assert usage["total_tokens"] == 3000
+    assert usage["cache_read_tokens"] == 800
+    assert usage["cache_hit_rate"] == 0.4
+    assert usage["spend_usd"] == 0.003
+    assert usage["effective_price_per_million"] == 1.0
+    assert by_selector[_FIREWORKS_GLM]["usage_30d"] is None

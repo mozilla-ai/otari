@@ -90,6 +90,13 @@ OTARI_ENV_PREFIX = "OTARI_"
 # (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
 # These carry the entire YAML schema (providers, pricing, etc.), not just the
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
+# Instance names a ``providers:`` entry may not take. ``otari`` is the reserved
+# pricing prefix for gateway-run tools; ``hosted`` is the namespace a hosted
+# edition serves its own deployment-owned offerings under, so a self-configured
+# instance of that name would be indistinguishable from one in the catalog.
+RESERVED_PROVIDER_INSTANCE_NAMES: frozenset[str] = frozenset({"otari", "hosted"})
+PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
+
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
 OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
@@ -802,6 +809,27 @@ class GatewayConfig(BaseSettings):
             "Reject requests for models that have no configured pricing (fail-closed, default). "
             "When False, unpriced models are served and logged without cost (legacy behavior). "
             "Audio and moderation endpoints are always exempt — they have no token-based pricing."
+        ),
+    )
+    pricing_refresh: Literal["manual", "review", "auto"] = Field(
+        default="manual",
+        description=(
+            "How the genai-prices defaults are kept current. 'manual': only when an operator checks for "
+            "updates on Model pricing. 'review': fetch upstream every pricing_refresh_interval_seconds and "
+            "hold the update for an operator to accept or reject. 'auto': fetch and apply on that schedule."
+        ),
+    )
+    pricing_refresh_interval_seconds: int = Field(
+        default=86400,
+        ge=300,
+        description="How often the scheduled genai-prices check runs when pricing_refresh is review or auto.",
+    )
+    public_catalog: bool = Field(
+        default=False,
+        description=(
+            "Serve GET /v1/catalog/models and the dashboard's Models pages to a visitor with no session or "
+            "key. An anonymous read sees the configured provider instances priced from the deployment "
+            "list and the defaults, and nothing tenant-specific. Off by default."
         ),
     )
     default_pricing: bool = Field(
@@ -1683,6 +1711,12 @@ class GatewayConfig(BaseSettings):
             # time. (No real any-llm provider name contains these characters.)
             if ":" in instance or "/" in instance:
                 msg = f"provider instance name '{instance}' must not contain ':' or '/'."
+                raise ValueError(msg)
+            if instance in RESERVED_PROVIDER_INSTANCE_NAMES:
+                msg = (
+                    f"provider instance name '{instance}' is reserved: 'otari' prices the gateway's own tools "
+                    "and 'hosted' names a deployment-owned offering."
+                )
                 raise ValueError(msg)
             if not isinstance(entry, dict):
                 continue

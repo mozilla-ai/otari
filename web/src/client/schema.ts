@@ -1025,7 +1025,9 @@ export interface paths {
          *
          *     Prices are the caller's: an organization's override where one applies, else
          *     the deployment's row, else the genai-prices default. Aliases and routing
-         *     policies are not models and are not listed; see Routing.
+         *     policies are not models and are not listed; see Routing. A visitor, where
+         *     the catalog is public, sees the configured instances at the deployment's
+         *     rates and nothing that belongs to a tenant.
          */
         get: operations["list_catalog_v1_catalog_models_get"];
         put?: never;
@@ -1049,6 +1051,8 @@ export interface paths {
          *
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
+         *     A signed-in caller's offerings also carry their organization's own usage of
+         *     each over the last 30 days.
          */
         get: operations["get_catalog_model_v1_catalog_models__model_id__get"];
         put?: never;
@@ -2646,6 +2650,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pricing/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pricing Drift
+         * @description Every stored deployment rate in force today, beside today's default for it.
+         *
+         *     A stored row shadows the genai-prices default silently and forever, whether
+         *     it was a deliberate override or a copy of a then-current default. This is
+         *     what makes the difference visible: a row that matches the default is a row
+         *     that could be deleted, and a row far from it is one worth a second look.
+         *     Tool rows (``otari:``) are per request and have no default to drift from,
+         *     so they are left out.
+         */
+        get: operations["list_pricing_drift_v1_pricing_drift_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pricing/refresh": {
         parameters: {
             query?: never;
@@ -2686,6 +2717,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pricing/refresh/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pending Pricing Refresh
+         * @description The update the scheduled refresh has left waiting for review, if any.
+         *
+         *     What the dashboard's notice reads. 404 when nothing is pending, so a page can
+         *     ask on load without treating the common case as an error banner.
+         */
+        get: operations["get_pending_pricing_refresh_v1_pricing_refresh_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pricing/refresh/reject": {
         parameters: {
             query?: never;
@@ -2700,6 +2754,26 @@ export interface paths {
          * @description Discard a reviewed default-price snapshot without applying it.
          */
         post: operations["reject_pricing_refresh_v1_pricing_refresh_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pricing/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pricing Snapshots
+         * @description The accepted default-price snapshots, newest first.
+         */
+        get: operations["list_pricing_snapshots_v1_pricing_snapshots_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4470,6 +4544,26 @@ export interface components {
             role: string;
         };
         /**
+         * AcceptedSnapshotResponse
+         * @description One accepted genai-prices snapshot in the history.
+         */
+        AcceptedSnapshotResponse: {
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+            /**
+             * Accepted By
+             * @description `operator` for a dashboard confirm, `schedule` for the auto policy.
+             */
+            accepted_by: string;
+            /** Id */
+            id: string;
+            /** Model Count */
+            model_count: number;
+        };
+        /**
          * ActivationApiKeyPublic
          * @description The API key the guide hands out, with its plaintext.
          *
@@ -5470,7 +5564,7 @@ export interface components {
              * @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.
              * @enum {string}
              */
-            credential: "deployment" | "organization";
+            credential: "deployment" | "organization" | "hosted";
             /**
              * Discovered
              * @description Whether the provider itself reported this model.
@@ -5478,6 +5572,13 @@ export interface components {
             discovered: boolean;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
+            /**
+             * Metadata Input Price Per Million
+             * @description What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.
+             */
+            metadata_input_price_per_million?: number | null;
+            /** Metadata Output Price Per Million */
+            metadata_output_price_per_million?: number | null;
             /**
              * Price Reference
              * @description For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.
@@ -5509,6 +5610,7 @@ export interface components {
              * @description What to send as `model`, in `instance:model` form.
              */
             selector: string;
+            usage_30d?: components["schemas"]["OfferingUsage"] | null;
         };
         /**
          * CatalogResponse
@@ -6187,6 +6289,12 @@ export interface components {
              * @description Where this deployment's privacy notice lives. Set, the account menu's Data & Privacy row links to it; null, no address is configured and that row stays disabled, carrying the standing note that there is nothing to configure there yet. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             privacy_url: string | null;
+            /**
+             * Public Catalog
+             * @description Whether the model catalog is served to a visitor with no session: GET /v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.
+             * @default false
+             */
+            public_catalog: boolean;
             /**
              * Session Type
              * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
@@ -7399,6 +7507,34 @@ export interface components {
             user_id: string;
         };
         /**
+         * OfferingUsage
+         * @description What the viewer's organization actually paid for one offering, last 30 days.
+         *
+         *     The listed rate is what a token costs; this is what the tokens cost, which is
+         *     lower wherever prompt caching hit. Absent for a visitor and for an offering
+         *     the organization never called.
+         */
+        OfferingUsage: {
+            /**
+             * Cache Hit Rate
+             * @description Cache-read tokens over prompt tokens. Null when no prompt tokens.
+             */
+            cache_hit_rate: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /**
+             * Effective Price Per Million
+             * @description Spend over every token served, per million. Null when no tokens were served.
+             */
+            effective_price_per_million: number | null;
+            /** Requests */
+            requests: number;
+            /** Spend Usd */
+            spend_usd: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /**
          * OrgProviderKeyCreateRequest
          * @description What a caller sends to create a key.
          *
@@ -8403,6 +8539,43 @@ export interface components {
             records: number;
             /** Warm */
             warm: boolean;
+        };
+        /**
+         * PricingDriftRow
+         * @description A stored deployment rate beside the default it shadows.
+         */
+        PricingDriftRow: {
+            /**
+             * Default Input Price Per Million
+             * @description What genai-prices would meter this key at today. Null when the dataset does not know it.
+             */
+            default_input_price_per_million: number | null;
+            /** Default Output Price Per Million */
+            default_output_price_per_million: number | null;
+            /**
+             * Default Reference
+             * @description The genai-prices entry the default came from.
+             */
+            default_reference: string | null;
+            /** Effective At */
+            effective_at: string;
+            /**
+             * Input Delta Percent
+             * @description (stored - default) / default, as a percentage.
+             */
+            input_delta_percent: number | null;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Model Key */
+            model_key: string;
+            /** Origin */
+            origin: string | null;
+            /** Output Delta Percent */
+            output_delta_percent: number | null;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /** Unit */
+            unit: string;
         };
         /**
          * PricingRefreshChangeResponse
@@ -9764,6 +9937,10 @@ export interface components {
             models_dev_cache_ttl_seconds?: number | null;
             /** Models Dev Metadata */
             models_dev_metadata?: boolean | null;
+            /** Pricing Refresh */
+            pricing_refresh?: ("manual" | "review" | "auto") | null;
+            /** Public Catalog */
+            public_catalog?: boolean | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
             /** Require Pricing */
@@ -15294,6 +15471,26 @@ export interface operations {
             };
         };
     };
+    list_pricing_drift_v1_pricing_drift_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingDriftRow"][];
+                };
+            };
+        };
+    };
     preview_pricing_refresh_v1_pricing_refresh_post: {
         parameters: {
             query?: never;
@@ -15334,6 +15531,26 @@ export interface operations {
             };
         };
     };
+    get_pending_pricing_refresh_v1_pricing_refresh_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingRefreshPreviewResponse"];
+                };
+            };
+        };
+    };
     reject_pricing_refresh_v1_pricing_refresh_reject_post: {
         parameters: {
             query?: never;
@@ -15349,6 +15566,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_pricing_snapshots_v1_pricing_snapshots_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedSnapshotResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

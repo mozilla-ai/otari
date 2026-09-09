@@ -26,15 +26,16 @@ one needs them as much as an operator does.
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
-from gateway.api.deps import get_config, get_db, get_session_identity, verify_catalog_reader
+from gateway.api.deps import get_config, get_db, get_session_identity, verify_catalog_reader_or_public
 from gateway.api.routes.models import (
     ALIAS_OWNED_BY,
     MergedCatalog,
@@ -44,8 +45,9 @@ from gateway.api.routes.models import (
     build_merged_catalog,
 )
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey, PricingSnapshot
+from gateway.models.entities import APIKey, PricingSnapshot, UsageLog
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.tenancy import Workspace
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     background_catalog_enabled,
@@ -70,14 +72,27 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.workspace_scope import organization_for_key_id
 
+# ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
+# visitor reads too while ``public_catalog`` is on, and is answered from the
+# configured instances alone. Every other route in the process keeps its gate.
 router = APIRouter(
     prefix="/v1/catalog",
     tags=["catalog"],
-    dependencies=[Depends(verify_catalog_reader)],
+    dependencies=[Depends(verify_catalog_reader_or_public)],
 )
 
+# The anonymous caller, as the dependency hands it over; the routes below read
+# it as "nobody" rather than as a key that failed to verify.
+CatalogCaller = tuple[APIKey | None, bool] | None
+
 PriceSource = Literal["organization", "deployment", "defaults"]
-Credential = Literal["deployment", "organization"]
+# ``hosted`` is the reserved instance a hosted edition serves deployment-owned
+# offerings under (``RESERVED_PROVIDER_INSTANCE_NAMES``); the base gateway never
+# configures one, so the label only ever appears where an overlay contributes it.
+Credential = Literal["deployment", "organization", "hosted"]
+
+# The window the viewer's own usage is rolled up over on a detail read.
+_USAGE_WINDOW = timedelta(days=30)
 
 
 class CatalogCapabilities(BaseModel):
@@ -88,6 +103,26 @@ class CatalogCapabilities(BaseModel):
     structured_output: bool = False
     attachment: bool = False
     temperature: bool = False
+
+
+class OfferingUsage(BaseModel):
+    """What the viewer's organization actually paid for one offering, last 30 days.
+
+    The listed rate is what a token costs; this is what the tokens cost, which is
+    lower wherever prompt caching hit. Absent for a visitor and for an offering
+    the organization never called.
+    """
+
+    requests: int
+    total_tokens: int
+    cache_read_tokens: int
+    spend_usd: float
+    cache_hit_rate: float | None = Field(
+        description="Cache-read tokens over prompt tokens. Null when no prompt tokens."
+    )
+    effective_price_per_million: float | None = Field(
+        description="Spend over every token served, per million. Null when no tokens were served."
+    )
 
 
 class CatalogOffering(BaseModel):
@@ -118,6 +153,15 @@ class CatalogOffering(BaseModel):
         default=None,
         description="For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
     )
+    metadata_input_price_per_million: float | None = Field(
+        default=None,
+        description=(
+            "What models.dev lists this provider charging, for a cross-check. Not billed from: two "
+            "independent datasets disagreeing is the cheapest stale-price detector there is."
+        ),
+    )
+    metadata_output_price_per_million: float | None = None
+    usage_30d: OfferingUsage | None = None
 
 
 class CatalogModelSummary(BaseModel):
@@ -206,18 +250,78 @@ def _metadata_entry(catalog: dict[str, Any] | None, provider_type: str, model_id
 
 
 async def _viewer_organization(
-    db: AsyncSession, auth: tuple[APIKey | None, bool], session_identity: TenancyUser | None
+    db: AsyncSession, caller: CatalogCaller, session_identity: TenancyUser | None
 ) -> uuid.UUID | None:
     """The organization whose overrides price this viewer's requests.
 
     Resolved the way settlement resolves it: a session acts in its active
     organization, an API key in its workspace's, and a master key in the default
-    workspace's. Never from the request.
+    workspace's. Never from the request. A visitor has none.
     """
     if session_identity is not None:
         return session_identity.active_organization_id
-    api_key, _ = auth
+    if caller is None:
+        return None
+    api_key, _ = caller
     return await organization_for_key_id(db, api_key.id if api_key is not None else None)
+
+
+async def _usage_by_selector(
+    db: AsyncSession, organization_id: uuid.UUID, offerings: Iterable[tuple[str, str, str]]
+) -> dict[str, OfferingUsage]:
+    """The organization's last 30 days against each offering, keyed by selector.
+
+    One grouped query over the organization's workspaces. A usage row carries
+    the instance and the provider's model id separately, and older rows carry
+    the whole selector in ``model``, so both spellings are matched.
+    """
+    since = datetime.now(UTC) - _USAGE_WINDOW
+    by_pair = {(instance, model_id): selector for selector, instance, model_id in offerings}
+    if not by_pair:
+        return {}
+    matches = [
+        (UsageLog.provider == instance) & (UsageLog.model == model_id) | (UsageLog.model == selector)
+        for (instance, model_id), selector in by_pair.items()
+    ]
+    stmt = (
+        select(
+            UsageLog.provider,
+            UsageLog.model,
+            func.count().label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(UsageLog.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(UsageLog.cache_read_tokens), 0).label("cache_read_tokens"),
+            func.coalesce(func.sum(UsageLog.cost), 0).label("spend"),
+        )
+        .join(Workspace, col(Workspace.id) == UsageLog.workspace_id)
+        .where(
+            col(Workspace.organization_id) == organization_id,
+            UsageLog.timestamp >= since,
+            UsageLog.status == "success",
+            or_(*matches),
+        )
+        .group_by(UsageLog.provider, UsageLog.model)
+    )
+    usage: dict[str, OfferingUsage] = {}
+    for row in (await db.execute(stmt)).all():
+        selector = by_pair.get((row.provider or "", row.model))
+        if selector is None and row.model in by_pair.values():
+            selector = row.model
+        if selector is None:
+            continue
+        total = int(row.total_tokens)
+        prompt = int(row.prompt_tokens)
+        cached = int(row.cache_read_tokens)
+        spend = float(row.spend)
+        usage[selector] = OfferingUsage(
+            requests=int(row.requests),
+            total_tokens=total,
+            cache_read_tokens=cached,
+            spend_usd=spend,
+            cache_hit_rate=round(cached / prompt, 4) if prompt > 0 else None,
+            effective_price_per_million=round(spend / total * 1_000_000, 6) if total > 0 else None,
+        )
+    return usage
 
 
 async def _defaults_as_of(db: AsyncSession) -> datetime | None:
@@ -240,8 +344,9 @@ async def _group(
     config: GatewayConfig,
     merged: MergedCatalog,
     *,
-    auth: tuple[APIKey | None, bool],
+    caller: CatalogCaller,
     session_identity: TenancyUser | None,
+    with_usage: bool = False,
 ) -> _Grouped:
     catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
     now = normalize_effective_at(None)
@@ -253,10 +358,15 @@ async def _group(
         key=lambda obj: obj.id,
     )
 
-    organization_id = await _viewer_organization(db, auth, session_identity)
+    organization_id = await _viewer_organization(db, caller, session_identity)
     overrides = (
         await load_organization_override_index(db, organization_id, (obj.id for obj in real))
         if organization_id is not None
+        else {}
+    )
+    usage = (
+        await _usage_by_selector(db, organization_id, ((obj.id, *_split_selector(obj)) for obj in real))
+        if with_usage and organization_id is not None
         else {}
     )
 
@@ -295,7 +405,7 @@ async def _group(
                 selector=obj.id,
                 provider=instance,
                 provider_type=provider_type,
-                credential="deployment" if instance in config.providers else "organization",
+                credential=_credential(config, instance),
                 discovered=obj.id in merged.discovered_keys,
                 context_window=(metadata.context_window if metadata else None) or obj.context_window,
                 max_output_tokens=metadata.max_output_tokens if metadata else None,
@@ -303,6 +413,9 @@ async def _group(
                 pricing=pricing,
                 price_source=source,
                 price_reference=reference,
+                metadata_input_price_per_million=metadata.cost_input if metadata else None,
+                metadata_output_price_per_million=metadata.cost_output if metadata else None,
+                usage_30d=usage.get(obj.id),
             ),
             metadata=metadata,
         )
@@ -313,6 +426,13 @@ async def _group(
         catalog=catalog,
         configured_types=configured_types,
     )
+
+
+def _credential(config: GatewayConfig, instance: str) -> Credential:
+    """Whose key an instance runs on, from its name alone."""
+    if instance == "hosted":
+        return "hosted"
+    return "deployment" if instance in config.providers else "organization"
 
 
 def _first(values: Iterable[str | None]) -> str | None:
@@ -391,21 +511,31 @@ def _elsewhere(grouped: _Grouped, key: str, offered_types: set[str]) -> list[Cat
     ]
 
 
+async def _merged_for(
+    db: AsyncSession, config: GatewayConfig, caller: CatalogCaller, session_identity: TenancyUser | None
+) -> MergedCatalog:
+    if caller is None:
+        return await build_merged_catalog(db, config, auth=(None, False), session_identity=None, anonymous=True)
+    return await build_merged_catalog(db, config, auth=caller, session_identity=session_identity)
+
+
 @router.get("/models")
 async def list_catalog(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
 
     Prices are the caller's: an organization's override where one applies, else
     the deployment's row, else the genai-prices default. Aliases and routing
-    policies are not models and are not listed; see Routing.
+    policies are not models and are not listed; see Routing. A visitor, where
+    the catalog is public, sees the configured instances at the deployment's
+    rates and nothing that belongs to a tenant.
     """
-    merged = await build_merged_catalog(db, config, auth=auth, session_identity=session_identity)
-    grouped = await _group(db, config, merged, auth=auth, session_identity=session_identity)
+    merged = await _merged_for(db, config, caller, session_identity)
+    grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     models = [
         _summary(identity, [grouped.offerings[selector] for selector in identity.selectors])
         for identity in grouped.identities.values()
@@ -423,16 +553,18 @@ async def get_catalog_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
     A model the caller may not see answers 404, the same as one that does not
     exist, so the route cannot be used to probe the catalog behind an allow-list.
+    A signed-in caller's offerings also carry their organization's own usage of
+    each over the last 30 days.
     """
-    merged = await build_merged_catalog(db, config, auth=auth, session_identity=session_identity)
-    grouped = await _group(db, config, merged, auth=auth, session_identity=session_identity)
+    merged = await _merged_for(db, config, caller, session_identity)
+    grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity, with_usage=True)
     identity = next((identity for identity in grouped.identities.values() if identity.slug == model_id), None)
     if identity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")

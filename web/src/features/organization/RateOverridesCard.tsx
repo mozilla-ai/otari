@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
@@ -21,6 +21,7 @@ import { Dot } from "@/shared/components/indicators/Dot"
 import { Section } from "@/shared/components/layout/Section"
 import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatDateTime, formatRate } from "@/shared/helpers/format"
+import { useUrlValue } from "@/shared/helpers/urlState"
 import {
   PricingOverrideDialog,
   type PricingOverrideDraft,
@@ -102,6 +103,17 @@ export function RateOverridesCard() {
     setEditing(undefined)
     setDialogOpen(true)
   }
+
+  // The catalog's "Set your rate" link lands here with the selector in
+  // `?override=`, so an admin who may not set a deployment price still gets
+  // from a row they were comparing to the one editor that is theirs.
+  const requestedKey = useUrlValue("override")
+  useEffect(() => {
+    if (requestedKey && canEdit) {
+      setEditing(undefined)
+      setDialogOpen(true)
+    }
+  }, [requestedKey, canEdit])
 
   const openEdit = (override: OrganizationPricingOverride) => {
     setEditing(override)
@@ -266,6 +278,7 @@ export function RateOverridesCard() {
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
+        initialModelKey={requestedKey}
         existing={rows}
         isPending={create.isPending || replace.isPending}
         error={editing ? replace.error : create.error}
