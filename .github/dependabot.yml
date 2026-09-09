@@ -34,9 +34,6 @@ updates:
           - "minor"
           - "patch"
 
-  # No entry for the dashboard, deliberately. pnpm belongs to the "npm"
-  # ecosystem, but Dependabot documents pnpm support only through v10 and
-  # web/package.json requires pnpm 11.25.0, so an entry here would target a
-  # lockfile format it cannot resolve. Revisit when the supported-ecosystems
-  # table lists pnpm 11; until then web/ dependencies move by hand or through a
-  # tool that supports pnpm 11 (Renovate does).
+  # No entry for the dashboard: Dependabot documents pnpm support only through
+  # v10 and web/ requires pnpm 11, so one would target a lockfile format it
+  # cannot resolve. Tracked in #1001.
