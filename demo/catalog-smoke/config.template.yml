@@ -1,0 +1,122 @@
+# Seed for demo/catalog-smoke/run.sh. The placeholders are filled by the
+# script; everything else is a normal config.yml.
+#
+# Discovery is off and every key is fake, so nothing here dials a provider: the
+# catalog is the priced selectors below, and models.dev is fetched live for
+# descriptions, limits and capabilities. The selectors are real provider ids,
+# chosen so several providers serve one model and the spellings differ.
+
+master_key: __MASTER_KEY__
+database_url: sqlite:///__DB__
+
+model_discovery: false
+models_dev_metadata: true
+require_pricing: false
+default_pricing: true
+
+providers:
+  openai:
+    api_key: sk-fake
+  anthropic:
+    api_key: sk-fake
+  nebius:
+    api_key: sk-fake
+  fireworks:
+    api_key: sk-fake
+  groq:
+    api_key: sk-fake
+  deepinfra:
+    api_key: sk-fake
+  cerebras:
+    api_key: sk-fake
+  # A self-hosted OpenAI-compatible box: models.dev knows nothing about it, so
+  # its rows show what a model with no metadata looks like.
+  home_lab:
+    provider_type: openai
+    api_base: "http://10.0.0.5:8000/v1"
+    api_key: none
+
+pricing:
+  # One open model on five providers, with a 5x spread on input and an 8x
+  # spread on max output once models.dev fills the limits in.
+  "groq:openai/gpt-oss-120b":
+    input_price_per_million: 0.15
+    output_price_per_million: 0.60
+    cache_read_price_per_million: 0.075
+  "deepinfra:openai/gpt-oss-120b":
+    input_price_per_million: 0.037
+    output_price_per_million: 0.17
+  "fireworks:accounts/fireworks/models/gpt-oss-120b":
+    input_price_per_million: 0.15
+    output_price_per_million: 0.60
+    cache_read_price_per_million: 0.015
+  "nebius:openai/gpt-oss-120b":
+    input_price_per_million: 0.15
+    output_price_per_million: 0.60
+    cache_read_price_per_million: 0.015
+  "cerebras:gpt-oss-120b":
+    input_price_per_million: 0.35
+    output_price_per_million: 0.75
+
+  # The Fireworks spellings: a path prefix and p for the decimal point.
+  "nebius:zai-org/GLM-5.3":
+    input_price_per_million: 0.5
+    output_price_per_million: 2.0
+    cache_read_price_per_million: 0.05
+  "fireworks:accounts/fireworks/models/glm-5p3":
+    input_price_per_million: 0.7
+    output_price_per_million: 2.5
+  "nebius:zai-org/GLM-5.3-Flash":
+    input_price_per_million: 0.1
+    output_price_per_million: 0.4
+  "fireworks:accounts/fireworks/models/glm-5p3-flash":
+    input_price_per_million: 0.12
+    output_price_per_million: 0.45
+
+  "nebius:moonshotai/Kimi-K2.6":
+    input_price_per_million: 0.6
+    output_price_per_million: 2.4
+  "fireworks:accounts/fireworks/models/kimi-k2p6":
+    input_price_per_million: 0.6
+    output_price_per_million: 2.5
+
+  # A dated build and the base model stay two entries.
+  "fireworks:accounts/fireworks/models/deepseek-v4-pro":
+    input_price_per_million: 1.2
+    output_price_per_million: 3.0
+  "fireworks:accounts/fireworks/models/deepseek-v4-pro-0813":
+    input_price_per_million: 1.2
+    output_price_per_million: 3.0
+  "deepinfra:deepseek-ai/DeepSeek-V4-Pro":
+    input_price_per_million: 0.9
+    output_price_per_million: 2.7
+
+  # Vendor-served frontier models, one provider each.
+  "anthropic:claude-sonnet-4-6":
+    input_price_per_million: 3.0
+    output_price_per_million: 15.0
+    cache_read_price_per_million: 0.3
+    cache_write_price_per_million: 3.75
+  "anthropic:claude-opus-4-8":
+    input_price_per_million: 15.0
+    output_price_per_million: 75.0
+    cache_read_price_per_million: 1.5
+  "openai:gpt-5":
+    input_price_per_million: 1.25
+    output_price_per_million: 10.0
+    cache_read_price_per_million: 0.125
+  "openai:gpt-5-mini":
+    input_price_per_million: 0.25
+    output_price_per_million: 2.0
+
+  # Self-hosted, unknown to models.dev: a singleton with no description.
+  "home_lab:qwen3-32b":
+    input_price_per_million: 0
+    output_price_per_million: 0
+
+  # A gateway-run tool, priced per million requests, so the Tools page and the
+  # pricing table have a non-token row to show.
+  "otari:web_search":
+    input_price_per_million: 5000
+    output_price_per_million: 0
+    unit: requests
