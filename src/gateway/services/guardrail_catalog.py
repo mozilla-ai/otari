@@ -1,8 +1,8 @@
 """The guardrail catalog behind the dashboard's mandate form.
 
 A profile is not a name this repository knows. It is a key in the operator's own
-``service.yaml`` on the any-guardrail sidecar, which builds one guardrail per
-entry at boot, so the set of profiles a deployment has is the sidecar's to state
+``service.yaml`` on the guardrails service, which builds one guardrail per
+entry at boot, so the set of profiles a deployment has is that service's to state
 and never ours to guess. The catalog is therefore a join of two sources, neither
 of them a list written here:
 
@@ -16,7 +16,7 @@ of them a list written here:
   #206). Nothing here constructs a guardrail; only the registry is read.
 
 Only ``validate``-stage parameters are published. The ``create`` stage is the
-sidecar's constructor, fixed by the operator's YAML at boot, so an organization
+guardrails service's constructor, fixed by the operator's YAML at boot, so an organization
 that could set one would be storing a value nothing sends: ``POST /validate``
 takes ``validate_kwargs`` and nothing else. That is the same reason
 ``extra_kwargs_for_creation`` has no column on an organization guardrail (see
@@ -43,7 +43,7 @@ from gateway.log_config import logger
 from gateway.services.url_safety import redact_url_secrets
 
 # Short, because this runs while an operator watches a settings page load. The
-# sidecar answers `/profiles` out of memory (it holds its built guardrails), so a
+# guardrails service answers `/profiles` out of memory (it holds its built guardrails), so a
 # slow answer means the host is struggling rather than the work being large.
 _CATALOG_TIMEOUT_S = 5.0
 
@@ -132,7 +132,7 @@ def _parameter_specs(guardrail: str) -> tuple[list[GuardrailParameterSpec], bool
     """The validate-stage parameters of one any-guardrail class, and whether they are known.
 
     A class name the installed registry has never heard of is reported rather
-    than raised: the sidecar may run a newer any-guardrail than this gateway, and
+    than raised: the guardrails service may run a newer any-guardrail than this gateway, and
     a profile whose fields cannot be typed is still a profile an organization can
     mandate and configure through the raw editor.
     """

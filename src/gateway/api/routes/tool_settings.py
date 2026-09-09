@@ -209,8 +209,8 @@ async def list_guardrail_profiles(
 
     Not on ``verify_catalog_reader``, despite being a catalog read: that plane is
     the three deployment-describing reads a data-plane key may also make, and
-    admitting a key here would let any workspace credential dial the operator's
-    sidecar. This is a management read, so it takes the router's own gate.
+    admitting a key here would let any workspace credential dial the deployment's
+    guardrails service. This is a management read, so it takes the router's own gate.
     """
     return await fetch_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
