@@ -261,7 +261,11 @@ async def test_an_unparseable_destination_is_refused(async_db: AsyncSession) -> 
         # and every one of them used to skip the gate: the earlier split checked
         # the webhook schemas and assumed everything else posted to a vendor
         # endpoint compiled into its plugin.
-        "mailto://user:pw@10.0.0.5",
+        #
+        # ``mailto`` belongs to this group and is not here: Apprise's mail plugin
+        # refuses an IP-literal host before the gate is reached, and a hostname
+        # would make the case depend on runner DNS. Its classification is covered
+        # in ``tests/unit/test_url_safety.py`` instead.
         "gotify://192.168.1.9/token",
         "ntfy://169.254.169.254/topic",
         "matrixs://user:pw@127.0.0.1/",

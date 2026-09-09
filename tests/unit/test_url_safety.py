@@ -3,8 +3,11 @@
 import pytest
 
 from gateway.services.url_safety import (
+    ALERT_SCHEMES_WITH_FIXED_ENDPOINT,
+    ALERT_SCHEMES_WITH_OPERATOR_HOST,
     UnsafeURLError,
     redact_url_secrets,
+    validate_alert_destination,
     validate_mcp_url,
     validate_outbound_fetch_url,
     validate_provider_api_base,
@@ -234,3 +237,70 @@ async def test_provider_api_base_on_keeps_allow_all(monkeypatch: pytest.MonkeyPa
 )
 def test_redact_url_secrets_masks_credentials_without_raising(raw: str, expected: str) -> None:
     assert redact_url_secrets(raw) == expected
+
+
+# --------------------------------------------------------------------------
+# Alert destinations
+# --------------------------------------------------------------------------
+#
+# The two scheme groups are the SSRF gate, so what is in each one is worth
+# asserting directly. IP literals throughout: `_reject_internal_host` takes the
+# literal branch and never resolves, so none of this needs DNS.
+
+
+@pytest.mark.parametrize(
+    "scheme",
+    [
+        # The ones a self-hosted deployment reaches for, and the six that
+        # previously made up the whole gate.
+        "mailto",
+        "mailtos",
+        "gotify",
+        "ntfy",
+        "matrix",
+        "rocket",
+        "mmost",
+        "ncloud",
+        "json",
+        "jsons",
+        "xml",
+        "form",
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_schema_that_names_a_host_is_address_checked(scheme: str) -> None:
+    """Every one of these dials the host in the URL, so every one is checked.
+
+    `mailto` is the case that motivated the split: it is advertised on the form
+    and in the docs, Apprise sends it to the SMTP server named in the URL, and
+    the earlier gate let it through because it was not one of the six
+    webhook-shaped schemas.
+    """
+    assert scheme in ALERT_SCHEMES_WITH_OPERATOR_HOST
+    with pytest.raises(UnsafeURLError):
+        await validate_alert_destination(scheme, "169.254.169.254")
+
+
+@pytest.mark.parametrize("scheme", ["slack", "discord", "pagerduty", "tgram"])
+@pytest.mark.asyncio
+async def test_a_fixed_endpoint_schema_has_no_address_to_check(scheme: str) -> None:
+    """The netloc is a token, so checking it would reject a working rule."""
+    assert scheme in ALERT_SCHEMES_WITH_FIXED_ENDPOINT
+    await validate_alert_destination(scheme, "10")
+
+
+@pytest.mark.asyncio
+async def test_a_public_host_is_accepted() -> None:
+    await validate_alert_destination("json", "93.184.216.34")
+
+
+@pytest.mark.asyncio
+async def test_a_host_bearing_schema_with_no_host_is_refused() -> None:
+    """Fail closed. A schema in the checked group must produce something to check."""
+    with pytest.raises(UnsafeURLError):
+        await validate_alert_destination("json", None)
+
+
+def test_the_two_scheme_groups_do_not_overlap() -> None:
+    """A schema in both would be checked or skipped depending on read order."""
+    assert not (ALERT_SCHEMES_WITH_OPERATOR_HOST & ALERT_SCHEMES_WITH_FIXED_ENDPOINT)
