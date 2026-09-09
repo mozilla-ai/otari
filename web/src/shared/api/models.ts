@@ -12,12 +12,17 @@ import {
   NO_RETRY,
 } from "@/shared/api/queryKeys"
 
-export function useModels() {
+// `enabled` is not the operator composition the reads below use: the catalog is
+// readable by any signed-in caller and is already narrowed server-side to what
+// that caller could route to. It is for a page with nothing to ask about yet,
+// such as an overview before a workspace is selected.
+export function useModels(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [MODELS],
     queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
     staleTime: 60_000,
+    enabled,
   })
 }
 

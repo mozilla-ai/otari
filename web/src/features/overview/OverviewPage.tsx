@@ -14,6 +14,7 @@ import {
 } from "@/features/overview/overview"
 import { useKeys } from "@/shared/api/apiKeys"
 import { useBudgets } from "@/shared/api/budgets"
+import { useModels } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import {
@@ -321,12 +322,20 @@ export function OverviewIndex() {
  * accounts) stay on the operator page, whose endpoints refuse this caller.
  */
 function OrganizationOverview() {
-  const { today, period, previous, recent } = useUsageOverview()
+  const { scope, today, period, previous, recent } = useUsageOverview()
+  // What this caller could route a request to, which is the setup guide's gate
+  // here. `/v1/providers` is the operator page's answer to the same question and
+  // refuses this caller; the catalog is deliberately not operator-gated and the
+  // server already narrows it to the organization's own providers, so an empty
+  // one is an honest "nothing to send a request to yet". Not asked on paint
+  // until a workspace is selected, since the guide is about one.
+  const models = useModels(scope !== undefined)
 
   // Recent activity is excluded for the operator page's reason: it renders its
   // own inline banner, so including it here would double-report. The previous
   // window is included: its only reader is the trend chips, so its failure
-  // would otherwise just silently strip them.
+  // would otherwise just silently strip them. The catalog is excluded too: it
+  // decides whether an optional offer appears, not whether this page is right.
   const loadError = today.error ?? period.error ?? previous.error
 
   const refresh = () => {
@@ -334,12 +343,16 @@ function OrganizationOverview() {
     void period.refetch()
     void previous.refetch()
     void recent.refetch()
+    // Included so a caller who has just been given a provider key can bring the
+    // guide out with the button already in front of them.
+    void models.refetch()
   }
   const isRefreshing =
     today.isFetching ||
     period.isFetching ||
     previous.isFetching ||
-    recent.isFetching
+    recent.isFetching ||
+    models.isFetching
 
   return (
     <div className="flex flex-col gap-6">
@@ -354,6 +367,13 @@ function OrganizationOverview() {
           />
         }
       />
+
+      {/* The tenant's first request is the one this deployment is waiting on, so
+          the guide belongs here and not only on the operator page. It decides
+          for itself whether to render; nothing above gates on the catalog
+          query's fetching state, which is what keeps the card's own observer of
+          it from looping (see `SetupGuideCard`). */}
+      <SetupGuideCard canServeRequests={(models.data?.data.length ?? 0) > 0} />
 
       <ErrorBanner error={loadError} />
 
@@ -549,7 +569,7 @@ export function OverviewPage({
           key and watch for the first request. It decides for itself whether to
           render, including holding back while there is no provider, which is
           when the strip above is the right guide instead. */}
-      <SetupGuideCard hasProviders={hasProviders} />
+      <SetupGuideCard canServeRequests={hasProviders} />
 
       <ErrorBanner error={loadError} />
 

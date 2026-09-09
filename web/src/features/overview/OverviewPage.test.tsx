@@ -18,6 +18,7 @@ import {
   HOSTED_SURFACES,
   organizationContext,
   usageTotals,
+  workspaceActivation,
   workspaceMember,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -72,6 +73,22 @@ interface Bodies {
   /** One workspace's roster, keyed by workspace id. */
   workspaceMembers?: Record<string, unknown[]>
   context?: Parameters<typeof organizationContext>[0]
+  /** Where the selected workspace stands on its first request. */
+  activation?: unknown
+  /** Model ids the caller's catalog reports, which is what the guide gates on. */
+  models?: string[]
+}
+
+function modelCatalog(ids: string[]) {
+  return {
+    object: "list",
+    data: ids.map((id) => ({
+      id,
+      object: "model",
+      created: 0,
+      owned_by: "openai",
+    })),
+  }
 }
 
 // Order matters: /v1/usage/summary is matched BEFORE the bare /v1/usage logs
@@ -94,6 +111,12 @@ function mockApi(b: Bodies) {
     const roster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
     if (roster) {
       return jsonResponse({ data: b.workspaceMembers?.[roster[1]] ?? [] })
+    }
+    if (url.includes("/activation")) {
+      return jsonResponse(b.activation ?? workspaceActivation())
+    }
+    if (url.includes("/v1/models")) {
+      return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     if (url.includes("/v1/usage/summary")) {
       if (url.includes("bucket=hour"))
@@ -799,7 +822,9 @@ function mockScopedApi(b: Bodies): string[] {
     const url = String(input)
     requested.push(url)
     if (url.endsWith("/v1/organizations/me")) {
-      return jsonResponse(organizationContext({ deployment_operator: false }))
+      return jsonResponse(
+        organizationContext({ deployment_operator: false, ...b.context }),
+      )
     }
     if (url.includes("/v1/organizations/me/usage/summary")) {
       if (url.includes("bucket=hour"))
@@ -809,6 +834,17 @@ function mockScopedApi(b: Bodies): string[] {
     }
     if (url.includes("/v1/organizations/me/usage")) {
       return jsonResponse(b.logs ?? [])
+    }
+    // The two reads the setup guide adds to this page. Both are open to any
+    // signed-in caller: the catalog is scoped to the caller's own providers
+    // rather than operator-gated, and the activation read answers every member
+    // who can see the workspace, reporting per caller whether the guide is on
+    // offer.
+    if (url.includes("/activation")) {
+      return jsonResponse(b.activation ?? workspaceActivation())
+    }
+    if (url.includes("/v1/models")) {
+      return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)
   })
@@ -1047,5 +1083,77 @@ describe("OverviewIndex operator-ness", () => {
     for (const url of asked) {
       expect(url).toContain("/v1/organizations/me/usage")
     }
+  })
+})
+
+// Who may be offered the first-request guide is the server's answer:
+// `WorkspaceActivationService._is_eligible` ends in
+// `has_workspace_management_access` and is reported as `experience_eligible` per
+// caller. Operating the deployment is no part of that answer, so the guide
+// belongs on whichever Overview the caller landed on (otari-ai#2080).
+describe("the setup guide on either Overview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("offers it to a caller who does not operate the deployment", async () => {
+    const requested = mockScopedApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(
+      await screen.findByRole("heading", { name: "Send your first request" }),
+    ).toBeInTheDocument()
+    // On the tenant page, rather than by falling through to the operator one.
+    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
+    // And its gate came from the catalog, which this caller may read, and not
+    // from the operator-gated provider list.
+    expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
+    expect(requested.some((url) => url.endsWith("/v1/providers"))).toBe(false)
+  })
+
+  it("still offers it to an operator", async () => {
+    mockApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(
+      await screen.findByRole("heading", { name: "Send your first request" }),
+    ).toBeInTheDocument()
+  })
+
+  it("shows nothing to a caller the server reports ineligible", async () => {
+    mockScopedApi({
+      context: TWO_WORKSPACES,
+      activation: workspaceActivation({ experience_eligible: false }),
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await screen.findByText(
+      "At-a-glance spend, traffic, and recent activity in your organization.",
+    )
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: "Send your first request" }),
+      ).not.toBeInTheDocument()
+    })
+  })
+
+  it("holds back, without asking, while the caller can route nowhere", async () => {
+    // An empty catalog is the tenant's form of "no provider configured": a key
+    // handed out here would be for a call that must fail, so the guide is not
+    // offered and the activation read is never made.
+    const requested = mockScopedApi({ context: TWO_WORKSPACES, models: [] })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    await screen.findByText(
+      "At-a-glance spend, traffic, and recent activity in your organization.",
+    )
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
+    expect(requested.some((url) => url.includes("/activation"))).toBe(false)
   })
 })

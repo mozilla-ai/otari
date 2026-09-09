@@ -38,6 +38,12 @@ import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
  * API key scoped to the selected workspace, shows the two calls that use it, and
  * watches the workspace's traffic until one lands.
  *
+ * **Offered on both Overviews, not only the operator's.** Who may be offered it
+ * is the server's answer (`experience_eligible`, which ends in
+ * `has_workspace_management_access`), so the caller doing a deployment's first
+ * request is whoever manages the workspace, and on a multi-tenant deployment
+ * that is a tenant rather than the person who operates it.
+ *
  * **Deliberately a panel and not a modal.** The platform's equivalent
  * (`otari-ai` `frontend/src/features/onboarding`) is a blocking sheet over the
  * whole app, which suits a hosted signup: the account is new, the first request
@@ -51,29 +57,32 @@ import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
  * Overview page.
  */
 export function SetupGuideCard({
-  hasProviders,
+  canServeRequests,
 }: {
   /**
-   * Whether the deployment has a provider configured, which is the caller's
-   * answer to give rather than this card's to fetch.
+   * Whether a request from this caller could succeed, which is the page's
+   * answer to give rather than this card's to fetch. Each Overview reads it off
+   * what it may see: the operator's from `/v1/providers`, which refuses a
+   * tenant, and the organization's from the model catalog, which is scoped to
+   * that caller's own providers.
    *
-   * Not a `useProviders()` call in here, and that is load-bearing: the page
-   * above decides whether to render at all from the *fetching* state of that
-   * same query, so a second observer inside a child re-triggers it on mount,
-   * flips the page back to its loading branch, and unmounts the observer that
-   * asked, which remounts and asks again. One query, one owner.
+   * Not a query of its own in here, and that is load-bearing: a page that
+   * decides whether to render at all from the *fetching* state of the same
+   * query would see a second observer inside a child re-trigger it on mount,
+   * flip back to its loading branch, and unmount the observer that asked, which
+   * remounts and asks again. One query, one owner.
    */
-  hasProviders: boolean
+  canServeRequests: boolean
 }) {
   const surfaces = useSurfaces()
   const { selected } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id ?? null
-  // Held back until the deployment can actually serve a request: with no
-  // provider the Overview's own getting-started panel is the right guide, and
-  // this one would be handing out a key for a call that cannot succeed.
+  // Held back until the deployment can actually serve a request: with nothing to
+  // route to this would be handing out a key for a call that cannot succeed, and
+  // on the operator page the getting-started panel is the right guide instead.
   const activation = useWorkspaceActivation(
     workspaceId,
-    surfaces("workspaces") && hasProviders,
+    surfaces("workspaces") && canServeRequests,
   )
 
   if (!workspaceId || !activation.data) {
@@ -83,7 +92,7 @@ export function SetupGuideCard({
   return (
     // Keyed on the workspace, which is what discards the guide's own state when
     // the switcher moves: the issued key belongs to one workspace, and so do
-    // "this session saw the offer" and "the operator dismissed the payoff".
+    // "this session saw the offer" and "somebody dismissed the payoff".
     // Without the key, switching workspaces would leave workspace A's key on
     // screen under workspace B's heading.
     <SetupGuide
@@ -115,11 +124,11 @@ function SetupGuide({
   const dismiss = useDismissActivation()
   const [issued, setIssued] = useState<ActivationApiKey>()
   const [finished, setFinished] = useState(false)
-  // Only a press the operator made, never the background poll: `isFetching`
+  // Only a press somebody made, never the background poll: `isFetching`
   // would put the button in its pending state every few seconds on its own.
   const [isChecking, setIsChecking] = useState(false)
   // The card only celebrates a first request it was present for. Without this
-  // latch, an operator who never opened the guide would be congratulated on the
+  // latch, somebody who never opened the guide would be congratulated on the
   // traffic they already had, on the next page load after it arrived.
   const wasOffered = useRef(false)
 
@@ -219,7 +228,7 @@ function SetupGuide({
   )
 }
 
-/** The key, and the two calls that use it, once the operator has asked for one. */
+/** The key, and the two calls that use it, once somebody has asked for one. */
 function IssuedKey({ issued }: { issued: ActivationApiKey }) {
   const models = useModels()
   // The first model the gateway can serve, so the snippets are runnable as
