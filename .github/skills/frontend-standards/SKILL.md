@@ -35,8 +35,10 @@ the same component with the variant union narrowed to the three that exist, whic
 retired variant a compile error instead of a silently unstyled button.
 
 Every primitive has a story beside it. `pnpm --dir web run storybook` is the catalog, and
-`.github/workflows/otari-design-system.yml` publishes it and renders every story in both
-themes on each PR.
+`.github/workflows/otari-design-system.yml` publishes it from main. A PR is gated on the
+catalog building; the sweep that renders every story in both themes runs on main and on
+demand, so run it locally (`pnpm --dir web exec node .storybook/smoke.mjs`, about ten
+seconds) before pushing a story.
 
 [web/AGENTS.md](../../../web/AGENTS.md) owns the structure and is worth reading first: the
 `features/` / `shared/` / `app/` layout it mirrors from `otari-ai/frontend`, the three

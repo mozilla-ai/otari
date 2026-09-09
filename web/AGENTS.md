@@ -11,7 +11,7 @@ topic guide it points to for the work at hand.
 
 [design/DESIGN.md](design/DESIGN.md) is the design system: what to reach for, which
 variant applies where, which token layer is allowed, and which components exist but
-must not be used in new code. It is ten short topic files, so load only the one
+must not be used in new code. It is eleven short topic files, so load only the one
 covering what you are building. Written for a reader who cannot ask a question,
 which is what an agent is.
 

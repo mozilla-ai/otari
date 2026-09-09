@@ -13,9 +13,12 @@ thing you look at.
 ## Published
 
 `.github/workflows/otari-design-system.yml` publishes it to GitHub Pages from
-`main`, and runs the smoke test below on every pull request touching `web/`, so
-a story that stops compiling or stops rendering fails the PR rather than rotting
-until somebody opens the site.
+`main`. A pull request touching `web/` is gated on the catalog *building*, which
+is where a story that stops compiling fails, and that takes about a minute. The
+smoke sweep below runs on main and on demand rather than per PR: it takes
+seconds locally and over twenty minutes on a hosted runner, which is six times
+the slowest existing job. So run it locally before pushing, which is where it is
+fast.
 
 `STORYBOOK_BASE_PATH` is why the published build resolves its assets: Pages
 serves a project site under `/<repo>/`, and the merged `vite.config.ts` carries

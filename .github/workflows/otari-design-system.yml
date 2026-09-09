@@ -3,11 +3,27 @@ name: Otari Design System
 # Publishes web/.storybook as the design system's reference: every primitive
 # with its variants, states and both themes.
 #
-# Two jobs on purpose. `catalog` runs on every pull request touching the
-# dashboard and is the gate: it builds the catalog and renders every story in
-# both themes, so a component whose story stops compiling (or stops rendering)
-# fails here rather than rotting unnoticed until somebody opens the site. Only
-# `publish` needs Pages, and it runs on main alone.
+# Three jobs, split by what each costs.
+#
+# `catalog` is the pull request gate: it builds the catalog, which is where a
+# story that stops compiling fails, and it takes about a minute.
+#
+# `render` walks all 327 stories in both themes in headless Chromium, and it is
+# deliberately NOT a pull request gate. It takes seconds locally and more than
+# twenty minutes on a hosted runner, and the cause has not been pinned down (the
+# per-navigation cost is roughly 45 times the local one; a cold browser cache and
+# the default `raf` polling were both ruled out or fixed and neither accounts for
+# it). Six times the slowest existing job, on every `web/` change, is not a trade
+# worth making for a check that has never yet failed on anything the build did
+# not already catch. So it runs on main and on demand, which is exactly how
+# `otari-dashboard.yml` treats the screenshot suite and for the same reason.
+#
+# The gap this leaves is real and worth stating: a story that compiles but throws
+# at render reaches main, and `render` is what reports it there. Reduce that by
+# running the sweep locally before pushing, which is where it is fast:
+# `pnpm --dir web exec node .storybook/smoke.mjs`.
+#
+# Only `publish` needs Pages, and it runs on main alone.
 on:
   push:
     branches: [ main ]
@@ -63,15 +79,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
 
-    # Chromium only: the smoke run below drives it, and the screenshot suite's
-    # browsers are another workflow's business.
-    - name: Install Chromium
-      run: pnpm run e2e:install
-
-    # `/otari/` because Pages serves a project site under the repository name,
-    # and the merged vite.config.ts carries the app's own `base: "/"`. Set for
-    # the pull-request build too, so the artifact a reviewer downloads is the
-    # same build that would publish rather than a differently-based one.
     - name: Build the catalog
       env:
         STORYBOOK_BASE_PATH: /${{ github.event.repository.name }}/
@@ -83,6 +90,58 @@ jobs:
     # renders all of them in headless Chromium in both themes and reports any
     # that error, come up empty, or log an uncaught exception.
     #
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: design-system-catalog
+        path: web/storybook-static
+        retention-days: 14
+
+    # Only main publishes. The artifact above is what a pull request gets, which
+    # is enough to review a component's variants without giving every branch the
+    # ability to overwrite the reference site.
+    - name: Upload the Pages artifact
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      with:
+        path: web/storybook-static
+
+  # The full sweep. On main and on demand, for the reason in the header.
+  render:
+    needs: catalog
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        package_json_file: web/package.json
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 'lts/*'
+        cache: pnpm
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    # Chromium only: the sweep drives it, and the screenshot suite's browsers
+    # are another workflow's business.
+    - name: Install Chromium
+      run: pnpm run e2e:install
+
+    - name: Build the catalog
+      run: pnpm run storybook:build
+
     # It serves the static build rather than the dev server, because the static
     # build is what publishes and so is what should be proven.
     #
@@ -103,23 +162,11 @@ jobs:
         pnpm exec node .storybook/smoke.mjs | tee smoke.log
         grep -q "ALL RENDERED CLEAN" smoke.log
 
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: design-system-catalog
-        path: web/storybook-static
-        retention-days: 14
-
-    # Only main publishes. The artifact above is what a pull request gets, which
-    # is enough to review a component's variants without giving every branch the
-    # ability to overwrite the reference site.
-    - name: Upload the Pages artifact
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-      with:
-        path: web/storybook-static
-
   publish:
-    needs: catalog
+    # Both, and `render` is the load-bearing one: publishing on `catalog` alone
+    # would put a catalog live while the check that renders it is still running,
+    # so a story that throws would be on the site before anything said so.
+    needs: [catalog, render]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # `pages: write` and `id-token: write` are what deploy-pages needs to claim

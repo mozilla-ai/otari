@@ -47,6 +47,13 @@ Two directories are the exception, and both sit outside the design system rather
 than inside it: `@/shared/components/access/` and
 `@/shared/components/deprecated/`. See "The extraction contract" below for why.
 
+Three directory names inside it are coined rather than borrowed from a topic
+file, so nobody mistakes them for the system's own vocabulary: `indicators/` and
+`access/` were named in [module-map.md](module-map.md), and `content/` is named
+here, for rendered prose. `helpers/` and `hooks/` are the layer's internals
+(`clipboard`, the two display formatters, `useConfirmationFocus`); a page reaches
+for a component, not for those.
+
 | Module | Exports you will reach for |
 | --- | --- |
 | `@heroui/react` | `Button`, `Select`, `Tooltip`, `Spinner`, and the rest of HeroUI v3 |
@@ -81,6 +88,7 @@ than inside it: `@/shared/components/access/` and
 | `indicators/Dot` · `/Badge` · `/DismissChip` · `/Kbd` · `/Avatar` | one each |
 | `indicators/Chip` | `Chip`, and the `ChipTone` type |
 | `layout/Divider` | `Divider` |
+| `content/Markdown` | `Markdown` |
 | `ProductMark` | `ProductMark`. At the top level: it belongs to no topic |
 | `@/shared/components/access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | one each |
 | `@/shared/helpers/format` | `formatUsd`, `formatUsdHeadline`, `formatNumber`, `formatTokens`, `formatPct`, `formatDate`, `formatDateTime`, `formatRelative`, `deltaFraction` |
@@ -182,9 +190,10 @@ same system as artboards (foundations, components with every state, page
 archetypes). The **component catalog** has it as running code: every component
 here with its variants, its states and both themes, one story per axis. Run it
 with `pnpm --dir web run storybook`; `.github/workflows/otari-design-system.yml`
-publishes it and renders every story on the way, so a story that stops
-compiling or stops rendering fails a pull request rather than rotting. See
-[web/.storybook/README.md](../.storybook/README.md).
+publishes it from main and gates a pull request on it building. Rendering every
+story is a separate sweep, on main and on demand, and it is worth running
+locally before pushing. See [web/.storybook/README.md](../.storybook/README.md)
+for both and for why they are split.
 
 ## Components that exist but must not be used in new code
 
