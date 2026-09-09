@@ -1,4 +1,6 @@
+import json
 from collections.abc import AsyncIterator, Generator
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -1860,6 +1862,70 @@ def _single_attempt_resolve_response(*, request_id: str) -> httpx.Response:
             ],
         },
     )
+
+
+_WEB_ACCESS_CONTRACT_CASES = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "web_access_resolution_contract.json").read_text()
+)["cases"]
+
+
+@pytest.mark.parametrize("case", _WEB_ACCESS_CONTRACT_CASES, ids=lambda case: str(case["name"]))
+def test_hybrid_mode_web_access_contract_matrix(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    case: dict[str, Any],
+) -> None:
+    """Mirror the control-plane request and response contract through the HTTP route."""
+    requested_tools = case["expected_requested_tools"]
+    if "web_search" in requested_tools:
+        monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    else:
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+
+    web_resolve_bodies: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id=f"contract-{case['name']}")
+        if url.endswith("/gateway/web-search/resolve"):
+            web_resolve_bodies.append(body)
+            return httpx.Response(200, json=case["platform_response"])
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-web-access-contract",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="answer"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": case["tools"],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == case["expected_status"]
+    assert web_resolve_bodies == [{"requested_tools": requested_tools}]
 
 
 def test_hybrid_mode_web_search_403_when_disabled(

@@ -1263,6 +1263,59 @@ async def test_invalid_managed_web_declarations_release_reservation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tools",
+    [
+        [{"type": "otari_web_search"}, {"type": "web_search_20250305"}],
+        [{"type": "web_search"}, {"type": "web_search_20250305"}],
+    ],
+)
+async def test_intercepted_search_declarations_must_be_unique(
+    monkeypatch: pytest.MonkeyPatch,
+    tools: list[dict[str, Any]],
+) -> None:
+    monkeypatch.setattr(pipeline, "resolve_workspace_web_search_config", AsyncMock(return_value=None))
+    ctx = _ctx(
+        GatewayConfig(
+            require_pricing=False,
+            web_search_url="https://search.example",
+            web_search_intercept=True,
+        ),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, tools=tools)
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    organization_resolve = AsyncMock(return_value=[])
+    mcp_resolve = AsyncMock(return_value=[])
+    monkeypatch.setattr(pipeline, "_resolve_organization_guardrails", organization_resolve)
+    monkeypatch.setattr(pipeline, "_resolve_mcp_server_ids", mcp_resolve)
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            tools=[{"type": "otari_web_fetch", "headers": {}}],
+            mcp_server_ids=[uuid.uuid4()],
+        )
+
+    assert exc_info.value.status_code == 400
+    organization_resolve.assert_not_awaited()
+    mcp_resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = ResolvedWebSearchConfig(
         enabled=True,

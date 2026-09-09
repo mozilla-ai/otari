@@ -2480,7 +2480,11 @@ def _validate_managed_web_declarations(
 ) -> None:
     """Reject ambiguous managed declarations before any policy or network I/O."""
     entries = [entry for entry in tools or [] if isinstance(entry, dict)]
-    search_count = sum(entry.get("type") == "otari_web_search" for entry in entries)
+    search_count = sum(
+        entry.get("type") == "otari_web_search"
+        or (intercept_web_search and _is_provider_web_search_tool_type(entry.get("type")))
+        for entry in entries
+    )
     fetch_count = sum(entry.get("type") == "otari_web_fetch" for entry in entries)
     if search_count > 1 or fetch_count > 1:
         raise adapter.error(400, WEB_TOOL_DUPLICATE_DETAIL, ErrorKind.INVALID_REQUEST)
@@ -2494,8 +2498,6 @@ def _validate_managed_web_declarations(
         for name, count in ((WEB_SEARCH_TOOL_NAME, search_count), (WEB_FETCH_TOOL_NAME, fetch_count))
         if count
     }
-    if intercept_web_search and any(_is_provider_web_search_tool_type(entry.get("type")) for entry in entries):
-        managed_names.add(WEB_SEARCH_TOOL_NAME)
     if any(_function_tool_name(entry) in managed_names for entry in entries):
         raise adapter.error(400, WEB_TOOL_RESERVED_NAME_DETAIL, ErrorKind.INVALID_REQUEST)
 
@@ -2581,6 +2583,13 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
+        intercept_web_search = _web_search_intercept_enabled(ctx.config) and ctx.config.web_search_configured()
+        _validate_managed_web_declarations(
+            adapter,
+            tools,
+            intercept_web_search=intercept_web_search,
+        )
+
         # The organization's and the policy's guardrails are merged in here
         # rather than at each route, so every completion endpoint enforces a
         # mandate identically and none can forget to. `guardrails` as passed is
@@ -2640,12 +2649,6 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
             mcp_servers = (mcp_servers or []) + stored_servers
 
-        intercept_web_search = _web_search_intercept_enabled(ctx.config) and ctx.config.web_search_configured()
-        _validate_managed_web_declarations(
-            adapter,
-            tools,
-            intercept_web_search=intercept_web_search,
-        )
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         # Read the effective config value (dashboard override / env / YAML), falling
         # back to the env var so pure-env deployments are unchanged. A dashboard
