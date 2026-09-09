@@ -164,15 +164,17 @@ describe("WorkspacesPage", () => {
   it("frames the create form as a band of the page", async () => {
     mockApi({})
     const user = userEvent.setup()
-    const { container } = renderPage(<WorkspacesPage />)
+    renderPage(<WorkspacesPage />)
 
     await user.click(
       await screen.findByRole("button", { name: "Create workspace" }),
     )
 
-    const band = container.querySelector("section.otari-bleed.border-y")
+    // Reached from the field rather than from the page, because a page is
+    // several bands and only this one frames the form.
+    const band = screen.getByLabelText("Name").closest("section.otari-bleed")
     expect(band).not.toBeNull()
-    expect(band).toContainElement(screen.getByLabelText("Name"))
+    expect(band).toHaveClass("border-y")
   })
 
   it("puts a refused create on the name that caused it, not in a banner", async () => {
