@@ -30,8 +30,9 @@ from gateway.api.routes._pipeline import (
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
     failure_status_code,
+    provider_error_headers,
 )
-from gateway.api.routes._platform import _provider_failure_http_exc
+from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
@@ -235,6 +236,81 @@ def test_a_non_error_response_status_does_not_shadow_the_real_status() -> None:
     # joining it to ``message`` would hand the caller the sentence twice, the
     # second time inside a JSON dump.
     assert mapping.detail == "You exceeded your current quota. Please retry in 34.6s."
+
+
+# ---------------------------------------------------------------------------
+# Retry-After: the one upstream header a rate-limited caller can act on
+# ---------------------------------------------------------------------------
+
+
+def _rate_limited_with(retry_after: str) -> Exception:
+    """A 429 whose attached response carries ``retry_after``."""
+    exc = _StatusError(429)
+    exc.response = httpx.Response(429, headers={"Retry-After": retry_after})  # type: ignore[attr-defined]
+    return exc
+
+
+def test_retry_after_is_forwarded_on_a_429() -> None:
+    assert provider_error_headers(_rate_limited_with("34"), 429) == {"Retry-After": "34"}
+
+
+def test_retry_after_rounds_a_fraction_up() -> None:
+    """A client honoring the header must not retry before the window the
+    provider named, so 0.4s becomes 1s rather than 0s."""
+    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {"Retry-After": "1"}
+
+
+def test_retry_after_is_clamped() -> None:
+    """A provider does not get to tell this gateway's callers to sleep for a
+    year."""
+    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {"Retry-After": "86400"}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Wed, 21 Oct 2015 07:28:00 GMT",  # the HTTP-date form, deliberately dropped
+        "soon",
+        "-5",
+        "",
+        "12\r\nX-Injected: 1",
+        # float() accepts these and math.ceil raises OverflowError on them.
+        # This runs inside error handling, so a raise would turn the rate limit
+        # into a 500.
+        "inf",
+        "1e400",
+        "nan",
+    ],
+)
+def test_retry_after_that_is_not_a_number_is_dropped(raw: str) -> None:
+    """The value is re-serialized from a parsed number, never relayed as
+    received: a header value is not a body, and CRLF in one is not a formatting
+    problem."""
+    assert provider_error_headers(_rate_limited_with(raw), 429) is None
+
+
+def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
+    """A 401 surfaces as a fixed-detail 502. Its Retry-After would describe the
+    gateway's own upstream account, which is not the caller's to read."""
+    exc = _StatusError(401)
+    exc.response = httpx.Response(401, headers={"Retry-After": "34"})  # type: ignore[attr-defined]
+    assert provider_error_headers(exc, 502) is None
+
+
+def test_retry_after_absent_sends_no_header() -> None:
+    assert provider_error_headers(_StatusError(429), 429) is None
+
+
+def test_retry_after_read_through_the_exception_chain() -> None:
+    """Read through ``original_exception`` like the other upstream readers, so
+    it survives any-llm's unified-exception wrapping."""
+    assert upstream_retry_after(_WrappedError(429, _rate_limited_with("7"))) == "7"
+
+
+def test_platform_terminal_exc_forwards_retry_after() -> None:
+    exc = _provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
+    assert exc.status_code == 429
+    assert exc.headers == {"Retry-After": "34"}
 
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])

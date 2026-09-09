@@ -34,6 +34,7 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     default_attempt_kwargs,
     prepare_gateway_tools,
+    provider_error_headers,
     raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
@@ -257,11 +258,17 @@ def _is_minted_pair_member(
     return block_type == "mcp_tool_result" and block.get("tool_use_id") in minted_mcp_ids
 
 
-def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
+def _anthropic_error(
+    error_type: str,
+    message: str,
+    status_code: int,
+    headers: dict[str, str] | None = None,
+) -> HTTPException:
     """Create an HTTPException with Anthropic-style error body."""
     return HTTPException(
         status_code=status_code,
         detail={"type": "error", "error": {"type": error_type, "message": message}},
+        headers=headers,
     )
 
 
@@ -406,14 +413,25 @@ class _MessagesAdapter:
     # behavior this endpoint has always had.
     log_success_without_usage = False
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
-        return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code)
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
+        return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
             error_type = _STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
-            return _anthropic_error(error_type, mapping.detail, mapping.status_code)
+            return _anthropic_error(
+                error_type,
+                mapping.detail,
+                mapping.status_code,
+                provider_error_headers(exc, mapping.status_code),
+            )
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def format_chunk(self, chunk: MessageStreamEvent) -> str:

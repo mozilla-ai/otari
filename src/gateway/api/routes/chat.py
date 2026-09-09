@@ -25,6 +25,7 @@ from gateway.api.routes._pipeline import (
     default_attempt_kwargs,
     log_usage,
     prepare_gateway_tools,
+    provider_error_headers,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
     resolve_dispatch_provider,
@@ -154,13 +155,23 @@ class _ChatAdapter:
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
-        return HTTPException(status_code=status_code, detail=message)
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
+        return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
-            return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+            return HTTPException(
+                status_code=mapping.status_code,
+                detail=mapping.detail,
+                headers=provider_error_headers(exc, mapping.status_code),
+            )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,

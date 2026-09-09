@@ -9,6 +9,7 @@ gateway's own fault keeps a fixed detail and never echoes upstream text.
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
 from fastapi.testclient import TestClient
@@ -111,6 +112,36 @@ def test_chat_rate_limit_falls_back_when_the_provider_said_nothing(
 
     assert response.status_code == 429
     assert response.json()["detail"] == PROVIDER_RATE_LIMITED_DETAIL
+
+
+def test_chat_forwards_the_upstream_retry_after(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """The one upstream header a rate-limited caller can act on reaches the
+    wire, so a client can honor the provider's own backoff window instead of
+    guessing one."""
+
+    class _RateLimited(Exception):
+        def __init__(self) -> None:
+            super().__init__("Quota exceeded.")
+            self.status_code = 429
+            self.response = httpx.Response(429, headers={"Retry-After": "34"})
+
+    with patch(
+        "gateway.api.routes.chat.acompletion",
+        new_callable=AsyncMock,
+        side_effect=_RateLimited(),
+    ):
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "34"
 
 
 def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(

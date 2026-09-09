@@ -12,6 +12,7 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
+import math
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -244,11 +245,15 @@ def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> H
     """
     # Deferred import: _pipeline imports this module, so importing it at module
     # scope would be circular.
-    from gateway.api.routes._pipeline import classify_provider_error
+    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers
 
     mapping = classify_provider_error(exc)
     if mapping is not None:
-        return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+        return HTTPException(
+            status_code=mapping.status_code,
+            detail=mapping.detail,
+            headers=provider_error_headers(exc, mapping.status_code),
+        )
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail)
 
 
@@ -809,6 +814,50 @@ def upstream_error_message(exc: BaseException) -> str:
                 seen.add(stripped)
                 parts.append(stripped)
     return " ".join(parts)
+
+
+# A day. A provider (or a confused proxy in front of one) does not get to tell
+# this gateway's callers to sleep for a year.
+_MAX_RETRY_AFTER_SECONDS = 86400
+
+
+def upstream_retry_after(exc: BaseException) -> str | None:
+    """The upstream ``Retry-After`` as whole seconds, or ``None``.
+
+    Read from the exception's own headers or its attached response's, whichever
+    carries them, walking the ``original_exception`` chain like the other
+    upstream readers here.
+
+    The value is re-serialized from a parsed number rather than relayed as
+    received, so nothing a provider chooses reaches a response header the
+    gateway emits: a header value is not a body, and CRLF in one is not a
+    formatting problem. Fractional seconds round up, since a client honoring
+    the header must not retry before the window the provider named. The
+    HTTP-date form is dropped rather than parsed, because no provider sends one
+    here and a value that cannot be bounded is not one to relay.
+    """
+    for current in upstream_exception_chain(exc):
+        for holder in (current, getattr(current, "response", None)):
+            # Mapping-like but not necessarily a Mapping: httpx.Headers here, a
+            # plain dict where an SDK copies them out.
+            get_header = getattr(getattr(holder, "headers", None), "get", None)
+            if not callable(get_header):
+                continue
+            raw = get_header("retry-after") or get_header("Retry-After")
+            if not isinstance(raw, str):
+                continue
+            try:
+                parsed = float(raw.strip())
+            except ValueError:
+                continue
+            # ``float`` accepts "inf" and "1e400", and ``math.ceil`` raises
+            # OverflowError on both. This runs inside error handling, so an
+            # exception here would turn a rate limit into a 500.
+            if not math.isfinite(parsed) or parsed < 0:
+                continue
+            seconds = math.ceil(parsed)
+            return str(min(seconds, _MAX_RETRY_AFTER_SECONDS))
+    return None
 
 
 def is_provider_billing_error(exc: BaseException) -> bool:

@@ -89,6 +89,7 @@ from gateway.api.routes._platform import (
     upstream_error_message,
     upstream_exception_chain,
     upstream_exception_shape,
+    upstream_retry_after,
 )
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
@@ -542,6 +543,25 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     return None
 
 
+def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, str] | None:
+    """Response headers for a classified provider failure, or ``None``.
+
+    Forwards the upstream ``Retry-After`` on a 429, which is the one header a
+    rate-limited caller can act on and the one piece of a provider's rate-limit
+    response that its message body cannot always carry. Restricted to the 429:
+    on the statuses that surface as a fixed-detail 502 the header would describe
+    the gateway's own upstream account, which is not the caller's to read.
+
+    Returns ``None`` rather than an empty dict when there is nothing to send, so
+    ``HTTPException(headers=...)`` stays unset instead of being handed a dict
+    that adds nothing.
+    """
+    if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+        return None
+    retry_after = upstream_retry_after(exc)
+    return {"Retry-After": retry_after} if retry_after is not None else None
+
+
 def failure_status_code(exc: BaseException) -> int:
     """The HTTP status to record on the usage log for an upstream failure.
 
@@ -628,7 +648,13 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     endpoint: str
     stream_format: StreamFormat
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
         """Build the format's wire error for ``status_code`` / ``message``."""
         ...
 
@@ -4149,7 +4175,12 @@ def raise_all_streaming_attempts_failed(
     if kind == "timeout":
         raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
     if status_code == 429:
-        raise adapter.error(429, ALL_PROVIDERS_RATE_LIMITED_DETAIL, ErrorKind.RATE_LIMIT) from exc
+        raise adapter.error(
+            429,
+            ALL_PROVIDERS_RATE_LIMITED_DETAIL,
+            ErrorKind.RATE_LIMIT,
+            provider_error_headers(exc, 429),
+        ) from exc
     raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
 
 
