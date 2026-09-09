@@ -32,13 +32,21 @@ print(asyncio.run(acompletion(
 )))
 ```
 
-| Belongs in [any-llm](https://github.com/mozilla-ai/any-llm/issues) | Belongs in Otari |
-| --- | --- |
-| A provider is unsupported, or needs a new implementation | Keys, users, orgs, workspaces, budgets, usage records, pricing |
-| A request param is dropped or mistranslated on the way to a provider SDK | Route schemas, the OpenAPI spec, the Anthropic and Responses envelopes |
-| A provider's response or stream chunks are not normalized to the OpenAI shape | Routing, fallback across attempts, routing memory |
-| `list_models` behavior, provider capability flags, credential env var names, default base URLs | `config.yml` layering, the `providers:` block, provider instances and aliases |
-| A provider SDK upgrade breaks the call itself | The dashboard, built-in tools, the MCP loop, guardrails, hybrid mode |
+**File it in [any-llm](https://github.com/mozilla-ai/any-llm/issues) if:**
+
+- a provider is unsupported, or needs a new implementation
+- a request param is dropped or mistranslated on the way to a provider SDK
+- a provider's response or stream chunks are not normalized to the OpenAI shape
+- `list_models` behavior, a provider capability flag, a credential env var name, or a default base URL is wrong
+- a provider SDK upgrade breaks the call itself
+
+**File it here if it touches:**
+
+- keys, users, orgs, workspaces, budgets, usage records, or pricing
+- route schemas, the OpenAPI spec, or the Anthropic and Responses envelopes
+- routing, fallback across attempts, or routing memory
+- `config.yml` layering, the `providers:` block, or provider instances and aliases
+- the dashboard, built-in tools, the MCP loop, guardrails, or hybrid mode
 
 Two things that look upstream but are ours: the per-provider setup guides in
 `docs/providers/`, and how a provider error becomes a status code and a
