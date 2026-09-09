@@ -1,9 +1,8 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
-
+import { useSignup } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
-import { useSignup } from "@/shared/api/hooks"
-import { ErrorBanner } from "@/shared/components/ui"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { emailFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,
@@ -201,7 +200,7 @@ export function SignupPage({ hash }: { hash: string }) {
         />
 
         {problem ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-caption text-danger">
             {problem}
           </p>
         ) : null}

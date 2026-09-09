@@ -289,7 +289,27 @@ async def get_file(
     return record.to_dict()
 
 
-@router.get("/files/{file_id}/content")
+@router.get(
+    "/files/{file_id}/content",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "File content. Content-Type reflects the stored media type; application/octet-stream is the fallback."
+            ),
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+                "*/*": {"schema": {"type": "string", "format": "binary"}},
+            },
+            "headers": {
+                "Content-Disposition": {
+                    "description": "Attachment filename, with a UTF-8 filename* parameter for non-ASCII names.",
+                    "schema": {"type": "string"},
+                }
+            },
+        }
+    },
+)
 async def get_file_content(
     file_id: str,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],

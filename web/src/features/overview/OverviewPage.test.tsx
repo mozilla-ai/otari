@@ -11,12 +11,18 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  apiKey,
   bootstrap,
   HOSTED_SURFACES,
   organizationContext,
+  organizationSpendCeiling,
+  seriesPoint,
   usageTotals,
+  workspaceActivation,
+  workspaceMember,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -27,7 +33,10 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
+function summary(
+  totals: Partial<UsageSummary["totals"]>,
+  series: UsageSummary["series"] = [],
+): UsageSummary {
   return {
     start_date: "2026-06-22T00:00:00Z",
     end_date: "2026-07-22T00:00:00Z",
@@ -53,7 +62,7 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
     by_provider: [],
     by_tool: [],
     errors_by_status_code: [],
-    series: [],
+    series,
   }
 }
 
@@ -61,12 +70,36 @@ interface Bodies {
   today?: Partial<UsageSummary["totals"]>
   period?: Partial<UsageSummary["totals"]>
   prev?: Partial<UsageSummary["totals"]>
+  /** The 30-day daily series, which is what the spend chart draws. */
+  series?: UsageSummary["series"]
   health?: unknown
   budgets?: unknown
+  /** The organization's spend ceilings, which is the tenant's budget signal. */
+  ceilings?: unknown
   keys?: unknown
   users?: unknown
   logs?: unknown
   providers?: unknown
+  /** One workspace's roster, keyed by workspace id. */
+  workspaceMembers?: Record<string, unknown[]>
+  context?: Parameters<typeof organizationContext>[0]
+  /** Where the selected workspace stands on its first request. */
+  activation?: unknown
+  /** Model ids the caller's catalog reports, which is what the guide gates on. */
+  models?: string[]
+}
+
+/** The catalog shape `/v1/models` answers, which is the setup guide's gate. */
+function modelCatalog(ids: string[]) {
+  return {
+    object: "list",
+    data: ids.map((id) => ({
+      id,
+      object: "model",
+      created: 0,
+      owned_by: "openai",
+    })),
+  }
 }
 
 // Order matters: /v1/usage/summary is matched BEFORE the bare /v1/usage logs
@@ -81,13 +114,26 @@ function mockApi(b: Bodies) {
     // routes or the organization-scoped ones (otari#837). Answered first, and
     // on an exact match, so it cannot shadow /v1/organizations/me/usage.
     if (url.endsWith("/v1/organizations/me")) {
-      return jsonResponse(organizationContext())
+      return jsonResponse(organizationContext(b.context))
+    }
+    // The rail's roster is per workspace, so the id in the path picks the
+    // answer. A `Paged` envelope and not a bare array: this one goes through
+    // `fetchAllPaged`, which reads `body.data` and pages until a short one.
+    const roster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
+    if (roster) {
+      return jsonResponse({ data: b.workspaceMembers?.[roster[1]] ?? [] })
+    }
+    if (url.includes("/activation")) {
+      return jsonResponse(b.activation ?? workspaceActivation())
+    }
+    if (url.includes("/v1/models")) {
+      return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     if (url.includes("/v1/usage/summary")) {
       if (url.includes("bucket=hour"))
         return jsonResponse(summary(b.today ?? {}))
       if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
-      return jsonResponse(summary(b.period ?? {}))
+      return jsonResponse(summary(b.period ?? {}, b.series))
     }
     if (url.includes("/v1/providers/health")) {
       return jsonResponse(
@@ -106,6 +152,7 @@ function mockApi(b: Bodies) {
   })
 }
 
+/** Reports where a navigation landed, for the routes `renderPage` mounts. */
 function LocationProbe() {
   const loc = useLocation()
   return <div data-testid="loc">{loc.pathname}</div>
@@ -139,10 +186,115 @@ function renderPage(
   )
 }
 
+/**
+ * The same page with a workspace actually selected.
+ *
+ * `renderPage` deliberately mounts no switcher, so `useSelectedWorkspace`
+ * answers NO_WORKSPACE there and every scoped query is disabled. The rail's
+ * roster is one of those, so a test about it has to seat the provider, which
+ * seeds itself from `workspace_memberships` on the organization context.
+ */
+function renderPageInWorkspace(
+  ui: ReactElement,
+  selected: string,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
+  window.localStorage.setItem("otari.dashboard.selectedWorkspace", selected)
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={deployment}>
+        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+      </DeploymentProvider>
+    </QueryClientProvider>,
+    {
+      wrapper: withRouter({
+        url: "/overview",
+        routes: [
+          { path: "/providers", element: <LocationProbe /> },
+          { path: "/organization/provider-keys", element: <LocationProbe /> },
+        ],
+      }),
+    },
+  )
+}
+
+const WORKSPACE_A = "44444444-4444-4444-4444-444444444444"
+const WORKSPACE_B = "55555555-5555-5555-5555-555555555555"
+
+const TWO_WORKSPACES = {
+  workspace_memberships: [
+    { workspace_id: WORKSPACE_A, name: "Default Workspace", role: "owner" },
+    { workspace_id: WORKSPACE_B, name: "Staging", role: "member" },
+  ],
+}
+
 describe("OverviewPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.useRealTimers()
+    window.localStorage.clear()
+  })
+
+  // The rail is headed "This workspace", so its member count has to move with
+  // the switcher. It read the organization's roster before, which is a superset:
+  // an organization member need not be in the workspace, so the count both
+  // overcounted the rail and stayed put when the selection changed. Two
+  // workspaces with different rosters is the case that tells those apart, since
+  // one workspace alone cannot show a count failing to move.
+  it("counts the selected workspace's own active members in the rail", async () => {
+    mockApi({
+      context: TWO_WORKSPACES,
+      workspaceMembers: {
+        [WORKSPACE_A]: [
+          workspaceMember({ id: "a1" }),
+          workspaceMember({ id: "a2" }),
+          // Invited, not active: on the roster and not in the count.
+          workspaceMember({ id: "a3", status: "invited" }),
+        ],
+        [WORKSPACE_B]: [
+          workspaceMember({ id: "b1", workspace_id: WORKSPACE_B }),
+        ],
+      },
+    })
+
+    renderPageInWorkspace(<OverviewPage />, WORKSPACE_A)
+
+    const rail = (await screen.findByText("This workspace")).closest("section")
+    expect(rail).not.toBeNull()
+    await waitFor(() => {
+      expect(
+        within(rail as HTMLElement).getByText("Active members").parentElement,
+      ).toHaveTextContent("2")
+    })
+  })
+
+  it("moves that count when a different workspace is selected", async () => {
+    mockApi({
+      context: TWO_WORKSPACES,
+      workspaceMembers: {
+        [WORKSPACE_A]: [
+          workspaceMember({ id: "a1" }),
+          workspaceMember({ id: "a2" }),
+          workspaceMember({ id: "a3", status: "invited" }),
+        ],
+        [WORKSPACE_B]: [
+          workspaceMember({ id: "b1", workspace_id: WORKSPACE_B }),
+        ],
+      },
+    })
+
+    renderPageInWorkspace(<OverviewPage />, WORKSPACE_B)
+
+    const rail = (await screen.findByText("This workspace")).closest("section")
+    expect(rail).not.toBeNull()
+    await waitFor(() => {
+      expect(
+        within(rail as HTMLElement).getByText("Active members").parentElement,
+      ).toHaveTextContent("1")
+    })
   })
 
   it("uses a zero-padded, one-based local calendar date as its refresh key", () => {
@@ -164,7 +316,12 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("$200.00")).toBeInTheDocument()
     expect(screen.getByText("2,000")).toBeInTheDocument()
     expect(screen.getByText("2.0%")).toBeInTheDocument()
-    expect(screen.getByText("Elevated")).toBeInTheDocument() // error-rate status word (non-hue)
+    // The status word, paired with a dot so severity never rides on hue alone.
+    // Uppercased in the mark, so the assertion is on the rendered casing.
+    expect(screen.getByText("ELEVATED")).toBeInTheDocument()
+    // And the rate's denominator, which is what the cell states instead of a
+    // sparkline it has no series for.
+    expect(screen.getByText("40 of 2,000 requests")).toBeInTheDocument()
   })
 
   it("renders period-over-period change as a trend chip, not a glyph", async () => {
@@ -220,11 +377,11 @@ describe("OverviewPage", () => {
     expect(screen.getAllByText("up")).toHaveLength(1)
   })
 
-  it("reserves no trend row for a tile with no comparable previous window", async () => {
+  it("reserves no trend row for a cell with no comparable previous window", async () => {
     // No previous window on the wire leaves every delta null, and TrendChip
     // renders nothing for a null fraction. The chip has to be gated on the
-    // fraction rather than on the query, or StatCard reserves the aside row for
-    // an element that draws nothing.
+    // fraction rather than on the query: the *element* is truthy either way,
+    // and a cell handed one keeps a line for something that draws nothing.
     mockApi({
       today: { cost: 5 },
       period: { cost: 200, request_count: 2000, error_count: 40 },
@@ -351,7 +508,20 @@ describe("OverviewPage", () => {
     })
     renderPage(<OverviewPage />)
     expect(await screen.findByText("125.0%")).toBeInTheDocument() // 25 / (10*2)
-    expect(screen.getByText("Over budget")).toBeInTheDocument()
+    expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
+    // The meter names the budget it is reporting on, so the graphic is not a
+    // decoration a screen reader has to skip past. `progressbar` and not `img`:
+    // it is the same `SpendMeter` the Budgets table uses now, which reports a
+    // value rather than being a picture of one, and it also says in words how
+    // far past the limit this budget is.
+    const meter = screen.getByRole("progressbar", {
+      name: /Worst budget usage/,
+    })
+    expect(meter).toBeInTheDocument()
+    expect(meter).toHaveAttribute(
+      "aria-valuetext",
+      "125% of limit — over budget",
+    )
   })
 
   it("summarizes provider health and surfaces problems in the status strip", async () => {
@@ -664,16 +834,43 @@ function mockScopedApi(b: Bodies): string[] {
     const url = String(input)
     requested.push(url)
     if (url.endsWith("/v1/organizations/me")) {
-      return jsonResponse(organizationContext({ deployment_operator: false }))
+      return jsonResponse(
+        organizationContext({ deployment_operator: false, ...b.context }),
+      )
     }
     if (url.includes("/v1/organizations/me/usage/summary")) {
       if (url.includes("bucket=hour"))
         return jsonResponse(summary(b.today ?? {}))
       if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
-      return jsonResponse(summary(b.period ?? {}))
+      return jsonResponse(summary(b.period ?? {}, b.series))
     }
     if (url.includes("/v1/organizations/me/usage")) {
       return jsonResponse(b.logs ?? [])
+    }
+    // The tenant surface the rest of the page reads: the organization's spend
+    // ceilings behind the budget cell (owner or admin, in a `Paged` envelope),
+    // its own keys, and the selected workspace's roster, which any member of
+    // that workspace may read.
+    if (url.includes("/v1/organizations/me/spend-ceilings")) {
+      return jsonResponse({ data: b.ceilings ?? [] })
+    }
+    if (url.includes("/v1/organizations/me/keys")) {
+      return jsonResponse(b.keys ?? [])
+    }
+    const scopedRoster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
+    if (scopedRoster) {
+      return jsonResponse({ data: b.workspaceMembers?.[scopedRoster[1]] ?? [] })
+    }
+    // The two reads the setup guide adds to this page. Both are open to any
+    // signed-in caller: the catalog is scoped to the caller's own providers
+    // rather than operator-gated, and the activation read answers every member
+    // who can see the workspace, reporting per caller whether the guide is on
+    // offer.
+    if (url.includes("/activation")) {
+      return jsonResponse(b.activation ?? workspaceActivation())
+    }
+    if (url.includes("/v1/models")) {
+      return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)
   })
@@ -705,22 +902,17 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     ).not.toBeInTheDocument()
   })
 
-  it("reads only the organization-scoped surface and shows no operator tile", async () => {
+  it("reads only the organization-scoped surface", async () => {
     const requested = mockScopedApi({
       period: { cost: 200, request_count: 2000 },
     })
     renderPage(<OverviewIndex />)
     await screen.findByText("$200.00")
 
-    // The deployment-wide panels stay on the operator page: no tile here reads
-    // budgets, keys, or the deployment roster.
-    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
-    expect(screen.queryByText("Active keys")).not.toBeInTheDocument()
-    expect(screen.queryByText("Active members")).not.toBeInTheDocument()
-    // And nothing left the scoped surface: beyond the context, every request
-    // this page made names /v1/organizations/me/usage. A bare /v1/usage read
-    // here would be a cross-tenant read the server refuses, so the page must
-    // not even attempt it.
+    // Nothing left the scoped surface: beyond the context, every request this
+    // page made is under /v1/organizations/me. A bare /v1/usage, /v1/budgets or
+    // /v1/keys read here would be a deployment-wide one the server refuses, so
+    // the page must not even attempt it, and neither must it ask the gate.
     expect(requested.some((url) => url.endsWith("/v1/admin/access"))).toBe(
       false,
     )
@@ -729,8 +921,28 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     )
     expect(scoped.length).toBeGreaterThan(0)
     for (const url of scoped) {
-      expect(url).toContain("/v1/organizations/me/usage")
+      expect(url).toContain("/v1/organizations/me/")
     }
+  })
+
+  it("shows no deployment-wide panel", async () => {
+    mockScopedApi({ period: { cost: 200, request_count: 2000 } })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    // Provider health and the deployment's budgets are the attention strip's
+    // two sources and both are operator surfaces, so the strip is correctly
+    // absent here rather than merely empty (otari-ai#2085).
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Some status data could not be loaded."),
+    ).not.toBeInTheDocument()
+    // And the header is the tenant's, not the gateway's.
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).not.toBeInTheDocument()
   })
 
   it("previews the caller's recent requests with a link to the full log", async () => {
@@ -812,6 +1024,236 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     renderPage(<OverviewIndex />)
 
     expect(await screen.findByText(/usage exploded/)).toBeInTheDocument()
+  })
+})
+
+// The parity gaps otari-ai#2085 is about, all on the page a caller who does not
+// operate the deployment lands on. Note what is *not* asserted anywhere below:
+// no entitlement (base otari has no entitlements server), no surface (nothing
+// publishes one for this), and no operator check, which is what this page is
+// the other branch of.
+describe("the tenant Overview's budget signal", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("shows an organization admin their tightest spend ceiling", async () => {
+    const requested = mockScopedApi({
+      context: { role: "admin" },
+      period: { cost: 200, request_count: 2000 },
+      ceilings: [
+        organizationSpendCeiling({ current_spend: 50, max_budget: 250 }),
+        organizationSpendCeiling({
+          id: "dddddddd-1111-2222-3333-444444444444",
+          name: "Staging cap",
+          current_spend: 180,
+          reserved_spend: 20,
+          max_budget: 250,
+        }),
+      ],
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText("Budget health")).toBeInTheDocument()
+    // 200 of 250, reserved included: a ceiling refuses on spend plus what is
+    // held against requests in flight, so the cell judges the same sum.
+    expect(await screen.findByText("80.0%")).toBeInTheDocument()
+    expect(screen.getByText("NEAR LIMIT")).toBeInTheDocument()
+    // The same meter the Spend page's own rows draw, naming the row it is about.
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Tightest spend ceiling: Staging cap",
+      }),
+    ).toBeInTheDocument()
+    expect(
+      requested.some((url) =>
+        url.includes("/v1/organizations/me/spend-ceilings"),
+      ),
+    ).toBe(true)
+    // And never `/v1/budgets`, the operator cell's endpoint, which is
+    // deployment-wide and answers 403 to this caller.
+    expect(requested.some((url) => url.includes("/v1/budgets"))).toBe(false)
+  })
+
+  it("counts a ceiling this organization cannot edit", async () => {
+    // `manageable` says whose figure it is, not whose spend. A ceiling naming a
+    // budget the organization does not own is enforcing against it today, so
+    // reading that field as a filter would let the page report "on track" while
+    // the tenant is over the cap that is actually refusing their requests.
+    mockScopedApi({
+      context: { role: "admin" },
+      ceilings: [
+        organizationSpendCeiling({
+          name: "Deployment cap",
+          manageable: false,
+          current_spend: 300,
+          max_budget: 250,
+        }),
+      ],
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText("120.0%")).toBeInTheDocument()
+    expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
+  })
+
+  it("withholds the cell from a member, without asking for it", async () => {
+    // The matrix has Spend & budgets Hidden for a member, and the server agrees:
+    // both halves of the organization budget surface go through
+    // `require_active_organization_management_access`. So the query is not made
+    // rather than made and its refusal painted.
+    const requested = mockScopedApi({
+      context: { role: "member" },
+      period: { cost: 200, request_count: 2000 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
+    expect(
+      requested.some((url) =>
+        url.includes("/v1/organizations/me/spend-ceilings"),
+      ),
+    ).toBe(false)
+  })
+
+  it("reads a failed ceiling query as unknown, not as zero spend", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(
+          organizationContext({ deployment_operator: false, role: "admin" }),
+        )
+      }
+      if (url.includes("/v1/organizations/me/spend-ceilings")) {
+        return jsonResponse({ detail: "ceilings exploded" }, 500)
+      }
+      if (url.includes("/v1/organizations/me/usage/summary")) {
+        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
+      }
+      return jsonResponse([])
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText(/ceilings exploded/)).toBeInTheDocument()
+    const cell = (await screen.findByText("Budget health")).parentElement
+    expect(cell).not.toBeNull()
+    // An em dash and "no data", never a percentage: a refused read that renders
+    // as 0% claims the tenant has spent nothing (otari-ai#1935, #1961).
+    expect(within(cell as HTMLElement).getByText("—")).toBeInTheDocument()
+    expect(within(cell as HTMLElement).getByText("no data")).toBeInTheDocument()
+    expect(
+      within(cell as HTMLElement).queryByRole("progressbar"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("says so when the organization has capped nothing", async () => {
+    mockScopedApi({ context: { role: "admin" }, ceilings: [] })
+    renderPage(<OverviewIndex />)
+
+    // Awaited, not read off the first paint: an unresolved query and an empty
+    // list both leave the value an em dash, and only the subline tells them
+    // apart.
+    const subline = await screen.findByText("no spend ceilings set")
+    expect(subline.closest("div")).toHaveTextContent("Budget health")
+  })
+})
+
+describe("the tenant Overview's chart and rail", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("draws the month's shape under the numbers", async () => {
+    mockScopedApi({
+      period: { cost: 200, request_count: 2000 },
+      series: [
+        seriesPoint({ bucket_start: "2026-07-01T00:00:00Z", cost: 10 }),
+        seriesPoint({ bucket_start: "2026-07-02T00:00:00Z", cost: 30 }),
+      ],
+    })
+    renderPage(<OverviewIndex />)
+
+    // The heading, not the KPI cell's label of the same words.
+    expect(
+      await screen.findByRole("heading", { name: "Spend, last 30 days" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /view usage/i })).toHaveAttribute(
+      "href",
+      "/usage",
+    )
+  })
+
+  it("counts the tenant's own keys and the workspace's roster", async () => {
+    const requested = mockScopedApi({
+      context: { ...TWO_WORKSPACES, role: "admin" },
+      keys: [
+        apiKey(),
+        apiKey({ id: "key-2", is_active: false }),
+        apiKey({ id: "key-3" }),
+      ],
+      workspaceMembers: {
+        [WORKSPACE_A]: [
+          workspaceMember({ id: "a1" }),
+          workspaceMember({ id: "a2" }),
+          workspaceMember({ id: "a3", status: "invited" }),
+        ],
+      },
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    const rail = (await screen.findByText("This workspace")).closest("section")
+    expect(rail).not.toBeNull()
+    await waitFor(() => {
+      expect(
+        within(rail as HTMLElement).getByText("Active keys").parentElement,
+      ).toHaveTextContent("2")
+    })
+    await waitFor(() => {
+      expect(
+        within(rail as HTMLElement).getByText("Active members").parentElement,
+      ).toHaveTextContent("2")
+    })
+    // Their own key list, which is the surface otari-ai#1941 gave them, and not
+    // the deployment-wide `/v1/keys` the operator page reads.
+    expect(
+      requested.some((url) => url.includes("/v1/organizations/me/keys")),
+    ).toBe(true)
+  })
+
+  it("offers a member only the destinations that will serve them", async () => {
+    mockScopedApi({ context: { role: "member" }, period: { cost: 200 } })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    const rail = (await screen.findByText("This workspace")).closest("section")
+    expect(rail).not.toBeNull()
+    const inRail = within(rail as HTMLElement)
+    expect(inRail.getByRole("link", { name: "API keys" })).toBeInTheDocument()
+    expect(inRail.getByRole("link", { name: "Activity" })).toBeInTheDocument()
+    // Members and Budgets are reached through the organization rail, which
+    // `AppShell` opens only to a caller who manages the organization, and both
+    // destinations refuse a member on the server too.
+    expect(
+      inRail.queryByRole("link", { name: "Budgets" }),
+    ).not.toBeInTheDocument()
+    expect(
+      inRail.queryByRole("link", { name: "Members" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("offers an admin all four", async () => {
+    mockScopedApi({ context: { role: "admin" }, period: { cost: 200 } })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    const rail = (await screen.findByText("This workspace")).closest("section")
+    expect(rail).not.toBeNull()
+    const inRail = within(rail as HTMLElement)
+    expect(inRail.getByRole("link", { name: "Budgets" })).toBeInTheDocument()
+    expect(inRail.getByRole("link", { name: "Members" })).toBeInTheDocument()
   })
 })
 
@@ -910,7 +1352,93 @@ describe("OverviewIndex operator-ness", () => {
     )
     expect(asked.length).toBeGreaterThan(0)
     for (const url of asked) {
-      expect(url).toContain("/v1/organizations/me/usage")
+      expect(url).toContain("/v1/organizations/me/")
     }
+    // The ceilings among them: an errored context names no role, and the page
+    // withholds a read the server may refuse rather than painting its refusal.
+    expect(
+      asked.some((url) => url.includes("/v1/organizations/me/spend-ceilings")),
+    ).toBe(false)
+  })
+})
+
+// Who may be offered the first-request guide is the server's answer:
+// `WorkspaceActivationService._is_eligible` ends in
+// `has_workspace_management_access` and is reported as `experience_eligible` per
+// caller. Operating the deployment is no part of that answer, so the guide
+// belongs on whichever Overview the caller landed on (otari-ai#2080).
+describe("the setup guide on either Overview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("offers it to a caller who does not operate the deployment", async () => {
+    const requested = mockScopedApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(
+      await screen.findByRole("heading", { name: "Send your first request" }),
+    ).toBeInTheDocument()
+    // On the tenant page, rather than by falling through to the operator one.
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).not.toBeInTheDocument()
+    // And its gate came from the catalog, which this caller may read, and not
+    // from the operator-gated provider list.
+    expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
+    expect(requested.some((url) => url.endsWith("/v1/providers"))).toBe(false)
+  })
+
+  it("still offers it to an operator", async () => {
+    mockApi({ context: TWO_WORKSPACES })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    expect(
+      await screen.findByRole("heading", { name: "Send your first request" }),
+    ).toBeInTheDocument()
+  })
+
+  it("shows nothing to a caller the server reports ineligible", async () => {
+    const requested = mockScopedApi({
+      context: TWO_WORKSPACES,
+      activation: workspaceActivation({ experience_eligible: false }),
+    })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    // Anchored on the answer this test varies. Without it the negative passes on
+    // its first tick, before the activation read has been made at all, and would
+    // read the same for an eligible caller.
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/activation"))).toBe(true)
+    })
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("holds back, without asking, while the caller can route nowhere", async () => {
+    // An empty catalog is the tenant's form of "no provider configured": a key
+    // handed out here would be for a call that must fail, so the guide is not
+    // offered and the activation read is never made.
+    const requested = mockScopedApi({ context: TWO_WORKSPACES, models: [] })
+    renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
+
+    // Settled, not merely issued: the Refresh control is disabled while any of
+    // this page's queries is in flight, the catalog included, so an enabled one
+    // is the empty answer having landed rather than being on its way.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+    })
+    expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
+    expect(requested.some((url) => url.includes("/activation"))).toBe(false)
   })
 })

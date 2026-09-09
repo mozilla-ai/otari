@@ -3,13 +3,10 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { isDeploymentOperator } from "@/features/organization/roles"
-import {
-  useFailureCount,
-  useOrganizationContext,
-  useSettings,
-  useUpdateSettings,
-} from "@/shared/api/hooks"
-import { InfoBanner } from "@/shared/components/ui"
+import { useOrganizationContext } from "@/shared/api/organizations"
+import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useFailureCount } from "@/shared/api/usage"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { HOUR_S } from "@/shared/helpers/timeRange"
 
 // A gateway-wide alarm, shown on every management page: when `require_pricing` is
@@ -68,9 +65,24 @@ export function PricingWarning() {
   }
 
   return (
-    // Out of flow, pinned to the top of the shell: in flow it pushed the whole
-    // shell down on every page the alarm is up on. Under the mobile drawer's z-40.
-    <div className="absolute inset-x-0 top-0 z-30 px-6 pt-4">
+    // In flow, as the shell's first band. It was pinned out of flow so it would
+    // not push the shell down, which worked while the banner was a tinted box
+    // with a fill of its own: it occluded what it covered. `InfoBanner` is a
+    // fact between rules now and paints no ground, so out of flow it drew its
+    // sentence straight over the top bar's trail and whatever the page opened
+    // with. A band pushes the rail and the content down together, which is what
+    // the rest of the surface already does with a full-bleed row, and an alarm
+    // that reports traffic being dropped is worth the shift.
+    // The column half of the band, spelled the way `Section`'s inner element
+    // and `<main>`'s own content column are: the inset matched the page at no
+    // breakpoint, and the sentence ran the whole window past the cap. It
+    // cannot line up with the page's column on a wide viewport, because this
+    // sits above the rail rather than beside it and the rail offsets `<main>`;
+    // what the cap buys is a bounded measure rather than an alignment.
+    <div
+      data-slot="pricing-alarm"
+      className="mx-auto w-full max-w-[112.5rem] shrink-0 px-4 md:px-6"
+    >
       <InfoBanner tone="warning">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span>

@@ -19,7 +19,7 @@ async def test_single_log_writer_rolls_back_on_failure(monkeypatch: pytest.Monke
     async def _session_cm() -> AsyncGenerator[AsyncMock, None]:
         yield session
 
-    monkeypatch.setattr("gateway.services.log_writer.create_session", lambda: _session_cm())
+    monkeypatch.setattr("gateway.services.log_writer.create_log_session", lambda: _session_cm())
     writer = SingleLogWriter()
 
     log = UsageLog(id="log", model="test-model", endpoint="/v1/test", status="success")

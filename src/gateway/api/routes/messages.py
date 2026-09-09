@@ -30,10 +30,12 @@ from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     ErrorKind,
+    RequestContext,
     classify_provider_error,
     default_attempt_kwargs,
     prepare_gateway_tools,
     raise_all_streaming_attempts_failed,
+    release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
@@ -59,6 +61,8 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
+    MCP_ACTIVITY_ID_PREFIX,
+    MCP_CLIENT_BETA,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
@@ -68,6 +72,29 @@ from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1", tags=["messages"])
+
+
+def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -> list[str] | None:
+    """Combine legacy body betas with Anthropic's standard beta header."""
+    betas = list(body_betas or [])
+    for header_value in raw_request.headers.getlist("anthropic-beta"):
+        betas.extend(beta.strip() for beta in header_value.split(",") if beta.strip())
+    return list(dict.fromkeys(betas)) or None
+
+
+def _split_mcp_client_beta(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Consume the client capability without forwarding it to the model provider."""
+    betas = kwargs.get("betas")
+    if not isinstance(betas, list) or MCP_CLIENT_BETA not in betas:
+        return kwargs, False
+
+    provider_kwargs = {**kwargs}
+    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA]
+    if provider_betas:
+        provider_kwargs["betas"] = provider_betas
+    else:
+        provider_kwargs.pop("betas")
+    return provider_kwargs, True
 
 
 class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc]
@@ -162,22 +189,33 @@ def _is_gateway_minted_result(block: Any) -> bool:
     return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
 
 
+def _is_gateway_minted_mcp_block(block: Any) -> bool:
+    """Whether ``block`` carries this gateway's reserved MCP activity prefix."""
+    if not isinstance(block, dict):
+        return False
+    block_type = block.get("type")
+    if block_type == "mcp_tool_use":
+        activity_id = block.get("id")
+    elif block_type == "mcp_tool_result":
+        activity_id = block.get("tool_use_id")
+    else:
+        return False
+    return str(activity_id or "").startswith(MCP_ACTIVITY_ID_PREFIX)
+
+
 def _strip_gateway_minted_blocks(messages: Any) -> Any:
     """Drop this gateway's own server-tool blocks from inbound ``messages``.
 
-    Continuing an Anthropic conversation means echoing the previous assistant turn,
-    and a gateway-minted ``web_search_tool_result`` carries an ``encrypted_content``
-    the gateway cannot sign, so an echoed turn would ship an unsignable block to a
-    provider. Mirrors ``responses._strip_gateway_minted_items``, but where Responses
-    has no way to tell its own minted items from a provider's, here it can: only
-    blocks with gateway provenance are removed (see
-    :func:`_is_gateway_minted_result`), so a genuine provider-run search's signed
-    blocks round-trip untouched even with interception on. A `server_tool_use` is
-    removed only alongside the gateway-minted result that answers it, matched by
-    ``tool_use_id``, so a provider's pair is never split.
-
-    Only called when interception is active (opted in, with a backend configured),
-    which is the only way one of our blocks can be in a transcript at all.
+    Continuing an Anthropic conversation means echoing the previous assistant turn.
+    A gateway-minted ``web_search_tool_result`` carries an ``encrypted_content`` the
+    gateway cannot sign, while a gateway-minted MCP pair describes execution the
+    internal loop already consumed. Neither should be shipped to a provider on the
+    next request. Mirrors ``responses._strip_gateway_minted_items``, but where
+    Responses has no way to tell its own minted items from a provider's, here it can:
+    web search uses the empty signed-content field and MCP uses an Otari-prefixed call
+    id. Genuine provider-run pairs therefore round-trip untouched. Each use is removed
+    only alongside the result that answers it, matched by ``tool_use_id``, so a
+    provider's pair is never split.
 
     A message left with no content is dropped: an empty ``content`` array is rejected
     by the API, and a turn that held nothing but our pair has nothing left to say.
@@ -191,12 +229,17 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
         if not isinstance(content, list):
             kept_messages.append(message)
             continue
-        # Two passes: identify our result blocks, then drop them along with the
-        # server_tool_use each one answers. A provider's pair matches neither.
-        minted_ids = {
+        # Two passes: identify our web-search results and our provenance-prefixed
+        # MCP uses, then drop each complete pair. A provider's pair matches neither.
+        minted_web_ids = {
             block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
         }
-        kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_ids)]
+        minted_mcp_ids = {
+            block.get("id") if block.get("type") == "mcp_tool_use" else block.get("tool_use_id")
+            for block in content
+            if _is_gateway_minted_mcp_block(block)
+        }
+        kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_web_ids, minted_mcp_ids)]
         if len(kept_blocks) == len(content):
             kept_messages.append(message)
             continue
@@ -208,13 +251,22 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
     return kept_messages
 
 
-def _is_minted_pair_member(block: Any, minted_ids: set[Any]) -> bool:
+def _is_minted_pair_member(
+    block: Any,
+    minted_web_ids: set[Any],
+    minted_mcp_ids: set[Any],
+) -> bool:
     """Whether ``block`` is one half of a gateway-minted server-tool pair."""
     if not isinstance(block, dict):
         return False
     if _is_gateway_minted_result(block):
-        return True
-    return block.get("type") == "server_tool_use" and block.get("id") in minted_ids
+        return block.get("tool_use_id") in minted_web_ids
+    block_type = block.get("type")
+    if block_type == "server_tool_use":
+        return block.get("id") in minted_web_ids
+    if block_type == "mcp_tool_use":
+        return block.get("id") in minted_mcp_ids
+    return block_type == "mcp_tool_result" and block.get("tool_use_id") in minted_mcp_ids
 
 
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
@@ -413,10 +465,12 @@ class _MessagesAdapter:
         return isinstance(chunk, MessageDeltaEvent)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
-        return await amessages(**kwargs)  # type: ignore[return-value]
+        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        return await amessages(**kwargs)  # type: ignore[return-value]
+        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
         self,
@@ -445,8 +499,9 @@ class _MessagesAdapter:
             extra["on_first_response"] = on_first_response
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
+        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
         return await anthropic_tool_loop(
-            completion_kwargs=kwargs,
+            completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
             emit_native_web_search=emit_native_web_search,
@@ -462,11 +517,14 @@ class _MessagesAdapter:
         emit_native_web_search: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
+        provider_kwargs, emit_native_mcp = _split_mcp_client_beta(kwargs)
         extra: dict[str, Any] = {}
+        if emit_native_mcp:
+            extra["emit_native_mcp"] = True
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
         return anthropic_tool_loop_stream(
-            completion_kwargs=kwargs,
+            completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
             emit_native_web_search=emit_native_web_search,
@@ -500,6 +558,46 @@ class _MessagesAdapter:
         return kwargs
 
 
+CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL = (
+    "container cannot be used on this route: it resolves to a provider account this gateway "
+    "manages on behalf of many workspaces, and a container id addresses state on that account "
+    "rather than on your workspace. Use a model served by your own provider key."
+)
+
+
+def _reject_container_on_managed_credential(ctx: RequestContext) -> None:
+    """Refuse a caller-chosen container id when the upstream account is not the caller's.
+
+    A container id names an execution environment and the files uploaded into it,
+    scoped to the *provider account* that minted it, not to an otari tenant. A
+    managed attempt runs on a credential the platform owns and many workspaces
+    share, so forwarding an id the caller picked would let anyone holding one
+    resume another tenant's container and read its workspace.
+
+    This is the container-shaped case of what :func:`scope_prompt_cache_key`
+    solves two calls later by namespacing the key. A container id is minted by
+    the provider and carries the caller's claim on it, so it cannot be
+    namespaced: forward or refuse are the only answers, and on a shared account
+    the answer is refuse.
+
+    Refused when *any* attempt on the route is managed, not only the first: which
+    attempt serves the request is decided during fallback, past this point. A
+    BYO-only route keeps the field, because there the account, and so the
+    container, is already the caller's own. Standalone never reaches this: its
+    credentials are the deployment operator's own, and the managed rung
+    (``_serve_from_hosted_credential``) answers ``None`` in every build that
+    mounts this route.
+    """
+    route = ctx.route
+    if route is None or not any(attempt.managed for attempt in route.attempts):
+        return
+    raise _anthropic_error(
+        _ERR_INVALID_REQUEST,
+        CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL,
+        status.HTTP_400_BAD_REQUEST,
+    )
+
+
 _ADAPTER = _MessagesAdapter()
 
 
@@ -523,6 +621,16 @@ async def create_message(
     applies up to the pre-lock-in point, same as chat).
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
+    merged_betas = _merge_anthropic_betas(request.betas, raw_request)
+    if merged_betas is not None:
+        request.betas = merged_betas
+
+    # Remove replayed gateway-owned activity before admission derives prompt
+    # size. Waiting until request_fields are built below would reserve against
+    # result content that never reaches the provider and can falsely reject or
+    # overcharge the request. Provenance comes from each block, so this is
+    # independent of whether the current request enables the same tool again.
+    request.messages = _strip_gateway_minted_blocks(request.messages)
 
     async def _normalize(
         user_id: str,
@@ -579,6 +687,16 @@ async def create_message(
         # them in the Anthropic envelope so /v1/messages errors stay structured.
         raise _ensure_anthropic_error(exc) from exc
 
+    if request.container is not None and ctx.hybrid_mode:
+        try:
+            _reject_container_on_managed_credential(ctx)
+        except HTTPException:
+            # A no-op in hybrid, the only mode that reaches this gate, since
+            # hybrid reserves nothing locally. Kept so this exit already settles
+            # if the gate ever covers a mode that does pre-debit the estimate.
+            await release_reservation(ctx)
+            raise
+
     tool_ctx = await prepare_gateway_tools(
         adapter=_ADAPTER,
         ctx=ctx,
@@ -603,8 +721,14 @@ async def create_message(
     scope_prompt_cache_key(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
-    if tool_ctx.intercepts_web_search and request_fields.get("messages"):
-        request_fields["messages"] = _strip_gateway_minted_blocks(request_fields["messages"])
+    if tool_ctx.use_sandbox:
+        # ``container`` addresses Anthropic's own code-execution container, and
+        # the gateway sandbox owns execution for this request, so the provider
+        # would be asked to attach a container no tool call will reach.
+        # ``prepare_gateway_tools`` has already refused the one shape where a
+        # provider-native code-execution tool survives alongside the sandbox, so
+        # dropping it here cannot strand a container the provider would have used.
+        request_fields.pop("container", None)
 
     # ------------------------------------------------------------------
     # Streaming path

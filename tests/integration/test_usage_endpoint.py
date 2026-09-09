@@ -359,6 +359,10 @@ def test_list_usage_response_shape(
         "source": "gateway",
         "source_label": None,
         "counts_toward_budget": True,
+        # False on both counts here: this gateway served the row, and it counts toward
+        # a budget. The dashboard reads this rather than deriving it, so the checkbox
+        # it offers and the rows a bulk delete can reach are one answer.
+        "bulk_editable": False,
         # Routing attribution: null for a request that named a plain model, which
         # is what this row is.
         "policy_name": None,

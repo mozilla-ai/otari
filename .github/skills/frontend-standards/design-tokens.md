@@ -140,9 +140,28 @@ through `--radius-4xl` calculated from it in `dist/themes/shared/theme.css`, so 
 is `calc(var(--radius) * 2)`), `--field-radius`, `--spacing`, `--border-width`,
 `--field-border-width`, `--ring-offset-width`, `--disabled-opacity`, `--cursor-interactive` /
 `--cursor-disabled` and the `--scrollbar-*` family, all declared in
-`dist/themes/default/variables.css`. This repo aliases none of them, so a component's corner
-radius, its disabled dimming and its pointer all come from HeroUI's defaults rather than from
-anything we name.
+`dist/themes/default/variables.css`. This repo declares three of them, all in `globals.css`:
+`--radius` (`0px`, the square corners), `--disabled-opacity` (`0.4`) and `--field-border-width`
+(`1px`, once per theme block). The rest are not aliased, so a component's pointer, its ring
+offset and its scrollbars still come from HeroUI's defaults rather than from anything we name.
+
+**Our variable block must stay unlayered.**
+
+`@heroui/styles` declares many of the same variables we do, from inside `@layer`. Ours are
+declared in a bare `:root` at the end of `globals.css`, and being unlayered is what makes them
+win: an unlayered declaration outranks a layered one regardless of source order, so it is not
+position in the file that is holding this up. Wrap the theme blocks in `@layer` and `--radius`
+goes from `0px` to `8px` (every corner in the app rounds), the weight ladder shifts up a step
+(`medium` 400 to 500, `semibold` 550 to 600, `bold` 600 to 700), the four `--shadow-*` tokens
+stop being `none` so elevation returns on top of the hairline edges that replaced it,
+`--tracking-tight` doubles, and the 12px and 18px line-heights move by 2px each way. The font
+sizes are the trap: `--text-xs` and `--text-sm` revert to `.75rem` and `.875rem`, which compute
+to the same 12px and 14px at our 16px root, so the sizes hold and only the leading around them
+moves. Nothing fails either way: Ruff is silent, the dashboard builds, `foundation.test.ts`
+passes, and the only place the change is visible is the screen.
+
+`--spacing` is the one variable in that set we deliberately do not override; the 4px step is
+Tailwind's own.
 
 **Only the color half belongs in both theme blocks.** A color token is declared twice because
 its whole job is to hold a light value and a dark one, which is what lets a component adapt
@@ -153,7 +172,12 @@ share is the rule that matters: the value lives in one named place, and a compon
 Never a hex, never a numbered Tailwind palette class, never `bg-white`, because those three do
 not adapt and nothing downstream can make them.
 
-That is a gap rather than a decision, and it decides how much work a visual fix is. A value
+The ones we have not aliased are a gap rather than a decision **where
+`@heroui/styles` still declares and reads them**, and the gap decides how much work a
+visual fix is. Not every unaliased name is one: `globals.css:361` records that upstream's
+`--content1` through `--content4` are deliberately left out because HeroUI v3 neither
+declares nor reads them, so aliasing those would restore four inert lines. Check that a
+variable is live upstream before treating its absence here as a gap. A value
 computed from a variable is one alias away from being ours; the same value chased through the
 rules that read it is a selector to keep in sync with somebody else's internals, forever. A
 table whose body corners are drawn at `min(32px, var(--radius-2xl))`, which is 16px, inside a
@@ -213,7 +237,7 @@ scale a role belongs to before deciding a class beside it is redundant. `text-sh
 the one documented off-scale size, and globals.css says why: two letters in a 26px avatar are
 recognized rather than read.
 
-Zilla Slab is spent on `text-display` alone; every other content role, `text-heading`
+Mozilla Headline is spent on `text-display` alone; every other content role, `text-heading`
 included, is set in Mozilla Text, because at 18px a slab serif competes with the page title
 instead of sitting under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare
 `h1`-`h6` still defaults to the display face through the `@layer base` rule in the same file,
@@ -248,11 +272,58 @@ retired, and handing new components a v2-flavored API. Most of that repo's primi
 `ResponsiveTabs`, `YesNoButtonGroup`) bind to the shim or to `react-icons`, so they wait on the
 same decision. `SettingsSection` and `RowActions`, which need neither, came across unchanged.
 
+### Declaring a token is not registering it, and the difference is silent
+
+A `--color-*` declared in the two theme blocks and left out of `@theme` still works from the
+stylesheet: `border-color: var(--color-border-subtle)` resolves fine. What it does not do is
+generate a utility. So `border-border-subtle` or `bg-text-subtle` written at a call site is a
+class that does not exist: nothing errors, nothing lints, the build is clean, and the property
+falls back to whatever it inherits. A separator quietly renders on the wrong tier; a status dot
+renders on a surface value at 1.1:1 and is invisible.
+
+All three of the `-subtle` neutrals were in exactly this state and were found one at a time.
+The first two had consumers reaching them through hand-written CSS in `globals.css`, so each
+tier worked everywhere it was used and was unreachable from anywhere else, which is a good
+disguise. Register a token in `@theme` in the same commit that declares it, using the
+self-referential form the neighbors use, so the name is registered once and the two theme
+blocks keep owning the light and dark values:
+
+```css
+@theme {
+  --color-border-subtle: var(--color-border-subtle);
+}
+```
+
+**Absence from the built stylesheet does not prove a token is unregistered.** Tailwind emits
+only the utilities something asks for, so a registered token nothing consumes emits nothing
+either. To check one, put a throwaway consumer in the tree, run `pnpm run build`, grep the
+emitted CSS for the class, and remove the consumer again.
+
+### Two rule tiers, and they are not interchangeable
+
+`--color-border` divides the page: a section from the next section, a table header from its
+rows, a form's fields from the row that commits them. `--color-border-subtle` divides repeated
+things *inside* one section: rows of a table, rows of a settings list. Using the section tier
+for both flattens the hierarchy into a single weight, which was found by eye three separate
+times before the shared components existed. Reach for `SettingsGroup` and the per-table blocks
+rather than spelling a tier at a call site.
+
+### A status dot takes a text-ramp value, never a surface one
+
+The surface family is what sits *behind* content, so its values are tuned to be nearly the
+page: `bg-surface-subtle` on a 6px square measures about 1.1:1 in light and 1.2:1 in dark,
+which is not a quiet dot but no dot. The quiet state of a dot is `bg-text-subtle`, the same
+value the muted status words use, which measures about 6:1 against the page in both themes.
+Fourteen sites had the surface value, because "subtle" was the property being reached for and
+the ramp was incidental. `src/shared/components/dotRamp.test.ts` reads the source for a
+`<Dot>` or a `dot:` carrying a surface or background value, because a rule that lives in a
+class name needs something that reads class names.
+
 ## Rules
 
 - **Add a token, don't scatter a hex.** A one-off hex in a component is a second source of
   truth for a color the tokens already name; the next person can't retheme the app from one
-  place. `src/styles/foundation.test.ts` rejects one outright under `shared/components/ui/`.
+  place. `src/styles/foundation.test.ts` rejects one outright, anywhere under `web/src`.
 - **Add it to both theme blocks.** Each block owns the complete set it needs rather than
   inheriting from its sibling, so a token declared in one only falls back to the other
   theme's value, which shows up as a contrast bug pages away from the edit. The same test

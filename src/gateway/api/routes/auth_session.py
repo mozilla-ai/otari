@@ -66,6 +66,7 @@ from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.errors import EmailNotVerifiedError, InvalidCredentialsError
+from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
 
@@ -311,6 +312,12 @@ async def create_session(
         assert body.email is not None and body.password is not None  # guaranteed by the model validator
         identity = await _sign_in_with_password(body.email, body.password, request, db)
     try:
+        # Before the session row and inside the same transaction, so a new
+        # membership and the sign-in that earned it land together or not at all.
+        # Not guarded: the only expected failure is two concurrent sign-ins
+        # racing, which the service settles on its own, and a database that
+        # cannot stage this cannot stage the session row either.
+        await OrganizationDomainService(db).auto_join_for_user(identity)
         token, expires_at = await create_dashboard_session(
             db, config.dashboard_session_ttl_hours, user_id=identity.id
         )

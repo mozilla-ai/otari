@@ -17,7 +17,7 @@ tree today.
 Do not add an `index.ts` whose job is re-exporting its siblings. A barrel makes the bundler
 pull in unrelated modules, fills the editor with tabs called `index.ts`, hides the real
 location in a stack trace, and is the usual way a circular import gets introduced. Import the
-file itself: `import { DataTable } from "@/shared/components/DataTable"`.
+file itself: `import { DataTable } from "@/shared/components/data/DataTable"`.
 
 Two `index` files in the tree are the framework's spelling rather than ours, and both stay:
 
@@ -45,7 +45,7 @@ nothing imports, and on a new `overlay*` module missing from the list.
 
 ## The layer boundary is a lint error, not a review note
 
-`web/biome.jsonc` enforces three rules, each with the alias form and the relative form spelled
+`web/biome.jsonc` enforces four rules, each with the alias form and the relative form spelled
 out so `../../app/Sidebar` cannot dodge what `@/app/Sidebar` catches:
 
 | Files | May not import | Why |
@@ -53,6 +53,7 @@ out so `../../app/Sidebar` cannot dodge what `@/app/Sidebar` catches:
 | `src/features/**` | `src/app/**` | A feature must not reach into the composition root. Lift the shared piece into `src/shared`, or let the shell pass it as a prop. |
 | `src/shared/**` | `src/app/**`, `src/features/**` | `shared` is the leaf layer; dependencies point inward. |
 | everything under `src/` | `overlay/**`, `@overlay/**` | An overlay tree exists only in the superset build composed in otari-ai. An import of it does not resolve in this repo's build. |
+| everything except `src/shared/api/**` | `shared/api/queryKeys`, `shared/api/paging` | The keys sit in one module because 109 invalidations reach 39 of them across domains, which makes the invalidation graph the hooks' to own. They were file-private to `hooks.ts` until it was split by domain, so this rule is what puts back, at a directory, the boundary that split gave up at a file. A page importing a key is a page about to hand-roll an invalidation. |
 
 Feature-to-feature is deliberately allowed: keys pick models, budgets pick users.
 `src/tests/` is deliberately outside the boundary, because a harness has to mount what the app

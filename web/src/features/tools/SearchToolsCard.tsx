@@ -1,4 +1,4 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 import type {
   ConfigSearchTool,
@@ -11,15 +11,14 @@ import {
   useSearchProviders,
   useSearchTools,
   useUpdateSearchTool,
-} from "@/shared/api/hooks"
-import {
-  Badge,
-  ConfirmButton,
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  INPUT_CLASS,
-} from "@/shared/components/ui"
+} from "@/shared/api/tools"
+import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
+import { Badge } from "@/shared/components/indicators/Badge"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // Search tools are what POST /v1/search dispatches against. They used to be
 // declarable only in a config file, so a deployment configured entirely through
@@ -131,7 +130,7 @@ function StoredToolRow({
           {update.isPending ? "Saving…" : "Save"}
         </Button>
         <ConfirmButton
-          confirmLabel="Remove"
+          confirmLabel="Remove permanently"
           isPending={busy}
           onConfirm={() => {
             setError("")
@@ -141,11 +140,11 @@ function StoredToolRow({
             })
           }}
         >
-          Remove
+          Remove tool
         </ConfirmButton>
       </div>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -286,7 +285,7 @@ function AddToolForm({
         <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
       </span>
       {error ? (
-        <span className="break-words text-xs text-danger">{error}</span>
+        <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -304,42 +303,39 @@ export function SearchToolsCard({
   const fromConfig = tools.data?.config ?? []
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Search tools</h2>
-      <p className="text-sm text-muted">
-        The tools <code className="font-mono">POST /v1/search</code> dispatches
-        against. A searxng tool that declares no backend URL uses the web-search
-        URL above, so one entry here exposes the same backend on the direct
-        endpoint.
-      </p>
-      <ErrorBanner error={tools.error ?? providers.error} />
-      <Card>
-        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-          {stored.map((tool) => (
-            <StoredToolRow
-              key={tool.name}
-              tool={tool}
-              providers={known}
-              onSaved={onSaved}
-            />
-          ))}
-          {fromConfig.map((tool) => (
-            <ConfigToolRow key={tool.name} tool={tool} />
-          ))}
-          {stored.length === 0 &&
-          fromConfig.length === 0 &&
-          !tools.isLoading ? (
-            <p className="py-4 text-sm text-muted">
-              No search tools configured, so{" "}
-              <code className="font-mono">POST /v1/search</code> refuses every
-              request.
-            </p>
-          ) : null}
-          {known.length > 0 ? (
-            <AddToolForm providers={known} onSaved={onSaved} />
-          ) : null}
-        </Card.Content>
-      </Card>
-    </section>
+    <SettingsGroup
+      title="Search tools"
+      description={
+        <>
+          The tools <code className="font-mono">POST /v1/search</code>{" "}
+          dispatches against. A searxng tool that declares no backend URL uses
+          the web-search URL above, so one entry here exposes the same backend
+          on the direct endpoint.
+          <ErrorBanner error={tools.error ?? providers.error} />
+        </>
+      }
+    >
+      {stored.map((tool) => (
+        <StoredToolRow
+          key={tool.name}
+          tool={tool}
+          providers={known}
+          onSaved={onSaved}
+        />
+      ))}
+      {fromConfig.map((tool) => (
+        <ConfigToolRow key={tool.name} tool={tool} />
+      ))}
+      {stored.length === 0 && fromConfig.length === 0 && !tools.isLoading ? (
+        <p className="py-4 text-sm text-muted">
+          No search tools configured, so{" "}
+          <code className="font-mono">POST /v1/search</code> refuses every
+          request.
+        </p>
+      ) : null}
+      {known.length > 0 ? (
+        <AddToolForm providers={known} onSaved={onSaved} />
+      ) : null}
+    </SettingsGroup>
   )
 }

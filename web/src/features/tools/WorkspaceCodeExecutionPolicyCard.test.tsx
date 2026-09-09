@@ -79,7 +79,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     mockApi()
     renderCard()
 
-    expect(await screen.findByText("No policy set")).toBeInTheDocument()
+    expect(await screen.findByText("NO POLICY SET")).toBeInTheDocument()
     expect(selectTrigger("Code execution")).toHaveTextContent(
       "Deployment default",
     )

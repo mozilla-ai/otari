@@ -397,20 +397,28 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
     monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
     monkeypatch.setenv("PLATFORM_HEALTH_PATH", "/healthz")
+    monkeypatch.setenv("PLATFORM_HEALTH_URL", "http://localhost:8100/health")
     monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
     monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
     monkeypatch.setenv("PLATFORM_USAGE_INLINE_TIMEOUT_MS", "150")
     monkeypatch.setenv("PLATFORM_USAGE_MAX_RETRIES", "7")
+    monkeypatch.setenv("STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS", "3000")
+    monkeypatch.setenv("STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP", "12000")
+    monkeypatch.setenv("STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS", "4000")
 
     config = load_config(str(config_file))
 
     assert config.is_hybrid_mode
     assert config.platform["base_url"] == "http://localhost:8100/api/v1"
     assert config.platform["health_path"] == "/healthz"
+    assert config.platform["health_url"] == "http://localhost:8100/health"
     assert config.platform["resolve_timeout_ms"] == 1234
     assert config.platform["usage_timeout_ms"] == 2345
     assert config.platform["usage_inline_timeout_ms"] == 150
     assert config.platform["usage_max_retries"] == 7
+    assert config.platform["streaming_first_chunk_timeout_ms"] == 3000
+    assert config.platform["streaming_first_chunk_timeout_ms_tool_loop"] == 12000
+    assert config.platform["streaming_final_attempt_extra_first_chunk_timeout_ms"] == 4000
 
 
 def test_load_config_sets_default_platform_base_url_when_token_is_set(

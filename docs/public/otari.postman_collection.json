@@ -2461,6 +2461,159 @@
           }
         },
         {
+          "name": "List Active Organization Domains",
+          "request": {
+            "description": "List the caller's organization's email-domain claims. Owners and admins only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains"
+            }
+          }
+        },
+        {
+          "name": "Create Active Organization Domain",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"domain\": \"string\"\n}"
+            },
+            "description": "Claim an email domain for the caller's organization. Owners and admins only.\n\nThe claim lands unverified and does nothing until ``POST\n/me/domains/{id}/verify`` finds the record in ``verification_record``\npublished at the domain's apex. A public email provider is refused outright,\nand a domain another organization already claims answers 409 without saying\nwho holds it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains"
+            }
+          }
+        },
+        {
+          "name": "Update Active Organization Domain",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"default_role\": \"member\",\n  \"enabled\": false\n}"
+            },
+            "description": "Change a claim's auto-join role or enabled flag. Owners and admins only.\n\nThe domain itself and its verification state are not editable: a different\ndomain is a different claim and needs its own proof.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains",
+                ":organization_domain_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_domain_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Active Organization Domain",
+          "request": {
+            "description": "Drop an email-domain claim. Owners and admins only.\n\nMembers who already joined through it keep their membership: they are\ncolleagues by then, not an artifact of the claim.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains",
+                ":organization_domain_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_domain_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Verify Active Organization Domain",
+          "request": {
+            "description": "Prove control of a claimed domain via its DNS TXT record. Owners and admins only.\n\nIdempotent, and answers 400 while the record is not visible yet, which is\nthe expected answer straight after publishing one.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "domains",
+                ":organization_domain_id",
+                "verify"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id/verify",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_domain_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Invite Active Organization Member",
           "request": {
             "body": {
@@ -2691,6 +2844,98 @@
                 }
               ],
               "raw": "{{baseUrl}}/v1/organizations/me/memberships?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "List Caller Pending Memberships",
+          "request": {
+            "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pending-memberships"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Accept Caller Pending Membership",
+          "request": {
+            "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pending-memberships",
+                ":organization_member_id",
+                "accept"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships/:organization_member_id/accept",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_member_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Decline Caller Pending Membership",
+          "request": {
+            "description": "Decline an invitation addressed to the caller.\n\nLands the pair where a revoke does: the invitation cancelled and the\nmembership suspended rather than deleted, which is what stops the emailed\nlink from later reviving a declined invitation. A future invite to the same\naddress revives the membership.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pending-memberships",
+                ":organization_member_id",
+                "decline"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships/:organization_member_id/decline",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_member_id",
+                  "value": ""
+                }
+              ]
             }
           }
         },
@@ -4344,7 +4589,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -4381,7 +4626,7 @@
         {
           "name": "Count Organization Usage",
           "request": {
-            "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.",
+            "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4475,7 +4720,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -4600,7 +4845,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -4719,7 +4964,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -6142,7 +6387,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -6197,7 +6442,7 @@
         {
           "name": "Count Usage",
           "request": {
-            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.",
+            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.\n\nThat value is the one place this count is narrower than ``GET /v1/usage``: it\nalso excludes rows this deployment served itself, so the number an operator\nconfirms is the number the mutation can reach. The list still pages the\nbudget-exempt gateway rows it omits.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6289,7 +6534,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /v1/usage so the total matches what bulk delete and set-price can reach",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -6464,7 +6709,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -6614,7 +6859,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""

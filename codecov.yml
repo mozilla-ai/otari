@@ -1,2 +1,15 @@
 ignore:
   - tests/
+
+# unit and integration now upload from separate parallel jobs (#903), so a job
+# that fails uploads nothing for its flag on that commit. Without carryforward,
+# Codecov reports whatever flag *did* upload as the whole project's coverage,
+# which reads as a coverage cliff on a routine partial failure - integration
+# tests failing without network egress, per AGENTS.md, is exactly that case.
+# carryforward keeps a flag's last known value instead of treating a missing
+# upload as zero.
+flags:
+  unit:
+    carryforward: true
+  integration:
+    carryforward: true

@@ -205,6 +205,54 @@ describe("layer boundaries", () => {
     expect(messages).toEqual([])
   })
 
+  // The query keys and the bounded pagination walk were file-private to
+  // `shared/api/hooks.ts` until it was split by domain, which is what made "a page
+  // cannot hand-roll an invalidation the hooks own" structural rather than a
+  // convention. Splitting had to export them so the domain modules could share
+  // them, so the boundary moved out one directory and this is what holds it there.
+  it.each(["app", "features", "routes"])(
+    "reject %s importing shared/api's query keys",
+    (layer) => {
+      const messages = rejects(
+        layer,
+        'import { USAGE } from "@/shared/api/queryKeys";\nexport const a = USAGE;\n',
+      )
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatch(/may import its own query keys/)
+    },
+  )
+
+  it("reject a feature reaching the query keys by relative path", () => {
+    const messages = rejects(
+      "features",
+      'import { USAGE } from "../../shared/api/queryKeys";\nexport const a = USAGE;\n',
+    )
+    expect(messages).toHaveLength(1)
+  })
+
+  it("reject shared code outside api/ importing the pagination walk", () => {
+    const messages = rejects(
+      "shared",
+      'import { fetchAllPaged } from "@/shared/api/paging";\nexport const a = fetchAllPaged;\n',
+    )
+    expect(messages).toHaveLength(1)
+  })
+
+  it("allow shared/api importing its own query keys and pagination walk", () => {
+    // The pair for the four above, and the reason the rule is a directory rather
+    // than a file: the keys sit in one module precisely so the domain modules can
+    // share them, so `shared/api` itself must keep reaching both.
+    const messages = rejects(
+      "shared/api",
+      [
+        'import { USAGE } from "@/shared/api/queryKeys";',
+        'import { fetchAllPaged } from "@/shared/api/paging";',
+        "export const a = [USAGE, fetchAllPaged];",
+      ].join("\n"),
+    )
+    expect(messages).toEqual([])
+  })
+
   it.each(["app", "features", "shared"])(
     "reject %s importing the overlay tree",
     (layer) => {

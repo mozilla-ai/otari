@@ -73,6 +73,12 @@ DEFAULT_PLATFORM_MANAGEMENT_URL = "https://otari.ai"
 # is an otari.ai route, so a deployment resolving against any other peer sets
 # platform.health_path (PLATFORM_HEALTH_PATH) to one that peer serves.
 DEFAULT_PLATFORM_HEALTH_PATH = "/utils/health-check/"
+# health_path is always joined onto base_url, which only works when the peer's
+# health route lives under the same path prefix as the rest of its API. Some
+# peers serve health outside that prefix entirely (an unversioned /health
+# beside a versioned /v1 API): no join of base_url and a relative path reaches
+# that. platform.health_url (PLATFORM_HEALTH_URL) is a full URL that bypasses
+# the join and is checked first, for exactly that peer shape.
 PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.
@@ -403,8 +409,44 @@ class GatewayConfig(BaseSettings):
         description="Seconds to wait for an available connection before raising TimeoutError.",
     )
     db_pool_recycle: int = Field(
-        default=-1,
-        description="Recycle connections older than this many seconds. -1 disables.",
+        default=1800,
+        description=(
+            "Recycle connections older than this many seconds, so one is never old enough to "
+            "have been dropped by a managed database or the NAT in front of it without a FIN. "
+            "-1 disables."
+        ),
+    )
+    db_connect_timeout: float = Field(
+        default=10.0,
+        gt=0,
+        description="Seconds to wait for a new database connection to be established.",
+    )
+    db_command_timeout: float = Field(
+        default=60.0,
+        ge=0,
+        description=(
+            "Seconds a single database statement may take, enforced client-side. Also bounds the "
+            "pool's pre-ping, which is the statement that hangs when a pooled socket has gone "
+            "away silently. 0 disables."
+        ),
+    )
+    db_statement_timeout_ms: int = Field(
+        default=65000,
+        ge=0,
+        description=(
+            "Server-side statement timeout in milliseconds, applied per connection. Backstop for "
+            "db_command_timeout, which cannot fire when the client is the stuck half. Must be "
+            "above db_command_timeout so the client-side timeout is the one callers normally see; "
+            "0 disables."
+        ),
+    )
+    db_log_pool_size: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Connections reserved for the usage-log writer, separate from the request pool so "
+            "metering is not starved by traffic. No overflow above this."
+        ),
     )
     host: str = Field(default="0.0.0.0", description="Host to bind the server to")  # noqa: S104
     port: int = Field(default=8000, description="Port to bind the server to")
@@ -1856,6 +1898,29 @@ class GatewayConfig(BaseSettings):
             if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
+    @model_validator(mode="after")
+    def _validate_database_timeout_ordering(self) -> "GatewayConfig":
+        """Keep the server-side statement timeout behind the client-side one.
+
+        Set equal, which the two defaults used to be, whichever fires first is
+        a race, and the two report differently: the server-side one arrives as
+        a translated database error, the client-side one as a timeout the
+        engine translates for the same handlers. Ordering them makes the
+        client-side timeout the one callers normally see and leaves the
+        server-side one as the backstop it is described as.
+        """
+        if self.db_command_timeout <= 0 or self.db_statement_timeout_ms <= 0:
+            return self
+        if self.db_statement_timeout_ms <= self.db_command_timeout * 1000:
+            msg = (
+                f"db_statement_timeout_ms ({self.db_statement_timeout_ms}) must be greater than "
+                f"db_command_timeout ({self.db_command_timeout}s = "
+                f"{int(self.db_command_timeout * 1000)}ms), so the server-side backstop fires "
+                "after the client-side timeout rather than racing it"
+            )
+            raise ValueError(msg)
+        return self
+
     @field_validator("web_search_provider")
     @classmethod
     def _validate_web_search_provider(cls, value: str | None) -> str | None:
@@ -2407,6 +2472,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         "PLATFORM_BASE_URL": ("base_url", str),
         "PLATFORM_MANAGEMENT_URL": ("management_url", str),
         "PLATFORM_HEALTH_PATH": ("health_path", str),
+        "PLATFORM_HEALTH_URL": ("health_url", str),
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
         # Budget for the one usage report the response path waits on. Expiry
@@ -2420,6 +2486,13 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         # control.
         "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS": (
             "streaming_first_chunk_timeout_ms",
+            int,
+        ),
+        # The same budget for a request that runs a gateway-managed tool loop or
+        # forwards provider-native tools, which are slow to emit a first token
+        # because the model picks a tool before it says anything.
+        "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP": (
+            "streaming_first_chunk_timeout_ms_tool_loop",
             int,
         ),
         # Extra first-chunk grace for the sole/final streaming attempt, added on

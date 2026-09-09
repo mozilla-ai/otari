@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationBudget, OrganizationSpendCeiling } from "@/client"
 import { OrganizationBudgetsPage } from "@/features/budgets/OrganizationBudgetsPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationContext, workspace } from "@/tests/fixtures"
+import {
+  bootstrap,
+  organizationContext,
+  organizationSpendCeiling as spendCeiling,
+  workspace,
+} from "@/tests/fixtures"
 
 interface RecordedRequest {
   url: string
@@ -27,36 +32,6 @@ function organizationBudget(
     budget_duration_sec: null,
     reset_alignment: "calendar_month",
     ceiling_count: 0,
-    created_at: "2026-01-01T00:00:00+00:00",
-    updated_at: "2026-01-01T00:00:00+00:00",
-    ...overrides,
-  }
-}
-
-function spendCeiling(
-  overrides: Partial<OrganizationSpendCeiling> = {},
-): OrganizationSpendCeiling {
-  return {
-    id: "cccccccc-1111-2222-3333-444444444444",
-    scope_type: "organization",
-    scope_id: "11111111-1111-1111-1111-111111111111",
-    provider_key_id: null,
-    budget_id: "bbbbbbbb-1111-2222-3333-444444444444",
-    name: null,
-    max_budget: 250,
-    current_spend: 12.5,
-    reserved_spend: 0,
-    token_limit: null,
-    current_tokens: 0,
-    reserved_tokens: 0,
-    request_limit: null,
-    current_requests: 0,
-    reserved_requests: 0,
-    budget_duration_sec: null,
-    reset_alignment: "calendar_month",
-    period_start: "2026-08-01T00:00:00+00:00",
-    period_end: "2026-09-01T00:00:00+00:00",
-    manageable: true,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,

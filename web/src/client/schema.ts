@@ -1688,6 +1688,89 @@ export interface paths {
         patch: operations["update_organization_budget_v1_organizations_me_budgets__budget_id__patch"];
         trace?: never;
     };
+    "/v1/organizations/me/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Active Organization Domains
+         * @description List the caller's organization's email-domain claims. Owners and admins only.
+         */
+        get: operations["list_active_organization_domains_v1_organizations_me_domains_get"];
+        put?: never;
+        /**
+         * Create Active Organization Domain
+         * @description Claim an email domain for the caller's organization. Owners and admins only.
+         *
+         *     The claim lands unverified and does nothing until ``POST
+         *     /me/domains/{id}/verify`` finds the record in ``verification_record``
+         *     published at the domain's apex. A public email provider is refused outright,
+         *     and a domain another organization already claims answers 409 without saying
+         *     who holds it.
+         */
+        post: operations["create_active_organization_domain_v1_organizations_me_domains_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/domains/{organization_domain_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Active Organization Domain
+         * @description Drop an email-domain claim. Owners and admins only.
+         *
+         *     Members who already joined through it keep their membership: they are
+         *     colleagues by then, not an artifact of the claim.
+         */
+        delete: operations["delete_active_organization_domain_v1_organizations_me_domains__organization_domain_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Active Organization Domain
+         * @description Change a claim's auto-join role or enabled flag. Owners and admins only.
+         *
+         *     The domain itself and its verification state are not editable: a different
+         *     domain is a different claim and needs its own proof.
+         */
+        patch: operations["update_active_organization_domain_v1_organizations_me_domains__organization_domain_id__patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/domains/{organization_domain_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Active Organization Domain
+         * @description Prove control of a claimed domain via its DNS TXT record. Owners and admins only.
+         *
+         *     Idempotent, and answers 400 while the record is not visible yet, which is
+         *     the expected answer straight after publishing one.
+         */
+        post: operations["verify_active_organization_domain_v1_organizations_me_domains__organization_domain_id__verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/guardrails": {
         parameters: {
             query?: never;
@@ -1962,6 +2045,98 @@ export interface paths {
         get: operations["list_caller_organization_memberships_v1_organizations_me_memberships_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/pending-memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Caller Pending Memberships
+         * @description List the organization invitations still awaiting the caller.
+         *
+         *     The invitee's side of the invitation flow, where ``/me/member-invitations``
+         *     is the admin's. Not to be confused with ``GET /me/memberships``, which
+         *     lists the organizations the caller is already an active member of and
+         *     deliberately omits an ``invited`` one.
+         *
+         *     Takes no token, unlike ``/v1/invitations/*``: those are public because the
+         *     recipient of an emailed link holds nothing else to prove anything with,
+         *     while this caller is authenticated as the addressee and the membership's
+         *     own ``user_id`` is what scopes the answer. An invitation whose deadline has
+         *     passed is omitted rather than listed as unactionable.
+         */
+        get: operations["list_caller_pending_memberships_v1_organizations_me_pending_memberships_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Caller Pending Membership
+         * @description Accept an invitation addressed to the caller, resolving it to an active membership.
+         *
+         *     Does the same work as ``POST /v1/invitations/accept``, including the
+         *     workspace assignments parked at invite time, and answers the same shape.
+         *     Addressed by membership id rather than by token: the caller is already the
+         *     addressee, so a token would add nothing their session does not carry.
+         *
+         *     Idempotent for any membership the caller already holds ``active``, which is
+         *     what two clicks before the list refreshes produces: it answers that
+         *     membership's organization and role rather than a 404 for an action that
+         *     worked. Deliberately not narrowed to memberships that got there by
+         *     accepting, which would cost a lookup to tell the two apart and answer a
+         *     caller nothing they cannot already read from ``GET /me/memberships``.
+         *
+         *     Answers 404 for a membership that is not the caller's own, whether or not
+         *     it exists, and for one of theirs that is neither ``active`` nor holding an
+         *     invitation. An invitation that has lapsed answers 400.
+         */
+        post: operations["accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Caller Pending Membership
+         * @description Decline an invitation addressed to the caller.
+         *
+         *     Lands the pair where a revoke does: the invitation cancelled and the
+         *     membership suspended rather than deleted, which is what stops the emailed
+         *     link from later reviving a declined invitation. A future invite to the same
+         *     address revives the membership.
+         */
+        post: operations["decline_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__decline_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2323,6 +2498,10 @@ export interface paths {
          *
          *     Serves the paginator's "N of M" beside the list above, and is scoped the
          *     same way, so the total can never describe more rows than the list will show.
+         *
+         *     Unlike the deployment-wide ``GET /v1/usage/count``, ``counts_toward_budget=false``
+         *     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
+         *     this surface has none. So this total keeps matching the list beside it.
          */
         get: operations["count_organization_usage_v1_organizations_me_usage_count_get"];
         put?: never;
@@ -3469,6 +3648,11 @@ export interface paths {
          *     separate request), so the ``COUNT(*)`` is not paid on every page load. With
          *     ``counts_toward_budget=false`` it also backs the "select all N matching this
          *     filter" affordance for bulk delete / set-price, which touch imported rows only.
+         *
+         *     That value is the one place this count is narrower than ``GET /v1/usage``: it
+         *     also excludes rows this deployment served itself, so the number an operator
+         *     confirms is the number the mutation can reach. The list still pages the
+         *     budget-exempt gateway rows it omits.
          */
         get: operations["count_usage_v1_usage_count_get"];
         put?: never;
@@ -5477,7 +5661,7 @@ export interface components {
             name?: string | null;
             /**
              * Provider Key Id
-             * @description Narrow the cap to one provider instance; null caps spend across every provider
+             * @description Narrow the cap to one provider instance; omit or null to cap spend across every provider. A blank value would store a ceiling that never binds, so it is refused; this does not check that the value names a configured provider instance
              */
             provider_key_id?: string | null;
             /**
@@ -6585,6 +6769,8 @@ export interface components {
             cache_control?: {
                 [key: string]: unknown;
             } | null;
+            /** Container */
+            container?: string | null;
             /** Context Management */
             context_management?: {
                 [key: string]: unknown;
@@ -6615,6 +6801,8 @@ export interface components {
             } | null;
             /** Prompt Cache Key */
             prompt_cache_key?: string | null;
+            /** Service Tier */
+            service_tier?: string | null;
             /**
              * Session Label
              * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.
@@ -7117,6 +7305,82 @@ export interface components {
         OrganizationCreateRequest: {
             /** Name */
             name: string;
+        };
+        /** OrganizationDomainCreateRequest */
+        OrganizationDomainCreateRequest: {
+            /**
+             * Default Role
+             * @default member
+             * @enum {string}
+             */
+            default_role: "member" | "viewer";
+            /** Domain */
+            domain: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
+         * OrganizationDomainPublic
+         * @description A claim as its organization's admins see it.
+         *
+         *     Carries ``verification_record`` (the whole string to publish) rather than
+         *     the raw token: the admin never has a use for the token on its own, and one
+         *     field that can be copied verbatim into a DNS panel is harder to get wrong
+         *     than a prefix they must remember to prepend.
+         */
+        OrganizationDomainPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Default Role
+             * @default member
+             */
+            default_role: string;
+            /** Domain */
+            domain: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Proof Expires At */
+            proof_expires_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Verification Record */
+            verification_record: string;
+            /** Verified At */
+            verified_at?: string | null;
+        };
+        /** OrganizationDomainUpdateRequest */
+        OrganizationDomainUpdateRequest: {
+            /** Default Role */
+            default_role?: ("member" | "viewer") | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /** OrganizationDomainsPublic */
+        OrganizationDomainsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationDomainPublic"][];
         };
         /**
          * OrganizationGuardrailCreate
@@ -7684,6 +7948,64 @@ export interface components {
              * @description Whether POST /v1/auth/session has stopped accepting the master key as a dashboard login. True once the operator identity has a password, which is what claiming the deployment means; a member setting their own password leaves an unclaimed deployment on the master key. Either way the master key stays the credential for the management API.
              */
             master_key_sign_in_retired: boolean;
+        };
+        /**
+         * PendingOrganizationInvitationPublic
+         * @description One invitation waiting on the caller, as their own inbox lists it.
+         *
+         *     The authenticated counterpart to ``InvitationPreviewPublic``, and wider
+         *     than it on purpose: that one answers a visitor whose only credential is
+         *     the token, so it carries nothing it does not strictly need, while this one
+         *     answers the addressee's own session and can name the ids its accept and
+         *     decline calls take.
+         *
+         *     ``organization_member_id`` is what those two calls address, not
+         *     ``invitation_id``: the membership is the row that outlives a revoke and a
+         *     re-invite (each round mints a fresh ``Invitation`` against the same
+         *     membership), so a client holding a list from a moment ago names something
+         *     still resolvable rather than a token-shaped id that has since been
+         *     superseded. ``invitation_id`` rides along for the roster's sake, since
+         *     ``ActiveOrganizationMemberPublic`` carries the same field.
+         */
+        PendingOrganizationInvitationPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Invitation Id
+             * Format: uuid
+             */
+            invitation_id: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Organization Member Id
+             * Format: uuid
+             */
+            organization_member_id: string;
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
+        };
+        /** PendingOrganizationInvitationsPublic */
+        PendingOrganizationInvitationsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["PendingOrganizationInvitationPublic"][];
         };
         /**
          * PolicyRequest
@@ -9256,6 +9578,8 @@ export interface components {
             billing_meters: components["schemas"]["BillingMeters"] | {
                 [key: string]: unknown;
             } | null;
+            /** Bulk Editable */
+            bulk_editable: boolean;
             /** Cache Read Tokens */
             cache_read_tokens: number | null;
             /** Cache Write 1H Tokens */
@@ -11972,13 +12296,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description File content. Content-Type reflects the stored media type; application/octet-stream is the fallback. */
             200: {
                 headers: {
+                    /** @description Attachment filename, with a UTF-8 filename* parameter for non-ASCII names. */
+                    "Content-Disposition"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "*/*": string;
+                    "application/octet-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -12856,6 +13183,156 @@ export interface operations {
             };
         };
     };
+    list_active_organization_domains_v1_organizations_me_domains_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainsPublic"];
+                };
+            };
+        };
+    };
+    create_active_organization_domain_v1_organizations_me_domains_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationDomainCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_active_organization_domain_v1_organizations_me_domains__organization_domain_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_active_organization_domain_v1_organizations_me_domains__organization_domain_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationDomainUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_active_organization_domain_v1_organizations_me_domains__organization_domain_id__verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationDomainPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_organization_guardrails_v1_organizations_me_guardrails_get: {
         parameters: {
             query?: {
@@ -13369,6 +13846,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_caller_pending_memberships_v1_organizations_me_pending_memberships_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingOrganizationInvitationsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptInvitationResultPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__decline_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
                 };
             };
             /** @description Validation Error */
@@ -14033,7 +14606,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
@@ -14097,7 +14670,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
@@ -14161,7 +14734,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
@@ -14223,7 +14796,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
@@ -15770,7 +16343,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
@@ -15867,7 +16440,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /v1/usage so the total matches what bulk delete and set-price can reach */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
@@ -15984,7 +16557,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;
@@ -16079,7 +16652,7 @@ export interface operations {
                 priced?: boolean | null;
                 /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
                 tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
                 workspace_id?: string | null;

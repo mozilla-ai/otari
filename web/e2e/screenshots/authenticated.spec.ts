@@ -32,6 +32,17 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "organization-members",
     heading: /members/i,
   },
+  // The other way somebody becomes a member. Its own entry rather than folded
+  // into the roster's: the claim table and the record-to-publish card are what
+  // this page is, and neither appears anywhere else. Captured here only, and not
+  // also by a test in the organization-rail block below: that block's tests do
+  // exactly what `open` does, so a second one would be a duplicate baseline to
+  // keep in step for no extra coverage.
+  {
+    route: "/organization/domains",
+    name: "organization-domains",
+    heading: /email domains/i,
+  },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },
@@ -56,6 +67,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   // the same: what this matrix is for is how a page renders on a phone and in
   // the dark, which does not depend on which control opens it.
   { route: "/account", name: "account", heading: /account settings/i },
+  // Also reached from chrome rather than a rail (the scope switcher, and only
+  // while something is waiting). Captured in its empty state, which is the one
+  // a seeded deployment has: the operator identity holds no invitation, and
+  // there is no second organization to send it one.
+  { route: "/invitations", name: "invitations", heading: /invitations/i },
   { route: "/docs", name: "docs", heading: /./ },
 ]
 

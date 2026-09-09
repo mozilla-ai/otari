@@ -1141,8 +1141,11 @@ describe("UsagePage", () => {
     await user.click(toggle)
 
     expect(toggle).toHaveAttribute("aria-expanded", "true")
-    expect(region.className).toContain("flex")
-    expect(region.className).not.toContain("hidden")
+    // classList, not className: `toContain` on the string is a substring match,
+    // so "flex" is satisfied by `flex-wrap` alone and "hidden" by
+    // `overflow-hidden`. Both are one edit away from being true here.
+    expect([...region.classList]).toContain("flex")
+    expect([...region.classList]).not.toContain("hidden")
   })
 
   it("surfaces an active filter as a removable chip", async () => {

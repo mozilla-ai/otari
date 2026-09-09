@@ -318,6 +318,15 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 
+// An organization's email-domain claims. A claim is inert until its DNS TXT
+// record is found, so `verified_at` is the field the UI branches on and
+// `verification_record` is the whole string an admin publishes.
+export type OrganizationDomain = Schemas["OrganizationDomainPublic"]
+export type CreateOrganizationDomainRequest =
+  Schemas["OrganizationDomainCreateRequest"]
+export type UpdateOrganizationDomainRequest =
+  Schemas["OrganizationDomainUpdateRequest"]
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
@@ -470,6 +479,13 @@ export type InviteOrganizationMemberResult =
   Schemas["InviteOrganizationMemberResultPublic"]
 export type InvitationPreview = Schemas["InvitationPreviewPublic"]
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
+
+// The invitee's side of the same flow: what is waiting on the signed-in
+// identity, rather than what this organization has sent out. Addressed by
+// `organization_member_id`, not by token, because the caller is already the
+// addressee (otari-ai#1999).
+export type PendingOrganizationInvitation =
+  Schemas["PendingOrganizationInvitationPublic"]
 
 // A workspace-level template for a per-member `scoped_budgets` ceiling; see
 // `src/gateway/services/tenancy/workspace_budget_default_service.py`. The DTO

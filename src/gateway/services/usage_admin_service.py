@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import ColumnElement, delete, func, select
+from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -354,11 +354,3 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
     )
     return result
 
-
-# Count query used by the dashboard's "select all N matching this filter" affordance
-# and the delete/set-price confirm dialogs, so an operator sees how many imported rows
-# a filter touches before committing to the mutation.
-async def count_imported_matches(db: AsyncSession, selection: UsageSelection) -> int:
-    conditions = _selection_conditions(selection)
-    stmt = select(func.count()).select_from(UsageLog).where(*conditions)
-    return int((await db.execute(stmt)).scalar_one())

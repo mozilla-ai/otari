@@ -8,7 +8,12 @@ thing is and what it does without opening it.
 - Components: `PascalCase.tsx`, named for the component (`ProvidersPage.tsx`, `RowActions.tsx`).
 - Hooks: `useCamelCase.ts(x)` (`useDeployment.tsx`, `useEntitlements.tsx`).
 - Helpers and pure modules: `camelCase.ts` (`urlState.ts`, `tableSelection.ts`, `format.ts`).
-- Tests: `<Name>.test.ts(x)`, beside the file they cover.
+- Tests: `<Name>.test.ts(x)`, beside the file they cover. One file is deliberately
+  not: `shared/components/navigation/tabs.test.tsx` covers `Tab`, `TabRow` and
+  `Segmented` under a single header docstring arguing all three ARIA departures
+  together, so it has no one subject to be named after and splitting it would
+  duplicate that rationale across two files. A test with one subject takes its
+  subject's name.
 - Routes: whatever file-based routing requires (`tools.guardrails.tsx`), never renamed by hand.
 
 ## Variables

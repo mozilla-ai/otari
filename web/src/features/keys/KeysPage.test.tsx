@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ApiKey, DeploymentBootstrap, User } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationMember } from "@/tests/fixtures"
+import { apiKey, bootstrap, organizationMember } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { pickOption } from "@/tests/select"
 
@@ -30,27 +30,6 @@ function user(overrides: Partial<User> = {}): User {
     blocked: false,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
-    metadata: {},
-    ...overrides,
-  }
-}
-
-function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
-  return {
-    capture_agent_telemetry: null,
-    id: "key-1",
-    // NOT NULL on the server: a key always belongs to exactly one workspace.
-    workspace_id: "11111111-1111-1111-1111-111111111111",
-    key_prefix: "gw-AbC3dE",
-    key_name: "ci-bot",
-    user_id: "alice",
-    created_at: "2026-01-01T00:00:00+00:00",
-    last_used_at: null,
-    expires_at: null,
-    is_active: true,
-    allowed_models: null,
-    exclude_from_budget: false,
-    reject_user_mismatch: null,
     metadata: {},
     ...overrides,
   }
@@ -271,12 +250,11 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
     // The reveal shows the secret and a runnable curl snippet with the key injected.
-    // Named by its own heading, which is what the parity spec locates it by.
-    const dialog = await screen.findByRole("dialog", {
-      name: "API key created",
+    const reveal = await screen.findByRole("alert", {
+      name: /API key created|New secret for/,
     })
-    expect(within(dialog).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
-    const curl = within(dialog).getByDisplayValue(
+    expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+    const curl = within(reveal).getByDisplayValue(
       new RegExp(`Otari-Key: ${NEW_SECRET}`),
     )
     expect(curl).toBeInTheDocument()
@@ -285,11 +263,13 @@ describe("KeysPage", () => {
     )
 
     await user.click(
-      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
     )
 
     // After closing, the list shows only the prefix and the secret is gone from the DOM.
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("alert", { name: /API key created|New secret for/ }),
+    ).not.toBeInTheDocument()
     expect(
       await screen.findByText(`${NEW_SECRET.slice(0, 10)}…`),
     ).toBeInTheDocument()
@@ -311,7 +291,11 @@ describe("KeysPage", () => {
     await person.keyboard("{Escape}")
     await person.click(screen.getByRole("button", { name: "Create key" }))
 
-    return within(await screen.findByRole("dialog"))
+    return within(
+      await screen.findByRole("alert", {
+        name: /API key created|New secret for/,
+      }),
+    )
   }
 
   it("sends the snippet at the data plane a hosted deployment published", async () => {
@@ -348,7 +332,11 @@ describe("KeysPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("does not close the reveal on Escape; requires the explicit save button", async () => {
+  it("keeps the reveal up through a stray Escape; only the save button dismisses it", async () => {
+    // The reveal is a strip on the page now rather than a modal, so there is no
+    // Esc handler to suppress and no backdrop to click. What still has to hold
+    // is the thing the modal was protecting: a one-time secret cannot be lost
+    // to a keystroke aimed at something else.
     mockApi({ keys: [] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -361,17 +349,29 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
-    const dialog = await screen.findByRole("dialog")
+    const reveal = await screen.findByRole("alert", {
+      name: /API key created|New secret for/,
+    })
     await user.keyboard("{Escape}")
-    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(
+      screen.getByRole("alert", { name: /API key created|New secret for/ }),
+    ).toBeInTheDocument()
 
     await user.click(
-      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
     )
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("alert", { name: /API key created|New secret for/ }),
+    ).not.toBeInTheDocument()
   })
 
-  it("refuses a backdrop press and inerts the page behind the reveal", async () => {
+  // The reveal is a strip, not a modal: it has no backdrop to press and does
+  // not take the page out of the accessibility tree. Both would be a dialog
+  // fighting its own conventions, as the reveal's own docstring argues.
+  // What has to survive is the part that mattered, that nothing incidental can
+  // dismiss a secret shown once, so that is what this asserts now. The page
+  // behind staying reachable is a deliberate change and not covered here.
+  it("keeps the reveal up through a press elsewhere on the page", async () => {
     mockApi({ keys: [] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -384,20 +384,24 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
-    const dialog = await screen.findByRole("dialog")
-    // The page behind is out of the accessibility tree, so the create action
-    // the reveal came from is not reachable while the secret is on screen.
-    expect(screen.queryByRole("button", { name: "Create key" })).toBeNull()
+    const reveal = await screen.findByRole("alert", {
+      name: /API key created|New secret for/,
+    })
+    await user.click(screen.getByRole("heading", { name: "API keys" }))
+    expect(
+      screen.getByRole("alert", { name: /API key created|New secret for/ }),
+    ).toBeInTheDocument()
 
     await user.click(
-      document.querySelector('[data-slot="modal-backdrop"]') as HTMLElement,
+      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
     )
-    expect(screen.getByRole("dialog")).toBeInTheDocument()
-
-    await user.click(
-      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("alert", {
+          name: /API key created|New secret for/,
+        }),
+      ).toBeNull(),
     )
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it("returns focus to the page's create action when the reveal closes", async () => {
@@ -413,13 +417,15 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
-    const dialog = await screen.findByRole("dialog")
+    const reveal = await screen.findByRole("alert", {
+      name: /API key created|New secret for/,
+    })
     await user.click(
-      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
     )
 
-    // The form that opened the reveal is gone by now, so the dialog's own
-    // restore has nowhere to land and focus would otherwise be on <body>.
+    // The form that opened the reveal is gone by now, so nothing else has a
+    // claim on focus and it would otherwise be left on <body>.
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByRole("button", { name: "Create key" }),
@@ -427,28 +433,54 @@ describe("KeysPage", () => {
     )
   })
 
-  it("moves focus onto the confirm and back on cancel, so a regenerate never drops it", async () => {
+  // Rewritten from "moves focus onto the confirm and back on cancel". That
+  // version scoped every query to `within(row)` because the confirm used to
+  // swap the trigger for a Confirm/Cancel pair in place, and React reused the
+  // same <button> node, so focus rode onto Confirm with nothing managing it.
+  // The confirmation is a sibling row now, which changes the facts: probing
+  // document.activeElement shows the trigger is never unmounted and keeps
+  // focus, so arming cannot strand it on <body>. That is what is asserted.
+  it("keeps the armed row's trigger mounted and focused, so arming never drops focus", async () => {
     mockApi({ keys: [apiKey()] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Regenerate" }))
+    const trigger = within(row).getByRole("button", { name: "Regenerate" })
+    await user.click(trigger)
 
-    // Arming unmounts the button that was pressed, so focus has to follow the
-    // swap rather than falling back to <body>.
-    await waitFor(() =>
-      expect(document.activeElement).toBe(
-        within(row).getByRole("button", { name: "Regenerate" }),
-      ),
+    await screen.findByText(/stops working immediately/)
+    // Same node, not a re-rendered replacement: the strip is added beside the
+    // row rather than swapped into it.
+    expect(within(row).getByRole("button", { name: "Regenerate" })).toBe(
+      trigger,
     )
     expect(document.activeElement).not.toBe(document.body)
+  })
 
-    await user.click(within(row).getByRole("button", { name: "Cancel" }))
+  it("returns focus to the row action when an armed row is cancelled", async () => {
+    // Cancelling unmounts the strip from under the focused Confirm, which the
+    // browser answers by moving focus to <body>: the keyboard loses its place
+    // on the most destructive control in the row. `useConfirmationFocus` hands
+    // it back, and the trigger is identified by `lastArmed` rather than `armed`
+    // so the ref is still attached when the hook's effect runs.
+    mockApi({ keys: [apiKey()] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    const trigger = within(row).getByRole("button", { name: "Regenerate" })
+    await user.click(trigger)
+    await screen.findByText(/stops working immediately/)
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
     await waitFor(() =>
-      expect(document.activeElement).toBe(
-        within(row).getByRole("button", { name: "Regenerate" }),
-      ),
+      expect(screen.queryByText(/stops working immediately/)).toBeNull(),
+    )
+
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement).toBe(
+      within(row).getByRole("button", { name: "Regenerate" }),
     )
   })
 
@@ -472,13 +504,15 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
-    const dialog = await screen.findByRole("dialog")
-    const copyButtons = within(dialog).getAllByRole("button", { name: "Copy" })
+    const reveal = await screen.findByRole("alert", {
+      name: /API key created|New secret for/,
+    })
+    const copyButtons = within(reveal).getAllByRole("button", { name: "Copy" })
     await user.click(copyButtons[0])
 
     expect(writeText).toHaveBeenCalledWith(NEW_SECRET)
     expect(
-      await within(dialog).findByText("Copied to clipboard."),
+      await within(reveal).findByText("Copied to clipboard."),
     ).toBeInTheDocument()
   })
 
@@ -520,14 +554,22 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Regenerate" }))
-    // Arming shows a named warning; a second click confirms.
-    expect(
-      within(row).getByText(/stops working immediately/),
-    ).toBeInTheDocument()
-    await user.click(within(row).getByRole("button", { name: "Regenerate" }))
+    // Arming opens a strip in its own row directly under the key's, so the
+    // message and the confirm are siblings of that row rather than inside it.
+    const armed = screen
+      .getByText(/stops working immediately/)
+      .closest("tr") as HTMLTableRowElement
+    expect(armed).not.toBe(row)
+    expect(row.nextElementSibling).toBe(armed)
+    // The message names the key it is about, which is the whole point of
+    // confirming in place rather than in a dialog.
+    expect(within(armed).getByText("ci-bot")).toBeInTheDocument()
+    await user.click(within(armed).getByRole("button", { name: "Regenerate" }))
 
-    const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByDisplayValue(REGEN_SECRET)).toBeInTheDocument()
+    const reveal = await screen.findByRole("alert", {
+      name: /API key created|New secret for/,
+    })
+    expect(within(reveal).getByDisplayValue(REGEN_SECRET)).toBeInTheDocument()
   })
 
   it("permanently deletes a disabled key after confirm", async () => {
@@ -539,11 +581,13 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    expect(
-      within(row).getByText(/unlinks its usage history/),
-    ).toBeInTheDocument()
+    const armed = screen
+      .getByText(/unlinks its usage history/)
+      .closest("tr") as HTMLTableRowElement
+    expect(row.nextElementSibling).toBe(armed)
+    expect(within(armed).getByText("legacy")).toBeInTheDocument()
     await user.click(
-      within(row).getByRole("button", { name: "Delete permanently" }),
+      within(armed).getByRole("button", { name: "Delete permanently" }),
     )
 
     const del = fetchMock.mock.calls.find(
@@ -1069,8 +1113,10 @@ describe("KeysPage", () => {
 
       await usr.type(screen.getByPlaceholderText("ci-bot"), "my-key")
       await usr.click(screen.getByRole("button", { name: "Create key" }))
-      const dialog = await screen.findByRole("dialog")
-      expect(within(dialog).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+      const reveal = await screen.findByRole("alert", {
+        name: /API key created|New secret for/,
+      })
+      expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
 
       const post = fetchMock.mock.calls.find(
         ([u, init]) =>

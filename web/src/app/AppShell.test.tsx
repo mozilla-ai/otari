@@ -484,6 +484,40 @@ describe("AppShell responsive layout", () => {
   })
 })
 
+describe("the rail's closing rules", () => {
+  // The footer block and the closing band each draw a rule. Between them sits
+  // one row, the way onto the organization rail, and on that rail it is gated
+  // out: the two rules then land 4px apart and read as a single doubled
+  // hairline, which is what a reader reported. The band's rule is the
+  // unconditional one, mirroring the scope band at the head of the rail, so the
+  // footer's is the one that gives way.
+  const footerOf = (container: HTMLElement) =>
+    container.querySelector('[class*="pb-[env(safe-area-inset-bottom)]"]')
+
+  it("keeps the footer rule where a row sits below it", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell(bootstrap(), { url: "/" })
+
+    expect(
+      await screen.findByRole("link", { name: "Organization" }),
+    ).toBeInTheDocument()
+    expect(footerOf(container)).toHaveClass("border-t")
+  })
+
+  it("drops it on the organization rail, where that row is gone", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell(bootstrap(), {
+      url: "/organization/members",
+    })
+
+    expect(
+      await screen.findByRole("link", { name: /^Back to/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+    expect(footerOf(container)).not.toHaveClass("border-t")
+  })
+})
+
 describe("AppShell surface gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -549,6 +583,7 @@ describe("AppShell surface gating", () => {
     ).toEqual([
       "Workspaces",
       "Members & roles",
+      "Email domains",
       "Spend & budgets",
       "Model pricing",
       "Org settings",
@@ -717,13 +752,17 @@ describe("AppShell entitlement gating", () => {
 
     const members = await screen.findByRole("link", { name: "Members & roles" })
     const parent = screen.getByRole("link", { name: "Org settings" })
-    // The selected fill, which the navigation design draws as a lifted chip
-    // (`--color-surface-muted`, reached through `bg-surface-alt`) rather than the
-    // tinted `bg-primary-subtle` this rail used to wear. Asserted as the class
-    // because it is what a reader of the rail actually sees; `aria-current` is
-    // covered separately.
-    expect(members.className).toContain("bg-surface-alt")
-    expect(parent.className).not.toContain("bg-surface-alt")
+    // The selected treatment, asserted as the classes because they are what a
+    // reader of the rail actually sees; `aria-current` is covered separately.
+    // The fill is `bg-surface-subtle`, the louder of the two rungs; hover takes
+    // the quieter `surface-alt`, so a transient state cannot out-shout a
+    // permanent one. The left edge is the part hover can never borrow, which is why it is
+    // asserted here rather than left to `rowStyles.test.ts`: this is the test
+    // that proves exactly one row wears it.
+    expect(members.className).toContain("bg-surface-subtle")
+    expect(members.className).toContain("border-foreground")
+    expect(parent.className).not.toContain("bg-surface-subtle")
+    expect(parent.className).not.toContain("border-foreground")
   })
 
   it("names a gated-off child route after the child, not its parent", async () => {

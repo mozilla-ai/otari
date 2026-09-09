@@ -8,15 +8,19 @@
 
 import type {
   ActivationAttempt,
+  ApiKey,
   Budget,
   CallerOrganizationMembership,
   DeploymentBootstrap,
   DeploymentUser,
   Organization,
   OrganizationContext,
+  OrganizationDomain,
   OrganizationGuardrail,
   OrganizationMember,
+  OrganizationSpendCeiling,
   OrgProviderKey,
+  PendingOrganizationInvitation,
   PricingResponse,
   ScopedBudget,
   UsageSeriesPoint,
@@ -223,6 +227,28 @@ export function callerOrganizationMembership(
   }
 }
 
+/**
+ * One invitation waiting on the caller, as their own inbox lists it.
+ *
+ * A second organization by default, because that is the case the inbox exists
+ * for: an identity already active somewhere, invited elsewhere.
+ */
+export function pendingOrganizationInvitation(
+  overrides: Partial<PendingOrganizationInvitation> = {},
+): PendingOrganizationInvitation {
+  return {
+    organization_member_id: "44444444-4444-4444-4444-444444444444",
+    invitation_id: "55555555-5555-5555-5555-555555555555",
+    organization_id: "99999999-9999-9999-9999-999999999999",
+    organization_name: "Research",
+    email: "invitee@example.com",
+    role: "member",
+    expires_at: "2026-01-08T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  }
+}
+
 export function organizationMember(
   overrides: Partial<OrganizationMember> = {},
 ): OrganizationMember {
@@ -347,6 +373,66 @@ export function scopedBudget(
     period_end: null,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/**
+ * One of the caller's organization's spend ceilings, as
+ * `/v1/organizations/me/spend-ceilings` reports it.
+ *
+ * The tenant-scoped view of `scopedBudget`: the same row joined onto its
+ * budget, plus `manageable`, which says whether the figure is this
+ * organization's to change and never whether the ceiling binds it.
+ */
+export function organizationSpendCeiling(
+  overrides: Partial<OrganizationSpendCeiling> = {},
+): OrganizationSpendCeiling {
+  return {
+    id: "cccccccc-1111-2222-3333-444444444444",
+    scope_type: "organization",
+    scope_id: ORGANIZATION_ID,
+    provider_key_id: null,
+    budget_id: "bbbbbbbb-1111-2222-3333-444444444444",
+    name: null,
+    max_budget: 250,
+    current_spend: 12.5,
+    reserved_spend: 0,
+    token_limit: null,
+    current_tokens: 0,
+    reserved_tokens: 0,
+    request_limit: null,
+    current_requests: 0,
+    reserved_requests: 0,
+    budget_duration_sec: null,
+    reset_alignment: "calendar_month",
+    period_start: "2026-08-01T00:00:00+00:00",
+    period_end: "2026-09-01T00:00:00+00:00",
+    manageable: true,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** A key as either key surface reports one; both answer the same shape. */
+export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
+  return {
+    capture_agent_telemetry: null,
+    id: "key-1",
+    // NOT NULL on the server: a key always belongs to exactly one workspace.
+    workspace_id: "11111111-1111-1111-1111-111111111111",
+    key_prefix: "gw-AbC3dE",
+    key_name: "ci-bot",
+    user_id: "alice",
+    created_at: "2026-01-01T00:00:00+00:00",
+    last_used_at: null,
+    expires_at: null,
+    is_active: true,
+    allowed_models: null,
+    exclude_from_budget: false,
+    reject_user_mismatch: null,
+    metadata: {},
     ...overrides,
   }
 }
@@ -485,6 +571,26 @@ export function organizationGuardrail(
     workspace_ids: [],
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: "2026-08-24T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function organizationDomain(
+  overrides: Partial<OrganizationDomain> = {},
+): OrganizationDomain {
+  return {
+    id: "77777777-7777-7777-7777-777777777777",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    domain: "acme.example",
+    default_role: "member",
+    enabled: true,
+    verification_record: "otari-domain-verification=tok-abc123",
+    // Unverified by default: a claim lands inert, and a fixture that arrived
+    // already proven would let a test about the pending state pass by accident.
+    verified_at: null,
+    proof_expires_at: null,
+    created_at: "2026-08-24T00:00:00+00:00",
+    updated_at: null,
     ...overrides,
   }
 }

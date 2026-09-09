@@ -59,11 +59,22 @@ exactly as the platform's own tenancy models do.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import field_validator
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, ForeignKey, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
@@ -765,6 +776,159 @@ class OrganizationMember(OrganizationMemberBase, PrimaryKeyMixin, CreatedAtMixin
 
 
 # =============================================================================
+# Email-domain auto-join
+# =============================================================================
+
+
+# Roles a domain claim may hand out. Owner and admin are deliberately absent:
+# the claim proves control of a *domain*, which is not the same as a decision
+# about any one person, so a match must never confer management of the
+# organization. Narrower than ORGANIZATION_MEMBER_ROLES for that reason alone,
+# and widening it would make publishing one DNS record enough to mint admins.
+ORGANIZATION_DOMAIN_ROLES = {"member", "viewer"}
+OrganizationDomainRole = Literal["member", "viewer"]
+
+# The TXT record an admin publishes at the claimed domain's apex to prove they
+# control it. The stored token is the secret half; this prefix is what makes the
+# record recognizable among the other TXT records a domain already publishes.
+DOMAIN_VERIFICATION_TXT_PREFIX = "otari-domain-verification="
+
+# How long one DNS proof is good for. A proof is evidence about the moment it
+# was taken, and domains change hands: pull the record, transfer the domain, or
+# let it lapse, and a stamp kept forever would go on admitting whoever owns the
+# domain next, at a role this organization chose. Past this the claim stops
+# admitting anyone until an admin re-verifies, which fails closed and needs no
+# background sweeper. Re-checking on the sign-in path instead was the other
+# option and is worse: it puts a 5s outbound lookup in front of a person
+# waiting to sign in.
+DOMAIN_PROOF_TTL = timedelta(days=90)
+
+# The most domains one organization may claim. In the shape of
+# MAX_WORKSPACE_ASSIGNMENTS, and here for a sharper reason: every unverified
+# claim is a name this deployment will run an outbound DNS query against on
+# demand, so an uncapped list is an uncapped query relay.
+MAX_ORGANIZATION_DOMAINS = 50
+
+
+class OrganizationDomainBase(SQLModel):
+    organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
+    # Indexed, and NOT unique. Uniqueness applies to *proven* claims only (see
+    # the partial index on the table below): two organizations may both have an
+    # unproven claim on a domain, and whichever proves it first is the one that
+    # gets it.
+    domain: str = Field(max_length=255, index=True)
+    default_role: str = Field(default="member", max_length=32)
+    enabled: bool = Field(default=True)
+
+    # Runs on the request and response schemas below, and NOT on the table
+    # class: SQLModel skips validation for ``table=True``, so the repository
+    # constructing an ``OrganizationDomain`` directly is unchecked. The request
+    # ``Literal`` is what actually keeps a management role out; this is a last
+    # guard on the way back out, so a row that somehow held one could not be
+    # serialized as if it were fine.
+    @field_validator("default_role")
+    @classmethod
+    def validate_default_role(cls, value: str) -> str:
+        return _validate_membership(value, allowed=ORGANIZATION_DOMAIN_ROLES, kind="auto-join role")
+
+
+class OrganizationDomainCreate(OrganizationDomainBase):
+    pass
+
+
+class OrganizationDomainUpdate(SQLModel):
+    default_role: str | None = Field(default=None, max_length=32)
+    enabled: bool | None = Field(default=None)
+
+    @field_validator("default_role")
+    @classmethod
+    def validate_default_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=ORGANIZATION_DOMAIN_ROLES, kind="auto-join role")
+
+
+class OrganizationDomainPublic(OrganizationDomainBase):
+    """A claim as its organization's admins see it.
+
+    Carries ``verification_record`` (the whole string to publish) rather than
+    the raw token: the admin never has a use for the token on its own, and one
+    field that can be copied verbatim into a DNS panel is harder to get wrong
+    than a prefix they must remember to prepend.
+    """
+
+    id: uuid.UUID
+    verification_record: str
+    verified_at: datetime | None = None
+    # When the proof stops being acted on, computed rather than left to the
+    # caller: the TTL is a server rule, and a dashboard deriving it would hold a
+    # second copy of the constant that could drift from this one.
+    proof_expires_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class OrganizationDomainsPublic(SQLModel):
+    data: list[OrganizationDomainPublic]
+    count: int
+
+
+class OrganizationDomainCreateRequest(SQLModel):
+    domain: str = Field(min_length=1, max_length=255)
+    default_role: OrganizationDomainRole = "member"
+    enabled: bool = True
+
+
+class OrganizationDomainUpdateRequest(SQLModel):
+    default_role: OrganizationDomainRole | None = None
+    enabled: bool | None = None
+
+
+class OrganizationDomain(OrganizationDomainBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """One organization's claim on an email domain, and its DNS proof.
+
+    A claim on its own grants nothing. Auto-join reads only rows that are
+    ``enabled``, verified, and whose proof is younger than ``DOMAIN_PROOF_TTL``,
+    so an organization may name any domain it likes and nothing happens until
+    the record is published.
+
+    **Only a proven claim is exclusive.** The unique index is partial, over
+    verified rows alone, so any number of organizations may hold an unproven
+    claim on one domain and the first to publish the record takes it. A plain
+    ``UNIQUE(domain)`` would have made claiming first-come-first-served, which
+    hands anyone who can create an organization a way to permanently lock the
+    real owner of a domain out of ever claiming it.
+
+    The row outlives verification rather than collapsing into a boolean,
+    because the proof is re-checked: ``verified_at`` is the age of the evidence
+    and the token stays the value the published record has to keep matching.
+    """
+
+    __tablename__ = "organization_domain"
+    __table_args__ = (
+        Index(
+            "uq_organization_domain_verified_domain",
+            "domain",
+            unique=True,
+            postgresql_where=text("verified_at IS NOT NULL"),
+            sqlite_where=text("verified_at IS NOT NULL"),
+        ),
+    )
+
+    verification_token: str = Field(max_length=64)
+    verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+
+    @property
+    def verification_record(self) -> str:
+        """The exact TXT value to publish at the domain's apex."""
+        return f"{DOMAIN_VERIFICATION_TXT_PREFIX}{self.verification_token}"
+
+    def proof_expired(self, *, now: datetime) -> bool:
+        """Whether the DNS proof is too old to still be acted on."""
+        return self.verified_at is None or now - self.verified_at > DOMAIN_PROOF_TTL
+
+
+# =============================================================================
 # Workspaces
 # =============================================================================
 
@@ -982,6 +1146,44 @@ class AcceptInvitationResultPublic(SQLModel):
 
     organization_name: str
     role: str
+
+
+class PendingOrganizationInvitationPublic(SQLModel):
+    """One invitation waiting on the caller, as their own inbox lists it.
+
+    The authenticated counterpart to ``InvitationPreviewPublic``, and wider
+    than it on purpose: that one answers a visitor whose only credential is
+    the token, so it carries nothing it does not strictly need, while this one
+    answers the addressee's own session and can name the ids its accept and
+    decline calls take.
+
+    ``organization_member_id`` is what those two calls address, not
+    ``invitation_id``: the membership is the row that outlives a revoke and a
+    re-invite (each round mints a fresh ``Invitation`` against the same
+    membership), so a client holding a list from a moment ago names something
+    still resolvable rather than a token-shaped id that has since been
+    superseded. ``invitation_id`` rides along for the roster's sake, since
+    ``ActiveOrganizationMemberPublic`` carries the same field.
+    """
+
+    organization_member_id: uuid.UUID
+    invitation_id: uuid.UUID
+    organization_id: uuid.UUID
+    organization_name: str
+    # The address the invitation was actually sent to, read off the invitation
+    # rather than off the caller's identity. The two are the same address at
+    # invite time (an invitation resolves its membership through
+    # ``get_by_email``), but this one is a record of where the link was mailed
+    # and does not follow a later change to the identity's own address.
+    email: str
+    role: str
+    expires_at: datetime
+    created_at: datetime
+
+
+class PendingOrganizationInvitationsPublic(SQLModel):
+    data: list[PendingOrganizationInvitationPublic]
+    count: int
 
 
 class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -1235,11 +1437,15 @@ __all__ = [
     "DeploymentUserPublic",
     "DeploymentUserUpdateRequest",
     "DeploymentUsersPublic",
+    "DOMAIN_PROOF_TTL",
+    "DOMAIN_VERIFICATION_TXT_PREFIX",
     "INVITATION_STATUSES",
     "MAX_CREDENTIAL_ID_LENGTH",
     "MAX_WEBAUTHN_CREDENTIAL_NAME",
     "MANAGEMENT_ROLES",
+    "MAX_ORGANIZATION_DOMAINS",
     "MAX_WORKSPACE_ASSIGNMENTS",
+    "ORGANIZATION_DOMAIN_ROLES",
     "ORGANIZATION_MEMBER_ROLES",
     "ORGANIZATION_MEMBER_STATUSES",
     "WORKSPACE_MEMBER_ROLES",
@@ -1267,6 +1473,14 @@ __all__ = [
     "Organization",
     "OrganizationCreate",
     "OrganizationCreateRequest",
+    "OrganizationDomain",
+    "OrganizationDomainCreate",
+    "OrganizationDomainCreateRequest",
+    "OrganizationDomainPublic",
+    "OrganizationDomainRole",
+    "OrganizationDomainUpdate",
+    "OrganizationDomainUpdateRequest",
+    "OrganizationDomainsPublic",
     "OrganizationMember",
     "OrganizationMemberCreate",
     "OrganizationMemberPublic",
@@ -1278,6 +1492,8 @@ __all__ = [
     "OrganizationPublic",
     "OrganizationUpdate",
     "OrganizationsPublic",
+    "PendingOrganizationInvitationPublic",
+    "PendingOrganizationInvitationsPublic",
     "SwitchActiveOrganizationRequest",
     "User",
     "UserCreate",

@@ -311,4 +311,26 @@ describe("PricingWarning", () => {
     await user.click(await screen.findByRole("button", { name: "Dismiss" }))
     expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
   })
+
+  it("takes up room rather than covering what is under it", async () => {
+    // `InfoBanner` paints no ground, so an alarm out of flow lays its sentence
+    // over the top bar's trail and the page's own first rows. Negative
+    // assertions on the class string, which reject more than a token check
+    // would: no positioning scheme at all is the property, not the absence of
+    // one particular class.
+    mockSettings({ ...BASE, require_pricing: true, default_pricing: false })
+    renderPage(<PricingWarning />)
+
+    // Keyed on the band's own slot rather than on a padding utility: the
+    // padding is the part of this wrapper most likely to move, and it has
+    // already moved once, so a lookup through it would fail on a change this
+    // assertion is not about.
+    const banner = (await screen.findByText(/Requests are rejected/)).closest(
+      "[data-slot='pricing-alarm']",
+    )
+    expect(banner).not.toBeNull()
+    expect(banner?.className).not.toContain("absolute")
+    expect(banner?.className).not.toContain("fixed")
+    expect(banner?.className).not.toContain("z-")
+  })
 })

@@ -56,16 +56,28 @@ def _isolated_platform_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     ``load_config`` reads a ``.env`` from the working directory, which would put
     a contributor's local ``PLATFORM_*`` values back after the deletes below.
     """
-    for name in ("OTARI_AI_TOKEN", "PLATFORM_BASE_URL", "PLATFORM_HEALTH_PATH", "OTARI_MODE"):
+    for name in (
+        "OTARI_AI_TOKEN",
+        "PLATFORM_BASE_URL",
+        "PLATFORM_HEALTH_PATH",
+        "PLATFORM_HEALTH_URL",
+        "OTARI_MODE",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
 
 
-def _hybrid_config(monkeypatch: pytest.MonkeyPatch, health_path: str | None = None) -> Any:
+def _hybrid_config(
+    monkeypatch: pytest.MonkeyPatch,
+    health_path: str | None = None,
+    health_url: str | None = None,
+) -> Any:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
     monkeypatch.setenv("PLATFORM_BASE_URL", "http://platform.test/v1")
     if health_path is not None:
         monkeypatch.setenv("PLATFORM_HEALTH_PATH", health_path)
+    if health_url is not None:
+        monkeypatch.setenv("PLATFORM_HEALTH_URL", health_url)
     return load_config()
 
 
@@ -76,6 +88,28 @@ async def test_health_path_env_var_moves_the_probe(monkeypatch: pytest.MonkeyPat
 
     assert await _check_platform_reachability(config) is True
     assert [str(url) for url in stub.requested] == ["http://platform.test/v1/healthz"]
+
+
+@pytest.mark.asyncio
+async def test_health_url_env_var_bypasses_the_join(monkeypatch: pytest.MonkeyPatch, probe: Any) -> None:
+    """A peer whose health route sits outside base_url's own path (an
+    unversioned /health beside a versioned /v1 base) has no health_path that
+    joining onto base_url can reach; health_url names it directly instead.
+    """
+    stub = probe()
+    config = _hybrid_config(monkeypatch, health_url="http://platform.test/health")
+
+    assert await _check_platform_reachability(config) is True
+    assert [str(url) for url in stub.requested] == ["http://platform.test/health"]
+
+
+@pytest.mark.asyncio
+async def test_health_url_takes_precedence_over_health_path(monkeypatch: pytest.MonkeyPatch, probe: Any) -> None:
+    stub = probe()
+    config = _hybrid_config(monkeypatch, health_path="/healthz", health_url="http://platform.test/health")
+
+    assert await _check_platform_reachability(config) is True
+    assert [str(url) for url in stub.requested] == ["http://platform.test/health"]
 
 
 @pytest.mark.asyncio

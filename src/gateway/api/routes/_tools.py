@@ -124,6 +124,36 @@ def _is_code_execution_tool_type(type_value: Any) -> bool:
     return type_value == Tool.CODE_EXECUTION
 
 
+# The provider-named code-execution keywords: OpenAI's ``code_interpreter``, the
+# bare short form, and any dated/preview variant. The prefix match keeps future
+# Anthropic versions (``code_execution_20991231``) working without a release
+# here, mirroring the web-search keywords above.
+_BARE_CODE_EXECUTION_TYPES = frozenset({"code_execution", "code_interpreter"})
+_VERSIONED_CODE_EXECUTION_PREFIX = "code_execution_"
+
+
+def has_provider_code_execution_tool(tools: list[dict[str, Any]] | None) -> bool:
+    """Whether ``tools`` still asks the provider to run code in its own sandbox.
+
+    Matched on the tool ``type`` alone, never on a caller's ``function`` named
+    ``code_execution``: that is the caller's own tool, the same carve-out
+    :func:`_is_web_search_tool_type` makes for a function named ``web_search``.
+
+    Called on what is left after :func:`_extract_code_execution_tool` has taken
+    the gateway-managed entry, so a true answer means the request asks two
+    separate sandboxes to run code.
+    """
+    if not tools:
+        return False
+    for entry in tools:
+        type_value = entry.get("type") if isinstance(entry, dict) else None
+        if not isinstance(type_value, str):
+            continue
+        if type_value in _BARE_CODE_EXECUTION_TYPES or type_value.startswith(_VERSIONED_CODE_EXECUTION_PREFIX):
+            return True
+    return False
+
+
 # Gateway-internal fields the provider SDKs (any-llm, anthropic, openai, …)
 # don't accept as ``acompletion`` kwargs. Strip these from the model_dump
 # before forwarding to upstream — Anthropic in particular rejects unknown

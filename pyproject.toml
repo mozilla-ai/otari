@@ -12,7 +12,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.25.0",
+    "any-llm-sdk[all]>=1.27.1",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the
@@ -34,6 +34,16 @@ dependencies = [
     "bcrypt>=5.0.0",
     "click>=8.1.0",
     "cryptography>=50.0.0",
+    # DNS lookups for the email-domain ownership proof
+    # (`services.tenancy.domain_verification`). The async resolver specifically:
+    # a claimed domain whose nameservers are gone takes the full timeout, and the
+    # blocking resolver would hold the event loop for it.
+    "dnspython>=2.7.0",
+    # IDNA2008 for the same feature (`core.email_domains`). Declared rather than
+    # leaned on as a transitive dependency, because the standard library's own
+    # "idna" codec is IDNA2003 and folds `faß.de` into `fass.de`, which would
+    # let a proof taken on one domain admit addresses at another.
+    "idna>=3.7",
     "fastapi>=0.115.0",
     "genai-prices>=0.1.0",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",

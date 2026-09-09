@@ -101,9 +101,11 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
     _web_search_intercept_enabled,
     declares_native_web_search,
+    has_provider_code_execution_tool,
     web_search_max_results_baseline,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.usage import (
@@ -254,6 +256,12 @@ SANDBOX_MCP_CONFLICT_DETAIL = (
     "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
     "pick one. Multi-backend dispatch is a planned refinement."
 )
+SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL = (
+    "otari_code_execution cannot be combined with a provider-native code-execution tool "
+    "(code_execution, code_interpreter, code_execution_<date>) in the same request; pick one. "
+    "The gateway sandbox and the provider's own are separate environments, and a request "
+    "addressing both has no single place its files and state live."
+)
 WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
     "otari_web_search tool requested but no search backend is configured on this gateway. "
     "Set OTARI_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
@@ -380,9 +388,6 @@ _FORWARDED_PARAMS: frozenset[str] = frozenset(
         set(CompletionParams.model_fields)
         | set(MessagesParams.model_fields)
         | set(ResponsesParams.model_fields)
-        # Declared on the chat request rather than derived, and forwarded through
-        # any-llm's ``**kwargs`` (see ``chat.ChatCompletionRequest.service_tier``).
-        | {"service_tier"}
     )
     - SENSITIVE_PARAM_FIELDS
 )
@@ -2441,6 +2446,13 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
             if mcp_servers:
                 raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            # Two sandboxes, one request. Whichever way the gateway resolved it
+            # silently, half the caller's state would live somewhere they cannot
+            # address: the gateway sandbox's session is per-request and never
+            # named on the wire, the provider's is named by a handle the gateway
+            # would then have to route around. Refuse instead of picking.
+            if has_provider_code_execution_tool(tools_after_sandbox):
+                raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_sandbox = True
 
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
@@ -2673,7 +2685,7 @@ async def prepare_gateway_tools(
     except HTTPException:
         await release_reservation(ctx)
         raise
-    except SQLAlchemyError:
+    except DATABASE_ERRORS:
         # Five reads in this block touch the database (the organization's
         # guardrails, the workspace MCP servers, the workspace code-execution
         # policy and the workspace web-search configuration above, and
@@ -2688,11 +2700,16 @@ async def prepare_gateway_tools(
         # still refusing work re-raises the original failure rather than a
         # confusing second one.
         if ctx.db is not None:
-            with contextlib.suppress(SQLAlchemyError):
+            with contextlib.suppress(*DATABASE_ERRORS):
                 await ctx.db.rollback()
-        with contextlib.suppress(SQLAlchemyError):
+        with contextlib.suppress(*DATABASE_ERRORS):
             await release_reservation(ctx)
         raise
+
+    # Last statement of the preamble: everything after this is the provider
+    # call. See :func:`gateway.core.database.release_session` for why the
+    # connection must not be held across it.
+    await release_session(ctx.db)
 
     return ToolContext(
         config=ctx.config,
@@ -3751,15 +3768,24 @@ def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool
     )
 
 
-def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
+def stream_final_attempt_extra_seconds(
+    config: GatewayConfig,
+    *,
+    tool_mode: bool = False,
+    has_forwarded_tools: bool = False,
+) -> float:
     """Extra first-chunk grace granted only to the sole/final streaming attempt.
 
     Added on top of the per-attempt failover budget for the terminal attempt,
-    which has no next entry in the routing policy to fall over to. Keeps that
-    attempt's wait bounded while not converting a slow-but-valid first token into
-    a timeout. Mode-agnostic (applies on top of the plain or tool-loop budget).
+    which has no next entry in the routing policy to fall over to. A request that
+    forwards provider-native tools but does not run a gateway-managed tool loop
+    keeps the plain failover budget on non-final attempts, and on the final one
+    is raised to the tool-loop base before the configured grace is added, so
+    tool-heavy agents get the relaxed criterion only where there is nowhere left
+    to fail over. The grace stays additive in every mode: an operator who
+    configures it always buys that much more time.
     """
-    return (
+    configured_extra = (
         int(
             config.platform.get(
                 _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
@@ -3768,6 +3794,12 @@ def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
         )
         / 1000
     )
+    if tool_mode or not has_forwarded_tools:
+        return configured_extra
+
+    plain_budget = stream_first_chunk_timeout_seconds(config, tool_mode=False)
+    tool_loop_budget = stream_first_chunk_timeout_seconds(config, tool_mode=True)
+    return configured_extra + max(0.0, tool_loop_budget - plain_budget)
 
 
 # ---------------------------------------------------------------------------
@@ -3984,7 +4016,11 @@ async def run_streaming_with_fallback(
     """
     tool_mode = tool_ctx.use_tool_loop
     first_chunk_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
-    final_attempt_extra = stream_final_attempt_extra_seconds(config)
+    final_attempt_extra = stream_final_attempt_extra_seconds(
+        config,
+        tool_mode=tool_mode,
+        has_forwarded_tools=bool(tool_ctx.remaining_user_tools),
+    )
 
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None

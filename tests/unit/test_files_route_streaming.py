@@ -10,8 +10,22 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 import pytest
+from fastapi import FastAPI
 
-from gateway.api.routes.files import _prime
+from gateway.api.routes.files import _prime, router
+
+
+def test_download_openapi_describes_binary_content() -> None:
+    app = FastAPI()
+    app.include_router(router)
+    responses = app.openapi()["paths"]["/v1/files/{file_id}/content"]["get"]["responses"]
+
+    assert responses["200"]["content"] == {
+        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+        "*/*": {"schema": {"type": "string", "format": "binary"}},
+    }
+    assert responses["200"]["headers"]["Content-Disposition"]["schema"]["type"] == "string"
+    assert "application/json" in responses["422"]["content"]
 
 
 async def _iter(chunks: list[bytes]) -> AsyncGenerator[bytes, None]:

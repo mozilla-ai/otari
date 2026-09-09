@@ -6,13 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { Provider } from "@/app/provider"
-import type { CallerOrganizationMembership } from "@/client"
+import type {
+  CallerOrganizationMembership,
+  PendingOrganizationInvitation,
+} from "@/client"
 import * as apiClient from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
   callerOrganizationMembership,
   organization,
   organizationContext,
+  pendingOrganizationInvitation,
   workspace,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
@@ -49,6 +53,8 @@ function mockApi(
     memberships?: CallerOrganizationMembership[]
     context?: Parameters<typeof organizationContext>[0]
     switchFails?: boolean
+    pendingInvitations?: PendingOrganizationInvitation[]
+    pendingInvitationsFail?: boolean
   } = {},
 ) {
   const requests: Recorded[] = []
@@ -86,6 +92,13 @@ function mockApi(
           },
         ],
       } as never
+    }
+    if (url.startsWith("/v1/organizations/me/pending-memberships")) {
+      if (options.pendingInvitationsFail) {
+        throw new apiClient.ApiError(404, "Not found")
+      }
+      const pending = options.pendingInvitations ?? []
+      return { data: pending, count: pending.length } as never
     }
     if (url.startsWith("/v1/organizations/me/memberships")) {
       return { data: memberships, count: memberships.length } as never
@@ -262,7 +275,10 @@ function renderSwitcherOnAPage(
   )
   return renderWithRouter(<div>USAGE PAGE</div>, {
     url: "/usage",
-    routes: [{ path: "/", element: <div>OVERVIEW PAGE</div> }],
+    routes: [
+      { path: "/", element: <div>OVERVIEW PAGE</div> },
+      { path: "/invitations", element: <div>INVITATIONS PAGE</div> },
+    ],
     // StrictMode remounts every component once, which is what development does
     // and what the guard inside the create form has to survive.
     shell: options.strict ? <StrictMode>{shell}</StrictMode> : shell,
@@ -415,5 +431,89 @@ describe("the workspace half of the scope switcher", () => {
     beat.release()
 
     expect(await screen.findByText("OVERVIEW PAGE")).toBeInTheDocument()
+  })
+})
+
+/**
+ * The invitee-side entry point (otari-ai#1999).
+ *
+ * The inbox is a chrome destination with no sidebar row, so this menu is the
+ * only thing in the shell that leads to it. Its absence when nothing is
+ * waiting is as much the contract as its presence when something is: a
+ * permanent row for an almost-always-empty list would read as a section of the
+ * product.
+ */
+describe("the invitations row in the scope switcher", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("offers nothing when no invitation is waiting", async () => {
+    mockApi()
+    await renderSwitcher()
+
+    const { menu } = await openMenu()
+
+    expect(within(menu).queryByText(/invitation/i)).toBeNull()
+  })
+
+  it("names how many are waiting and opens the inbox", async () => {
+    mockApi({ pendingInvitations: [pendingOrganizationInvitation()] })
+    const user = userEvent.setup()
+    await renderSwitcherOnAPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch workspace/ }),
+    )
+    const menu = await screen.findByRole("dialog")
+    await user.click(
+      within(menu).getByRole("button", { name: "1 invitation waiting" }),
+    )
+
+    expect(await screen.findByText("INVITATIONS PAGE")).toBeInTheDocument()
+  })
+
+  it("counts more than one in the plural", async () => {
+    mockApi({
+      pendingInvitations: [
+        pendingOrganizationInvitation(),
+        pendingOrganizationInvitation({
+          organization_member_id: "66666666-6666-6666-6666-666666666666",
+        }),
+      ],
+    })
+    await renderSwitcher()
+
+    const { menu } = await openMenu()
+
+    expect(
+      await within(menu).findByRole("button", {
+        name: "2 invitations waiting",
+      }),
+    ).toBeVisible()
+  })
+
+  it("stays silent when the read fails, rather than breaking the chrome", async () => {
+    // A gateway older than this bundle does not serve the route, and a hybrid
+    // one answers 404 for every `/v1/organizations` path. The switcher still
+    // has to switch.
+    mockApi({
+      memberships: twoOrganizations(),
+      pendingInvitationsFail: true,
+    })
+    await renderSwitcher()
+
+    const { menu } = await openMenu()
+
+    expect(within(menu).queryByText(/invitation/i)).toBeNull()
+    expect(
+      await within(menu).findByRole("button", { name: /Research/ }),
+    ).toBeVisible()
   })
 })

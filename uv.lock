@@ -156,7 +156,7 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "0.88.0"
+version = "0.125.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -168,9 +168,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/68/565f13059c0a6a6fd5f96f306f2a0fb478a0e1174ec18a4df16b5fac9379/anthropic-0.88.0.tar.gz", hash = "sha256:f4c7f6863d08c869913516f08d658fe53caaf8bcc4fbea3218df343d2a876c58", size = 596654, upload-time = "2026-04-01T19:59:05.287Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/f8/6f0560884b5363848347bd640b6c1d04abc25e7aa61787a232f790c6b60a/anthropic-0.125.0.tar.gz", hash = "sha256:e0cdd336580cb7411c1cdab69f80973e9bf4bff7f8e08141811d46307d45c682", size = 1112593, upload-time = "2026-08-19T22:00:42.837Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/ac/68f646998160c9f2e6f9353a31dd87292ef02b915b455aaf70a52a059a75/anthropic-0.88.0-py3-none-any.whl", hash = "sha256:71898b32332bc75d9739bc10095288d40a29605da6d00da2fe832b1aa036552f", size = 478338, upload-time = "2026-04-01T19:59:03.832Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/1a/b1bd30cda3790557e8791bec5922a6ec8fabb6fa8b008c76a39cf7be6152/anthropic-0.125.0-py3-none-any.whl", hash = "sha256:3486013602eca76d8b12540764e53654f02cf4951110bca86cf06e67428a9f21", size = 1184067, upload-time = "2026-08-19T22:00:44.596Z" },
 ]
 
 [package.optional-dependencies]
@@ -196,7 +196,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.25.0"
+version = "1.27.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -207,9 +207,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/3b/baf9f17c3eb945f735de942550509bab0b03b2ba98ad64e9905c170dfe73/any_llm_sdk-1.25.0.tar.gz", hash = "sha256:af5671e8dedfed271485190e10f1517aff53ad0a234c6d5a1bf357629f9f4e85", size = 192367, upload-time = "2026-08-11T11:23:47.583Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/67/e4ec7b8b065210e4069f54e4075871ad017b3dc988cf9230259c1abdad86/any_llm_sdk-1.27.1.tar.gz", hash = "sha256:605a44b24e67e3396f8cef9489bf5cf6a4cc59d25cd022ceb823aae268590cf0", size = 210430, upload-time = "2026-09-04T09:58:00.719Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/42/b89c812352589b1c7330a08a96440185925e124c77ecb786c7d1c743ed9c/any_llm_sdk-1.25.0-py3-none-any.whl", hash = "sha256:fc1bdf7db5d314e3a26c0b8e95c2fac6a7ae478446534d023b3e61ab5ad6ef41", size = 246498, upload-time = "2026-08-11T11:23:45.93Z" },
+    { url = "https://files.pythonhosted.org/packages/96/14/07f949b26734222d1cc0be2b461c68c7bd4cfb3849ed15ce9edcf640be7e/any_llm_sdk-1.27.1-py3-none-any.whl", hash = "sha256:be3a919c07163db94b88b0d8676d0abbc9a6ed432ca4d415741a71cbc25b91d7", size = 265047, upload-time = "2026-09-04T09:57:59.175Z" },
 ]
 
 [package.optional-dependencies]
@@ -802,6 +802,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dnspython"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/8b/57666417c0f90f08bcafa776861060426765fdb422eb10212086fb811d26/dnspython-2.8.0.tar.gz", hash = "sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f", size = 368251, upload-time = "2025-09-07T18:58:00.022Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/5a/18ad964b0086c6e62e2e7500f7edc89e3faa45033c71c1893d34eed2b2de/dnspython-2.8.0-py3-none-any.whl", hash = "sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af", size = 331094, upload-time = "2025-09-07T18:57:58.071Z" },
+]
+
+[[package]]
 name = "docker"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1014,8 +1023,10 @@ dependencies = [
     { name = "bcrypt" },
     { name = "click" },
     { name = "cryptography" },
+    { name = "dnspython" },
     { name = "fastapi" },
     { name = "genai-prices" },
+    { name = "idna" },
     { name = "markitdown", extra = ["docx", "pdf", "pptx", "xlsx"] },
     { name = "mcp" },
     { name = "opentelemetry-api" },
@@ -1066,15 +1077,17 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "alembic", specifier = ">=1.13.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.25.0" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.27.1" },
     { name = "apron-auth", specifier = ">=0.15.1,<0.16.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.42.0" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
+    { name = "dnspython", specifier = ">=2.7.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "genai-prices", specifier = ">=0.1.0" },
+    { name = "idna", specifier = ">=3.7" },
     { name = "markitdown", extras = ["docx", "pptx", "xlsx", "pdf"], specifier = ">=0.1.0" },
     { name = "mcp", specifier = ">=1.28.1,<2.0.0" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=1.26.0" },
@@ -2564,7 +2577,7 @@ wheels = [
 
 [[package]]
 name = "otari"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2572,9 +2585,9 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/04/e4/a4425f159b7c56b529c2a733e2aa59ef0de4f3e982b367236f7edfccbca1/otari-0.2.0.tar.gz", hash = "sha256:0e434232aeca64dc95c8658698363ab1facdd1304c189041bf3e1fc3b8d7c6c5", size = 130711, upload-time = "2026-06-16T19:57:37.517Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/57/a121d08fd41fde51948f7a8bc5176323a58988a394e0c28f5f16a550e7c6/otari-0.3.0.tar.gz", hash = "sha256:15b2408ade8cee9dfeb45adaf3396b3a3ba2a39d91f6645d53295447f96c817d", size = 259831, upload-time = "2026-08-14T08:27:57.671Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/72/499032f271375593906e263fbbe2605e27372bb6f81dbc7c11607040d522/otari-0.2.0-py3-none-any.whl", hash = "sha256:794e41207e4ef901ed81709a73aa500c9549372c99ae4a27aed7e45cc0c5dead", size = 365641, upload-time = "2026-06-16T19:57:35.782Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/57/b5244e8b99d7f29cba2eac730e0ad60d38823132d83bf84da5faed15fed4/otari-0.3.0-py3-none-any.whl", hash = "sha256:9097c795b2b8007899750e34dcba106dbe713d20d4b8fc63d92a02df70145262", size = 669174, upload-time = "2026-08-14T08:27:56.064Z" },
 ]
 
 [[package]]

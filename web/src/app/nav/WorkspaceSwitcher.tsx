@@ -1,18 +1,20 @@
 import { Button, Modal, Popover } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { FiCheck, FiChevronDown, FiPlus } from "react-icons/fi"
+import { FiCheck, FiChevronDown, FiMail, FiPlus } from "react-icons/fi"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import { CreateWorkspaceForm } from "@/features/workspaces/WorkspacesPage"
 import {
   useOrganizationContext,
   useOrganizationMemberships,
+  usePendingOrganizationInvitations,
   useSwitchOrganization,
-} from "@/shared/api/hooks"
-import { ErrorBanner } from "@/shared/components/ui"
+} from "@/shared/api/organizations"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { ProductMark } from "@/shared/components/ProductMark"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { NAV_TRANSITION, navIndicatorClass } from "./rowStyles"
+import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
 
 // The menu's own rhythm, which is the rail's: a 44px row and a 32px heading
 // block. The eyebrow above the organization is shorter (28px), because it opens
@@ -47,6 +49,10 @@ function PlusMark() {
   return <FiPlus aria-hidden="true" className="size-5 shrink-0" />
 }
 
+function MailMark() {
+  return <FiMail aria-hidden="true" className="size-5 shrink-0" />
+}
+
 // The organization and the workspace the shell is looking at, and the control
 // that changes the second. Sits above the nav rather than in it because it
 // scopes the destinations below it rather than being one.
@@ -74,6 +80,10 @@ export function WorkspaceSwitcher({
   const context = useOrganizationContext()
   const navigate = useNavigate()
   const organizations = useOrganizationMemberships()
+  // What is waiting on the caller, as against what they already belong to.
+  // Read here because this is where somebody looks for an organization they
+  // cannot find, and it is the only chrome that names organizations at all.
+  const pendingInvitations = usePendingOrganizationInvitations()
   const switchOrganization = useSwitchOrganization()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -89,6 +99,11 @@ export function WorkspaceSwitcher({
   // a menu item whose only effect is to close the menu reads as broken.
   const organizationRows = organizations.data ?? []
   const switchable = organizationRows.length > 1
+  // Absent rather than shown empty: a permanent row reading "0 invitations"
+  // would be chrome for something that is almost always nothing. A failed or
+  // unserved read (an older gateway, a hybrid one) lands here as "nothing
+  // waiting" too, which is the right way for chrome to fail.
+  const invitationCount = pendingInvitations.data?.length ?? 0
 
   // Both hops optional: the context can answer without an organization (a
   // failed read, or a shape a test supplies), and the switcher is chrome that
@@ -103,8 +118,8 @@ export function WorkspaceSwitcher({
     <>
       <Popover isOpen={open} onOpenChange={setOpen}>
         {/* HeroUI's Button, not a plain one: the popover wires its trigger through
-          react-aria. `w-auto!` overrides the width the variant sets, which
-          otherwise stops this short of the rail rather than spanning it.
+          react-aria. It fills the band it opens the rail with, so the hover
+          fill is the band rather than a box inset inside it.
 
           Collapsing narrows the trigger to the mark, but it stays the same
           trigger: the rail's collapsed state is remembered, so a switcher that
@@ -119,24 +134,35 @@ export function WorkspaceSwitcher({
           // the popover itself is what names the current workspace (it marks it
           // with a check), and this label is what assistive tech reads.
           aria-label={`Switch workspace, currently ${workspaceName} in ${organizationName}`}
-          // 56px tall in both states, so the rail's first block is the same height
-          // whichever context it is in: the organization rail's "Back to" row sits
-          // in a box of exactly this height. The fill is the rail's own ground with
-          // a border, not a white card, which is what keeps it reading as part of
-          // the chrome rather than as the first item in the list.
+          // A row, not a box. It had a border and its own fill, which made the
+          // rail open with an outlined card sitting above a list of flat rows;
+          // the artboard draws it blended into the chrome, distinguished by its
+          // height and its mark rather than by an edge. So it takes the same
+          // hover fill the nav rows take and nothing else.
+          //
+          // It fills the 56px band in both states, so the rail's first block is
+          // the same height whichever context it is in: the organization rail's
+          // "Back to" row fills the same band. The band's own rule is what the
+          // fill stops at, which is why the height comes from `h-full` rather
+          // than from a floor of its own.
           className={
             collapsed
-              ? `min-h-14 w-full! items-center justify-center rounded-[0.625rem] border border-border bg-background-alt px-0 hover:border-accent ${NAV_TRANSITION}`
-              : `min-h-14 w-full! items-center justify-start gap-2.5 rounded-[0.625rem] border border-border bg-background-alt px-2.5 py-2 text-left hover:border-accent ${NAV_TRANSITION}`
+              ? `items-center justify-center hover:bg-surface-alt ${navBandRowClass({ collapsed })} ${NAV_TRANSITION}`
+              : `items-center justify-start gap-2.5 py-2 text-left hover:bg-surface-alt ${navBandRowClass()} ${NAV_TRANSITION}`
           }
         >
           {/* The mark is the switcher's hero, as in the prototype: the product
             name is not repeated in the header, so this is where it lives. */}
-          <img
-            src="/favicon.svg"
-            alt=""
-            className="h-[1.875rem] w-[1.875rem] shrink-0"
-          />
+          {/* A 28px square on the active-control fill, which is what the
+              artboard draws: the mark sits in a tile the way a nav row's icon
+              sits in its lane, rather than floating at its own size. */}
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-surface-subtle">
+            {/* Width only: the mark is 273 by 250, so a height of its own would
+                stretch it. It fills the tile's width and centers on the short
+                axis, which is why the tile is a flex box rather than a square
+                the image is told to fill. */}
+            <ProductMark className="h-auto w-7 text-accent" />
+          </span>
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col gap-px">
@@ -220,6 +246,23 @@ export function WorkspaceSwitcher({
                 <CheckMark />
               </div>
             )}
+            {invitationCount > 0 ? (
+              <button
+                type="button"
+                className={`${MENU_ROW} ${MENU_ROW_RESTING}`}
+                onClick={() => {
+                  setOpen(false)
+                  void navigate({ to: "/invitations" })
+                }}
+              >
+                <MailMark />
+                <span className="min-w-0 flex-1 truncate">
+                  {invitationCount === 1
+                    ? "1 invitation waiting"
+                    : `${invitationCount} invitations waiting`}
+                </span>
+              </button>
+            ) : null}
             <div className={MENU_DIVIDER} />
             <p className={`${MENU_HEADING} min-h-8`}>
               Workspaces ({memberships.length})

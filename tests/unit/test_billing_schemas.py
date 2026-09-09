@@ -58,6 +58,7 @@ def entry(**overrides: object) -> UsageEntry:
         "source": "gateway",
         "source_label": None,
         "counts_toward_budget": True,
+        "bulk_editable": False,
     }
     fields.update(overrides)
     return UsageEntry(**fields)  # type: ignore[arg-type]

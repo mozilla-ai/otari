@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -171,6 +171,38 @@ describe("Login", () => {
 
     const link = screen.getByRole("link", { name: /welcome/i })
     expect(link).toHaveAttribute("href", "/welcome")
+  })
+
+  // The note under the rule explains what becomes of the credential, so it has
+  // to name the credential the form above actually took. One block served both
+  // branches before, telling anyone signing in with an email and password that
+  // their "master key" was exchanged for a cookie.
+  it("names the master key in the credential note on an unclaimed deployment", () => {
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByText(/master key/, { selector: "a" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/^Your password is sent once/)).toBeNull()
+  })
+
+  it("names the password in the credential note once the deployment is claimed", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByText(/Your password is sent once and exchanged/),
+    ).toBeInTheDocument()
+    // And the master-key link is gone with it: `/welcome` documents the
+    // bootstrap credential, which is not the one this form takes any more.
+    expect(screen.queryByText(/master key/, { selector: "a" })).toBeNull()
   })
 
   it("shows an error and stays on the form when the key is rejected", async () => {
@@ -508,7 +540,25 @@ describe("Login", () => {
       name: "Finishing sign-out…",
     })
     expect(submitButton).toBeDisabled()
-    await user.click(submitButton)
+
+    // The submit event straight at the form, rather than a press on the
+    // disabled button, and the difference is not cosmetic.
+    //
+    // A press is not a path a browser has here: Chromium delivers pointerdown
+    // and pointerup to a disabled control but no mousedown, mouseup or click,
+    // so there is no activation for the guard to refuse. Under jsdom the
+    // synthesized press did not vanish either: it produced a submit event 81ms
+    // later, once the revocation had settled and the button read "Sign in",
+    // which signed in with no further interaction and left this test racing
+    // its own next click. That race is what made this test fail about one full
+    // run in three. Enter is no substitute: implicit submission goes through
+    // the default button, which is disabled, so it reaches nothing and the
+    // assertion below would hold with the guard deleted.
+    //
+    // So the guard is exercised where it actually lives, on the submit handler,
+    // by dispatching the event the handler is bound to. Removing
+    // `isSigningOut` from `submit`'s guard fails this line.
+    fireEvent.submit(keyField.closest("form") as HTMLFormElement)
 
     // Blocked: no sign-in POST was attempted while the old sign-out was pending.
     expect(

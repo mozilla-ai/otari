@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
 import { EntitlementProvider } from "@/shared/hooks/useEntitlements"

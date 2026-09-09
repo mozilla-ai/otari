@@ -24,6 +24,24 @@ When the model emits an MCP tool call, Otari:
 The loop stops when the model returns a normal assistant response or hits
 `max_tool_iterations`.
 
+## Messages streaming activity
+
+For streaming `/v1/messages` requests with the standard Anthropic header
+`anthropic-beta: mcp-client-2025-11-20`, Otari emits server-owned activity
+around each gateway-run MCP call. The body form
+`betas: ["mcp-client-2025-11-20"]` is also accepted. An `mcp_tool_use` block
+starts immediately before execution with an opaque call id, tool and server
+names, and parsed input. A matching
+`mcp_tool_result` block follows with the result content and `is_error` value.
+Each block uses a `content_block_start` / `content_block_stop` pair. Without an
+MCP client beta, Otari still runs the call but omits these activity blocks.
+
+The blocks report execution without transferring it: Otari runs the call, feeds
+the result back to the model, and returns one logical Messages stream. It strips
+the blocks from history echoed on later turns and never includes the server URL,
+authorization token, or headers. Chat Completions and Responses streams continue
+to hide this activity because they have no equivalent server-owned MCP vocabulary.
+
 ## Inline MCP servers
 
 ```json
@@ -119,6 +137,7 @@ are managed there.
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name. Two `mcp_servers` entries sharing a name are refused with a `400` naming it, the way a bad request-body URL is. An `mcp_servers` name colliding with one of your workspace's stored servers is a `400` too, but a fixed one that repeats neither name, since a stored server is not yours to read. Two stored servers sharing a name is a `500` with the names in the log, on the same grounds as a stored URL that fails its safety check
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
+- Redirects are followed only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host; configure the final URL when a redirect changes host or port
 - `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
 
 For the hybrid platform contract behind `mcp_server_ids`, see

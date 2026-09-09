@@ -110,7 +110,7 @@ function Switcher() {
 }
 
 function renderCard(
-  hasProviders = true,
+  canServeRequests = true,
   deployment: DeploymentBootstrap = bootstrap(),
 ) {
   const client = new QueryClient({
@@ -120,7 +120,7 @@ function renderCard(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={deployment}>
         <SelectedWorkspaceProvider>
-          <SetupGuideCard hasProviders={hasProviders} />
+          <SetupGuideCard canServeRequests={canServeRequests} />
           <Switcher />
         </SelectedWorkspaceProvider>
       </DeploymentProvider>
@@ -147,7 +147,7 @@ describe("SetupGuideCard", () => {
     ).toBeInTheDocument()
   })
 
-  it("holds back while the gateway has no provider to serve the request", async () => {
+  it("holds back while nothing can serve the request", async () => {
     // The Overview's own getting-started panel is the guide at that point, and
     // a key handed out here would be for a call that cannot succeed.
     mockApi()

@@ -237,7 +237,7 @@ describe("OrganizationMembersPage", () => {
         name: /Remove Operator \(This is the last active owner/,
       }),
     ).toBeDisabled()
-    expect(within(owner).getByText("Active")).toBeInTheDocument()
+    expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("suspends a member rather than deleting them, and says so", async () => {
@@ -270,7 +270,7 @@ describe("OrganizationMembersPage", () => {
     // be an unconfirmed removal. The other direction has no subject: a
     // suspended membership is not listable, so no row exists to reactivate.
     expect(screen.queryByLabelText("Status for Analyst")).toBeNull()
-    expect(within(rowFor("Analyst")).getByText("Active")).toBeInTheDocument()
+    expect(within(rowFor("Analyst")).getByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("adds a member by address, into the workspaces that were ticked", async () => {
@@ -523,9 +523,9 @@ describe("OrganizationMembersPage", () => {
   })
 
   it("edits model access, workspace membership and the workspace budget in one save", async () => {
-    // The three used to be separate controls on the row. They are three tables
-    // underneath, so this asserts all three writes land from a single save, and
-    // that the ceiling is written against the membership rather than the person.
+    // One control over three tables underneath, so this asserts all three
+    // writes land from a single save, and that the ceiling is written against
+    // the membership rather than the person.
     const requests = mockApi({
       members: [OWNER, ANALYST],
       users: [
@@ -640,7 +640,10 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    expect(screen.queryByText("Model access")).not.toBeInTheDocument()
+    // "Spend" is still a column and is withheld by id. Model access is not a
+    // column any more, it reads under the member's name, so what is asserted
+    // here is the marker itself rather than a header that no longer exists.
+    expect(screen.queryAllByText("All models")).toHaveLength(0)
     expect(screen.queryByText("Spend")).not.toBeInTheDocument()
     // What is theirs stays.
     expect(screen.getByText("Role")).toBeInTheDocument()
@@ -691,6 +694,53 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     )
   })
 
+  it("withholds model access in the editor rather than denying it exists", async () => {
+    // `spendRow` comes from `useUsers(operates)`, so for this caller it is
+    // always undefined. Ungated, the editor falls to "No spend row yet", which
+    // states as fact something the page never read: the same confusion the
+    // roster's member cell is gated to avoid, one surface along.
+    mockApi({
+      members: [OWNER, ANALYST],
+      workspaces: [workspace()],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+
+    expect(screen.queryByText(/Model access/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No spend row yet/)).not.toBeInTheDocument()
+    // And the guidance that names the Budget column this caller is not shown.
+    expect(
+      screen.queryByText(/pick a different budget here/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows an operator both, so the case above is not vacuous", async () => {
+    mockApi({
+      members: [OWNER, ANALYST],
+      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      workspaces: [workspace()],
+      context: organizationContext({ deployment_operator: true }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+
+    expect(screen.getByText(/Model access/)).toBeInTheDocument()
+    expect(screen.getByText(/pick a different budget here/)).toBeInTheDocument()
+  })
+
   it("still shows the columns to an operator, so the case above is not vacuous", async () => {
     mockApi({
       members: [OWNER, ANALYST],
@@ -700,7 +750,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    expect(await screen.findByText("Model access")).toBeInTheDocument()
+    expect((await screen.findAllByText("All models")).length).toBeGreaterThan(0)
     expect(screen.getByText("Spend")).toBeInTheDocument()
   })
 })

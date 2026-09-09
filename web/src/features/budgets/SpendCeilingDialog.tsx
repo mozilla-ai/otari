@@ -6,8 +6,9 @@ import type {
   OrganizationSpendCeiling,
   Workspace,
 } from "@/client"
-import { Field } from "@/shared/components/Field"
-import { ErrorBanner, FilterSelect } from "@/shared/components/ui"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { Field } from "@/shared/components/forms/Field"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 import { budgetLabel, limitLabel, scopeLabel } from "./organizationBudget"
 

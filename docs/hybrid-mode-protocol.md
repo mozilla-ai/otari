@@ -407,6 +407,32 @@ that in mind:
   and are not part of `prompt_tokens`. `cache_write_tokens` is a true cache
   creation charge billed at a premium.
 
+`cache_write_1h_tokens` is an optional **subset** of `cache_write_tokens`: the
+portion created with a one-hour TTL rather than the five-minute default, which
+Anthropic bills at a higher rate. It is never added to `cache_write_tokens`, so
+the five-minute portion is `cache_write_tokens - cache_write_1h_tokens`. A
+receiver that does not price the two TTLs separately can ignore it.
+
+The key is present whenever `cache_write_tokens` is non-zero, and `0` there means
+every write used the five-minute TTL. It is omitted entirely when the report
+carries no cache writes, which is every OpenAI and Gemini report; hence its
+absence from the example above. Absent means zero, so a report from an older
+gateway prices exactly as before. A cache-writing report looks like:
+
+```json
+"usage": {
+  "prompt_tokens": 13,
+  "completion_tokens": 7,
+  "total_tokens": 20,
+  "cache_read_tokens": 8,
+  "cache_write_tokens": 30,
+  "cache_write_1h_tokens": 10
+}
+```
+
+so 10 of those 30 written tokens carry the one-hour TTL and the other 20 the
+five-minute one.
+
 The platform must accept these additive keys with lenient parsing; a handler that
 rejects unknown fields would 422 the report (a non-retryable status), silently
 dropping it. See companion issue mozilla-ai/otari-ai#1168.
@@ -485,10 +511,14 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
    per-attempt failover budget (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`,
    default 2000 ms). The sole/final attempt has no next attempt to fall over to,
    so it additionally gets `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS`
-   of grace on top of the budget (default 0, i.e. unchanged), so a slow-but-valid
-   first token is not turned into a timeout, while the wait stays bounded. If the
-   upstream raises before yielding or the wait times out, move to the next
-   attempt.
+   of grace on top of the budget (default 0). A request that forwards provider
+   tools but does not run a gateway-managed tool loop keeps the tight budget on
+   non-final attempts, while its final attempt takes the tool-loop budget
+   (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP`, default 30000 ms) as
+   its base before the grace is added. This gives tool-heavy agents more time
+   only when there is nowhere left to fail over, and the configured grace stays
+   additive in every mode. If the upstream raises before yielding or the bounded
+   wait times out, move to the next attempt.
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
    and start flushing SSE chunks to the client.
 
@@ -523,9 +553,11 @@ flag.
 |---|---|---|
 | `OTARI_AI_TOKEN` | none | Setting this enables hybrid mode. |
 | `PLATFORM_HEALTH_PATH` | `/utils/health-check/` | Path under `base_url` probed to report `platform_reachable` on `GET /health`; `GET /health/readiness` answers `503` when the same probe fails. Only a `2xx` counts as reachable, so point it at a route the peer actually serves: a `404`, a `401`, and a redirect to a login page all report unreachable. The default is an otari.ai route. |
+| `PLATFORM_HEALTH_URL` | none | Full URL probed instead of `base_url` + `PLATFORM_HEALTH_PATH`, for a peer whose health route does not live under `base_url`'s own path (an unversioned `/health` beside a versioned `/v1` API, say). Takes precedence over `PLATFORM_HEALTH_PATH` when set. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_INLINE_TIMEOUT_MS` | `1500` | Budget for the one usage report the response path waits on to attach inline cost. Expiry ships the response without cost; the report itself continues. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
-| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |
-| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, on top of the budget. `0` = unchanged. |
+| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. Forwarded provider-tool requests retain it on non-final attempts. |
+| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP` | `30000` | Gate budget for a gateway-managed tool loop, and the final-attempt base for a request that forwards provider tools. |
+| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, added on top of whichever base budget applies. |

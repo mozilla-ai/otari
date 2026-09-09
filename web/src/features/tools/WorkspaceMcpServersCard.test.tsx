@@ -117,11 +117,11 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText("https://mcp.example.com/github")).toBeVisible()
     // The token is never returned, so "Stored" is the whole of what a row can
     // say about it.
-    expect(screen.getByText("Stored")).toBeVisible()
+    expect(screen.getByText("STORED")).toBeVisible()
     expect(screen.getByText("2 allowed")).toBeVisible()
     expect(screen.getByText("All")).toBeVisible()
-    expect(screen.getByText("Enabled")).toBeVisible()
-    expect(screen.getByText("Disabled")).toBeVisible()
+    expect(screen.getByText("ENABLED")).toBeVisible()
+    expect(screen.getByText("DISABLED")).toBeVisible()
   })
 
   it("reads an empty allow-list as every tool, the way the gateway does", async () => {
@@ -347,8 +347,10 @@ describe("WorkspaceMcpServersCard", () => {
     // masks any credential in it for a reader who cannot manage the workspace,
     // so the card renders what it is given and adds no masking of its own.
     expect(screen.getByText("https://mcp.example.com/github")).toBeVisible()
-    // The token stays write-only whoever is reading.
-    expect(screen.getByText("Stored")).toBeVisible()
+    // The token stays write-only whoever is reading. Uppercase in the source
+    // rather than through a text-transform, so the accessible name is what is
+    // asserted here and in the operator case above.
+    expect(screen.getByText("STORED")).toBeVisible()
     expect(
       screen.getByText(/for an owner or admin of the workspace/),
     ).toBeVisible()

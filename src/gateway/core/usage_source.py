@@ -13,11 +13,13 @@ blanket ``otari-ai:%`` match would be wrong in the direction that breaks a featu
 operator surface whose whole purpose is repricing imported usage has to keep reaching
 it.
 
-Both callers ask this same question, from opposite sides, which is why it is here
-rather than a literal in each: the usage admin mutations exclude served-here rows
-(they may only touch imported usage, and ``counts_toward_budget`` does not tell them
-apart), and the activation guide requires one (imported usage is somebody else's
-traffic, so it is never a workspace's first request to this gateway).
+Three callers ask this same question, which is why it is here rather than a literal
+in each: the usage admin mutations exclude served-here rows (they may only touch
+imported usage, and ``counts_toward_budget`` does not tell them apart), the count
+behind their "select all N matching" excludes the same rows so the number an operator
+confirms is one the mutation can reach, and the activation guide requires a served-here
+row (imported usage is somebody else's traffic, so it is never a workspace's first
+request to this gateway).
 """
 
 from typing import Any, cast
@@ -47,3 +49,8 @@ def served_here(column: Any) -> ColumnElement[bool]:
 def not_served_here(column: Any) -> ColumnElement[bool]:
     """Match rows this deployment did not serve: imported usage, live or migrated."""
     return cast("ColumnElement[bool]", column.not_in(SERVED_HERE_SOURCES))
+
+
+def is_served_here(source: str) -> bool:
+    """The same question about a row already in memory, for a response field."""
+    return source in SERVED_HERE_SOURCES

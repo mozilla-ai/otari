@@ -7,9 +7,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
       :root {
-        --brand: #4e8295;
-        --brand-dark: #3c6678;
-        --brand-tint: #eaf1f3;
+        --brand: #0098a4;
+        /* Both derived from the accent above rather than from the blue-grey it
+           replaced, and both taken from the dashboard's own light palette so
+           this page and the app cannot drift: `--brand-dark` is
+           `--color-link`, the accent's darker step, and `--brand-tint` is
+           `--color-primary-subtle` composited on white, since this page uses
+           opaque fills. Measured: the ink reads 5.53 on white and 4.70 on the
+           tint, both clearing 4.5. */
+        --brand-dark: #00747e;
+        --brand-tint: #dbf1f2;
         --ink: #14242c;
         --muted: #5b6b73;
         --line: #dbe5e8;
@@ -328,7 +335,7 @@
   <body>
     <header class="nav">
       <span class="brand" aria-label="Otari">
-        <svg viewBox="0 0 882 250" role="img" aria-hidden="true" fill="#4e8295" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 882 250" role="img" aria-hidden="true" fill="#0098a4" xmlns="http://www.w3.org/2000/svg">
           <path d="M193.598 0.0195312C219.712 -0.0192587 240.934 21.1417 240.935 47.2881V134.572C240.934 142.999
             239.806 151.163 237.693 158.921C236.494 163.324 234.977 167.597 233.17 171.713C223.865 192.902 206.842
             209.935 185.658 219.252C181.625 221.026 177.441 222.52 173.131 223.71C167.946 225.141 162.578 226.132

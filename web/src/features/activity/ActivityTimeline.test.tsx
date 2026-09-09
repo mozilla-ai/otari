@@ -235,8 +235,8 @@ describe("ActivityTimeline", () => {
       windowEnd: "2026-07-12T00:00:00.000Z",
     })
     const pan = screen.getByRole("slider", { name: "Pan the selected window" })
-    expect(pan.className).toContain("inset-y-0")
-    expect(pan.parentElement?.className).toContain("h-11")
+    expect(pan).toHaveClass("inset-y-0")
+    expect(pan.parentElement).toHaveClass("h-11")
   })
 
   it("renders no pan rail at the full extent (nothing to pan)", () => {

@@ -1,6 +1,7 @@
 # Data fetching: TanStack Query
 
-All *authenticated* server state flows through TanStack Query hooks in `web/src/shared/api/hooks.ts`,
+All *authenticated* server state flows through the TanStack Query hooks in `web/src/shared/api/`,
+one module per domain (`usage.ts`, `apiKeys.ts`, `organizations.ts`, `budgets.ts`, and so on),
 which call `apiFetch` from `web/src/shared/api/client.ts`. Don't call `fetch()` directly for
 authenticated management requests, and never mirror server state into `useState`.
 

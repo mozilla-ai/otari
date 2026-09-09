@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PasswordCard } from "@/features/account/PasswordCard"
-import { useOrganizationMembers } from "@/shared/api/hooks"
+import { useOrganizationMembers } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"

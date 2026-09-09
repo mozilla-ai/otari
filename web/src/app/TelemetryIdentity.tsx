@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 
-import { useOrganizationContext } from "@/shared/api/hooks"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 

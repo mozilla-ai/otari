@@ -2942,13 +2942,15 @@
             "anyOf": [
               {
                 "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Narrow the cap to one provider instance; null caps spend across every provider",
+            "description": "Narrow the cap to one provider instance; omit or null to cap spend across every provider. A blank value would store a ceiling that never binds, so it is refused; this does not check that the value names a configured provider instance",
             "title": "Provider Key Id"
           },
           "scope_id": {
@@ -5103,6 +5105,17 @@
             ],
             "title": "Cache Control"
           },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container"
+          },
           "context_management": {
             "anyOf": [
               {
@@ -5224,6 +5237,17 @@
               }
             ],
             "title": "Prompt Cache Key"
+          },
+          "service_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Tier"
           },
           "session_label": {
             "anyOf": [
@@ -6450,6 +6474,173 @@
         "title": "OrganizationCreateRequest",
         "type": "object"
       },
+      "OrganizationDomainCreateRequest": {
+        "properties": {
+          "default_role": {
+            "default": "member",
+            "enum": [
+              "member",
+              "viewer"
+            ],
+            "title": "Default Role",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "title": "OrganizationDomainCreateRequest",
+        "type": "object"
+      },
+      "OrganizationDomainPublic": {
+        "description": "A claim as its organization's admins see it.\n\nCarries ``verification_record`` (the whole string to publish) rather than\nthe raw token: the admin never has a use for the token on its own, and one\nfield that can be copied verbatim into a DNS panel is harder to get wrong\nthan a prefix they must remember to prepend.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_role": {
+            "default": "member",
+            "maxLength": 32,
+            "title": "Default Role",
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 255,
+            "title": "Domain",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "proof_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Expires At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "verification_record": {
+            "title": "Verification Record",
+            "type": "string"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "organization_id",
+          "domain",
+          "id",
+          "verification_record",
+          "created_at"
+        ],
+        "title": "OrganizationDomainPublic",
+        "type": "object"
+      },
+      "OrganizationDomainUpdateRequest": {
+        "properties": {
+          "default_role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "member",
+                  "viewer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Role"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "title": "OrganizationDomainUpdateRequest",
+        "type": "object"
+      },
+      "OrganizationDomainsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationDomainPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationDomainsPublic",
+        "type": "object"
+      },
       "OrganizationGuardrailCreate": {
         "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
         "example": {
@@ -7574,6 +7765,81 @@
           "master_key_sign_in_retired"
         ],
         "title": "PasswordResponse",
+        "type": "object"
+      },
+      "PendingOrganizationInvitationPublic": {
+        "description": "One invitation waiting on the caller, as their own inbox lists it.\n\nThe authenticated counterpart to ``InvitationPreviewPublic``, and wider\nthan it on purpose: that one answers a visitor whose only credential is\nthe token, so it carries nothing it does not strictly need, while this one\nanswers the addressee's own session and can name the ids its accept and\ndecline calls take.\n\n``organization_member_id`` is what those two calls address, not\n``invitation_id``: the membership is the row that outlives a revoke and a\nre-invite (each round mints a fresh ``Invitation`` against the same\nmembership), so a client holding a list from a moment ago names something\nstill resolvable rather than a token-shaped id that has since been\nsuperseded. ``invitation_id`` rides along for the roster's sake, since\n``ActiveOrganizationMemberPublic`` carries the same field.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invitation_id": {
+            "format": "uuid",
+            "title": "Invitation Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "organization_member_id": {
+            "format": "uuid",
+            "title": "Organization Member Id",
+            "type": "string"
+          },
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_member_id",
+          "invitation_id",
+          "organization_id",
+          "organization_name",
+          "email",
+          "role",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "PendingOrganizationInvitationPublic",
+        "type": "object"
+      },
+      "PendingOrganizationInvitationsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PendingOrganizationInvitationPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "PendingOrganizationInvitationsPublic",
         "type": "object"
       },
       "PolicyRequest": {
@@ -11477,6 +11743,10 @@
             ],
             "title": "Billing Meters"
           },
+          "bulk_editable": {
+            "title": "Bulk Editable",
+            "type": "boolean"
+          },
           "cache_read_tokens": {
             "anyOf": [
               {
@@ -11741,7 +12011,8 @@
           "latency_ms",
           "source",
           "source_label",
-          "counts_toward_budget"
+          "counts_toward_budget",
+          "bulk_editable"
         ],
         "title": "UsageEntry",
         "type": "object"
@@ -17146,11 +17417,28 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "*/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "File content. Content-Type reflects the stored media type; application/octet-stream is the fallback.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Attachment filename, with a UTF-8 filename* parameter for non-ASCII names.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -18585,6 +18873,248 @@
         ]
       }
     },
+    "/v1/organizations/me/domains": {
+      "get": {
+        "description": "List the caller's organization's email-domain claims. Owners and admins only.",
+        "operationId": "list_active_organization_domains_v1_organizations_me_domains_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Active Organization Domains",
+        "tags": [
+          "organizations"
+        ]
+      },
+      "post": {
+        "description": "Claim an email domain for the caller's organization. Owners and admins only.\n\nThe claim lands unverified and does nothing until ``POST\n/me/domains/{id}/verify`` finds the record in ``verification_record``\npublished at the domain's apex. A public email provider is refused outright,\nand a domain another organization already claims answers 409 without saying\nwho holds it.",
+        "operationId": "create_active_organization_domain_v1_organizations_me_domains_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationDomainCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/domains/{organization_domain_id}": {
+      "delete": {
+        "description": "Drop an email-domain claim. Owners and admins only.\n\nMembers who already joined through it keep their membership: they are\ncolleagues by then, not an artifact of the claim.",
+        "operationId": "delete_active_organization_domain_v1_organizations_me_domains__organization_domain_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      },
+      "patch": {
+        "description": "Change a claim's auto-join role or enabled flag. Owners and admins only.\n\nThe domain itself and its verification state are not editable: a different\ndomain is a different claim and needs its own proof.",
+        "operationId": "update_active_organization_domain_v1_organizations_me_domains__organization_domain_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationDomainUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/domains/{organization_domain_id}/verify": {
+      "post": {
+        "description": "Prove control of a claimed domain via its DNS TXT record. Owners and admins only.\n\nIdempotent, and answers 400 while the record is not visible yet, which is\nthe expected answer straight after publishing one.",
+        "operationId": "verify_active_organization_domain_v1_organizations_me_domains__organization_domain_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomainPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Verify Active Organization Domain",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
     "/v1/organizations/me/guardrails": {
       "get": {
         "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",
@@ -19499,6 +20029,179 @@
           }
         ],
         "summary": "List Caller Organization Memberships",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pending-memberships": {
+      "get": {
+        "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
+        "operationId": "list_caller_pending_memberships_v1_organizations_me_pending_memberships_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingOrganizationInvitationsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Caller Pending Memberships",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
+      "post": {
+        "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
+        "operationId": "accept_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptInvitationResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Accept Caller Pending Membership",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pending-memberships/{organization_member_id}/decline": {
+      "post": {
+        "description": "Decline an invitation addressed to the caller.\n\nLands the pair where a revoke does: the invitation cancelled and the\nmembership suspended rather than deleted, which is what stops the emailed\nlink from later reviving a declined invitation. A future invite to the same\naddress revives the membership.",
+        "operationId": "decline_caller_pending_membership_v1_organizations_me_pending_memberships__organization_member_id__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "organization_member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Organization Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Decline Caller Pending Membership",
         "tags": [
           "organizations"
         ]
@@ -20830,7 +21533,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -20843,7 +21546,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },
@@ -20954,7 +21657,7 @@
     },
     "/v1/organizations/me/usage/count": {
       "get": {
-        "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.",
+        "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
         "operationId": "count_organization_usage_v1_organizations_me_usage_count_get",
         "parameters": [
           {
@@ -21211,7 +21914,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -21224,7 +21927,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },
@@ -21582,7 +22285,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -21595,7 +22298,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },
@@ -21930,7 +22633,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -21943,7 +22646,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },
@@ -24820,7 +25523,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -24833,7 +25536,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },
@@ -24944,7 +25647,7 @@
     },
     "/v1/usage/count": {
       "get": {
-        "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.",
+        "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.\n\nThat value is the one place this count is narrower than ``GET /v1/usage``: it\nalso excludes rows this deployment served itself, so the number an operator\nconfirms is the number the mutation can reach. The list still pages the\nbudget-exempt gateway rows it omits.",
         "operationId": "count_usage_v1_usage_count_get",
         "parameters": [
           {
@@ -25201,7 +25904,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /v1/usage so the total matches what bulk delete and set-price can reach",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -25214,7 +25917,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /v1/usage so the total matches what bulk delete and set-price can reach",
               "title": "Counts Toward Budget"
             }
           },
@@ -25652,7 +26355,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -25665,7 +26368,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },
@@ -26050,7 +26753,7 @@
             }
           },
           {
-            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
             "in": "query",
             "name": "counts_toward_budget",
             "required": false,
@@ -26063,7 +26766,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "description": "Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key",
               "title": "Counts Toward Budget"
             }
           },

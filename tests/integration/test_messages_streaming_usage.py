@@ -137,6 +137,7 @@ async def _stream_with_compaction_usage(**_kwargs: Any) -> AsyncIterator[Message
                 },
                 {
                     "type": "message",
+                    "model": "claude-3-5-sonnet-20241022",
                     "input_tokens": _INPUT_TOKENS,
                     "output_tokens": _OUTPUT_TOKENS,
                     "cache_creation_input_tokens": 0,

@@ -79,6 +79,7 @@ The organization view contains tenant-wide administration:
 
 - Organization-wide usage, in hosted mode
 - Workspaces and organization members
+- Email domains, for joining colleagues automatically
 - Spend and budgets
 - Organization pricing
 - Organization settings and, in hosted mode, provider keys
@@ -102,6 +103,12 @@ What a page shows can also depend on who is signed in. On API keys, an operator
 manages every key in the organization and chooses each key's owner, while a
 member sees the same page scoped to their own keys, always billed to themselves
 and never budget-exempt.
+
+Overview splits the same way. Everyone lands on their own spend, traffic and
+recent requests. An organization owner or admin also gets a budget-health
+figure, read from the spend ceilings holding their organization, while a
+deployment operator gets provider health and the deployment's own budgets
+instead.
 
 ## Observability
 
@@ -130,6 +137,13 @@ Google OAuth, and GitHub OAuth add ways for that identity to sign in; they do no
 make an unknown account a member. OAuth requires `public_base_url` plus the
 provider's client ID and secret. Passkeys can instead use `public_base_url`, or
 an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
+
+Signing in *can* add a membership in one case. If an organization has claimed and
+proven the email domain that the identity's verified address belongs to, the
+sign-in joins them to that organization at the role the claim names, whichever of
+the three credentials they used. It is the only path that grants membership
+without somebody deciding about the person, and it is fenced accordingly: see
+[Email-domain auto-join](access-control.md#email-domain-auto-join).
 
 Mail is optional. Without SMTP, invitation links can still be copied and shared
 manually. See [Configuration](configuration.md#mail).

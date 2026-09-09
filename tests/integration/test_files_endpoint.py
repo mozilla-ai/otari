@@ -150,21 +150,30 @@ def test_download_filename_header_is_injection_safe(
     assert "filename*=UTF-8''" in cd
 
 
+@pytest.mark.parametrize(
+    ("filename", "payload", "media_type"),
+    [("notes.txt", b"hello world", "text/plain"), ("data.bin", b"\x00\xff\x80", "application/octet-stream")],
+)
 def test_upload_get_list_delete_roundtrip(
-    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    filename: str,
+    payload: bytes,
+    media_type: str,
 ) -> None:
     up = client.post(
         "/v1/files",
         headers=api_key_header,
         data={"purpose": "user_data"},
-        files={"file": ("notes.txt", b"hello world", "text/plain")},
+        files={"file": (filename, payload, media_type)},
     )
     assert up.status_code == 200, up.text
     obj = up.json()
     file_id = obj["id"]
     assert obj["object"] == "file"
-    assert obj["bytes"] == len(b"hello world")
-    assert obj["filename"] == "notes.txt"
+    assert obj["bytes"] == len(payload)
+    assert obj["filename"] == filename
 
     got = client.get(f"/v1/files/{file_id}", headers=api_key_header)
     assert got.status_code == 200
@@ -172,7 +181,11 @@ def test_upload_get_list_delete_roundtrip(
 
     content = client.get(f"/v1/files/{file_id}/content", headers=api_key_header)
     assert content.status_code == 200
-    assert content.content == b"hello world"
+    assert content.content == payload
+    assert content.headers["content-type"].split(";")[0] == media_type
+    assert content.headers["content-disposition"].startswith("attachment;")
+    assert f'filename="{filename}"' in content.headers["content-disposition"]
+    assert f"filename*=UTF-8''{filename}" in content.headers["content-disposition"]
 
     listed = client.get("/v1/files", headers=api_key_header)
     assert listed.status_code == 200

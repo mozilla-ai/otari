@@ -6,9 +6,7 @@ import asyncio
 import time
 from typing import Protocol
 
-from sqlalchemy.exc import SQLAlchemyError
-
-from gateway.core.database import create_session
+from gateway.core.database import DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
 from gateway.metrics import (
     log_writer_batch_size,
@@ -31,7 +29,7 @@ class SingleLogWriter:
     """Write each usage log inline, one transaction per event."""
 
     async def put(self, log: UsageLog) -> None:
-        async with create_session() as db:
+        async with create_log_session() as db:
             try:
                 # Spend is owned by the budget reservation reconcile path
                 # (gateway.services.budget_service), not the log writer — the
@@ -40,7 +38,7 @@ class SingleLogWriter:
                 db.add(log)
                 await db.commit()
                 log_writer_rows.labels(writer="single", result="written").inc()
-            except SQLAlchemyError as e:  # pragma: no cover - defensive logging
+            except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
                 await db.rollback()
                 logger.error("SingleLogWriter failed: %s", e)
                 log_writer_rows.labels(writer="single", result="dropped").inc()
@@ -110,7 +108,7 @@ class BatchLogWriter:
         start = time.monotonic()
         log_writer_batch_size.labels(writer="batch").observe(len(batch))
         try:
-            async with create_session() as db:
+            async with create_log_session() as db:
                 # Spend is reconciled inline via the budget reservation path, not
                 # here — see SingleLogWriter.put. The writer only persists rows.
                 for log in batch:
@@ -118,7 +116,7 @@ class BatchLogWriter:
                 await db.commit()
                 log_writer_rows.labels(writer="batch", result="written").inc(len(batch))
             log_writer_flush_duration.labels(writer="batch", result="ok").observe(time.monotonic() - start)
-        except SQLAlchemyError as e:  # pragma: no cover - defensive logging
+        except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
             logger.error("BatchLogWriter flush failed, dropping %d rows: %s", len(batch), e)
             log_writer_rows.labels(writer="batch", result="dropped").inc(len(batch))
             log_writer_flush_duration.labels(writer="batch", result="error").observe(time.monotonic() - start)

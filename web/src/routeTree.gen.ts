@@ -16,6 +16,7 @@ import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as DocsRouteImport } from './routes/docs'
+import { Route as InvitationsRouteImport } from './routes/invitations'
 import { Route as KeysRouteImport } from './routes/keys'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
@@ -28,6 +29,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
+import { Route as OrganizationDomainsRouteImport } from './routes/organization.domains'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
@@ -72,6 +74,11 @@ const BudgetsRoute = BudgetsRouteImport.update({
 const DocsRoute = DocsRouteImport.update({
   id: '/docs',
   path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvitationsRoute = InvitationsRouteImport.update({
+  id: '/invitations',
+  path: '/invitations',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KeysRoute = KeysRouteImport.update({
@@ -134,6 +141,11 @@ const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
   path: '/',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const OrganizationDomainsRoute = OrganizationDomainsRouteImport.update({
+  id: '/domains',
+  path: '/domains',
+  getParentRoute: () => OrganizationRoute,
+} as any)
 const OrganizationGuardrailsRoute = OrganizationGuardrailsRouteImport.update({
   id: '/guardrails',
   path: '/guardrails',
@@ -194,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
+  '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
@@ -205,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -225,6 +239,7 @@ export interface FileRoutesByTo {
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
+  '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
@@ -234,6 +249,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -255,6 +271,7 @@ export interface FileRoutesById {
   '/aliases': typeof AliasesRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
+  '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
@@ -266,6 +283,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -288,6 +306,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/budgets'
     | '/docs'
+    | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
@@ -299,6 +318,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -319,6 +339,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/budgets'
     | '/docs'
+    | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
@@ -328,6 +349,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -348,6 +370,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/budgets'
     | '/docs'
+    | '/invitations'
     | '/keys'
     | '/members'
     | '/models'
@@ -359,6 +382,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -380,6 +404,7 @@ export interface RootRouteChildren {
   AliasesRoute: typeof AliasesRoute
   BudgetsRoute: typeof BudgetsRoute
   DocsRoute: typeof DocsRoute
+  InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
   MembersRoute: typeof MembersRoute
   ModelsRoute: typeof ModelsRoute
@@ -442,6 +467,13 @@ declare module '@tanstack/react-router' {
       path: '/docs'
       fullPath: '/docs'
       preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invitations': {
+      id: '/invitations'
+      path: '/invitations'
+      fullPath: '/invitations'
+      preLoaderRoute: typeof InvitationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/keys': {
@@ -528,6 +560,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationIndexRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/domains': {
+      id: '/organization/domains'
+      path: '/domains'
+      fullPath: '/organization/domains'
+      preLoaderRoute: typeof OrganizationDomainsRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/organization/guardrails': {
       id: '/organization/guardrails'
       path: '/guardrails'
@@ -602,6 +641,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface OrganizationRouteChildren {
+  OrganizationDomainsRoute: typeof OrganizationDomainsRoute
   OrganizationGuardrailsRoute: typeof OrganizationGuardrailsRoute
   OrganizationMembersRoute: typeof OrganizationMembersRoute
   OrganizationPricingRoute: typeof OrganizationPricingRoute
@@ -611,6 +651,7 @@ interface OrganizationRouteChildren {
 }
 
 const OrganizationRouteChildren: OrganizationRouteChildren = {
+  OrganizationDomainsRoute: OrganizationDomainsRoute,
   OrganizationGuardrailsRoute: OrganizationGuardrailsRoute,
   OrganizationMembersRoute: OrganizationMembersRoute,
   OrganizationPricingRoute: OrganizationPricingRoute,
@@ -649,6 +690,7 @@ const rootRouteChildren: RootRouteChildren = {
   AliasesRoute: AliasesRoute,
   BudgetsRoute: BudgetsRoute,
   DocsRoute: DocsRoute,
+  InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,
   MembersRoute: MembersRoute,
   ModelsRoute: ModelsRoute,

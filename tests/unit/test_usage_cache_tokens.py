@@ -180,6 +180,7 @@ def test_messages_non_stream_bills_compaction_iterations() -> None:
                     },
                     {
                         "type": "message",
+                        "model": "claude-opus-5",
                         "input_tokens": 10,
                         "output_tokens": 5,
                         "cache_read_input_tokens": 2,
@@ -261,6 +262,7 @@ def test_messages_stream_delta_bills_compaction_iterations() -> None:
                     },
                     {
                         "type": "message",
+                        "model": "claude-opus-5",
                         "input_tokens": 10,
                         "output_tokens": 5,
                         "cache_read_input_tokens": 2,

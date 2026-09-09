@@ -45,8 +45,8 @@ export function buildManifest(base: string) {
     // Literal copies of --color-background and --color-primary: a manifest
     // cannot read a custom property. src/styles/foundation.test.ts holds them
     // to the tokens, and index.html's theme-color meta is the third copy.
-    background_color: "#ffffff",
-    theme_color: "#4a7d8f",
+    background_color: "#f7f8f8",
+    theme_color: "#0098a4",
     icons: [
       icon("icon-192.png", "192x192", "any"),
       icon("icon-512.png", "512x512", "any"),

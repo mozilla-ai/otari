@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -11,7 +11,7 @@ import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
-  return {
+  const row = {
     id: "req-1",
     user_id: "alice",
     api_key_id: "key-1",
@@ -36,6 +36,16 @@ function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
     source_label: null,
     counts_toward_budget: true,
     ...overrides,
+  }
+  return {
+    ...row,
+    // The server derives this (see `UsageEntry.bulk_editable`); mirrored here so a
+    // fixture cannot claim a shape the API would never send, which is what let these
+    // tests treat a budget-exempt gateway row as selectable. Override it explicitly
+    // to exercise a row whose provenance and budget flag disagree.
+    bulk_editable:
+      overrides.bulk_editable ??
+      (!row.counts_toward_budget && row.source !== "gateway"),
   }
 }
 
@@ -292,7 +302,8 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("1,500")).toBeInTheDocument()
     expect(within(row).getByText("842 ms")).toBeInTheDocument()
     expect(within(row).getByText("$0.0123")).toBeInTheDocument()
-    expect(within(row).getByText("success")).toBeInTheDocument()
+    // Status is a dot plus an uppercase word now, not a pill.
+    expect(within(row).getByText("Success")).toBeInTheDocument()
   })
 
   it("shows the api key column, and an em-dash for master-key rows", async () => {
@@ -433,7 +444,7 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    expect(within(row).getByText("error")).toBeInTheDocument()
+    expect(within(row).getByText("Error")).toBeInTheDocument()
 
     await user.click(row)
     // The dashboard is admin-only, so the stored error text is shown verbatim,
@@ -462,9 +473,13 @@ describe("ActivityPage", () => {
     expect(
       screen.getByText("stream completed without usage data"),
     ).toBeInTheDocument()
-    // Bare heading, no "(code)" suffix; scope to a span so the status filter's
-    // <option>Error</option> does not match.
-    expect(screen.getByText("Error", { selector: "span" })).toBeInTheDocument()
+    // Bare heading, no "(code)" suffix. Scoped to the overline, which is the
+    // heading's own class: a plain span now also matches the status filter's
+    // <option>Error</option> and the row's own status word, which reads "Error"
+    // rather than "ERROR" since it took a label map.
+    expect(
+      screen.getByText("Error", { selector: "span.text-overline" }),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/Error \(/)).not.toBeInTheDocument()
   })
 
@@ -987,6 +1002,13 @@ describe("ActivityPage", () => {
         entry({
           id: "imp",
           model: "imported-model",
+          source: "claude_code",
+          counts_toward_budget: false,
+        }),
+        entry({
+          id: "gw-exempt",
+          model: "exempt-model",
+          source: "gateway",
           counts_toward_budget: false,
         }),
       ],
@@ -995,8 +1017,13 @@ describe("ActivityPage", () => {
 
     const gatewayRow = (await screen.findByText("gateway-model")).closest("tr")!
     const importedRow = screen.getByText("imported-model").closest("tr")!
+    const exemptRow = screen.getByText("exempt-model").closest("tr")!
     expect(within(gatewayRow).getByRole("checkbox")).toBeDisabled()
     expect(within(importedRow).getByRole("checkbox")).toBeEnabled()
+    // Traffic this gateway served on an exclude_from_budget key. Budget-exempt like
+    // an import, so selecting on `counts_toward_budget` alone offered it, and the
+    // delete then refused it and reported a smaller number than the dialog promised.
+    expect(within(exemptRow).getByRole("checkbox")).toBeDisabled()
   })
 
   it("deletes the selected imported rows by id", async () => {
@@ -1006,6 +1033,7 @@ describe("ActivityPage", () => {
         entry({
           id: "imp-1",
           model: "imported-model",
+          source: "claude_code",
           counts_toward_budget: false,
         }),
       ],
@@ -1044,6 +1072,7 @@ describe("ActivityPage", () => {
         entry({
           id: "imp-1",
           model: "imported-model",
+          source: "claude_code",
           counts_toward_budget: false,
         }),
       ],
@@ -1091,6 +1120,7 @@ describe("ActivityPage", () => {
         entry({
           id: "imp-1",
           model: "imported-model",
+          source: "claude_code",
           counts_toward_budget: false,
         }),
       ],
@@ -1138,6 +1168,7 @@ describe("ActivityPage", () => {
         entry({
           id: "imp-1",
           model: "imported-model",
+          source: "claude_code",
           counts_toward_budget: false,
         }),
       ],
@@ -1183,6 +1214,7 @@ describe("ActivityPage", () => {
         entry({
           id: "imp-1",
           model: "imported-model",
+          source: "claude_code",
           counts_toward_budget: false,
         }),
       ],
@@ -1351,13 +1383,16 @@ describe("ActivityPage", () => {
       toggle.getAttribute("aria-controls")!,
     )!
     expect(toggle).toHaveAttribute("aria-expanded", "false")
-    expect(region.className).toContain("hidden")
+    // classList, not className: `toContain` on the string is a substring match,
+    // so "hidden" would also be satisfied by `overflow-hidden` and "flex" by
+    // `flex-wrap` alone. Both are one edit away from being true here.
+    expect([...region.classList]).toContain("hidden")
 
     await user.click(toggle)
 
     expect(toggle).toHaveAttribute("aria-expanded", "true")
-    expect(region.className).toContain("flex")
-    expect(region.className).not.toContain("hidden")
+    expect([...region.classList]).toContain("flex")
+    expect([...region.classList]).not.toContain("hidden")
   })
 
   it("shows active filters as removable chips and clears one on ✕", async () => {
@@ -1411,6 +1446,39 @@ describe("ActivityPage", () => {
           c.url.includes("/v1/usage/summary") && c.url.includes("start_date="),
       ),
     ).toBe(true)
+  })
+
+  it("rewrites an unrecognized range to the one it actually applied", async () => {
+    mockApi({ rows: [entry()] })
+    // `90d` is a Usage preset and not an Activity one, so a URL copied between
+    // the two pages arrives with a range this page cannot honor. It falls back
+    // to the default window either way; the point here is that the address bar
+    // stops claiming ninety days over a list showing one, which the preset row
+    // reads back: no tab is pressed while the bogus key stands.
+    renderPage(<ActivityPage />, "/activity?range=90d")
+    await screen.findByText("gpt-4o")
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    )
+  })
+
+  it("leaves an unrecognized range alone when explicit bounds are set", async () => {
+    mockApi({ rows: [entry()] })
+    // A drill-down carries its own window, so the range is not being read and
+    // is not lying about anything. Rewriting it here would fight the bounds.
+    renderPage(
+      <ActivityPage />,
+      "/activity?range=90d&start_date=2026-08-01T00:00:00.000Z",
+    )
+    await screen.findByText("gpt-4o")
+
+    expect(
+      screen.queryByRole("button", { name: "24h", pressed: true }),
+    ).not.toBeInTheDocument()
   })
 
   it("gives the histogram an explicit start for the custom-range sentinel", async () => {
@@ -1507,10 +1575,13 @@ describe("ActivityPage", () => {
         ),
       ).toBe(true),
     )
-    // The visible half of the same bug: the preset row still highlights 24h rather
-    // than falling back to the custom sentinel, which highlights nothing.
-    expect(screen.getByRole("button", { name: "24h" }).className).toContain(
-      "button--primary",
+    // The visible half of the same bug: the preset row still marks 24h active
+    // rather than falling back to the custom sentinel, which marks nothing. The
+    // presets are tabs now, so the assertion is on the state a tab reports
+    // rather than on a button variant class.
+    expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     )
   })
 
@@ -2175,14 +2246,30 @@ describe("ActivityPage live traffic", () => {
       return jsonResponse([])
     })
 
-    renderPage(<ActivityPage />, "/activity?range=24h")
-    await waitFor(() => expect(liveControl()).toBeInTheDocument())
+    // The wait is jumped rather than slept through. `useInFlightRequests`
+    // declares its own `retry` (three attempts, since a 503 is a gateway
+    // restarting and worth re-asking), which overrides the harness's
+    // `retry: false`, so reaching the error arm costs the 2s poll plus
+    // TanStack's 1s/2s/4s backoffs. On real timers that was 9.1s, a third of
+    // this whole suite's wall clock in one case, and the 20s and 30s ceilings
+    // above were sized to survive it.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      renderPage(<ActivityPage />, "/activity?range=24h")
+      await waitFor(() => expect(liveControl()).toBeInTheDocument())
 
-    failing = true
-    await waitFor(() => expect(liveControl()).not.toBeInTheDocument(), {
-      timeout: 20000,
-    })
-  }, 30_000)
+      failing = true
+      // Past the poll and all three backoffs. `...Async` rather than the
+      // synchronous form because each attempt is a fetch: the awaits between
+      // timers are what let those promises settle and schedule the next one.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000 + 1_000 + 2_000 + 4_000 + 500)
+      })
+      expect(liveControl()).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it("reports live traffic gateway-wide, whatever the table is filtered to", async () => {
     // The endpoint takes no filters (a request in progress has no status, cost, or

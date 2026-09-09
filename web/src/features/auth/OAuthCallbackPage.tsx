@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { ApiError, completeOAuthSignIn } from "@/shared/api/client"
-import { errorMessage } from "@/shared/components/ui"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
 import {
   analyticsErrorCode,
   analyticsStatusCode,
@@ -178,7 +178,7 @@ export function OAuthCallbackPage({
       >
         {/* No spinner: the wait is a single request and a spinner that renders
             for 200ms is a flash rather than feedback. */}
-        <p className="text-center text-sm text-muted" role="status">
+        <p className="text-sm text-muted" role="status">
           Checking with the gateway…
         </p>
       </PublicAuthLayout>

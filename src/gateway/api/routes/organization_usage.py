@@ -252,6 +252,10 @@ async def count_organization_usage(
 
     Serves the paginator's "N of M" beside the list above, and is scoped the
     same way, so the total can never describe more rows than the list will show.
+
+    Unlike the deployment-wide ``GET /v1/usage/count``, ``counts_toward_budget=false``
+    is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
+    this surface has none. So this total keeps matching the list beside it.
     """
     conditions = _usage_filters(
         start_date=start_date,

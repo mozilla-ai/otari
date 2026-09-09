@@ -16,6 +16,11 @@ Tailwind CSS v4, TanStack Query, TanStack Router (file-based, `web/src/routes/`)
 Vitest + Testing Library, Playwright (`web/e2e/`, behavioral and screenshot suites). Package
 manager is **pnpm**.
 
+[web/design/DESIGN.md](../../../web/design/DESIGN.md) owns the design system: which component
+to reach for, which variant applies where, which token layer is allowed, and the three
+components that still exist but must not be used in new code. Ten short topic files; load the
+one covering the work at hand.
+
 [web/AGENTS.md](../../../web/AGENTS.md) owns the structure and is worth reading first: the
 `features/` / `shared/` / `app/` layout it mirrors from `otari-ai/frontend`, the three
 lint-enforced import rules, the routing conventions, the generated API client, and the design
@@ -62,7 +67,8 @@ can link Vite's esbuild binary at all.
   ships that look like ours and are not.
 - Space siblings with `gap-*` on the parent, and write arbitrary values in `rem`. See
   [responsiveness.md](./responsiveness.md).
-- Fetch server state through the TanStack Query hooks in `web/src/shared/api/hooks.ts`, guard
+- Fetch server state through the TanStack Query hooks in `web/src/shared/api/` (one module per
+  domain, with every query key in `queryKeys.ts`), guard
   on `isPending && !data`, keep the previous page with `placeholderData` on a filtered query,
   and bound every "fetch everything" walk with a hard page cap. See
   [data-fetching.md](./data-fetching.md).

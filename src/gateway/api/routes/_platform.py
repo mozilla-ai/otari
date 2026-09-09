@@ -27,7 +27,11 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import GatewayConfig
-from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
+from gateway.core.usage import (
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt
 from gateway.models.mcp import McpServerConfig
@@ -92,9 +96,10 @@ _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY = "streaming_first_chunk_timeout_ms
 # into a 504 with nothing to fall over to. Granting grace keeps the terminal wait
 # bounded (a genuinely hung upstream still times out at budget + grace) while not
 # failing valid slow-to-start responses. Applied on top of whichever base budget
-# is in effect (plain or tool-loop). Defaults to 0 (no grace), so behavior is
-# unchanged unless an operator opts in via ``config.platform`` (v1.2 will move
-# these onto the routing_policy schema).
+# is in effect: the tool-loop one whenever the request runs a gateway-managed
+# tool loop or forwards provider-native tools, the plain one otherwise. Defaults
+# to 0 (no grace), so behavior is unchanged unless an operator opts in via
+# ``config.platform`` (v1.2 will move these onto the routing_policy schema).
 _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS = 0
 _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_final_attempt_extra_first_chunk_timeout_ms"
 
@@ -659,6 +664,37 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
 UpstreamErrorKind = Literal["timeout", "conn_err"]
 
 
+def _error_status_code(exc: BaseException) -> int | None:
+    """The HTTP error status an upstream exception carries, or ``None``.
+
+    Reads ``status_code``, then an integer ``code``, then
+    ``response.status_code``, and accepts only a 4xx/5xx from any of them.
+
+    ``code`` is needed because google-genai's ``APIError`` puts the status there
+    and never sets ``status_code``; where another SDK uses ``code`` for an error
+    slug (OpenAI's ``"invalid_api_key"``) the value is not an ``int`` and is
+    skipped. ``response.status_code`` comes last because the attached object is
+    not always the response that failed: google-genai raises a mid-stream error
+    against its own stream wrapper, whose ``status_code`` is a hardcoded 200
+    because the SSE response opened fine and the error arrived in a later chunk.
+    That is how Gemini reports a quota 429 on a streaming call, so reading the
+    200 would classify a rate limit as unclassifiable (a generic 502) and record
+    200 as the request's outcome through :func:`failure_status_code`.
+
+    The 4xx/5xx bound is what rejects that 200, and also the non-HTTP integers
+    that reach ``code``: google-genai's live API raises through the same
+    ``APIError`` with a websocket close code (1006, 1008).
+    """
+    for value in (
+        getattr(exc, "status_code", None),
+        getattr(exc, "code", None),
+        getattr(getattr(exc, "response", None), "status_code", None),
+    ):
+        if isinstance(value, int) and 400 <= value <= 599:
+            return value
+    return None
+
+
 def upstream_exception_chain(exc: BaseException) -> Iterator[BaseException]:
     """Yield an exception and its ``original_exception`` chain once each."""
     current: BaseException | None = exc
@@ -697,8 +733,9 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
        in both SDKs, so the timeout check must run first. This covers the
        majority of any-llm providers, which reuse ``BaseOpenAIProvider`` or
        ``BaseAnthropicProvider``.
-    3. An HTTP status code carried directly on the exception or on its
-       attached ``.response``.
+    3. An HTTP error status carried by the exception, on ``status_code``,
+       ``code``, or its attached ``.response`` (see
+       :func:`_error_status_code`).
     4. A conservative duck-typed fallback, by exception class name, for the
        remaining any-llm provider SDKs that don't reuse the OpenAI/Anthropic
        base classes (e.g. cohere, mistral, groq, bedrock) and whose own
@@ -732,12 +769,8 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
         if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
             return "conn_err", None
 
-        status_code = getattr(current, "status_code", None)
-        if status_code is None:
-            resp = getattr(current, "response", None)
-            if resp is not None:
-                status_code = getattr(resp, "status_code", None)
-        if isinstance(status_code, int):
+        status_code = _error_status_code(current)
+        if status_code is not None:
             return None, status_code
 
         class_name = type(current).__name__
@@ -944,13 +977,19 @@ async def _report_platform_usage(
         payload["session_label"] = normalized_label
     if outcome == "success":
         if usage is not None:
-            payload["usage"] = {
+            cache_write_tokens = cache_write_tokens_of(usage)
+            usage_payload: dict[str, Any] = {
                 "prompt_tokens": usage.prompt_tokens,
                 "completion_tokens": usage.completion_tokens,
                 "total_tokens": usage.total_tokens,
                 "cache_read_tokens": cache_read_tokens_of(usage),
-                "cache_write_tokens": cache_write_tokens_of(usage),
+                "cache_write_tokens": cache_write_tokens,
             }
+            # Only a cache-writing report can carry a TTL split, so a provider
+            # with no cache-write concept keeps the exact payload it sent before.
+            if cache_write_tokens:
+                usage_payload["cache_write_1h_tokens"] = cache_write_1h_tokens_of(usage)
+            payload["usage"] = usage_payload
     elif error_class is not None:
         payload["error_class"] = error_class
 

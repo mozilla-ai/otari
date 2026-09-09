@@ -1,20 +1,20 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import { canManageWorkspace } from "@/features/organization/roles"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
-  useOrganizationContext,
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
-} from "@/shared/api/hooks"
-import { Field } from "@/shared/components/Field"
-import {
-  ErrorBanner,
-  errorMessage,
-  FilterSelect,
-  InfoBanner,
-} from "@/shared/components/ui"
+} from "@/shared/api/tools"
+import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+import { Field } from "@/shared/components/forms/Field"
+import { Dot } from "@/shared/components/indicators/Dot"
+import { Section } from "@/shared/components/layout/Section"
+import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The layer above the deployment-wide web-search settings this card sits under:
@@ -208,91 +208,99 @@ export function WorkspaceWebSearchCard({
   }
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">This workspace ({selected.name})</h2>
-      <p className="text-sm text-muted">
-        Whether requests billed to this workspace may search the web, and how
-        far a search may reach. Blocking covers both doors: the otari_web_search
-        tool and POST /v1/search. The rest narrows the in-loop tool only. These
-        settings can only narrow what the deployment above allows; they never
-        grant a backend the deployment has not configured, and they hold no
-        credential.
-      </p>
-      <Card>
-        <Card.Content className="flex flex-col gap-4 px-5 py-4">
-          <ErrorBanner error={query.error} />
-          {config && !config.web_search_configured ? (
-            <InfoBanner tone="warning">
-              This deployment has no in-loop search backend configured, so
-              otari_web_search is unavailable here whatever this workspace
-              allows. The search URL is set above. Blocking still takes effect
-              on POST /v1/search, which runs off the search tools below.
-            </InfoBanner>
-          ) : null}
+    <Section
+      aria-label={`This workspace (${selected.name})`}
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-2">
+        <h2 className="text-title">This workspace ({selected.name})</h2>
+        <p className="max-w-prose text-sm text-muted">
+          Whether requests billed to this workspace may search the web, and how
+          far a search may reach. Blocking covers both doors: the
+          otari_web_search tool and POST /v1/search. The rest narrows the
+          in-loop tool only. These settings can only narrow what the deployment
+          above allows; they never grant a backend the deployment has not
+          configured, and they hold no credential.
+        </p>
+      </div>
+      <ErrorBanner error={query.error} />
+      {/* A ceiling, not a caution: nothing is broken and nothing on this
+              page can change it, so it reads on the subtle dot. The danger
+              dot is for the things worth acting on. */}
+      {config && !config.web_search_configured ? (
+        <InfoBanner>
+          This deployment has no in-loop search backend configured, so
+          otari_web_search is unavailable here whatever this workspace allows.
+          The search URL is set above. Blocking still takes effect on POST
+          /v1/search, which runs off the search tools below.
+        </InfoBanner>
+      ) : null}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <FilterSelect
-              label="Web search"
-              value={stance}
-              onChange={(next) => setStance(next as Stance)}
-              options={[
-                { value: "default", label: "Deployment default" },
-                { value: "allowed", label: "Allowed" },
-                // Named for what it covers: an admin choosing this is also
-                // switching off the workspace's POST /v1/search calls, which
-                // "Blocked" alone would not have told them.
-                { value: "blocked", label: "Blocked (tool and /v1/search)" },
-              ]}
-              disabled={busy}
-            />
-            {config?.configured === false ? (
-              <Chip size="sm" color="default">
-                Nothing set
-              </Chip>
-            ) : null}
-          </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <FilterSelect
+          label="Web search"
+          value={stance}
+          onChange={(next) => setStance(next as Stance)}
+          options={[
+            { value: "default", label: "Deployment default" },
+            { value: "allowed", label: "Allowed" },
+            // Named for what it covers: an admin choosing this is also
+            // switching off the workspace's POST /v1/search calls, which
+            // "Blocked" alone would not have told them.
+            { value: "blocked", label: "Blocked (tool and /v1/search)" },
+          ]}
+          disabled={busy}
+        />
+        {config?.configured === false ? (
+          // The absence of a stored row, stated rather than boxed: this
+          // workspace has not departed from the deployment default.
+          <span className="flex items-center gap-2 text-mono-caption text-subtle">
+            <Dot className="bg-text-subtle" />
+            NOTHING SET
+          </span>
+        ) : null}
+      </div>
 
-          <Field
-            label="Max results"
-            value={maxResults}
-            onChange={setMaxResults}
-            placeholder={`Blank for the request's own limit (max ${MAX_RESULTS})`}
-            description="Lowers how many results one search returns. It never raises the number."
-          />
-          <Field
-            label="Prompt hint"
-            value={hint}
-            onChange={setHint}
-            placeholder="Leave blank to use the deployment's hint"
-            description="Used only when a request declares otari_web_search without a hint of its own."
-          />
-          <Field
-            label="Allowed domains"
-            value={allowedDomains}
-            onChange={setAllowedDomains}
-            placeholder="Comma separated, blank for no restriction"
-            description="Results are kept only from these domains. A request that names its own list is narrowed to the domains on both."
-          />
-          <Field
-            label="Blocked domains"
-            value={blockedDomains}
-            onChange={setBlockedDomains}
-            placeholder="Comma separated, blank for none"
-            description="Results from these domains are always dropped, whatever a request asks for."
-          />
+      <Field
+        label="Max results"
+        value={maxResults}
+        onChange={setMaxResults}
+        placeholder={`Blank for the request's own limit (max ${MAX_RESULTS})`}
+        description="Lowers how many results one search returns. It never raises the number."
+      />
+      <Field
+        label="Prompt hint"
+        value={hint}
+        onChange={setHint}
+        placeholder="Leave blank to use the deployment's hint"
+        description="Used only when a request declares otari_web_search without a hint of its own."
+      />
+      <Field
+        label="Allowed domains"
+        value={allowedDomains}
+        onChange={setAllowedDomains}
+        placeholder="Comma separated, blank for no restriction"
+        description="Results are kept only from these domains. A request that names its own list is narrowed to the domains on both."
+      />
+      <Field
+        label="Blocked domains"
+        value={blockedDomains}
+        onChange={setBlockedDomains}
+        placeholder="Comma separated, blank for none"
+        description="Results from these domains are always dropped, whatever a request asks for."
+      />
 
-          {error ? (
-            <p role="alert" className="text-sm text-danger">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex justify-end">
-            <Button size="sm" isDisabled={busy} onPress={save}>
-              Save
-            </Button>
-          </div>
-        </Card.Content>
-      </Card>
-    </section>
+      {error ? (
+        <p role="alert" className="text-caption text-danger">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-end">
+        <Button size="sm" isDisabled={busy} onPress={save}>
+          Save
+        </Button>
+      </div>
+    </Section>
   )
 }

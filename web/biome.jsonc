@@ -76,6 +76,15 @@
                   "**/overlay/**"
                 ],
                 "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
+              },
+              {
+                "group": [
+                  "@/shared/api/queryKeys",
+                  "@/shared/api/paging",
+                  "**/api/queryKeys",
+                  "**/api/paging"
+                ],
+                "message": "Only src/shared/api may import its own query keys or its pagination walk. They sit in one module because 109 invalidations reach 39 of those keys across domains, and that is a fact the hooks own: a page importing a key is a page about to hand-roll an invalidation, which the monolith these modules came from made structurally impossible. Call the hook for the read or the write and let it invalidate."
               }
             ]
           }
@@ -86,7 +95,7 @@
 
   // An override replaces a rule's options rather than merging with them, so each one
   // below restates the overlay group. Deleting the repetition would silently exempt
-  // that layer from it; src/architecture.test.ts asserts all three still reject it.
+  // that layer from it; src/architecture.test.ts asserts every one still rejects it.
   "overrides": [
     {
       // A feature owns a domain (its pages, its components, its derivations) and is
@@ -104,6 +113,15 @@
                   {
                     "group": ["@/app", "@/app/**", "**/../app", "**/../app/**"],
                     "message": "A feature may not import the composition root (src/app). Anything a feature and the shell both need belongs in src/shared; anything the shell needs from a feature, the shell imports."
+                  },
+                  {
+                    "group": [
+                      "@/shared/api/queryKeys",
+                      "@/shared/api/paging",
+                      "**/api/queryKeys",
+                      "**/api/paging"
+                    ],
+                    "message": "Only src/shared/api may import its own query keys or its pagination walk. They sit in one module because 109 invalidations reach 39 of those keys across domains, and that is a fact the hooks own: a page importing a key is a page about to hand-roll an invalidation, which the monolith these modules came from made structurally impossible. Call the hook for the read or the write and let it invalidate."
                   },
                   {
                     "group": [
@@ -134,6 +152,67 @@
       // close: `tests/router.tsx` builds its own route tree rather than importing the
       // generated one.
       "includes": ["src/shared/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/app",
+                      "@/app/**",
+                      "**/../app",
+                      "**/../app/**",
+                      "@/features",
+                      "@/features/**",
+                      "**/../features",
+                      "**/../features/**",
+                      "@/routes",
+                      "@/routes/**",
+                      "**/../routes",
+                      "**/../routes/**"
+                    ],
+                    "message": "src/shared may not import src/app, src/features, or src/routes. Shared code is domain-agnostic by definition; if a helper needs a domain type, it belongs to that feature. A route is a feature page under another name, so importing one is the same crossing."
+                  },
+                  {
+                    "group": [
+                      "@/shared/api/queryKeys",
+                      "@/shared/api/paging",
+                      "**/api/queryKeys",
+                      "**/api/paging"
+                    ],
+                    "message": "Only src/shared/api may import its own query keys or its pagination walk. They sit in one module because 109 invalidations reach 39 of those keys across domains, and that is a fact the hooks own: a page importing a key is a page about to hand-roll an invalidation, which the monolith these modules came from made structurally impossible. Call the hook for the read or the write and let it invalidate."
+                  },
+                  {
+                    "group": [
+                      "@/overlay",
+                      "@/overlay/**",
+                      "**/overlay",
+                      "**/overlay/**"
+                    ],
+                    "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // `shared/api/` is the one place that may reach its own query keys and its
+      // pagination walk, so it restates the layer group above without the
+      // queryKeys one. It comes after that override on purpose: a later entry
+      // wins, and `src/shared/api/**` is inside `src/shared/**`.
+      //
+      // The keys were file-private to `hooks.ts` before that module was split by
+      // domain, which is what made "a page cannot hand-roll an invalidation" a
+      // structural fact rather than a convention. Exporting them to the domain
+      // modules gave that up; this puts it back at the only boundary that
+      // matters, one directory out instead of one file.
+      "includes": ["src/shared/api/**"],
       "linter": {
         "rules": {
           "style": {

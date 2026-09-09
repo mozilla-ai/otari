@@ -27,6 +27,7 @@ from gateway.core.sql import (
     match_any,
     utc_bound,
 )
+from gateway.core.usage_source import is_served_here, not_served_here
 from gateway.inflight import get_registry
 from gateway.models.entities import APIKey, UsageLog, User
 from gateway.models.money import as_float
@@ -210,6 +211,12 @@ class UsageEntry(BaseModel):
     source: str
     source_label: str | None
     counts_toward_budget: bool
+    # Whether the bulk operator mutations can reach this row: the fixed scope
+    # ``_selection_conditions`` pins them to, which is provenance *and* budget
+    # participation. Derived here rather than left to the client, because a client
+    # composing it from the two fields above is a second copy of the rule, and the
+    # copy is what let the dashboard offer a checkbox the delete then refused (#781).
+    bulk_editable: bool
     # Routing attribution. All null for a request that named a plain model.
     # `status == "absorbed"` marks an attempt a policy recovered from; those rows
     # are excluded from `error_count` and from `request_count`, since the request
@@ -241,6 +248,7 @@ class UsageEntry(BaseModel):
             source=log.source,
             source_label=log.source_label,
             counts_toward_budget=log.counts_toward_budget,
+            bulk_editable=not is_served_here(log.source) and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
@@ -329,8 +337,16 @@ _TOOL_DESC = (
     f"name ({', '.join(GATEWAY_TOOL_NAMES)}) matches that tool specifically."
 )
 _COUNTS_DESC = (
-    "Filter by budget participation: true = only enforced gateway rows, "
-    "false = only imported rows that never touch a budget"
+    "Filter by budget participation, which is not the same question as provenance: "
+    "true = only enforced gateway rows, false = every row that never touches a budget, "
+    "meaning imported usage and also gateway traffic on a budget-exempt key"
+)
+# The count endpoint alone narrows the false case further, so it cannot publish the
+# description above: there it would promise the rows this count is what excludes.
+_COUNT_COUNTS_DESC = (
+    "Filter by budget participation: true = only enforced gateway rows, false = only "
+    "imported rows, narrowed past the filter of the same name on GET /v1/usage so the "
+    "total matches what bulk delete and set-price can reach"
 )
 _WORKSPACE_DESC = "Only usage recorded in this workspace."
 # The three entity filters are repeatable on every usage endpoint, so a chart or a
@@ -382,8 +398,10 @@ def _usage_filters(
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
-    Keeping this in one place guarantees the paginator's total (``/count``)
-    always matches the rows ``list_usage`` returns for the same filters.
+    Keeping this in one place is what makes the paginator's total (``/count``)
+    match the rows ``list_usage`` returns. One condition sits outside it:
+    ``count_usage`` also narrows ``counts_toward_budget=false`` to imported rows,
+    because that call sizes a mutation rather than a page (see its docstring).
 
     ``scope`` is the one condition that is not a filter. The deployment-wide
     routes here pass ``None`` and read every row; the organization-scoped routes
@@ -578,7 +596,7 @@ async def count_usage(
     ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
-    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNT_COUNTS_DESC),
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
@@ -591,6 +609,11 @@ async def count_usage(
     separate request), so the ``COUNT(*)`` is not paid on every page load. With
     ``counts_toward_budget=false`` it also backs the "select all N matching this
     filter" affordance for bulk delete / set-price, which touch imported rows only.
+
+    That value is the one place this count is narrower than ``GET /v1/usage``: it
+    also excludes rows this deployment served itself, so the number an operator
+    confirms is the number the mutation can reach. The list still pages the
+    budget-exempt gateway rows it omits.
     """
     conditions = _usage_filters(
         start_date=start_date,
@@ -611,6 +634,11 @@ async def count_usage(
         workspace_id=workspace_id,
         scope=None,
     )
+    if counts_toward_budget is False:
+        # counts_toward_budget alone does not say "imported": gateway traffic on an
+        # exclude_from_budget key is also False, so without this the count would
+        # promise rows _selection_conditions then refuses to touch.
+        conditions.append(not_served_here(UsageLog.source))
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
