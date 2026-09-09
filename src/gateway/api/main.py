@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
@@ -65,50 +65,46 @@ from gateway.core.config import GatewayConfig
 
 
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
-    """Mount Otari's own routers, then whatever the bootstrap contributed."""
-    _register_core_routers(app, config)
-    _register_contributed_routers(app)
+    """Mount Otari's own routers, then whatever the bootstrap contributed.
+
+    One aggregate router carries them all, so the mount prefix has one owner.
+    Mount order on that router matters. The hybrid and hosted stubs are
+    ``{path:path}`` catch-alls and the first matching route wins, so the
+    stubs go last. A stub mounted earlier would answer a path that a
+    contributed router serves.
+    """
+    api = APIRouter()
+    _register_core_routers(api, config)
+    _register_contributed_routers(api, app.state.container)
     if config.is_hybrid_mode:
-        # Last, and after the contributed routers on purpose. These are
-        # ``{path:path}`` catch-alls over whole management prefixes
-        # (/v1/organizations, /v1/usage, ...), and FastAPI serves the first
-        # route that matches, so registering them earlier would swallow an
-        # overlay route under any of those prefixes and answer "manage this via
-        # the platform UI" instead. They are a fallback for a path nothing else
-        # serves, so they are mounted like one.
-        app.include_router(hybrid_mode.router)
+        api.include_router(hybrid_mode.router)
     elif config.is_hosted_mode:
-        # The same treatment for the opposite plane, and last for the same
-        # reason: a hosted control plane holds no data plane, so the inference
-        # prefixes get catch-all stubs that a contributed router still wins
-        # against. An overlay that deliberately contributes a data-plane route
-        # to a control plane has made a choice, and a fallback does not overrule
-        # one. See gateway.api.routes.hosted_mode.
-        app.include_router(hosted_mode.router)
+        # A hosted control plane holds no data plane, so the inference prefixes
+        # get catch-all stubs. A contributed route still wins: an overlay that
+        # adds one has made a choice, and a fallback does not overrule it.
+        api.include_router(hosted_mode.router)
+    app.include_router(api)
 
 
-def _register_contributed_routers(app: FastAPI) -> None:
+def _register_contributed_routers(api: APIRouter, container: Container) -> None:
     """Mount the routers this build's bootstrap contributed, each behind its gate.
 
     The additive half of the extension seam: an overlay records a router on the
     container and Otari mounts it, gated on the capability it names. Mounted in
     both modes, because an overlay may extend the data plane as readily as the
-    management plane. With no bootstrap configured there are none, so this is a
-    no-op for the plain build.
+    management plane.
 
-    Mounted after Otari's own routers and before the hybrid stubs, so a
-    contribution cannot take a path the core already serves and the hybrid
-    stubs' catch-alls cannot take one the contribution serves.
+    A contribution inherits the aggregate's prefix, so it declares its resource
+    only.
     """
-    container: Container = app.state.container
     for contribution in container.router_contributions():
-        app.include_router(
+        api.include_router(
             contribution.router,
             dependencies=[Depends(require_capability(contribution.capability))],
         )
 
 
-def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
+def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     # Whether this deployment serves inference at all. False only for a hosted
     # control plane, which owns many tenants' wallets and credentials but runs
     # none of their traffic: that belongs on a hybrid data-plane gateway, whose
@@ -118,112 +114,112 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     serves_data_plane = not config.is_hosted_mode
 
     if serves_data_plane:
-        app.include_router(chat.router)
-    app.include_router(health.router)
+        api.include_router(chat.router)
+    api.include_router(health.router)
     # Registered in every mode on purpose: the deployment bootstrap is how a
     # browser learns which mode it reached, so it is the one management-adjacent
     # route a hybrid gateway still answers.
-    app.include_router(bootstrap.router)
+    api.include_router(bootstrap.router)
     # The search backend a data-plane gateway calls, mounted only where it can
     # both authenticate one and answer it: this deployment holds a search
     # provider's credential and a token to recognize its own gateway by. Absent
     # otherwise rather than mounted and refusing, because a deployment that
     # configured neither is not offering this surface at all.
     if config.web_search_provider_configured() and config.web_search_backend_token:
-        app.include_router(web_search_backend.router)
+        api.include_router(web_search_backend.router)
     # /v1/messages and /v1/responses now support hybrid mode (multi-attempt
     # fallback + usage reporting), so they're registered for hybrid too.
     if serves_data_plane:
-        app.include_router(messages.router)
-        app.include_router(responses.router)
+        api.include_router(messages.router)
+        api.include_router(responses.router)
 
     if config.is_hybrid_mode:
         # The hybrid stub router is mounted by register_routers, after the
         # contributed routers; see the note there.
         return  # Remaining routers (including batches) are standalone-mode only
 
-    app.include_router(admin.router)
-    app.include_router(auth_session.router)
-    app.include_router(auth_password.router)
-    app.include_router(auth_signup.router)
-    app.include_router(auth_password_reset.router)
-    app.include_router(auth_webauthn.router)
-    app.include_router(auth_oauth.router)
+    api.include_router(admin.router)
+    api.include_router(auth_session.router)
+    api.include_router(auth_password.router)
+    api.include_router(auth_signup.router)
+    api.include_router(auth_password_reset.router)
+    api.include_router(auth_webauthn.router)
+    api.include_router(auth_oauth.router)
     if serves_data_plane:
         # The rest of the data plane. ``files`` sits here because an upload
         # exists to be referenced from a completion or a batch, so it follows
         # the traffic rather than the management API.
-        app.include_router(embeddings.router)
-        app.include_router(images.router)
-        app.include_router(audio.router)
-        app.include_router(files.router)
-        app.include_router(rerank.router)
-        app.include_router(search.router)
-        app.include_router(batches.router)
-        app.include_router(moderations.router)
+        api.include_router(embeddings.router)
+        api.include_router(images.router)
+        api.include_router(audio.router)
+        api.include_router(files.router)
+        api.include_router(rerank.router)
+        api.include_router(search.router)
+        api.include_router(batches.router)
+        api.include_router(moderations.router)
     # The catalog reads are not operator-gated: /v1/models is discovery, not
     # dispatch. A control plane needs it to tell a tenant which models their
     # gateway could route to, and "models" is one of the surfaces bootstrap
     # publishes for a hosted deployment. The operator router goes first so
     # /v1/models/discoverable and /v1/models/metadata stay ahead of the
     # /v1/models/{model_id:path} catch-all the catalog router ends with.
-    app.include_router(models.operator_router)
-    app.include_router(models.catalog_router)
-    app.include_router(providers.router)
-    app.include_router(keys.router)
-    app.include_router(users.router)
-    app.include_router(organizations.router)
-    app.include_router(organization_budgets.budgets_router)
-    app.include_router(organization_budgets.ceilings_router)
-    app.include_router(organization_pricing.router)
-    app.include_router(organization_guardrails.router)
+    api.include_router(models.operator_router)
+    api.include_router(models.catalog_router)
+    api.include_router(providers.router)
+    api.include_router(keys.router)
+    api.include_router(users.router)
+    api.include_router(organizations.router)
+    api.include_router(organization_budgets.budgets_router)
+    api.include_router(organization_budgets.ceilings_router)
+    api.include_router(organization_pricing.router)
+    api.include_router(organization_guardrails.router)
     # The tenant-scoped read over the same rows ``/v1/usage`` serves to an
     # operator. Mounted with the rest of the ``/v1/organizations/me`` surface
     # rather than beside the usage routers, because what it is scoped to is what
     # decides who may call it (otari#837).
-    app.include_router(organization_usage.router)
+    api.include_router(organization_usage.router)
     # The tenant-scoped reads and writes over the same tables ``/v1/routing/policies``
     # and ``/v1/aliases`` serve to an operator, mounted here for the same reason
     # (otari-ai#1942, otari-ai#1969).
-    app.include_router(organization_routing.policies_router)
-    app.include_router(organization_routing.aliases_router)
+    api.include_router(organization_routing.policies_router)
+    api.include_router(organization_routing.aliases_router)
     # The member-scoped key surface: the caller's own keys, in workspaces they
     # may see. Mounted here for the reason the usage sibling above is; the
     # deployment-wide ``keys.router`` keeps its operator gate unchanged
     # (mozilla-ai/otari-ai#1941).
-    app.include_router(organization_keys.router)
-    app.include_router(workspaces.router)
-    app.include_router(invitations.router)
-    app.include_router(workspace_member_budget_policies.router)
-    app.include_router(workspace_activation.router)
-    app.include_router(workspace_mcp_servers.router)
-    app.include_router(workspace_code_execution_policy.router)
-    app.include_router(workspace_web_search.router)
-    app.include_router(org_provider_keys.org_router)
-    app.include_router(org_provider_keys.workspace_router)
-    app.include_router(budgets.router)
-    app.include_router(scoped_budgets.router)
-    app.include_router(aliases.router)
-    app.include_router(routing.router)
-    app.include_router(routing_memory.router)
+    api.include_router(organization_keys.router)
+    api.include_router(workspaces.router)
+    api.include_router(invitations.router)
+    api.include_router(workspace_member_budget_policies.router)
+    api.include_router(workspace_activation.router)
+    api.include_router(workspace_mcp_servers.router)
+    api.include_router(workspace_code_execution_policy.router)
+    api.include_router(workspace_web_search.router)
+    api.include_router(org_provider_keys.org_router)
+    api.include_router(org_provider_keys.workspace_router)
+    api.include_router(budgets.router)
+    api.include_router(scoped_budgets.router)
+    api.include_router(aliases.router)
+    api.include_router(routing.router)
+    api.include_router(routing_memory.router)
     # Both prefixed /v1/pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
-    app.include_router(pricing.operator_router)
-    app.include_router(pricing.catalog_router)
+    api.include_router(pricing.operator_router)
+    api.include_router(pricing.catalog_router)
     # Both prefixed /v1/usage. POST /external-events authenticates with an API
     # key rather than operator standing, so it is mounted on its own router.
-    app.include_router(usage.operator_router)
-    app.include_router(usage.ingest_router)
-    app.include_router(agent_telemetry.router)
-    app.include_router(otlp.router)
-    app.include_router(settings.router)
-    app.include_router(mail.router)
-    app.include_router(maintenance_mode.router)
+    api.include_router(usage.operator_router)
+    api.include_router(usage.ingest_router)
+    api.include_router(agent_telemetry.router)
+    api.include_router(otlp.router)
+    api.include_router(settings.router)
+    api.include_router(mail.router)
+    api.include_router(maintenance_mode.router)
     # Both prefixed /v1/tool-settings, split by who may call them: the reader is
     # the one route a tenant may reach, narrowed inside the handler
     # (otari-ai#1969). Operator first, matching the pair above, though neither
     # router here ends with a catch-all for the other to sit behind.
-    app.include_router(tool_settings.operator_router)
-    app.include_router(tool_settings.reader_router)
-    app.include_router(search_tools.router)
-    app.include_router(tools.router)
+    api.include_router(tool_settings.operator_router)
+    api.include_router(tool_settings.reader_router)
+    api.include_router(search_tools.router)
+    api.include_router(tools.router)
