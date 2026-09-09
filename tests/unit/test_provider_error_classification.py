@@ -82,6 +82,16 @@ class _ResponseStatusError(Exception):
         self.response = httpx.Response(status_code)
 
 
+class _CodeError(Exception):
+    """Upstream error carrying its status on ``code``, as google-genai's
+    ``APIError`` does. It never sets ``status_code``."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(f"{code} {message}")
+        self.code = code
+        self.message = message
+
+
 def test_timeout_maps_to_504() -> None:
     for exc in (asyncio.TimeoutError(), TimeoutError(), httpx.TimeoutException("slow")):
         mapping = classify_provider_error(exc)
@@ -158,6 +168,42 @@ def test_status_read_from_attached_response() -> None:
     mapping = classify_provider_error(_ResponseStatusError(404))
     assert mapping is not None
     assert mapping.status_code == 404
+
+
+def test_status_read_from_an_int_code() -> None:
+    """google-genai's ``APIError`` puts the status on ``code`` and never sets
+    ``status_code``, so a Gemini rejection is unclassifiable without it."""
+    mapping = classify_provider_error(_CodeError(404, "models/gemini-9 is not found"))
+    assert mapping is not None
+    assert mapping.status_code == 404
+
+
+def test_a_string_code_is_not_read_as_a_status() -> None:
+    """OpenAI-family SDKs use ``code`` for an error slug, not a status, so it
+    must not be guessed at and the exception stays unclassifiable."""
+    exc = Exception(_RAW)
+    exc.code = "invalid_api_key"  # type: ignore[attr-defined]
+    assert classify_provider_error(exc) is None
+
+
+def test_a_non_http_int_code_is_not_read_as_a_status() -> None:
+    """google-genai's live API raises through the same ``APIError`` with a
+    websocket close code. It is an ``int`` but not a status."""
+    assert classify_provider_error(_CodeError(1008, "policy violation")) is None
+
+
+def test_a_non_error_response_status_does_not_shadow_the_real_status() -> None:
+    """Gemini reports a streaming failure in a body chunk, against a stream
+    wrapper whose ``status_code`` is a hardcoded 200: the SSE response opened
+    fine and the 429 arrived later. Reading that 200 as the failure's status is
+    what turned a rate limit into an opaque 502 and recorded 200 as the
+    request's outcome."""
+    exc = _CodeError(429, "You exceeded your current quota. Please retry in 34.6s.")
+    exc.response = httpx.Response(200)  # type: ignore[attr-defined]
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 429
+    assert failure_status_code(exc) == 429
 
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])
