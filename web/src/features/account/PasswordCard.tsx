@@ -101,6 +101,17 @@ function PasswordField({
  * publishes the caller's own address, for the account menu's greeting, so this
  * card reads that same query and, when it names one, prefills and locks the
  * field to it instead of asking again.
+ *
+ * That query is asynchronous, and a `null` `existingEmail` is ambiguous
+ * between "resolved, no address" and "hasn't resolved yet" unless the pending
+ * case is held apart: submitting while it holds would recreate the very
+ * failure this card exists to close, for whichever migrated identity's
+ * response just hasn't landed. A failed query is deliberately *not* held the
+ * same way: refusing to submit on `isError` would mean an unreachable
+ * `/v1/organizations/me` makes an unclaimed deployment permanently
+ * unclaimable through its only UI, a worse failure than the one it would
+ * prevent, so that state instead falls open with a visible note rather than a
+ * silent one.
  */
 export function PasswordCard() {
   const { sign_in_methods } = useDeployment()
@@ -118,6 +129,9 @@ export function PasswordCard() {
   // Trimmed so a stray space on a backfilled row does not read as "has none".
   const organization = useOrganizationContext()
   const existingEmail = organization.data?.caller?.email?.trim() || null
+  // Distinct from "resolved, no address" (see the doc comment above): held
+  // only for the pending case, not the failed one.
+  const identityUnresolved = !isClaimed && organization.isPending
   const [email, setEmail] = useState("")
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -137,7 +151,8 @@ export function PasswordCard() {
     isClaimed && newPassword !== "" && newPassword === currentPassword
   const complete = isClaimed
     ? currentPassword !== "" && newPassword !== "" && confirmPassword !== ""
-    : (existingEmail !== null || email.trim() !== "") &&
+    : !identityUnresolved &&
+      (existingEmail !== null || email.trim() !== "") &&
       newPassword !== "" &&
       confirmPassword !== ""
   // Deliberately not gated on `isPending`: that is the Button's own prop, which
@@ -251,6 +266,7 @@ export function PasswordCard() {
             type="email"
             isRequired
             isReadOnly={existingEmail !== null}
+            isDisabled={identityUnresolved}
             className="flex max-w-md flex-col gap-1"
           >
             <Label className="text-body">Email</Label>
@@ -274,7 +290,11 @@ export function PasswordCard() {
               <Description className="text-muted">
                 {existingEmail
                   ? "This identity already has a sign-in address; claiming keeps it."
-                  : "Changing this address later is not supported yet, so pick the one you will keep."}
+                  : identityUnresolved
+                    ? "Checking whether this identity already has an address…"
+                    : organization.isError
+                      ? "Could not confirm whether this identity already has an address on file; if it does, enter that exact one."
+                      : "Changing this address later is not supported yet, so pick the one you will keep."}
               </Description>
             </FieldMessages>
           </TextField>

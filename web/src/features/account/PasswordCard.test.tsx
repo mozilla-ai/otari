@@ -69,6 +69,51 @@ function putCall(fetchMock: ReturnType<typeof vi.spyOn>) {
   )
 }
 
+/**
+ * Holds `GET /v1/organizations/me` pending forever, for the loading-window
+ * gap (otari#992): while it holds, `existingEmail` cannot yet distinguish a
+ * migrated identity from a bare one.
+ */
+function mockOrganizationContextPending() {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input)
+    if (url === "/v1/organizations/me") {
+      return new Promise<Response>(() => {})
+    }
+    return jsonResponse({ count: 0, data: [] })
+  })
+}
+
+/**
+ * Fails `GET /v1/organizations/me`, everything else answers normally. 403,
+ * not 500: the app's `QueryClient` retries a failed query up to twice by
+ * default and only skips that for 401/403, and a status this test would
+ * retry through is a status this test would also have to wait through.
+ */
+function mockOrganizationContextFailing(put: unknown = CLAIMED) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input)
+    if (url === "/v1/organizations/me") {
+      return jsonResponse({ detail: "boom" }, 403)
+    }
+    if (url === "/v1/auth/password") {
+      return jsonResponse(put)
+    }
+    return jsonResponse({ count: 0, data: [] })
+  })
+}
+
+/**
+ * Wait past the organization-context query the claim form gates on: the
+ * email field is disabled while this identity's address is still unknown
+ * (otari#992's loading-window gap), so a test that types and submits before
+ * it settles would exercise a state real typing speed never reaches rather
+ * than the form itself.
+ */
+async function identityResolved() {
+  await waitFor(() => expect(screen.getByLabelText("Email")).not.toBeDisabled())
+}
+
 describe("PasswordCard on an unclaimed deployment", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -88,6 +133,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
     const user = userEvent.setup()
     renderCard(["master_key"])
 
+    await identityResolved()
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.type(screen.getByLabelText("New password"), "a-real-password")
     await user.type(
@@ -118,6 +164,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
     const user = userEvent.setup()
     renderCard(["master_key"])
 
+    await identityResolved()
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.type(screen.getByLabelText("New password"), "a-real-password")
     await user.type(
@@ -161,8 +208,10 @@ describe("PasswordCard on a migrated deployment (otari#992)", () => {
     renderCard(["master_key"])
 
     // The field is locked, so there is nothing to type into it; only the new
-    // password is this operator's to choose.
-    await screen.findByLabelText("Email")
+    // password is this operator's to choose. Waited on by its resolved value
+    // rather than its mere presence, matching the loading-window gap: the
+    // field exists (and is briefly editable) before the query settles.
+    await screen.findByDisplayValue("operator@example.com")
     await user.type(screen.getByLabelText("New password"), "a-real-password")
     await user.type(
       screen.getByLabelText("Confirm new password"),
@@ -187,6 +236,70 @@ describe("PasswordCard on a migrated deployment (otari#992)", () => {
         /Set a password to sign in as operator@example\.com/i,
       ),
     ).toBeInTheDocument()
+  })
+
+  it("blocks submission while the identity's address is still unknown", async () => {
+    const fetchMock = mockOrganizationContextPending()
+    const user = userEvent.setup()
+    renderCard(["master_key"])
+
+    // Not readonly and not the migrated address either: this is the gap
+    // between "resolved, no address" and "hasn't resolved yet" that a bare
+    // `existingEmail == null` check cannot tell apart on its own.
+    const emailField = screen.getByLabelText("Email")
+    expect(emailField).toBeDisabled()
+    expect(emailField).not.toHaveAttribute("readonly")
+    expect(
+      screen.getByText(/Checking whether this identity already has/i),
+    ).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("New password"), "a-real-password")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "a-real-password",
+    )
+
+    // Filling in both passwords is not enough while the identity is unknown:
+    // submitting here is exactly the failure otari#992 removed for the
+    // resolved case.
+    expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+    expect(putCall(fetchMock)).toBeUndefined()
+  })
+
+  it("falls open, with a visible note, when the identity's address can't be confirmed", async () => {
+    const fetchMock = mockOrganizationContextFailing()
+    const user = userEvent.setup()
+    renderCard(["master_key"])
+
+    // Unlike the pending case, a failed lookup must not make the deployment
+    // permanently unclaimable through its only UI: the field stays editable
+    // and says why, rather than refusing quietly or blocking forever.
+    const emailField = await screen.findByLabelText("Email")
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Could not confirm whether this identity/i),
+      ).toBeInTheDocument(),
+    )
+    expect(emailField).not.toBeDisabled()
+    expect(emailField).not.toHaveAttribute("readonly")
+
+    await user.type(emailField, "operator@example.com")
+    await user.type(screen.getByLabelText("New password"), "a-real-password")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "a-real-password",
+    )
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+
+    await waitFor(() => expect(putCall(fetchMock)).toBeDefined())
+    const [, init] = putCall(fetchMock) ?? []
+    expect(init?.body).toBe(
+      JSON.stringify({
+        email: "operator@example.com",
+        new_password: "a-real-password",
+      }),
+    )
   })
 })
 
@@ -298,6 +411,7 @@ describe("PasswordCard policy checks", () => {
     const user = userEvent.setup()
     renderCard(["master_key"])
 
+    await identityResolved()
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.type(screen.getByLabelText("New password"), "short")
     await user.type(screen.getByLabelText("Confirm new password"), "short")
@@ -311,6 +425,7 @@ describe("PasswordCard policy checks", () => {
     const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
+    await identityResolved()
 
     // 40 characters, and 80 bytes in UTF-8: under any character count bcrypt
     // would be described by, over the 72 bytes it actually hashes.
@@ -332,6 +447,7 @@ describe("PasswordCard policy checks", () => {
     const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
+    await identityResolved()
 
     // Seven emoji: 14 to JavaScript's `String.length` and 7 to Python's `len`,
     // so a UTF-16 count would enable Save and hand the gateway a password its
@@ -353,6 +469,7 @@ describe("PasswordCard policy checks", () => {
     const user = userEvent.setup()
     renderCard(["master_key"])
 
+    await identityResolved()
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.type(screen.getByLabelText("New password"), "a-real-password")
     await user.type(
@@ -409,6 +526,7 @@ describe("PasswordCard and the member roster", () => {
       </AppProviders>,
     )
     await waitFor(() => expect(memberFetches).toBe(1))
+    await identityResolved()
 
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.type(screen.getByLabelText("New password"), "a-real-password")
