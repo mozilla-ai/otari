@@ -1,7 +1,12 @@
 import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
-import type { OrganizationGuardrail, Workspace } from "@/client"
+import type {
+  GuardrailCatalog,
+  GuardrailParameterSpec,
+  OrganizationGuardrail,
+  Workspace,
+} from "@/client"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
@@ -12,10 +17,24 @@ import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManage } from "@/features/organization/roles"
+import { GuardrailParametersSection } from "@/features/tools/GuardrailParametersSection"
+import { GuardrailProfileField } from "@/features/tools/GuardrailProfileField"
+import {
+  buildValidateKwargs,
+  findProfile,
+  type ParameterErrors,
+  type ParameterValues,
+  parameterErrors,
+  parameterSpecs,
+  parseExtraJson,
+  type SeededParameters,
+  seedParameters,
+} from "@/features/tools/guardrailParameters"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateOrganizationGuardrail,
   useDeleteOrganizationGuardrail,
+  useGuardrailProfiles,
   useOrganizationGuardrails,
   useUpdateOrganizationGuardrail,
 } from "@/shared/api/tools"
@@ -122,12 +141,80 @@ function WorkspaceScope({
   )
 }
 
+/**
+ * The `validate_kwargs` half of one entry's form: the typed values, the raw
+ * editor beside them, and the messages a submit produced.
+ *
+ * A hook rather than five `useState` calls at each of the two call sites, which
+ * is what keeps the seeding rule in one place: the row and the add form seed
+ * from different sources but must both re-seed when the profile's schema
+ * arrives, and a catalog that loads a moment after the card does is the ordinary
+ * case rather than the edge one.
+ */
+function useParameterForm(
+  specs: GuardrailParameterSpec[],
+  stored: Record<string, unknown> | null | undefined,
+) {
+  const [state, setState] = useState<SeededParameters>(() =>
+    seedParameters(specs, stored),
+  )
+  const [issues, setIssues] = useState<ParameterErrors>({})
+  const [rawError, setRawError] = useState<string | undefined>(undefined)
+
+  // Both dependencies are serialized, for the reason the workspace scope below
+  // is: each is a fresh object on every fetch and on every catalog read, so
+  // depending on them by reference would wipe a half-typed parameter whenever
+  // any row on the card saved. Parsed back inside the effect so nothing it
+  // touches is missing from the dependency list.
+  const specsJson = JSON.stringify(specs)
+  const storedJson = JSON.stringify(stored ?? {})
+  useEffect(() => {
+    setState(
+      seedParameters(
+        JSON.parse(specsJson) as GuardrailParameterSpec[],
+        JSON.parse(storedJson) as Record<string, unknown>,
+      ),
+    )
+    setIssues({})
+    setRawError(undefined)
+  }, [specsJson, storedJson])
+
+  return {
+    values: state.values,
+    extraJson: state.extraJson,
+    issues,
+    rawError,
+    setValue: (name: string, next: ParameterValues[string]) =>
+      setState((current) => ({
+        ...current,
+        values: { ...current.values, [name]: next },
+      })),
+    setExtraJson: (next: string) =>
+      setState((current) => ({ ...current, extraJson: next })),
+    /**
+     * Validate on submit and report whether the entry may be sent. Messages
+     * appear here rather than on the first keystroke, which is what the forms
+     * guide asks for.
+     */
+    check: (): boolean => {
+      const found = parameterErrors(specs, state.values)
+      const raw = parseExtraJson(state.extraJson).error
+      setIssues(found)
+      setRawError(raw)
+      return raw === undefined && Object.keys(found).length === 0
+    },
+    build: () => buildValidateKwargs(specs, state.values, state.extraJson),
+  }
+}
+
 function GuardrailRow({
   guardrail,
+  catalog,
   workspaces,
   onSaved,
 }: {
   guardrail: OrganizationGuardrail
+  catalog: GuardrailCatalog | undefined
   workspaces: readonly Workspace[]
   onSaved: (message: string) => void
 }) {
@@ -148,6 +235,8 @@ function GuardrailRow({
   const [credential, setCredential] = useState("")
   const [error, setError] = useState("")
   const [isDeleteOpen, setDeleteOpen] = useState(false)
+  const specs = parameterSpecs(catalog, guardrail.profile)
+  const parameters = useParameterForm(specs, guardrail.validate_kwargs)
 
   // Rehydrate from whatever the server last said, so the row never drifts from
   // the stored entry after a save.
@@ -182,6 +271,7 @@ function GuardrailRow({
 
   const save = () => {
     setError("")
+    if (!parameters.check()) return
     update.mutate(
       {
         guardrailId: guardrail.id,
@@ -202,6 +292,12 @@ function GuardrailRow({
           // Omitted entirely when blank, so saving a mode never clears the
           // credential.
           ...(credential === "" ? {} : { credential }),
+          // Sent whole every time, unlike the two fields above. Those are
+          // write-only or nullable and need their omitted/cleared/replaced
+          // states; this one is fully rendered by the form, so what the form
+          // holds *is* the stored value and sending it back is a no-op when
+          // nothing was touched. `null` is how the API clears it.
+          validate_kwargs: parameters.build(),
         },
       },
       {
@@ -288,6 +384,18 @@ function GuardrailRow({
           )
         }
       />
+      <GuardrailParametersSection
+        specs={specs}
+        scopeName={guardrail.profile}
+        values={parameters.values}
+        errors={parameters.issues}
+        extraJson={parameters.extraJson}
+        extraJsonError={parameters.rawError}
+        described={findProfile(catalog, guardrail.profile) !== undefined}
+        disabled={busy}
+        onChange={parameters.setValue}
+        onExtraJsonChange={parameters.setExtraJson}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -348,9 +456,11 @@ function GuardrailRow({
 }
 
 function AddGuardrailForm({
+  catalog,
   workspaces,
   onSaved,
 }: {
+  catalog: GuardrailCatalog | undefined
   workspaces: readonly Workspace[]
   onSaved: (message: string) => void
 }) {
@@ -362,16 +472,22 @@ function AddGuardrailForm({
   const [everywhere, setEverywhere] = useState(false)
   const [scope, setScope] = useState<string[]>([])
   const [error, setError] = useState("")
+  const specs = parameterSpecs(catalog, profile)
+  // Nothing stored yet, so the fields start at the profile's own defaults and
+  // re-seed when the picker moves to a profile with a different schema.
+  const parameters = useParameterForm(specs, undefined)
 
   const submit = () => {
     setError("")
     const named = profile.trim()
+    if (!parameters.check()) return
     create.mutate(
       {
         profile: named,
         mode,
         url: url.trim() === "" ? null : url.trim(),
         credential: credential === "" ? null : credential,
+        validate_kwargs: parameters.build(),
         applies_to_all_workspaces: everywhere,
         workspace_ids: everywhere ? [] : scope,
       },
@@ -391,16 +507,13 @@ function AddGuardrailForm({
   return (
     <div className="flex flex-col gap-2 py-4">
       <span className="text-body">Mandate a guardrail</span>
+      <GuardrailProfileField
+        catalog={catalog}
+        value={profile}
+        disabled={create.isPending}
+        onChange={setProfile}
+      />
       <div className="flex flex-wrap items-end gap-2">
-        <input
-          type="text"
-          aria-label="Guardrail profile"
-          value={profile}
-          placeholder="profile, e.g. prompt-injection"
-          disabled={create.isPending}
-          onChange={(event) => setProfile(event.target.value)}
-          className={`w-full sm:w-52 ${INPUT_CLASS}`}
-        />
         <FilterSelect
           ariaLabel="Guardrail mode"
           value={mode}
@@ -444,6 +557,20 @@ function AddGuardrailForm({
           )
         }
       />
+      <GuardrailParametersSection
+        specs={specs}
+        scopeName={profile === "" ? "the new guardrail" : profile}
+        values={parameters.values}
+        errors={parameters.issues}
+        extraJson={parameters.extraJson}
+        extraJsonError={parameters.rawError}
+        described={
+          profile === "" || findProfile(catalog, profile) !== undefined
+        }
+        disabled={create.isPending}
+        onChange={parameters.setValue}
+        onExtraJsonChange={parameters.setExtraJson}
+      />
       <div className="flex items-center gap-2">
         <Button
           size="sm"
@@ -455,11 +582,10 @@ function AddGuardrailForm({
         </Button>
       </div>
       <span className="text-caption">
-        The profile has to exist on the guardrails service. A caller can tighten
-        a mandated guardrail but never weaken it. A credential needs an https
-        endpoint of its own, since the URL above may be a plain-http sidecar,
-        and <code className="font-mono">OTARI_SECRET_KEY</code> set on the
-        gateway.
+        A caller can tighten a mandated guardrail but never weaken it. A
+        credential needs an https endpoint of its own, since the URL above may
+        be a plain-http sidecar, and{" "}
+        <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
       </span>
       {error ? (
         <span className="break-words text-caption text-danger">{error}</span>
@@ -480,6 +606,9 @@ export function OrganizationGuardrailsCard({
   // see them either, and asking would earn a 403 over a form they cannot use.
   const manages = canManage(context.data)
   const guardrails = useOrganizationGuardrails(manages)
+  // Behind the same gate for the same reason the entries are: nothing here is
+  // asked for over a form the caller cannot use.
+  const catalog = useGuardrailProfiles(manages)
   const workspaces = useWorkspaces()
   const entries = guardrails.data ?? []
   const known = workspaces.data ?? []
@@ -503,6 +632,7 @@ export function OrganizationGuardrailsCard({
             <GuardrailRow
               key={guardrail.id}
               guardrail={guardrail}
+              catalog={catalog.data}
               workspaces={known}
               onSaved={onSaved}
             />
@@ -513,7 +643,11 @@ export function OrganizationGuardrailsCard({
               for run.
             </p>
           ) : null}
-          <AddGuardrailForm workspaces={known} onSaved={onSaved} />
+          <AddGuardrailForm
+            catalog={catalog.data}
+            workspaces={known}
+            onSaved={onSaved}
+          />
         </>
       ) : null}
     </SettingsGroup>

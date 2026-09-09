@@ -379,6 +379,14 @@ export type ToolSettingsResponse = Schemas["ToolSettingsResponse"]
 export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"]
 export type TestServiceResponse = Schemas["TestServiceResponse"]
 
+// The guardrail catalog behind the mandate form: which profiles the operator's
+// guardrails service has built, and the `validate_kwargs` each one accepts. See
+// `src/gateway/services/guardrail_catalog.py`.
+export type GuardrailCatalog = Schemas["GuardrailCatalog"]
+export type GuardrailProfileSpec = Schemas["GuardrailProfileSpec"]
+export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
+export type GuardrailParameterType = GuardrailParameterSpec["type"]
+
 // ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------

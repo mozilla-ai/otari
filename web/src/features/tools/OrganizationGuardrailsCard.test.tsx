@@ -2,21 +2,70 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { OrganizationGuardrail } from "@/client"
+import type { GuardrailCatalog, OrganizationGuardrail } from "@/client"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext, organizationGuardrail } from "@/tests/fixtures"
-import { selectTrigger } from "@/tests/select"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const BETA = "22222222-2222-2222-2222-222222222222"
 
+// What the operator's guardrails service answered with, joined to the parameter
+// schema of the any-guardrail class each profile is built from. Shaped as the
+// gateway serves it, so these tests exercise the catalog contract rather than a
+// convenient stand-in for it.
+const CATALOG: GuardrailCatalog = {
+  available: true,
+  reason: null,
+  profiles: [
+    {
+      profile: "house-policy",
+      guardrail: "any_llm",
+      model_id: null,
+      parameters_known: true,
+      parameters: [
+        {
+          name: "policy",
+          type: "string",
+          required: true,
+          secret: false,
+          description: "Natural-language policy to validate against.",
+        },
+        {
+          name: "threshold",
+          type: "number",
+          required: false,
+          secret: false,
+          default: 0.5,
+        },
+        {
+          name: "prompt_version",
+          type: "enum",
+          required: false,
+          secret: false,
+          choices: ["v1", "v2"],
+        },
+      ],
+    },
+    {
+      profile: "prompt-injection",
+      guardrail: "injec_guard",
+      model_id: "leolee99/InjecGuard",
+      parameters_known: true,
+      parameters: [],
+    },
+  ],
+}
+
 function mockApi({
   guardrails = [] as OrganizationGuardrail[],
   role = "owner",
+  catalog = CATALOG,
 }: {
   guardrails?: OrganizationGuardrail[]
   role?: string
+  catalog?: GuardrailCatalog
 } = {}) {
   const calls: { url: string; method: string; body: unknown }[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -33,6 +82,10 @@ function mockApi({
         return Response.json({ data: guardrails, count: guardrails.length })
       }
       return Response.json(guardrails[0] ?? organizationGuardrail())
+    }
+    if (url.includes(`${API_ROOT}/tool-settings/guardrails/profiles`)) {
+      calls.push({ url, method, body: undefined })
+      return Response.json(catalog)
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
       return Response.json({
@@ -329,10 +382,12 @@ describe("OrganizationGuardrailsCard", () => {
     const calls = mockApi()
     renderCard()
 
-    await userEvent.type(
-      await screen.findByLabelText("Guardrail profile"),
-      "pii",
+    // A profile the catalog does not list, which is what the by-hand field is
+    // for: this entry may be destined for an endpoint of its own.
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Name a profile by hand" }),
     )
+    await userEvent.type(screen.getByLabelText("Guardrail profile"), "pii")
     await userEvent.click(screen.getByRole("button", { name: "Add" }))
 
     await waitFor(() =>
@@ -346,5 +401,177 @@ describe("OrganizationGuardrailsCard", () => {
       applies_to_all_workspaces: false,
       workspace_ids: [],
     })
+  })
+
+  it("picks a profile from what the guardrails service has built", async () => {
+    const calls = mockApi()
+    renderCard()
+
+    await pickOption(userEvent.setup(), "Guardrail profile", "prompt-injection")
+    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "POST")).toBe(true),
+    )
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      profile: "prompt-injection",
+    })
+  })
+
+  it("writes the chosen profile's typed parameters into validate_kwargs", async () => {
+    const calls = mockApi()
+    renderCard()
+    const user = userEvent.setup()
+
+    await pickOption(user, "Guardrail profile", "house-policy")
+    await user.type(await screen.findByLabelText("Policy"), "No personal data.")
+    await user.type(screen.getByLabelText("Threshold"), "0.8")
+    await pickOption(user, "Prompt version", "v2")
+    await user.click(screen.getByRole("button", { name: "Add" }))
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "POST")).toBe(true),
+    )
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      profile: "house-policy",
+      validate_kwargs: {
+        policy: "No personal data.",
+        // Coerced back to its JSON-native type, not left as the typed string.
+        threshold: 0.8,
+        prompt_version: "v2",
+      },
+    })
+  })
+
+  it("refuses to add an entry whose guardrail needs a parameter it has not got", async () => {
+    const calls = mockApi()
+    renderCard()
+
+    await pickOption(userEvent.setup(), "Guardrail profile", "house-policy")
+    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+
+    expect(
+      await screen.findByText("This guardrail needs a value here."),
+    ).toBeInTheDocument()
+    expect(calls.some((call) => call.method === "POST")).toBe(false)
+  })
+
+  it("omits a parameter left blank, so the profile's own default still applies", async () => {
+    const calls = mockApi()
+    renderCard()
+    const user = userEvent.setup()
+
+    await pickOption(user, "Guardrail profile", "house-policy")
+    await user.type(await screen.findByLabelText("Policy"), "No personal data.")
+    await user.click(screen.getByRole("button", { name: "Add" }))
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "POST")).toBe(true),
+    )
+    const body = calls.find((call) => call.method === "POST")?.body as {
+      validate_kwargs: Record<string, unknown>
+    }
+    expect(body.validate_kwargs).toEqual({ policy: "No personal data." })
+  })
+
+  it("renders a stored parameter into its typed field", async () => {
+    mockApi({
+      guardrails: [
+        organizationGuardrail({
+          profile: "house-policy",
+          applies_to_all_workspaces: true,
+          validate_kwargs: { policy: "Stored policy." },
+        }),
+      ],
+    })
+    renderCard()
+
+    expect(await screen.findByLabelText("Policy")).toHaveValue("Stored policy.")
+  })
+
+  it("round-trips a stored parameter the catalog does not describe", async () => {
+    const calls = mockApi({
+      guardrails: [
+        organizationGuardrail({
+          profile: "house-policy",
+          applies_to_all_workspaces: true,
+          validate_kwargs: { policy: "Stored policy.", unmapped: [1, 2] },
+        }),
+      ],
+    })
+    renderCard()
+
+    // The raw editor opens on its own when it holds something, so a value with
+    // no typed field is not one the operator has to go looking for.
+    expect(await screen.findByLabelText("Parameters (JSON)")).toHaveValue(
+      JSON.stringify({ unmapped: [1, 2] }, null, 2),
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save house-policy" }),
+    )
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "PATCH")).toBe(true),
+    )
+    expect(calls.find((call) => call.method === "PATCH")?.body).toMatchObject({
+      validate_kwargs: { policy: "Stored policy.", unmapped: [1, 2] },
+    })
+  })
+
+  it("refuses a save whose raw parameters are not JSON", async () => {
+    const calls = mockApi({
+      guardrails: [
+        organizationGuardrail({
+          profile: "prompt-injection",
+          applies_to_all_workspaces: true,
+        }),
+      ],
+    })
+    renderCard()
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /Other parameters for prompt-injection/,
+      }),
+    )
+    await userEvent.type(screen.getByLabelText("Parameters (JSON)"), "not json")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save prompt-injection" }),
+    )
+
+    expect(await screen.findByText("Not valid JSON.")).toBeInTheDocument()
+    expect(calls.some((call) => call.method === "PATCH")).toBe(false)
+  })
+
+  it("falls back to naming a profile by hand, and says why, when the service cannot be listed", async () => {
+    const calls = mockApi({
+      catalog: {
+        available: false,
+        reason: "The guardrails service could not be reached.",
+        profiles: [],
+      },
+    })
+    renderCard()
+
+    expect(
+      await screen.findByText("The guardrails service could not be reached."),
+    ).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText("Guardrail profile"), "pii")
+    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "POST")).toBe(true),
+    )
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      profile: "pii",
+    })
+  })
+
+  it("asks for no catalog from a member who cannot manage the organization", async () => {
+    const calls = mockApi({ role: "member" })
+    renderCard()
+
+    await screen.findByText(/set by an owner or admin of the organization/)
+    expect(calls).toEqual([])
   })
 })

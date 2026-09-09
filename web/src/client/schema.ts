@@ -3543,6 +3543,43 @@ export interface paths {
         patch: operations["tool-settings-update_tool_settings"];
         trace?: never;
     };
+    "/api/v1/tool-settings/guardrails/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Guardrail Profiles
+         * @description List the guardrail profiles this deployment's guardrails service has built.
+         *
+         *     What an organization guardrail's ``profile`` may name, with the
+         *     ``validate_kwargs`` each one accepts, so the dashboard offers a picker and
+         *     typed fields instead of a free-text box beside an unrendered dict. The
+         *     profiles come from the service itself and the parameter schemas from the
+         *     ``any_guardrail`` registry; neither is a list kept in this repository. See
+         *     `gateway.services.guardrail_catalog`.
+         *
+         *     Reports ``available: false`` with a reason rather than an error when the
+         *     service is unconfigured, unreachable, or older than its ``/profiles``
+         *     endpoint, because a guardrails outage must not also break the page that
+         *     configures guardrails.
+         *
+         *     Read against ``guardrails_url``, which is the deployment's own service. An
+         *     entry that carries an endpoint of its own is not probed: that URL is
+         *     caller-supplied and fetching it here would make this a way to have the
+         *     gateway request an address of the caller's choosing.
+         */
+        get: operations["tool-settings-list_guardrail_profiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tool-settings/{service}/test": {
         parameters: {
             query?: never;
@@ -6491,6 +6528,24 @@ export interface components {
             version: string;
         };
         /**
+         * GuardrailCatalog
+         * @description The profiles a guardrail entry may name, or why they could not be listed.
+         */
+        GuardrailCatalog: {
+            /**
+             * Available
+             * @description Whether the guardrails service answered with its profiles
+             */
+            available: boolean;
+            /** Profiles */
+            profiles?: components["schemas"]["GuardrailProfileSpec"][];
+            /**
+             * Reason
+             * @description Why the catalog is unavailable, in terms a tenant can act on
+             */
+            reason?: string | null;
+        };
+        /**
          * GuardrailConfig
          * @description A single guardrail check the caller wants the gateway to enforce.
          *
@@ -6525,6 +6580,80 @@ export interface components {
             validate_kwargs?: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * GuardrailParameterSpec
+         * @description One ``validate_kwargs`` key a profile accepts, typed for a form control.
+         */
+        GuardrailParameterSpec: {
+            /**
+             * Choices
+             * @description Allowed values for an enum parameter
+             */
+            choices?: string[] | null;
+            /**
+             * Default
+             * @description The signature default, or null when there is none
+             */
+            default?: unknown;
+            /**
+             * Description
+             * @description One-line help text from the guardrail's docstring
+             */
+            description?: string | null;
+            /**
+             * Name
+             * @description The keyword argument's name, as it is sent in validate_kwargs
+             */
+            name: string;
+            /**
+             * Required
+             * @description Whether a value must be supplied for the guardrail to run. Folds together the signature having no default and upstream's effectively-required flag, which covers a parameter that defaults to a value the guardrail then refuses to run without
+             */
+            required: boolean;
+            /**
+             * Secret
+             * @description Whether the value is a credential, so a form masks it and never echoes it back
+             * @default false
+             */
+            secret: boolean;
+            /**
+             * Type
+             * @description Value shape, so a form can render the matching control
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "enum" | "json";
+        };
+        /**
+         * GuardrailProfileSpec
+         * @description One profile the operator's guardrails service has built.
+         */
+        GuardrailProfileSpec: {
+            /**
+             * Guardrail
+             * @description The any-guardrail class the profile is built from
+             */
+            guardrail: string;
+            /**
+             * Model Id
+             * @description The model the operator pinned, when they pinned one
+             */
+            model_id?: string | null;
+            /**
+             * Parameters
+             * @description The validate_kwargs this profile accepts
+             */
+            parameters?: components["schemas"]["GuardrailParameterSpec"][];
+            /**
+             * Parameters Known
+             * @description False when this gateway's any-guardrail is older than the service's and has no schema for that class. The profile is still selectable; only its typed fields are missing
+             */
+            parameters_known: boolean;
+            /**
+             * Profile
+             * @description The name a guardrail entry puts in its profile field
+             */
+            profile: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -16870,6 +16999,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "tool-settings-list_guardrail_profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardrailCatalog"];
                 };
             };
         };

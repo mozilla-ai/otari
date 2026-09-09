@@ -4470,6 +4470,40 @@
         "title": "GatewaySettings",
         "type": "object"
       },
+      "GuardrailCatalog": {
+        "description": "The profiles a guardrail entry may name, or why they could not be listed.",
+        "properties": {
+          "available": {
+            "description": "Whether the guardrails service answered with its profiles",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/GuardrailProfileSpec"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the catalog is unavailable, in terms a tenant can act on",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "GuardrailCatalog",
+        "type": "object"
+      },
       "GuardrailConfig": {
         "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.run_input_guardrails` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
@@ -4530,6 +4564,125 @@
           "profile"
         ],
         "title": "GuardrailConfig",
+        "type": "object"
+      },
+      "GuardrailParameterSpec": {
+        "description": "One ``validate_kwargs`` key a profile accepts, typed for a form control.",
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Allowed values for an enum parameter",
+            "title": "Choices"
+          },
+          "default": {
+            "description": "The signature default, or null when there is none",
+            "title": "Default"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One-line help text from the guardrail's docstring",
+            "title": "Description"
+          },
+          "name": {
+            "description": "The keyword argument's name, as it is sent in validate_kwargs",
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "description": "Whether a value must be supplied for the guardrail to run. Folds together the signature having no default and upstream's effectively-required flag, which covers a parameter that defaults to a value the guardrail then refuses to run without",
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "description": "Whether the value is a credential, so a form masks it and never echoes it back",
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Value shape, so a form can render the matching control",
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "enum",
+              "json"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "required"
+        ],
+        "title": "GuardrailParameterSpec",
+        "type": "object"
+      },
+      "GuardrailProfileSpec": {
+        "description": "One profile the operator's guardrails service has built.",
+        "properties": {
+          "guardrail": {
+            "description": "The any-guardrail class the profile is built from",
+            "title": "Guardrail",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the operator pinned, when they pinned one",
+            "title": "Model Id"
+          },
+          "parameters": {
+            "description": "The validate_kwargs this profile accepts",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailParameterSpec"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "parameters_known": {
+            "description": "False when this gateway's any-guardrail is older than the service's and has no schema for that class. The profile is still selectable; only its typed fields are missing",
+            "title": "Parameters Known",
+            "type": "boolean"
+          },
+          "profile": {
+            "description": "The name a guardrail entry puts in its profile field",
+            "title": "Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile",
+          "guardrail",
+          "parameters_known"
+        ],
+        "title": "GuardrailProfileSpec",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -26060,6 +26213,36 @@
           }
         ],
         "summary": "Update Tool Settings",
+        "tags": [
+          "tool-settings"
+        ]
+      }
+    },
+    "/api/v1/tool-settings/guardrails/profiles": {
+      "get": {
+        "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.",
+        "operationId": "tool-settings-list_guardrail_profiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Guardrail Profiles",
         "tags": [
           "tool-settings"
         ]

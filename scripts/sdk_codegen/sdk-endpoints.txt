@@ -189,6 +189,7 @@ GET /api/v1/tools                                   # not yet wrapped
 GET /api/v1/tool-settings                           # not yet wrapped
 PATCH /api/v1/tool-settings                         # not yet wrapped
 POST /api/v1/tool-settings/{service}/test           # not yet wrapped
+GET /api/v1/tool-settings/guardrails/profiles       # not yet wrapped
 POST /api/v1/search                                 # not yet wrapped
 POST /api/v1/search/{search_tool_name}              # not yet wrapped
 # Search tools (runtime search-tool management)

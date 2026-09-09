@@ -95,6 +95,43 @@ curl -X POST http://localhost:8000/v1/organizations/me/guardrails \
   }'
 ```
 
+### Which profiles exist, and what they take
+
+`GET /v1/tool-settings/guardrails/profiles` lists the profiles the deployment's
+guardrails service has actually built, with the `validate_kwargs` each one
+accepts. It is what the dashboard's guardrail form is driven by, so an entry is
+configured by picking a profile and filling in typed fields rather than by
+naming a profile from memory and hand-writing a dict.
+
+Neither half of that answer is a list Otari keeps. The profiles come from the
+service's own `GET /profiles`, which reports each profile's name and the
+`any-guardrail` class it was built from; the parameters come from
+[any-guardrail's parameter registry](https://github.com/mozilla-ai/any-guardrail),
+keyed by that class. Only `validate` parameters appear: a guardrail's
+constructor arguments are fixed by the operator's `service.yaml` when the
+service boots, and `POST /validate` takes nothing else.
+
+```json
+{
+  "available": true,
+  "profiles": [
+    {
+      "profile": "prompt-injection",
+      "guardrail": "injec_guard",
+      "model_id": "leolee99/InjecGuard",
+      "parameters_known": true,
+      "parameters": []
+    }
+  ]
+}
+```
+
+A service that is unconfigured, unreachable, or older than its `/profiles`
+endpoint answers `"available": false` with a reason rather than an error, and
+the dashboard falls back to naming a profile by hand. The same fallback covers
+an entry that points at an endpoint of its own: only `guardrails_url` is read
+here, because a URL taken from an entry would be one a caller chose.
+
 ### How the layers compose
 
 Three layers can name a guardrail: the caller's request, the caller's

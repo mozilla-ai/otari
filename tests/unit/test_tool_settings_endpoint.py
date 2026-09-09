@@ -204,3 +204,71 @@ def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
     assert fields["sandbox_session_image"]["value"] == "mzdotai/otari-sandbox-container:latest"
     assert fields["sandbox_session_image"]["service"] == "sandbox"
     assert "sandbox_allowed_session_images" not in fields
+
+
+def _profiles_response(rows: Any, status_code: int = 200) -> Any:
+    """Stand in for the guardrails service's ``GET /profiles`` answer."""
+
+    class _Resp:
+        def __init__(self) -> None:
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError("boom", request=None, response=None)  # type: ignore[arg-type]
+
+        def json(self) -> Any:
+            return rows
+
+    return _Resp()
+
+
+def test_guardrail_profiles_lists_what_the_service_built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get(self: Any, url: str) -> Any:  # noqa: ARG001
+        assert url == "http://anyguardrails:8000/profiles"
+        return _profiles_response([{"name": "house-policy", "guardrail_name": "any_llm"}])
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    with _client(tmp_path, guardrails_url="http://anyguardrails:8000") as client:
+        resp = client.get("/v1/tool-settings/guardrails/profiles", headers=AUTH)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["available"] is True
+    assert body["profiles"][0]["profile"] == "house-policy"
+    assert "policy" in {parameter["name"] for parameter in body["profiles"][0]["parameters"]}
+
+
+def test_guardrail_profiles_reports_an_unconfigured_service(tmp_path: Path) -> None:
+    """A deployment with no guardrails service gets a reason, not an error.
+
+    This drives the page an operator configures guardrails on, so it has to
+    render before the service they are configuring exists.
+    """
+    with _client(tmp_path) as client:
+        resp = client.get("/v1/tool-settings/guardrails/profiles", headers=AUTH)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["available"] is False
+    assert body["profiles"] == []
+    assert body["reason"]
+
+
+def test_guardrail_profiles_never_returns_the_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reader router serves a tenant, from whom the GET above withholds URLs."""
+
+    async def fake_get(self: Any, url: str) -> Any:  # noqa: ARG001
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    with _client(tmp_path, guardrails_url="https://guardrails.internal.example") as client:
+        resp = client.get("/v1/tool-settings/guardrails/profiles", headers=AUTH)
+
+    assert resp.status_code == 200
+    assert "guardrails.internal.example" not in resp.text
+
+
+def test_guardrail_profiles_requires_master_key(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        assert client.get("/v1/tool-settings/guardrails/profiles").status_code == 401
