@@ -1,0 +1,172 @@
+name: Otari Lock Refresh
+
+# Re-resolves uv.lock against the latest versions the declared constraints allow,
+# and opens a PR when that moves anything.
+#
+# This exists because Dependabot cannot see the staleness it is meant to catch.
+# Dependabot bumps a dependency when a declared constraint or a security advisory
+# forces one; it does not chase a package that still satisfies its floor. Nearly
+# every dependency here is floored rather than pinned, and `uv lock` preserves an
+# existing resolution unless something forces a change, so a floored package stays
+# at whatever version happened to be current the day it was first locked. That is
+# not hypothetical: genai-prices sat at 0.1.0 from the day it was added while six
+# releases shipped upstream, and because it carries a *dataset* (model prices),
+# the stale resolution silently mispriced requests rather than merely missing a
+# feature. CI and the Docker image both install with --frozen, so the lockfile is
+# what ships.
+#
+# The refresh runs the resolution-sensitive checks itself before opening anything,
+# because a PR authored by GITHUB_TOKEN does not trigger `pull_request` workflows
+# (GitHub blocks that to avoid recursive runs). Set a LOCK_REFRESH_TOKEN secret (a
+# PAT or GitHub App token with contents:write and pull-requests:write on this
+# repo) to have the PR's own checks run automatically; without it, the PR body
+# tells the reviewer how to trigger them.
+
+on:
+  schedule:
+    # Mondays at 06:00 UTC, ahead of Dependabot's weekly run, so a constraint bump
+    # that Dependabot opens later in the day resolves against a lockfile that is
+    # already current rather than fighting this PR for the same lines.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Refresh only this package (blank refreshes every dependency)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lock-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: 3.14
+          activate-environment: true
+
+      - name: Re-resolve the lockfile
+        id: relock
+        env:
+          PACKAGE: ${{ github.event.inputs.package }}
+        run: |
+          # --dry-run first, purely for the summary: it names each package and
+          # both versions ("Update genai-prices v0.1.0 -> v0.1.6"), which a diff
+          # of uv.lock does not, because the name and the version sit on separate
+          # lines of the entry.
+          if [ -n "${PACKAGE}" ]; then
+            uv lock --upgrade-package "${PACKAGE}" --dry-run 2>&1 | tee /tmp/changes.txt
+            uv lock --upgrade-package "${PACKAGE}"
+          else
+            uv lock --upgrade --dry-run 2>&1 | tee /tmp/changes.txt
+            uv lock --upgrade
+          fi
+          if git diff --quiet -- uv.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Every dependency already resolves to its newest allowed version."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo '## Dependency changes'
+            echo
+            echo '```'
+            grep -E '^(Update|Add|Remove) ' /tmp/changes.txt || echo 'none'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the refreshed dependencies
+        if: steps.relock.outputs.changed == 'true'
+        run: uv sync --dev --frozen
+
+      - name: Lint
+        if: steps.relock.outputs.changed == 'true'
+        run: make lint
+
+      - name: Typecheck
+        if: steps.relock.outputs.changed == 'true'
+        run: make typecheck
+
+      - name: Unit tests
+        if: steps.relock.outputs.changed == 'true'
+        run: uv run pytest tests/unit -q -n auto
+
+      - name: Integration tests
+        if: steps.relock.outputs.changed == 'true'
+        # Testcontainers brings up postgres:17 on the runner's Docker daemon, the
+        # same way it does locally when TEST_DATABASE_URL is unset.
+        run: uv run pytest tests/integration -q -n auto
+
+      - name: OSS-edition smoke gate
+        if: steps.relock.outputs.changed == 'true'
+        # The gate that exists for exactly this class of change: it boots the
+        # packaged CLI with --no-dev, so a dev-only or enterprise-only import that
+        # a new resolution dragged onto an OSS code path fails here.
+        run: uv run --frozen --no-dev python scripts/oss_edition_smoke.py
+
+      - name: Open the refresh PR
+        if: steps.relock.outputs.changed == 'true'
+        id: refresh_pr
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.LOCK_REFRESH_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: chore/uv-lock-refresh
+          delete-branch: true
+          commit-message: |
+            chore(deps): refresh uv.lock against the latest allowed versions
+
+            Re-resolved by .github/workflows/otari-lock-refresh.yml.
+          title: "chore(deps): refresh uv.lock against the latest allowed versions"
+          body: |
+            Automated re-resolution of `uv.lock` by
+            `.github/workflows/otari-lock-refresh.yml`. Nothing in `pyproject.toml`
+            changed: these are the newest versions the existing constraints already
+            allowed, which Dependabot does not open PRs for.
+
+            The workflow ran `make lint`, `make typecheck`, the unit and
+            integration suites, and the OSS-edition smoke gate against this
+            resolution before opening the PR. See the run summary for the
+            package-level diff.
+
+            If the PR's own checks did not start, it was authored by
+            `GITHUB_TOKEN`, which cannot trigger `pull_request` workflows. Push an
+            empty commit to the branch, or close and reopen the PR, to run them.
+
+            ## Description
+
+            Keeps the locked resolution current, so a floored dependency does not
+            sit years behind while its constraint stays satisfied.
+
+            ## PR Type
+
+            - [x] Infrastructure / CI
+
+            ## Relevant issues
+
+            ## Checklist
+
+            - [x] I understand the code I am submitting.
+            - [ ] I have added or updated tests that cover my change (`tests/unit`, `tests/integration`).
+            - [x] I ran the Definition of Done checks locally (`make lint`, `make typecheck`, `make test`).
+            - [ ] Documentation was updated where necessary.
+            - [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py`).
+
+            ## AI Usage
+
+            - [x] No AI was used.
+
+            **AI Model/Tool used:** none, this PR is opened by a scheduled workflow.
+
+            - [ ] I am an AI Agent filling out this form (check box if true)
