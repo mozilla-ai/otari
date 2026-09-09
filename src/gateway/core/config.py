@@ -62,6 +62,9 @@ CONVERSATION_HEADER = "Otari-Conversation-Id"
 # pass-through until that partition alone is warm; records from other tasks never
 # influence it. Submit the matching label via the /rank task_id.
 ROUTER_TASK_HEADER = "Otari-Router-Task"
+API_ROOT = "/api/v1"
+# Base only: OTel exporters append /v1/traces and the other signal paths.
+OTLP_ROOT = "/otlp"
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 # Where a hybrid gateway's control plane lives for a person, as opposed to
 # DEFAULT_PLATFORM_BASE_URL above, which is where it lives for the gateway. The
