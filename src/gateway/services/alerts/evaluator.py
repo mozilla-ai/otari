@@ -411,6 +411,15 @@ async def _dispatch(db: AsyncSession, rule: AlertRule, crossing: _Crossing, kind
     destination cannot be decrypted still consumes its dedupe key and reports
     the reason on the row instead of retrying the same broken decrypt on every
     tick for the rest of the period.
+
+    **Claiming first also keeps a pooled connection out of the send.**
+    ``create_session`` yields a commit-as-you-go session with no surrounding
+    transaction, so :func:`_claim`'s commit returns its connection to the pool
+    before ``send_alert`` runs, and :func:`_record_outcome` takes a fresh one
+    afterwards. That is what stops a destination sitting on its
+    ``SEND_TIMEOUT_SECONDS`` from holding a connection for the length of every
+    alert, which is the rule ``release_session`` enforces on the request path.
+    Wrapping a pass in ``async with db.begin()`` would silently give that up.
     """
     delivery = await _claim(db, rule, crossing, kind)
     if delivery is None:

@@ -21,6 +21,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "budgets",
       "keys",
       "models",
+      "organization_alerts",
       "organizations",
       "pricing",
       "providers",
