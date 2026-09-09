@@ -898,7 +898,7 @@ function PolicyForm({
                   </div>
                 ) : null}
                 <FieldAction>
-                  <label className="flex items-center gap-2 text-body text-foreground">
+                  <label className="flex items-center gap-2 text-body">
                     <input
                       type="radio"
                       name="router-safe-choice"
