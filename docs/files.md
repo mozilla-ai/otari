@@ -157,7 +157,14 @@ in order:
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_local_dir`, `files_max_bytes`,
-`files_retention_hours`: upload storage. An expired file answers 404 at once,
+`files_retention_hours`: upload storage. `files_backend` is `local` (a
+directory), `s3` (boto3, `files_s3_*`), or `fsspec`: any filesystem
+[fsspec](https://filesystem-spec.readthedocs.io) has an implementation for,
+named by `files_url` (`gcs://bucket/prefix`, `abfs://container/prefix`,
+`s3://bucket/prefix`, `sftp://host/path`, `file:///path`, ...) with the
+implementation's own keyword arguments in `files_storage_options`. Install the
+implementation package for the protocol (`gcsfs`, `adlfs`, `s3fs`, `paramiko`);
+most read their standard credential environment variables on their own. An expired file answers 404 at once,
 and the background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
 disable) then reclaims its bytes and row along with those of deleted files.
 - `file_understanding_enabled`: master switch for content normalization.
