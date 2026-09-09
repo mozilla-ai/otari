@@ -211,6 +211,8 @@ async def _execute_mcp_calls(
             continue
         try:
             text = await pool.call_tool(name, args)
+        except MaxToolIterationsExceeded:
+            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             logger.warning("MCP tool %s execution failed: %s", name, exc)
             text = f"[tool error] {exc}"

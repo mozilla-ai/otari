@@ -1013,19 +1013,18 @@ async def _resolve_platform_mcp_server(
 async def _resolve_platform_web_search(
     config: GatewayConfig,
     user_token: str,
+    requested_tools: list[str] | None = None,
 ) -> dict[str, Any]:
     """Resolve the workspace's web-search policy via the platform.
 
-    POSTs an empty body to `/gateway/web-search/resolve` (via `_post_resolve`,
-    which owns the shared guard/headers/status-code ladder) and returns the
-    parsed JSON dict on 200 (``{enabled, provider, max_results, purpose_hint,
-    allowed_domains, blocked_domains, provider_options}``).
+    New gateways send the exact managed web capabilities the request declared.
+    ``None`` retains the legacy Search-only body for compatibility callers.
     """
     payload = await _post_resolve(
         config,
         user_token=user_token,
         path="/gateway/web-search/resolve",
-        body={},
+        body={} if requested_tools is None else {"requested_tools": requested_tools},
         client_error_detail="Web search resolution failed",
     )
     return payload if isinstance(payload, dict) else {}

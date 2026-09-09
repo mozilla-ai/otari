@@ -47,11 +47,11 @@ def test_requires_auth(tmp_path: Path) -> None:
         assert client.get(f"{API_ROOT}/tools").status_code == 401
 
 
-def test_lists_both_gateway_tools_with_schemas_and_examples(tmp_path: Path) -> None:
+def test_lists_gateway_tools_with_schemas_and_examples(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         tools = _tools(client)
 
-    assert set(tools) == {"otari_web_search", "otari_code_execution"}
+    assert set(tools) == {"otari_web_search", "otari_web_fetch", "otari_code_execution"}
     web_search = tools["otari_web_search"]
     assert web_search["object"] == "tool"
     assert web_search["example"] == {"type": "otari_web_search"}
@@ -59,6 +59,11 @@ def test_lists_both_gateway_tools_with_schemas_and_examples(tmp_path: Path) -> N
     assert web_search["input_schema"]["required"] == ["query"]
     assert "query" in web_search["input_schema"]["properties"]
     assert tools["otari_code_execution"]["input_schema"]["required"] == ["code"]
+    web_fetch = tools["otari_web_fetch"]
+    assert web_fetch["available"] is True
+    assert web_fetch["accepted_types"] == ["otari_web_fetch"]
+    assert web_fetch["example"] == {"type": "otari_web_fetch"}
+    assert web_fetch["input_schema"]["required"] == ["url"]
 
 
 def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
@@ -68,6 +73,7 @@ def test_unconfigured_tools_are_listed_as_unavailable(tmp_path: Path) -> None:
         tools = _tools(client)
 
     assert tools["otari_web_search"]["available"] is False
+    assert tools["otari_web_fetch"]["available"] is True
     assert tools["otari_code_execution"]["available"] is False
 
 

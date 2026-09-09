@@ -4728,7 +4728,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -4860,7 +4860,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -4986,7 +4986,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -5106,7 +5106,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -6596,7 +6596,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -6745,7 +6745,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -6923,7 +6923,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -7075,7 +7075,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically.",
                   "disabled": true,
                   "key": "tool",
                   "value": ""
@@ -8255,7 +8255,7 @@
         {
           "name": "Get Workspace Web Search Config",
           "request": {
-            "description": "Read a workspace's web-search configuration.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the row describes the workspace's\nposture rather than one member's allowance. A workspace with no row answers\nwith the unconfigured shape (``configured: false``), which is the\ndeployment's own behavior described in the same shape rather than a 404.",
+            "description": "Read a workspace's web-access configuration.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the row describes the workspace's\nposture rather than one member's allowance. A workspace with no row answers\nwith the unconfigured shape (``configured: false``), which is the\ndeployment's own behavior described in the same shape rather than a 404.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8292,7 +8292,7 @@
               },
               "raw": "{\n  \"enabled\": false\n}"
             },
-            "description": "Set a workspace's web-search configuration, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. The configuration can only narrow what the deployment permits: turning\nweb search off for the workspace, lowering the result ceiling, and adding to\nthe domains a search may not reach. It never turns on a backend the\ndeployment has not configured, and it carries no credential.",
+            "description": "Set a workspace's web-access configuration, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. The configuration can only narrow what the deployment permits: turning\nweb access off for the workspace, lowering the Search result ceiling, and\nconstraining domains for Search and Fetch. It never turns on a backend the\ndeployment has not configured, and it carries no credential.",
             "header": [
               {
                 "key": "Content-Type",

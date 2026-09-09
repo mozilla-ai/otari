@@ -113,6 +113,8 @@ async def _execute_function_calls(
             continue
         try:
             text = await pool.call_tool(item.name, args)
+        except MaxToolIterationsExceeded:
+            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             logger.warning("MCP tool %s execution failed: %s", item.name, exc)
             text = f"[tool error] {exc}"
@@ -286,6 +288,8 @@ async def _execute_stream_owned(
             continue
         try:
             text = await pool.call_tool(spec["name"], args)
+        except MaxToolIterationsExceeded:
+            raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
             logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
             text = f"[tool error] {exc}"

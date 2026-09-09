@@ -713,7 +713,7 @@ describe("ToolsGuardrailsPage by caller role", () => {
     // The two workspace cards, in the state a harness with no selected
     // workspace lands in; their real forms are covered by their own suites.
     expect(
-      await screen.findByText(/Per-workspace web search is set on a workspace/),
+      await screen.findByText(/Per-workspace web access is set on a workspace/),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/Per-workspace code execution is set on a workspace/),
@@ -783,7 +783,7 @@ describe("ToolsGuardrailsPage by caller role", () => {
       screen.getByRole("heading", { name: "Search tools" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/Per-workspace web search is set on a workspace/),
+      screen.getByText(/Per-workspace web access is set on a workspace/),
     ).toBeInTheDocument()
   })
 })

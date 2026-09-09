@@ -151,8 +151,8 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     # no row means *unnarrowed*, so either default would surprise somebody.
     enabled: bool = Field(
         description=(
-            "False refuses web search for this workspace, both the otari_web_search tool "
-            "and the search endpoint. The fields below narrow the tool only."
+            "False refuses web access for this workspace through otari_web_search, "
+            "otari_web_fetch, and POST /api/v1/search."
         )
     )
     max_results: int | None = Field(
@@ -160,25 +160,32 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
         gt=0,
         le=_MAX_RESULTS,
         description=(
-            f"Ceiling on results one search returns; only ever lowers the effective limit, so at most {_MAX_RESULTS}"
+            "Search only: ceiling on results one search returns; only ever lowers "
+            f"the effective limit, so at most {_MAX_RESULTS}"
         ),
     )
     purpose_hint: str | None = Field(
         default=None,
         max_length=2048,
-        description="Hint used when a request declares otari_web_search without one of its own",
+        description="Search only: hint used when a request declares otari_web_search without one of its own",
     )
     allowed_domains: list[str] | None = Field(
         default=None,
-        description="Results are kept only from these domains; intersected with any list the request sends",
+        description=(
+            "Filters Search results and constrains initial and redirected Fetch destinations; "
+            "intersected with any list the request sends"
+        ),
     )
     blocked_domains: list[str] | None = Field(
         default=None,
-        description="Results from these domains are dropped; added to any list the request sends",
+        description=(
+            "Filters Search results and blocks initial and redirected Fetch destinations; "
+            "added to any list the request sends"
+        ),
     )
     provider_options: dict[str, Any] | None = Field(
         default=None,
-        description="Provider-specific knobs forwarded to the search backend; a request's own keys win",
+        description="Search only: provider-specific knobs forwarded to the backend; request keys win",
     )
 
     @field_validator("allowed_domains", "blocked_domains")
