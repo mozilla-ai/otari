@@ -38,11 +38,10 @@ import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
  * API key scoped to the selected workspace, shows the two calls that use it, and
  * watches the workspace's traffic until one lands.
  *
- * **Offered on both Overviews, not only the operator's.** Who may be offered it
- * is the server's answer (`experience_eligible`, which ends in
- * `has_workspace_management_access`), so the caller doing a deployment's first
- * request is whoever manages the workspace, and on a multi-tenant deployment
- * that is a tenant rather than the person who operates it.
+ * **Offered on either Overview.** Who may be offered it is the server's answer
+ * (`experience_eligible`, which ends in `has_workspace_management_access`), so
+ * it goes to whoever manages the workspace: on a multi-tenant deployment a
+ * tenant, and not the person who operates the deployment.
  *
  * **Deliberately a panel and not a modal.** The platform's equivalent
  * (`otari-ai` `frontend/src/features/onboarding`) is a blocking sheet over the
@@ -63,8 +62,8 @@ export function SetupGuideCard({
    * Whether a request from this caller could succeed, which is the page's
    * answer to give rather than this card's to fetch. Each Overview reads it off
    * what it may see: the operator's from `/v1/providers`, which refuses a
-   * tenant, and the organization's from the model catalog, which is scoped to
-   * that caller's own providers.
+   * tenant, and the organization's from the model catalog, which lists the
+   * selectors that caller may name.
    *
    * Not a query of its own in here, and that is load-bearing: a page that
    * decides whether to render at all from the *fetching* state of the same

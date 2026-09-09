@@ -1122,20 +1122,24 @@ describe("the setup guide on either Overview", () => {
   })
 
   it("shows nothing to a caller the server reports ineligible", async () => {
-    mockScopedApi({
+    const requested = mockScopedApi({
       context: TWO_WORKSPACES,
       activation: workspaceActivation({ experience_eligible: false }),
     })
     renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
 
-    await screen.findByText(
-      "At-a-glance spend, traffic, and recent activity in your organization.",
-    )
+    // Anchored on the answer this test varies. Without it the negative passes on
+    // its first tick, before the activation read has been made at all, and would
+    // read the same for an eligible caller.
     await waitFor(() => {
-      expect(
-        screen.queryByRole("heading", { name: "Send your first request" }),
-      ).not.toBeInTheDocument()
+      expect(requested.some((url) => url.includes("/activation"))).toBe(true)
     })
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
   })
 
   it("holds back, without asking, while the caller can route nowhere", async () => {
@@ -1145,12 +1149,13 @@ describe("the setup guide on either Overview", () => {
     const requested = mockScopedApi({ context: TWO_WORKSPACES, models: [] })
     renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
 
-    await screen.findByText(
-      "At-a-glance spend, traffic, and recent activity in your organization.",
-    )
+    // Settled, not merely issued: the Refresh control is disabled while any of
+    // this page's queries is in flight, the catalog included, so an enabled one
+    // is the empty answer having landed rather than being on its way.
     await waitFor(() => {
-      expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
     })
+    expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
     expect(
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()

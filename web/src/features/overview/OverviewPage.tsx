@@ -324,11 +324,12 @@ export function OverviewIndex() {
 function OrganizationOverview() {
   const { scope, today, period, previous, recent } = useUsageOverview()
   // What this caller could route a request to, which is the setup guide's gate
-  // here. `/v1/providers` is the operator page's answer to the same question and
-  // refuses this caller; the catalog is deliberately not operator-gated and the
-  // server already narrows it to the organization's own providers, so an empty
-  // one is an honest "nothing to send a request to yet". Not asked on paint
-  // until a workspace is selected, since the guide is about one.
+  // here: `/v1/providers`, the operator page's answer to the same question,
+  // refuses this caller. The catalog is not operator-gated and is filtered to
+  // the selectors this caller may name, the deployment's configured instances
+  // plus their organization's own keys, so an empty one means there is nothing
+  // to send a request to yet. Not asked until a workspace is selected, since the
+  // guide is about one.
   const models = useModels(scope !== undefined)
 
   // Recent activity is excluded for the operator page's reason: it renders its
@@ -343,9 +344,10 @@ function OrganizationOverview() {
     void period.refetch()
     void previous.refetch()
     void recent.refetch()
-    // Included so a caller who has just been given a provider key can bring the
-    // guide out with the button already in front of them.
-    void models.refetch()
+    // So a caller who has just been given a provider key can bring the guide out
+    // with the button already in front of them. Guarded because `refetch` runs a
+    // disabled query, which would ask for a catalog with no workspace to use it.
+    if (scope !== undefined) void models.refetch()
   }
   const isRefreshing =
     today.isFetching ||
@@ -368,11 +370,8 @@ function OrganizationOverview() {
         }
       />
 
-      {/* The tenant's first request is the one this deployment is waiting on, so
-          the guide belongs here and not only on the operator page. It decides
-          for itself whether to render; nothing above gates on the catalog
-          query's fetching state, which is what keeps the card's own observer of
-          it from looping (see `SetupGuideCard`). */}
+      {/* Offered to whoever manages the workspace, which on a multi-tenant
+          deployment is this caller. It decides for itself whether to render. */}
       <SetupGuideCard canServeRequests={(models.data?.data.length ?? 0) > 0} />
 
       <ErrorBanner error={loadError} />
