@@ -248,6 +248,11 @@ const defaultHold = () =>
  * design puts "Create workspace" at the foot of that menu), and two forms over
  * one endpoint drift: one of them grows the description field, or the ownership
  * note, and the other does not.
+ *
+ * Fields only: the caller frames it. A band is not portable between the two
+ * callers, because `.otari-bleed` escapes to `100cqw`, which is `<main>`, and
+ * the switcher's modal is portalled out of it: the band came out a viewport
+ * wide there and the dialog clipped it away to an empty modal.
  */
 export function CreateWorkspaceForm({
   onClose,
@@ -328,10 +333,7 @@ export function CreateWorkspaceForm({
   // fails after the workspace already exists.
   const bannerError = createDefault.error ?? (nameRefusal ? null : create.error)
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
-    >
+    <div className="flex flex-col gap-4">
       <h2 className="text-title">Create workspace</h2>
       {/* A refusal about the name is carried by the name, not by a block above
           the form that resizes whatever frames it. What is left here is what
@@ -472,7 +474,7 @@ export function CreateWorkspaceForm({
           Cancel
         </Button>
       </div>
-    </Section>
+    </div>
   )
 }
 
@@ -824,7 +826,9 @@ export function WorkspacesPage() {
       )}
 
       {creating ? (
-        <CreateWorkspaceForm onClose={() => setCreating(false)} />
+        <Section className="border-y border-border py-5">
+          <CreateWorkspaceForm onClose={() => setCreating(false)} />
+        </Section>
       ) : null}
 
       {/* Keyed on the workspace so switching which one is edited remounts the

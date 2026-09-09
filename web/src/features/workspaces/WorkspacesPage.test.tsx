@@ -158,6 +158,23 @@ describe("WorkspacesPage", () => {
     })
   })
 
+  // The form itself carries no band, so that the scope switcher can put it in a
+  // modal (otari-ai#2107). The band belongs to this page, and it is pinned here
+  // because losing it is invisible in jsdom: the fields render either way.
+  it("frames the create form as a band of the page", async () => {
+    mockApi({})
+    const user = userEvent.setup()
+    const { container } = renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+
+    const band = container.querySelector("section.otari-bleed.border-y")
+    expect(band).not.toBeNull()
+    expect(band).toContainElement(screen.getByLabelText("Name"))
+  })
+
   it("puts a refused create on the name that caused it, not in a banner", async () => {
     // A banner above the form resizes whatever frames it, and every way this
     // endpoint refuses is about the name: taken, empty, too long.

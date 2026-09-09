@@ -374,7 +374,11 @@ export function WorkspaceSwitcher({
             size="md"
             className="sm:w-[28rem]"
           >
-            <Modal.Dialog aria-label="Create workspace" className="p-0">
+            {/* The dialog's own padding, because the form inside it is
+                fields only: the page that also renders it supplies a band, and
+                a band cannot come in here (`.otari-bleed` measures `<main>`,
+                which a portalled modal is outside of). */}
+            <Modal.Dialog aria-label="Create workspace" className="p-5">
               <CreateWorkspaceForm
                 onClose={() => setCreating(false)}
                 // Creating from the scope switcher is a request to work in the

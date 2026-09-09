@@ -343,6 +343,22 @@ describe("the workspace half of the scope switcher", () => {
     ],
   }
 
+  // The form is shared with the Workspaces page, which frames it in a band.
+  // `.otari-bleed` sizes itself off `<main>`, and this modal is portalled out of
+  // `<main>`, so a band that travelled here measured a viewport wide and the
+  // dialog's `overflow-clip` cropped it to an empty modal (otari-ai#2107). jsdom
+  // computes no layout, so what is pinned is the class that causes it.
+  it("frames the create form without the page's bleeding band", async () => {
+    mockApi({ context: startedInAWorkspace })
+    const user = userEvent.setup()
+    await renderSwitcherOnAPage({})
+
+    const form = await fillCreateForm(user)
+
+    expect(form.querySelector(".otari-bleed")).toBeNull()
+    expect(within(form).getByLabelText(/^Name/)).toBeInTheDocument()
+  })
+
   it("enters the workspace it just created", async () => {
     mockApi({ context: startedInAWorkspace })
     const beat = pendingHold()
