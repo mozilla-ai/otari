@@ -64,6 +64,14 @@ async function renderLoaded() {
   await waitFor(() => expect(selectTrigger(STANCE)).toBeEnabled())
 }
 
+/** The one PUT body, once the write has gone out. */
+async function putBody(calls: { method: string; body: unknown }[]) {
+  await waitFor(() =>
+    expect(calls.some((call) => call.method === "PUT")).toBe(true),
+  )
+  return calls.filter((call) => call.method === "PUT").at(-1)?.body
+}
+
 describe("WorkspaceWebSearchCard", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -342,6 +350,94 @@ describe("WorkspaceWebSearchCard", () => {
     ).toBeInTheDocument()
     expect(screen.queryByLabelText("Max results")).toBeNull()
     expect(configRequests).toEqual([])
+  })
+
+  it("does not let a second row's save revert the first", async () => {
+    // Autosave is what opens this: every control has its own save state, so two
+    // rows can be in flight at once, and a PUT body built from the last value
+    // the *query* returned still holds the pre-first-write state.
+    const bodies: Record<string, unknown>[] = []
+    let releaseFirst: (() => void) | undefined
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (!url.includes("/web-search")) {
+        return Response.json(
+          organizationContext({
+            workspace_memberships: [
+              { workspace_id: ALPHA, name: "Alpha", role: "admin" },
+            ],
+          }),
+        )
+      }
+      if ((init?.method ?? "GET") !== "PUT") {
+        return Response.json(
+          workspaceWebSearchConfig({
+            workspace_id: ALPHA,
+            configured: true,
+            enabled: true,
+          }),
+        )
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      bodies.push(body)
+      if (bodies.length === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve
+        })
+      }
+      return Response.json(
+        workspaceWebSearchConfig({
+          workspace_id: ALPHA,
+          configured: true,
+          enabled: true,
+          ...body,
+        }),
+      )
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.type(screen.getByLabelText("Allowed domains"), "arxiv.org")
+    await user.tab()
+    await waitFor(() => expect(bodies).toHaveLength(1))
+
+    // The first write has not answered yet, so the query still holds the row
+    // without the allowed list on it.
+    await user.type(screen.getByLabelText("Blocked domains"), "evil.example")
+    await user.tab()
+    releaseFirst?.()
+
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toMatchObject({
+      allowed_domains: ["arxiv.org"],
+      blocked_domains: ["evil.example"],
+    })
+  })
+
+  it("sends only the writable half of the row", async () => {
+    // The stored shape also carries workspace_id, configured, the server's own
+    // web_search_configured and two timestamps. None of them belongs in a PUT.
+    const calls = mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.type(screen.getByLabelText("Max results"), "4")
+    await user.tab()
+
+    expect(Object.keys((await putBody(calls)) as object).sort()).toEqual([
+      "allowed_domains",
+      "blocked_domains",
+      "enabled",
+      "max_results",
+      "provider_options",
+      "purpose_hint",
+    ])
   })
 
   it("keeps its ceiling equal to the one the server enforces", () => {

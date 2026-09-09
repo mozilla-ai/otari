@@ -42,7 +42,9 @@ export function DisclosureRow({
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-emphasis">{label}</span>
-          {help ? <span className="text-xs text-subtle">{help}</span> : null}
+          {help ? (
+            <span className="text-caption text-subtle">{help}</span>
+          ) : null}
         </span>
         <span className="flex shrink-0 items-center gap-3">
           {trailing}

@@ -335,6 +335,64 @@ describe("ToolsGuardrailsPage", () => {
     expect(lastPatch(fetchMock)).toBeUndefined()
   })
 
+  it.each(["1e3", "0x10", "abc"])(
+    "refuses %s as a price rather than letting Number read it",
+    async (raw) => {
+      // The other numeric rows guard against this; the money row is the one
+      // that admits a decimal, so its guard is a different regex, not none.
+      const fetchMock = mockApi()
+      const user = userEvent.setup()
+      renderWithClient(<ToolsGuardrailsPage only="web_search" />)
+      const price = await screen.findByLabelText(
+        "Price per call for otari:web_search",
+      )
+
+      // The row is disabled until /v1/pricing answers, so a rate is never
+      // typed over one nobody can see.
+      await waitFor(() => expect(price).toBeEnabled())
+      await user.type(price, raw)
+      await user.tab()
+
+      expect(
+        await screen.findByText("An amount in dollars, such as 0.01."),
+      ).toBeInTheDocument()
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes("/v1/pricing"),
+        ) &&
+          fetchMock.mock.calls.some(
+            ([, init]) => (init?.method ?? "") === "POST",
+          ),
+      ).toBe(false)
+    },
+  )
+
+  it("rounds a price onto the wire rather than shipping float noise", async () => {
+    // The stored column is per million, so 0.07 * 1e6 is 70000.00000000001.
+    const fetchMock = mockApi()
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
+    const price = await screen.findByLabelText(
+      "Price per call for otari:web_search",
+    )
+
+    await waitFor(() => expect(price).toBeEnabled())
+    await user.type(price, "0.07")
+    await user.tab()
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url).includes("/v1/pricing") &&
+          (init?.method ?? "") === "POST",
+      )
+      expect(call).toBeDefined()
+      expect(JSON.parse(String(call?.[1]?.body)).input_price_per_million).toBe(
+        70000,
+      )
+    })
+  })
+
   it("tests a URL for reachability and announces the result", async () => {
     mockApi({ testBody: { ok: true, reason: "reachable (HTTP 200)" } })
     const user = userEvent.setup()

@@ -6,6 +6,7 @@ import {
   PolicyRow,
   parsePhrase,
 } from "@/features/tools/PolicyRow"
+import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
@@ -89,6 +90,28 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
   const setConfig = useSetWorkspaceWebSearchConfig()
   const clearConfig = useClearWorkspaceWebSearchConfig()
   const stanceSave = useAutosave()
+  // One writer for the group: a PUT replaces the whole row, so two rows saving
+  // at once would each carry the other's pre-save value.
+  const write = usePolicyWriter({
+    server: query.data,
+    resetKey: selected?.workspace_id ?? "",
+    toBody: (stored) => ({
+      enabled: stored.enabled,
+      max_results: stored.max_results,
+      purpose_hint: stored.purpose_hint,
+      allowed_domains: stored.allowed_domains,
+      blocked_domains: stored.blocked_domains,
+      // Not editable here: an opaque per-backend bag with no form that could
+      // validate it, preserved so a save from the dashboard never clears a
+      // value set over the API.
+      provider_options: stored.provider_options,
+    }),
+    put: (body: UpdateWorkspaceWebSearchConfigRequest) =>
+      setConfig.mutateAsync({
+        workspaceId: selected?.workspace_id as string,
+        body,
+      }),
+  })
 
   if (!selected) {
     return (
@@ -122,23 +145,10 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
   const unreadable = query.isLoading || query.isError || !config
   const narrowingDisabled = unreadable || stance === "default"
 
-  // A PUT replaces the row, so one field's save carries the rest of it, and
-  // `provider_options` with them: it is a per-backend bag with no form that
-  // could validate it, and omitting it would silently drop a value set over the
-  // API.
+  // `enabled` is the one field a patch always restates: the stance select is
+  // the only control that changes it, and every other row must not flip it.
   const commitField = (patch: Partial<UpdateWorkspaceWebSearchConfigRequest>) =>
-    setConfig.mutateAsync({
-      workspaceId: selected.workspace_id,
-      body: {
-        enabled: stance !== "blocked",
-        max_results: config?.max_results ?? null,
-        purpose_hint: config?.purpose_hint ?? null,
-        allowed_domains: config?.allowed_domains ?? null,
-        blocked_domains: config?.blocked_domains ?? null,
-        provider_options: config?.provider_options ?? null,
-        ...patch,
-      },
-    })
+    write({ enabled: stance !== "blocked", ...patch })
 
   const setStance = (next: Stance) =>
     void stanceSave.run(() =>

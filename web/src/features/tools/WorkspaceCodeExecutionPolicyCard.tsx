@@ -5,6 +5,7 @@ import {
   PolicyRow,
   parsePhrase,
 } from "@/features/tools/PolicyRow"
+import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceCodeExecutionPolicy,
@@ -74,6 +75,25 @@ export function WorkspaceCodeExecutionPolicyCard({
   const stanceSave = useAutosave()
   const imageSave = useAutosave()
   const toolsSave = useAutosave()
+  // One writer for the group: a PUT replaces the whole policy, so two rows
+  // saving at once would each carry the other's pre-save value.
+  const write = usePolicyWriter({
+    server: query.data,
+    resetKey: selected?.workspace_id ?? "",
+    toBody: (stored) => ({
+      enabled: stored.enabled,
+      default_purpose_hint: stored.default_purpose_hint,
+      max_iterations: stored.max_iterations,
+      exec_timeout_s: stored.exec_timeout_s,
+      image: stored.image,
+      tools: stored.tools,
+    }),
+    put: (body: UpdateWorkspaceCodeExecutionPolicyRequest) =>
+      setPolicy.mutateAsync({
+        workspaceId: selected?.workspace_id as string,
+        body,
+      }),
+  })
 
   if (!selected) {
     return (
@@ -131,22 +151,11 @@ export function WorkspaceCodeExecutionPolicyCard({
   const listedTools = [...availableTools, ...staleTools]
   const storedTools = policy?.tools
 
-  // A PUT replaces the policy, so one field's save carries the rest of it.
+  // `enabled` is the one field a patch always restates: the stance select is
+  // the only control that changes it, and every other row must not flip it.
   const commitField = (
     patch: Partial<UpdateWorkspaceCodeExecutionPolicyRequest>,
-  ) =>
-    setPolicy.mutateAsync({
-      workspaceId: selected.workspace_id,
-      body: {
-        enabled: stance !== "blocked",
-        default_purpose_hint: policy?.default_purpose_hint ?? null,
-        max_iterations: policy?.max_iterations ?? null,
-        exec_timeout_s: policy?.exec_timeout_s ?? null,
-        image: policy?.image ?? null,
-        tools: policy?.tools ?? null,
-        ...patch,
-      },
-    })
+  ) => write({ enabled: stance !== "blocked", ...patch })
 
   // An unset list ticks every box, because that is what it means: the workspace
   // gets whatever the backend serves. Unticking one is therefore a narrowing
@@ -264,7 +273,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         error={imageSave.error}
         note={
           withdrawnImage ? (
-            <p className="text-xs text-warning">
+            <p className="text-caption text-warning">
               This workspace is pinned to an image the operator no longer
               approves, so its requests are refused. Pick another, or ask an
               operator to restore it.
@@ -301,7 +310,7 @@ export function WorkspaceCodeExecutionPolicyCard({
               disabled={narrowingDisabled || imageSave.isSaving}
             />
           ) : (
-            <span className="text-xs text-subtle">
+            <span className="text-caption text-subtle">
               None approved, so this workspace runs whatever the sandbox runs
             </span>
           )
@@ -314,7 +323,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         error={toolsSave.error}
         note={
           staleTools.length > 0 ? (
-            <p className="text-xs text-warning">
+            <p className="text-caption text-warning">
               This workspace's policy names {staleTools.join(", ")}, which this
               deployment's sandbox no longer serves, so its requests are
               refused. Untick it and pick what should be allowed, or set the
@@ -344,7 +353,7 @@ export function WorkspaceCodeExecutionPolicyCard({
               ))}
             </fieldset>
           ) : (
-            <span className="text-xs text-subtle">
+            <span className="text-caption text-subtle">
               {availableTools.length === 1
                 ? `${availableTools[0]} only`
                 : "None served"}

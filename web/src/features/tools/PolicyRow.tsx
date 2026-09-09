@@ -45,6 +45,7 @@ export function PolicyRow<T>({
   const [synced, setSynced] = useState(committed)
   const save = useAutosave()
   const errorId = useId()
+  const controlId = useId()
 
   // Re-hydrated from the server's answer rather than from an effect: the row is
   // remounted by its key when the workspace changes, and a save is the only
@@ -60,11 +61,13 @@ export function PolicyRow<T>({
   return (
     <SettingRow
       label={label}
+      controlId={controlId}
       help={help}
       error={message}
       errorId={errorId}
       control={
         <input
+          id={controlId}
           type="text"
           inputMode={numeric ? "numeric" : undefined}
           aria-label={label}

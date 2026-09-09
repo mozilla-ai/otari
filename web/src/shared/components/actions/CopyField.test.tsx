@@ -36,32 +36,11 @@ describe("CopyField", () => {
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument()
   })
 
-  it("puts the copy control inside the field with no action beside it", () => {
-    // The arrangement is `inFieldCopy`'s to choose, not the action's: a value
-    // an operator copies and then acts on elsewhere wants the same field.
-    render(
-      <CopyField
-        inFieldCopy
-        label="tools[].type"
-        value='"type": "otari_web_search"'
-      />,
-    )
-
-    expect(screen.getByLabelText("tools[].type")).toHaveValue(
-      '"type": "otari_web_search"',
-    )
-    expect(
-      screen.getByRole("button", { name: "Copy tools[].type" }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull()
-  })
-
   it("moves the copy affordance into the field when given an action", () => {
     render(
       <CopyField
         label="TXT record for example.com"
         value="otari-verify=abc"
-        inFieldCopy
         action={<button type="button">Verify domain</button>}
       />,
     )
@@ -91,7 +70,6 @@ describe("CopyField", () => {
       <CopyField
         label="TXT record for example.com"
         value="otari-verify=abc"
-        inFieldCopy
         action={<button type="button">Verify domain</button>}
       />,
     )
@@ -129,7 +107,6 @@ describe("CopyField", () => {
       <CopyField
         label="TXT record for example.com"
         value="otari-verify=abc"
-        inFieldCopy
         action={<button type="button">Verify domain</button>}
       />,
     )
@@ -167,7 +144,6 @@ describe("CopyField", () => {
       <CopyField
         label="TXT record for example.com"
         value="otari-verify=abc"
-        inFieldCopy
         action={<button type="button">Verify domain</button>}
       />,
     )
@@ -210,7 +186,6 @@ describe("CopyField", () => {
         label="curl"
         value="one"
         multiline
-        inFieldCopy
         action={<button type="button">Verify domain</button>}
       />,
     )

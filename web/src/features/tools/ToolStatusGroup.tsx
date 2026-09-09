@@ -65,7 +65,7 @@ export function ToolStatusGroup({
         onToggle={() => setIsOpen((open) => !open)}
         trailing={
           <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
-            <Dot className={tool.available ? "bg-accent" : "bg-text-subtle"} />
+            <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
             {tool.available ? "Available" : "Unavailable · no backend"}
           </span>
         }

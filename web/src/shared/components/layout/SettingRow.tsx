@@ -17,6 +17,7 @@ export function SettingRow({
   configKey,
   help,
   control,
+  controlId,
   note,
   nested = false,
   error,
@@ -32,6 +33,13 @@ export function SettingRow({
   labelId?: string
   /** The config key this row writes, as a mono caption beside the label. */
   configKey?: string
+  /**
+   * The control's own `id`, which makes the label a real `<label for>`: on a
+   * page that is nothing but labelled rows, and on a phone where the label sits
+   * directly above its stacked field, the label is a target people press.
+   * `aria-labelledby` still decides the accessible name where both are set.
+   */
+  controlId?: string
   help?: ReactNode
   control: ReactNode
   /** An outcome the row reports back (a reachability result), under the help. */
@@ -55,9 +63,9 @@ export function SettingRow({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <span id={labelId} className="text-emphasis">
+          <label id={labelId} htmlFor={controlId} className="text-emphasis">
             {label}
-          </span>
+          </label>
           {configKey ? (
             <code
               id={labelId && `${labelId}-key`}
@@ -67,7 +75,7 @@ export function SettingRow({
             </code>
           ) : null}
         </div>
-        {help ? <p className="text-xs text-subtle">{help}</p> : null}
+        {help ? <p className="text-caption text-subtle">{help}</p> : null}
         {note}
         {error ? (
           <p id={errorId} className="text-caption text-danger">

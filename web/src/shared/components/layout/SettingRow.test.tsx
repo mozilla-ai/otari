@@ -21,6 +21,24 @@ describe("SettingRow", () => {
     ).toBeInTheDocument()
   })
 
+  it("makes the label a target that focuses the control", () => {
+    // The page is nothing but labelled rows, and on a phone the label sits
+    // directly above its stacked field, so it is a thing people press.
+    render(
+      <SettingRow
+        label="Backend URL"
+        controlId="backend-url"
+        control={<input id="backend-url" aria-label="Backend URL" />}
+      />,
+    )
+
+    expect(screen.getByText("Backend URL").tagName).toBe("LABEL")
+    expect(screen.getByText("Backend URL")).toHaveAttribute(
+      "for",
+      "backend-url",
+    )
+  })
+
   it("says nothing when a save works, so the help line never rewraps", () => {
     // A confirmation on every row of an autosaving page is a mark the reader
     // learns to ignore, and one in flow narrows the text column while it shows.

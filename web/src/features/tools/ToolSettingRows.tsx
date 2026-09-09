@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useEffect, useId, useState } from "react"
+import { useId, useState } from "react"
 
 import type { ToolSettingField } from "@/client"
 import { useTestService } from "@/shared/api/tools"
@@ -58,9 +58,14 @@ export interface FieldCopy {
 
 function useDraft(committed: string) {
   const [draft, setDraft] = useState(committed)
+  const [synced, setSynced] = useState(committed)
   // Re-hydrated from the server's answer, so a save or a clear lands in the
-  // field instead of leaving a stale draft over it.
-  useEffect(() => setDraft(committed), [committed])
+  // field instead of leaving a stale draft over it. In render rather than an
+  // effect, which is the idiom `PolicyRow` uses: one rule for the job.
+  if (committed !== synced) {
+    setSynced(committed)
+    setDraft(committed)
+  }
   return [draft, setDraft] as const
 }
 
@@ -92,6 +97,7 @@ function TextRow({
     <SettingRow
       label={copy.label}
       labelId={labelId}
+      controlId={settingInputId(field.key)}
       configKey={configKey}
       help={copy.help}
       note={note}
@@ -159,6 +165,7 @@ function NumberRow({
     <SettingRow
       label={copy.label}
       labelId={labelId}
+      controlId={settingInputId(field.key)}
       configKey={configKey}
       help={copy.help}
       error={message}
@@ -289,7 +296,7 @@ function UrlRow({
         <p
           role="status"
           aria-live="polite"
-          className={`text-xs ${test.data?.ok ? "text-success" : "text-danger"}`}
+          className={`text-caption ${test.data?.ok ? "text-success" : "text-danger"}`}
         >
           {settled &&
             (test.error ? errorMessage(test.error) : test.data?.reason)}
@@ -416,9 +423,15 @@ export function ToolPriceRow({
   const errorId = useId()
 
   const trimmed = draft.trim()
-  const parsed = Number(trimmed)
-  const valid = trimmed !== "" && Number.isFinite(parsed) && parsed >= 0
-  const message = loadError || save.error
+  // Digits with an optional decimal part, spelled out rather than left to
+  // `Number`, which reads "1e3" as 1000 and "0x10" as 16. The other numeric
+  // rows refuse those; this one is money, so it admits a decimal point.
+  const parsed = /^\d+(\.\d+)?$/.test(trimmed) ? Number(trimmed) : Number.NaN
+  const invalid =
+    trimmed !== "" && !(Number.isFinite(parsed) && parsed >= 0)
+      ? "An amount in dollars, such as 0.01."
+      : ""
+  const message = loadError || save.error || invalid
 
   return (
     <SettingRow
@@ -442,8 +455,18 @@ export function ToolPriceRow({
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={commitOnEnter}
             onBlur={() => {
-              if (!valid || trimmed === committed) return
-              void save.run(() => commit(parsed * PER_MILLION))
+              if (invalid || trimmed === committed) return
+              // Blank cannot be sent: `/v1/pricing` only writes a rate, so
+              // there is no way to make a priced tool unpriced again from
+              // here. Putting the stored value back says that without a
+              // message that would nag on every pass through the field.
+              if (trimmed === "") {
+                setDraft(committed)
+                return
+              }
+              // Rounded, because the wire value is per million: 0.07 * 1e6 is
+              // 70000.00000000001 in binary floating point.
+              void save.run(() => commit(Math.round(parsed * PER_MILLION)))
             }}
             className={`field-machine w-full text-right tabular-nums md:w-[7rem] ${INPUT_CLASS} ${
               message ? "border-danger" : ""

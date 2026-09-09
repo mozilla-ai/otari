@@ -17,7 +17,6 @@ import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { errorMessage } from "@/shared/components/feedback/errorMessage"
 import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { Dot } from "@/shared/components/indicators/Dot"
 import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
 import { DisclosureRow } from "@/shared/components/navigation/DisclosureRow"
 import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
@@ -34,7 +33,7 @@ import { useAutosave } from "@/shared/hooks/useAutosave"
 
 /** The lanes every line in the panel shares, so the columns read down. */
 const NAME_LANE = "w-full shrink-0 font-mono text-xs md:w-[7.5rem]"
-const PROVIDER_LANE = "w-full shrink-0 text-xs text-subtle md:w-[5.5rem]"
+const PROVIDER_LANE = "w-full shrink-0 text-caption text-subtle md:w-[5.5rem]"
 
 // The endpoint a tool with no api_base of its own will actually call, so a blank
 // box reads as "inherits X" rather than as "unconfigured".
@@ -118,7 +117,7 @@ function StoredToolLine({
           isDisabled={busy || !changed}
           onPress={commit}
         >
-          Save
+          {update.isPending ? "Saving…" : "Save"}
         </Button>
         <ConfirmButton
           confirmLabel="Remove permanently"
@@ -129,17 +128,17 @@ function StoredToolLine({
         </ConfirmButton>
       </div>
       {tool.decryptable ? null : (
-        <p className="text-xs text-warning">
+        <p className="text-caption text-warning">
           Key unreadable: check OTARI_SECRET_KEY
         </p>
       )}
       {tool.shadows_config ? (
-        <p className="text-xs text-warning">
+        <p className="text-caption text-warning">
           Overrides the config-file tool of this name
         </p>
       ) : null}
       {save.error ? (
-        <p role="alert" className="break-words text-xs text-danger">
+        <p role="alert" className="break-words text-caption text-danger">
           {save.error}
         </p>
       ) : null}
@@ -154,16 +153,15 @@ function ConfigToolLine({ tool }: { tool: ConfigSearchTool }) {
     <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:flex-wrap md:items-center">
       <code className={NAME_LANE}>{tool.name}</code>
       <span className={PROVIDER_LANE}>{tool.provider}</span>
-      <span className="min-w-0 flex-1 text-xs text-subtle">
+      <span className="min-w-0 flex-1 text-caption text-subtle">
         {tool.api_base ?? "no api_base declared"} · config file, editable where
         it is defined
       </span>
-      <span className="flex shrink-0 items-center gap-2.5 text-mono-overline text-subtle">
-        <Dot className="bg-text-subtle" />
+      <span className="shrink-0 text-mono-overline text-subtle">
         {tool.has_api_key ? "Key set" : "No key"}
       </span>
       {tool.shadowed ? (
-        <p className="text-xs text-warning">
+        <p className="text-caption text-warning">
           Overridden by the stored tool of this name
         </p>
       ) : null}
@@ -271,12 +269,12 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
           {create.isPending ? "Adding…" : "Add"}
         </Button>
       </div>
-      <p className="text-xs text-subtle">
+      <p className="text-caption text-subtle">
         Storing an API key needs{" "}
         <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
       </p>
       {error ? (
-        <p role="alert" className="break-words text-xs text-danger">
+        <p role="alert" className="break-words text-caption text-danger">
           {error}
         </p>
       ) : null}
@@ -301,6 +299,9 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
   const stored = tools.data?.stored ?? []
   const fromConfig = tools.data?.config ?? []
   const count = stored.length + fromConfig.length
+  // Nothing is known until the read answers, and "0 tools · refuses every
+  // request" is a claim, not a placeholder.
+  const answered = !tools.isLoading
 
   return (
     <SettingsGroup
@@ -312,15 +313,17 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
       <DisclosureRow
         label="Configure search tools"
         help={
-          count === 0
-            ? "None configured, so POST /v1/search refuses every request."
-            : "Callers name one in search_tool_name, or in the /v1/search/{tool} path."
+          !answered
+            ? "Reading the tools this deployment serves."
+            : count === 0
+              ? "None configured, so POST /v1/search refuses every request."
+              : "Callers name one in search_tool_name, or in the /v1/search/{tool} path."
         }
         isOpen={isOpen}
         onToggle={() => setIsOpen((open) => !open)}
         trailing={
           <span className="text-caption text-subtle tabular-nums">
-            {toolCount(count)}
+            {answered ? toolCount(count) : ""}
           </span>
         }
       >
