@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
@@ -88,6 +88,13 @@ class SetPricingRequest(BaseModel):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
+    unit: Literal["tokens", "requests", "images"] = Field(
+        default="tokens",
+        description=(
+            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
+            "moderation call (USD per million requests), 'images' for image generation."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
@@ -109,6 +116,10 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
+    unit: str = Field(description="What the rates are per: tokens, requests, or images.")
+    origin: str | None = Field(
+        description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+    )
     created_at: str
     updated_at: str
 
@@ -124,6 +135,8 @@ class PricingResponse(BaseModel):
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
             cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
+            unit=pricing.unit or "tokens",
+            origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
         )
@@ -409,6 +422,8 @@ async def set_pricing(
         pricing.cache_write_price_per_million = cache_write
         pricing.cache_write_1h_price_per_million = cache_write_1h
         pricing.pricing_tiers = pricing_tiers
+        pricing.unit = request.unit
+        pricing.origin = "api"
     else:
         pricing = ModelPricing(
             model_key=normalized_key,
@@ -419,6 +434,8 @@ async def set_pricing(
             cache_write_price_per_million=cache_write,
             cache_write_1h_price_per_million=cache_write_1h,
             pricing_tiers=pricing_tiers,
+            unit=request.unit,
+            origin="api",
         )
         db.add(pricing)
 

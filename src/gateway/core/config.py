@@ -7,7 +7,7 @@ import typing
 from collections.abc import Container
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import yaml
@@ -303,6 +303,13 @@ class PricingConfig(BaseModel):
     effective_at: datetime | None = Field(
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
+    )
+    unit: Literal["tokens", "requests", "images"] = Field(
+        default="tokens",
+        description=(
+            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
+            "moderation call (USD per million requests), 'images' for image generation."
+        ),
     )
 
     @model_validator(mode="after")

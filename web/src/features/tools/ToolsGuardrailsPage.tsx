@@ -434,6 +434,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                           // A tool call is one unit; there is no output side
                           // of it to price.
                           output_price_per_million: 0,
+                          unit: "requests",
                         })
                       }
                       // Also disabled when the load failed: an errored query

@@ -34,6 +34,7 @@ function pricingOverride(
     cache_write_price_per_million: null,
     cache_write_1h_price_per_million: null,
     pricing_tiers: [],
+    unit: "tokens",
     effective_from: "2026-08-01T00:00:00Z",
     effective_to: null,
     created_at: "2026-08-01T00:00:00Z",

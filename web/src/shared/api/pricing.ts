@@ -10,6 +10,7 @@ import type {
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  CATALOG,
   MODELS,
   ORGANIZATION_PRICING,
   PRICING,
@@ -56,6 +57,7 @@ export function useSetPricing() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
   })
 }
@@ -70,6 +72,7 @@ export function useDeletePricing() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
   })
 }
@@ -94,6 +97,7 @@ export function useConfirmPricingRefresh() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
       void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
     },
   })
@@ -148,6 +152,7 @@ function invalidateOrganizationPricing(
 ) {
   void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_PRICING] })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
 }
 
 export function useCreateOrganizationPricing() {

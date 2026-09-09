@@ -19,6 +19,20 @@ export function formatCost(value: number | null | undefined): string {
   }).format(value)
 }
 
+// A per-million rate, as opposed to a spend. `formatCost` rounds to cents above
+// a cent, which is right for a bill and wrong for a rate: $0.075 per million is
+// a real published rate and "$0.08" is a figure nobody set. Two decimals at
+// least so a whole-dollar rate still reads as money, four at most because no
+// published rate carries a fifth.
+export function formatRate(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(value)
+}
+
 // Compact token counts for context windows: 128000 -> "128K", 1000000 -> "1M".
 // Returns an em-dash placeholder when unknown so table cells stay aligned.
 export function formatContext(value: number | null | undefined): string {

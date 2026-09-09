@@ -300,6 +300,21 @@ def model_context_window(provider: str | None, model: str, as_of: datetime | Non
     return calc.model.context_window
 
 
+def default_pricing_reference(provider: str | None, model: str, as_of: datetime | None = None) -> str | None:
+    """Which genai-prices entry :func:`default_model_pricing` would price a model from.
+
+    ``provider_id:model_id`` in the dataset's own spelling, or ``None`` on a miss.
+    The resolution walks five fallbacks, so the entry that answers is often not
+    the one the selector named (a Bedrock id priced under ``anthropic``, a bare
+    name matched provider-agnostically); saying which one is what lets a reader
+    judge whether the default is the right rate rather than a plausible one.
+    """
+    calc = _resolve_genai_price(provider, model, normalize_effective_at(as_of))
+    if calc is None:
+        return None
+    return f"{calc.provider.id}:{calc.model.id}"
+
+
 def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> ModelPricing | None:
     """Resolve community-maintained default pricing for a model via genai-prices.
 
@@ -376,6 +391,7 @@ def _override_as_model_pricing(override: OrganizationModelPricing) -> ModelPrici
         cache_write_price_per_million=override.cache_write_price_per_million,
         cache_write_1h_price_per_million=override.cache_write_1h_price_per_million,
         pricing_tiers=override.pricing_tiers or [],
+        unit=override.unit or "tokens",
     )
 
 

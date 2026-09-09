@@ -20,7 +20,7 @@ import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { Dot } from "@/shared/components/indicators/Dot"
 import { Section } from "@/shared/components/layout/Section"
 import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { formatCost, formatDateTime } from "@/shared/helpers/format"
+import { formatDateTime, formatRate } from "@/shared/helpers/format"
 import {
   PricingOverrideDialog,
   type PricingOverrideDraft,
@@ -67,15 +67,14 @@ const STATUS_DOT: Record<ReturnType<typeof overrideStatus>, string> = {
 }
 
 function rate(value: number | null | undefined): string {
-  // `formatCost` is the page's one money formatter, shared with the catalog
-  // table above so the same quantity cannot render two ways on one page. The
-  // absent check stays in front of it rather than being folded into it: a blank
-  // optional rate means the tokens are priced as fresh input, and `formatCost`
-  // renders null as "$0.00", which would claim the organization negotiated a
-  // free cache read. The em dash is the glyph the catalog column already uses
-  // for the same "no rate stored" state.
+  // `formatRate`, the one formatter for a per-million rate, shared with the
+  // catalog table above so the same quantity cannot render two ways on one
+  // page. The absent check stays in front of it: a blank optional rate means
+  // the tokens are priced as fresh input, and rendering it as $0.00 would claim
+  // the organization negotiated a free cache read. The em dash is the glyph the
+  // catalog column already uses for the same "no rate stored" state.
   if (value === null || value === undefined) return "—"
-  return formatCost(value)
+  return formatRate(value)
 }
 
 function period(override: OrganizationPricingOverride): string {

@@ -1558,6 +1558,57 @@
     {
       "item": [
         {
+          "name": "List Catalog",
+          "request": {
+            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "catalog",
+                "models"
+              ],
+              "raw": "{{baseUrl}}/v1/catalog/models"
+            }
+          }
+        },
+        {
+          "name": "Get Catalog Model",
+          "request": {
+            "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "catalog",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/v1/catalog/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "catalog"
+    },
+    {
+      "item": [
+        {
           "name": "Chat Completions",
           "request": {
             "body": {

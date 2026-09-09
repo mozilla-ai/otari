@@ -13,6 +13,10 @@
  */
 
 export const MODELS = "models"
+// The same selectors as MODELS, folded by model and priced for the viewer. Its
+// own key so the two reads can be cached apart, and every pricing mutation
+// invalidates both: a rate change moves a row in each.
+export const CATALOG = "catalog"
 export const PRICING = "pricing"
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"

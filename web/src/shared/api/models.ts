@@ -1,16 +1,44 @@
 import { useQuery } from "@tanstack/react-query"
 import type {
+  CatalogModelDetail,
+  CatalogResponse,
   DiscoverableModelsResponse,
   ModelListResponse,
   ModelMetadataResponse,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
+  CATALOG,
   DISCOVERABLE,
   METADATA,
   MODELS,
   NO_RETRY,
 } from "@/shared/api/queryKeys"
+
+// The catalog folded by model, priced for the caller. Any session may read it,
+// like `/v1/models`; the detail is keyed under the list so a pricing write that
+// invalidates CATALOG takes every open detail with it.
+export function useCatalog() {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG],
+    queryFn: () => apiFetch<CatalogResponse>("/v1/catalog/models"),
+    staleTime: 60_000,
+  })
+}
+
+export function useCatalogModel(modelId: string | undefined) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, modelId],
+    queryFn: () =>
+      apiFetch<CatalogModelDetail>(
+        `/v1/catalog/models/${encodeURIComponent(modelId ?? "")}`,
+      ),
+    staleTime: 60_000,
+    enabled: modelId !== undefined,
+  })
+}
 
 // `enabled` is not the operator composition the reads below use: the catalog is
 // readable by any signed-in caller and is already narrowed server-side to what

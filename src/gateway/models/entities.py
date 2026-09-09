@@ -29,6 +29,14 @@ from gateway.models.money import UsdCost, UsdRate
 from gateway.models.secret_fields import redact_secret_like_values
 from gateway.models.tenancy import UtcDateTime
 
+# The vocabulary of ``ModelPricing.unit`` and ``OrganizationModelPricing.unit``.
+# Every per-unit reader (``services/pricing_service`` helpers, the catalog) keys
+# on these spellings, and the request schemas validate against them.
+PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
+
+# The vocabulary of ``origin`` on the same two tables.
+PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration")
+
 
 class Base(DeclarativeBase):
     """Base class for SQLAlchemy models.
@@ -630,6 +638,15 @@ class ModelPricing(Base):
     # Ordered threshold rules. Each rule applies its supplied rates to the
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # What ``input_price_per_million`` is a rate per: ``tokens`` for a model,
+    # ``requests`` for a gateway-run tool or a moderation call, ``images`` for
+    # image generation. The rate columns are shared by all three and a reader
+    # cannot tell which from the number, so the row says (``PRICING_UNITS``).
+    unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
+    # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
+    # ``api`` (``POST /v1/pricing``), or ``migration``. NULL on a row written
+    # before origins were recorded, which is a real answer and not a default.
+    origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -648,6 +665,8 @@ class ModelPricing(Base):
             "cache_write_price_per_million": self.cache_write_price_per_million,
             "cache_write_1h_price_per_million": self.cache_write_1h_price_per_million,
             "pricing_tiers": self.pricing_tiers,
+            "unit": self.unit,
+            "origin": self.origin,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -1477,6 +1496,10 @@ class OrganizationModelPricing(Base):
     # Same shape and same ``min_input_tokens`` key as ``ModelPricing``, so the
     # transient row an override resolves into needs no tier translation.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # The same two columns ``ModelPricing`` carries, for the same reasons: an
+    # override is read as a ``ModelPricing`` and has to say what it is per.
+    unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
+    origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # ``UtcDateTime``, not ``DateTime(timezone=True)``, and this is the one place
     # in this file where that distinction is load-bearing. The flag is a no-op on
     # SQLite, which is what ``core/config.py`` defaults ``database_url`` to, so a

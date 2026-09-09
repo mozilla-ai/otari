@@ -175,6 +175,29 @@ Policies appear as model names, but dynamic policies have no single price.
 Price their concrete candidates. Unlike aliases, policies do not hide candidate
 models from the catalog.
 
+## The catalog, grouped by model
+
+`GET /v1/catalog/models` reads the same merged catalog as `GET /v1/models` and
+folds it by model, so `nebius:zai-org/GLM-5.3` and
+`fireworks:accounts/fireworks/models/glm-5p3` are two offerings of one entry.
+`GET /v1/catalog/models/{id}` lists every offering of one model the caller may
+use, cheapest first, with each provider's context and output limits and the
+price the caller's organization would be charged, labeled by which price list
+it came from: the organization's own override, the deployment's stored rate, or
+the genai-prices default. Both routes accept the same credentials as
+`GET /v1/models`, and a model the caller may not use answers 404.
+
+Grouping keys on the models.dev display name where the dataset knows the
+model, and on the provider's id with its path prefixes, org segment and version
+pins removed where it does not. A dated build, a size or tier, and a mode a
+reseller exposes as its own id stay separate models. models.dev's description,
+capabilities and modalities are served to every catalog reader here, where
+`GET /v1/models/metadata` stays operator-only.
+
+The dashboard's Models page is this catalog: the list on the left, the selected
+model's offerings on the right. It is read-only; a deployment rate is set on
+Organization pricing, which the offering rows link to.
+
 ## Listing available models
 
 ```bash

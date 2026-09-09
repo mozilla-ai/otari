@@ -223,6 +223,8 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             cache_write_price_per_million=cache_write_price,
             cache_write_1h_price_per_million=cache_write_1h_price,
             pricing_tiers=pricing_tiers,
+            unit=pricing_config.unit,
+            origin="config",
         )
         db.add(new_pricing)
         logger.info("Added pricing for '%s': input=$%s/M, output=$%s/M", model_key, input_price, output_price)

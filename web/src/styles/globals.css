@@ -2414,6 +2414,7 @@ main {
    content on the same pixel, so the lane is given explicit room on its left
    rather than relying on the cell padding both sides already spend. */
 .otari-models-table .otari-table.table-root,
+.otari-offerings-table .otari-table.table-root,
 .otari-domains-table .otari-table.table-root,
 .otari-providers-table .otari-table.table-root,
 .otari-routing-table .otari-table.table-root {
@@ -2423,6 +2424,7 @@ main {
 }
 .otari-domains-table .otari-table .table__header,
 .otari-models-table .otari-table .table__header,
+.otari-offerings-table .otari-table .table__header,
 .otari-providers-table .otari-table .table__header,
 .otari-routing-table .otari-table .table__header {
   background-color: transparent;
@@ -2432,23 +2434,21 @@ main {
 .otari-domains-table .table__row .table__cell,
 .otari-models-table .otari-table .table__row,
 .otari-models-table .table__row .table__cell,
+.otari-offerings-table .otari-table .table__row,
+.otari-offerings-table .table__row .table__cell,
 .otari-providers-table .otari-table .table__row,
 .otari-providers-table .table__row .table__cell,
 .otari-routing-table .otari-table .table__row,
 .otari-routing-table .table__row .table__cell {
   border-color: var(--color-border-subtle);
 }
-.otari-models-table .table__column[data-key="policy"],
-.otari-models-table .table__cell[data-key="policy"] {
-  padding-left: 20px;
+.otari-models-table .table__column[data-key="name"] {
+  min-width: 200px;
 }
-.otari-models-table .table__column[data-key="provider"] {
-  width: 150px;
+.otari-offerings-table .table__column[data-key="provider"] {
+  min-width: 140px;
 }
-.otari-models-table .table__column[data-key="modalities"] {
-  width: 210px;
-}
-.otari-models-table .table__column[data-key="model"] {
+.otari-offerings-table .table__column[data-key="selector"] {
   min-width: 220px;
 }
 /* The identity lane holds while the rest scrolls, as everywhere else. */

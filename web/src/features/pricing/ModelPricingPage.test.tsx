@@ -46,6 +46,8 @@ function price(overrides: Partial<PricingResponse> = {}): PricingResponse {
     cache_write_price_per_million: null,
     cache_write_1h_price_per_million: null,
     pricing_tiers: [],
+    unit: "tokens",
+    origin: null,
     effective_at: "2026-01-01T00:00:00Z",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -100,13 +102,13 @@ function mockApi(
     })
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(ui: ReactElement, url = "/organization/pricing") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
-    { wrapper: withRouter({ url: "/organization/pricing" }) },
+    { wrapper: withRouter({ url }) },
   )
 }
 
@@ -144,9 +146,10 @@ describe("ModelPricingPage", () => {
   it("keeps a sub-cent rate legible instead of rounding it to nothing", async () => {
     // Two cents to the dollar is not enough precision for a per-million rate: at
     // two digits a cache-read price of 0.0025 renders as "$0.00", which is what
-    // this table's em dash means (no cache-read rate at all). `formatCost` is
-    // what Models formats the same stored numbers with, so the two pages cannot
-    // print different figures for one price.
+    // this table's em dash means (no cache-read rate at all), and 0.075 as
+    // "$0.08", a figure nobody set (otari#700). `formatRate` is what Models
+    // formats the same stored numbers with, so the two pages cannot print
+    // different figures for one price.
     mockApi({
       pricing: [
         price({
@@ -159,7 +162,7 @@ describe("ModelPricingPage", () => {
 
     const table = await screen.findByRole("grid", { name: "Model prices" })
     expect(within(table).getByText("$0.0025")).toBeInTheDocument()
-    expect(within(table).getByText("$0.08")).toBeInTheDocument()
+    expect(within(table).getByText("$0.075")).toBeInTheDocument()
     expect(within(table).queryByText("$0.00")).toBeNull()
   })
 
@@ -339,8 +342,47 @@ describe("ModelPricingPage", () => {
     expect(
       await screen.findByText("No model carries a stored price yet."),
     ).toBeInTheDocument()
-    expect(screen.queryByText(/Price one from the Models page/)).toBeNull()
-    expect(screen.queryByText(/A rate is edited beside the model/)).toBeNull()
+    expect(screen.queryByText(/price one by its selector/)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Price a model" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Edit" })).toBeNull()
+  })
+
+  it("opens the editor for the selector the catalog linked with", async () => {
+    // The Models detail links here with `?model=<selector>`; an operator lands
+    // on that model's stored rate with the editor open.
+    mockApi({ pricing: [price({ model_key: "openai:gpt-5" })] })
+    renderPage(<ModelPricingPage />, "/organization/pricing?model=openai:gpt-5")
+
+    expect(
+      await screen.findByRole("heading", { name: /Edit price for/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("openai:gpt-5", { selector: "code" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Edit price" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Reset price" }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers to set a price for a selector with no stored rate", async () => {
+    mockApi({ pricing: [] })
+    renderPage(
+      <ModelPricingPage />,
+      "/organization/pricing?model=home_lab:qwen3-32b",
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /Set price for/ }),
+    ).toBeInTheDocument()
+    // Straight into the fields: there is nothing stored to look at first.
+    expect(
+      screen.getByRole("spinbutton", {
+        name: "Input price for home_lab:qwen3-32b",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("keeps the catalog controls for a deployment operator", async () => {
