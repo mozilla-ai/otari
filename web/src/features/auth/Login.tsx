@@ -537,10 +537,18 @@ export function Login() {
       <AuthPageShell>
         <div className={CARD_FLAT}>
           <h1 className={HEADING}>Otari sign-in is unavailable</h1>
+          {/* Two causes, because reloading only answers one of them. An empty
+              `sign_in_methods` is what the gateway sends when it cannot reach
+              its database, and also what `normalizeBootstrap` fills in for a
+              gateway too old to publish the field at all (otari#806). Naming
+              only the first sends an operator to restart a database that was
+              never the problem. */}
           <p className="text-sm text-muted">
-            This gateway cannot start a session at the moment, which usually
-            means it cannot reach its database. It reports which credentials it
-            accepts once it recovers, so reload this page to try again.
+            This gateway published no sign-in method. That usually means it
+            cannot reach its database, and it says which credentials it accepts
+            once it recovers, so reloading is worth a try. It can also mean the
+            gateway is older than the dashboard it is serving, and reloading
+            will not settle that: the two have to be brought back into step.
           </p>
           <p className="text-sm text-muted">
             The management API is unaffected by this screen and still accepts

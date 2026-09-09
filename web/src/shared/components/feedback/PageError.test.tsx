@@ -17,8 +17,9 @@ describe("PageError", () => {
   })
 
   // The banner renders nothing for a falsy value, so every one of these would
-  // otherwise be a panel with an explanation and no error in it. `null` is the
-  // only one a nullish coalesce would have caught.
+  // otherwise be a panel with an explanation and no error in it. The list runs
+  // past `null` and `undefined` deliberately: a nullish coalesce covers those
+  // two, so a case picked from them passes whether or not the other four work.
   it.each([
     ["empty string", ""],
     ["zero", 0],

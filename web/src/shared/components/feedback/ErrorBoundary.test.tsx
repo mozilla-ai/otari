@@ -89,7 +89,9 @@ describe("ErrorBoundary", () => {
   // throw. A boundary keyed on the thrown value's own truthiness renders the
   // child again, and React answers the second throw by blanking the document; a
   // banner keyed on it renders nothing, leaving a panel with no error in it.
-  // `null` alone exercises neither, being the one case a nullish coalesce covers.
+  // Every case here exercises the first. Only the three below `undefined`
+  // exercise the second, since a nullish coalesce already stood in for the two
+  // above it, which is how that half stayed broken behind a passing test.
   it.each([
     ["null", null],
     ["undefined", undefined],
