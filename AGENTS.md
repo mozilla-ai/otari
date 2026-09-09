@@ -104,7 +104,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 ## Repository Conventions
 - Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).
 - Add a comment only where the logic is not obvious; keep docstrings concise and meaningful on public functions and classes. Do not restate the code, narrate the change, or record what the code used to do: the commit message is where that belongs. Leave the comments around a change shorter than you found them: prune narration, repeated rationale, and implementation history as you touch them.
-- A workaround for an any-llm gap is a legitimate change here. Keep it minimal and follow the convention in [CONTRIBUTING.md](CONTRIBUTING.md#when-the-fix-is-upstream-but-otari-cannot-wait) (`service_tier` in `api/routes/chat.py` is the worked example).
+- A workaround for an any-llm gap is a legitimate change here. Keep it minimal and follow the convention in [CONTRIBUTING.md](CONTRIBUTING.md#when-the-fix-is-upstream-but-otari-cannot-wait) (`service_tier` in `src/gateway/api/routes/chat.py` is the worked example).
 - Preserve security-relevant behavior: header parsing, auth checks, and the error-detail boundary. Do not leak internals in public error responses, and never log secrets, tokens, or raw API keys (the one-time bootstrap key print is the deliberate exception).
 - Keep test additions next to the behavior they cover: unit for pure logic, integration for route or database behavior.
 - CI runs Python 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
