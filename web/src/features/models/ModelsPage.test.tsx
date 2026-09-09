@@ -1061,39 +1061,6 @@ describe("ModelsPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("bulk-sets pricing on the selected models", async () => {
-    const fetchMock = mockApi()
-    const user = userEvent.setup()
-
-    renderWithClient(<ModelsPage />)
-    await screen.findByText("openai:gpt-4o")
-
-    const row = tableRow("openai:gpt-4o")
-    await user.click(within(row).getByRole("checkbox"))
-
-    const bar = (await screen.findByText("1 selected")).closest("div")!
-    await user.click(within(bar).getByRole("button", { name: "Set pricing" }))
-
-    const dialog = await screen.findByRole("alertdialog")
-    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "5")
-    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "12")
-    await user.click(within(dialog).getByRole("button", { name: "Set price" }))
-
-    await vi.waitFor(() => {
-      const call = fetchMock.mock.calls.find(
-        ([u, init]) =>
-          String(u).includes("/v1/pricing") &&
-          (init?.method ?? "").toUpperCase() === "POST",
-      )
-      expect(call).toBeTruthy()
-      expect(JSON.parse(String(call![1]!.body))).toMatchObject({
-        model_key: "openai:gpt-4o",
-        input_price_per_million: 5,
-        output_price_per_million: 12,
-      })
-    })
-  })
-
   // -- pricing a model the catalog does not list --------------------------
 
   it("prices the searched selector when nothing matches, seeded from the search box", async () => {
@@ -1404,21 +1371,18 @@ describe("ModelsPage", () => {
     expect(urls.some((url) => url.includes("/v1/models/metadata"))).toBe(false)
   })
 
-  // Selection is the route into bulk pricing, so it is an operator control.
-  // Left ungated, a member could select rows, press "Set pricing" and fire the
-  // bulk write: the price-write class of defect, reached by another door.
-  it("offers a non-operator no row selection, and so no bulk pricing", async () => {
-    mockApi({
-      context: organizationContext({
-        deployment_operator: false,
-        role: "member",
-      }),
-    })
+  // Bulk price editing was removed (otari-ai#2096): mass-editing prices was
+  // never a capability the models page should have offered. Selection existed
+  // only to feed it, so the checkbox column goes with it. Asserted against an
+  // operator, the role that used to have both. The checkbox assertions are the
+  // real check (they fail if selection comes back); the last two are weaker
+  // guards that would only bite on a bulk bar reintroduced without selection,
+  // since with no checkbox there is no way to make a selection here.
+  it("offers no row selection and no bulk pricing, even to an operator", async () => {
+    mockApi()
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    // No checkbox on the row and none in the header, so there is nothing to
-    // select and the bulk bar has no way to appear.
     const row = tableRow("openai:gpt-4o")
     expect(within(row).queryByRole("checkbox")).toBeNull()
     expect(screen.queryByRole("checkbox")).toBeNull()
@@ -1426,17 +1390,5 @@ describe("ModelsPage", () => {
     expect(
       screen.queryByRole("button", { name: "Set pricing" }),
     ).not.toBeInTheDocument()
-  })
-
-  it("still offers an operator the selection that feeds it", async () => {
-    // The other half, so the gate above cannot be satisfied by removing
-    // selection for everyone.
-    mockApi()
-    renderWithClient(<ModelsPage />)
-    await screen.findByText("openai:gpt-4o")
-
-    expect(
-      within(tableRow("openai:gpt-4o")).getByRole("checkbox"),
-    ).toBeInTheDocument()
   })
 })
