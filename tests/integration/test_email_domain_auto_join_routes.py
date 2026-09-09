@@ -205,7 +205,9 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
 
-    async def _exchange(_config: GatewayConfig, provider: str, *, code: str) -> OAuthIdentity:
+    async def _exchange(
+        _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
+    ) -> OAuthIdentity:
         return OAuthIdentity(provider=provider, email=ADDRESS, full_name="Ada", email_verified=True)
 
     monkeypatch.setattr("gateway.api.routes.auth_oauth.exchange_code", _exchange)
@@ -213,7 +215,7 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     _rostered_identity(client, master_key_header, not_in=claiming_organization)
     client.cookies.clear()
 
-    signed_in = client.post("/v1/auth/oauth/google/callback", json={"code": "the-code"})
+    signed_in = client.post("/v1/auth/oauth/google/callback", json={"code": "the-code", "state": "s"})
 
     _assert_joined(client, signed_in, beta=claiming_organization, home=home)
 
@@ -290,12 +292,16 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
 
     # Read on a connection of its own, so what is asserted is what committed
     # rather than anything the request's own session still held.
-    stranded = test_db.execute(
-        select(OrganizationMember).where(
-            col(OrganizationMember.user_id) == uuid.UUID(user_id),
-            col(OrganizationMember.organization_id) == uuid.UUID(claiming_organization),
+    stranded = (
+        test_db.execute(
+            select(OrganizationMember).where(
+                col(OrganizationMember.user_id) == uuid.UUID(user_id),
+                col(OrganizationMember.organization_id) == uuid.UUID(claiming_organization),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert list(stranded) == [], "the failed sign-in left a membership behind"
 
     # And the same sign-in, once it can complete, does create it: the assertion
