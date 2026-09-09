@@ -228,3 +228,155 @@ async def test_disabled_is_noop() -> None:
     )
     assert out == _image_msg()
     assert not stats.touched
+
+
+def _stored(file_id: str = "file-csv", filename: str = "data.csv", mime: str = "text/csv") -> FileObject:
+    return FileObject(
+        id=file_id,
+        user_id="u",
+        filename=filename,
+        mime_type=mime,
+        bytes=9,
+        purpose="user_data",
+        storage_ref=f"x/{file_id}",
+    )
+
+
+def _patch_store(monkeypatch: pytest.MonkeyPatch, record: FileObject, data: bytes, reads: list[str]) -> None:
+    async def fake_fetch(db, file_id, user_id, *, workspace_id=None):  # type: ignore[no-untyped-def]
+        return record if file_id == record.id else None
+
+    async def fake_read(file_store, rec):  # type: ignore[no-untyped-def]
+        reads.append(rec.id)
+        return data
+
+    monkeypatch.setattr(cn, "fetch_file", fake_fetch)
+    monkeypatch.setattr(cn, "read_file_bytes", fake_read)
+
+
+@pytest.mark.asyncio
+async def test_container_upload_staged_for_sandbox_without_reading_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[str] = []
+    _patch_store(monkeypatch, _stored(), b"a,b\n1,2\n", reads)
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Plot this."},
+                {"type": "container_upload", "file_id": "file-csv"},
+            ],
+        }
+    ]
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="anthropic",
+        db=cast(Any, object()),
+        file_store=cast(Any, object()),
+        user_id="u",
+        sandbox_requested=True,
+    )
+    # Staged for the sandbox, named for the model, and the blob never loaded here.
+    assert [s.file_id for s in stats.sandbox_inputs] == ["file-csv"]
+    assert stats.sandbox_inputs[0].filename == "data.csv"
+    marker = out[0]["content"][1]
+    assert marker["type"] == "text"
+    assert "data.csv" in marker["text"]
+    assert reads == []
+
+
+@pytest.mark.asyncio
+async def test_container_upload_without_sandbox_is_read_as_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[str] = []
+    _patch_store(monkeypatch, _stored(), b"a,b\n1,2\n", reads)
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult("| a | b |", True, "ok")
+
+    monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
+    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file-csv"}]}]
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="anthropic",
+        db=cast(Any, object()),
+        file_store=cast(Any, object()),
+        user_id="u",
+    )
+    assert stats.sandbox_inputs == []
+    assert stats.files_extracted == 1
+    assert "| a | b |" in out[0]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_document_file_id_is_also_staged_when_sandbox_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[str] = []
+    _patch_store(monkeypatch, _stored("file-pdf", "report.pdf", "application/pdf"), b"%PDF", reads)
+    msgs = [
+        {"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-pdf"}}]},
+        {"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-pdf"}}]},
+    ]
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="anthropic",
+        db=cast(Any, object()),
+        file_store=cast(Any, object()),
+        user_id="u",
+        sandbox_requested=True,
+    )
+    # The model still gets the document (inlined for a native model), and the
+    # sandbox gets it once even though it was referenced twice.
+    assert out[0]["content"][0]["source"]["type"] == "base64"
+    assert [s.file_id for s in stats.sandbox_inputs] == ["file-pdf"]
+
+
+@pytest.mark.asyncio
+async def test_bare_responses_input_file_item_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[str] = []
+    _patch_store(monkeypatch, _stored("file-txt", "notes.txt", "text/plain"), b"hello", reads)
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(data.decode(), True, "ok")
+
+    monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
+    items = [
+        {"role": "user", "content": "Summarize."},
+        {"type": "input_file", "file_id": "file-txt"},
+    ]
+    out, stats = await normalize_messages(
+        items,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="responses",
+        db=cast(Any, object()),
+        file_store=cast(Any, object()),
+        user_id="u",
+    )
+    assert stats.files_extracted == 1
+    # Extracted text cannot sit bare in ``input``; it is wrapped in a user message.
+    assert out[1]["role"] == "user"
+    assert out[1]["content"][0]["type"] == "input_text"
+    assert "hello" in out[1]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_bare_responses_input_file_item_inlined_for_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[str] = []
+    _patch_store(monkeypatch, _stored("file-pdf", "r.pdf", "application/pdf"), b"%PDF", reads)
+    items = [{"type": "input_file", "file_id": "file-pdf"}]
+    out, _ = await normalize_messages(
+        items,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="responses",
+        db=cast(Any, object()),
+        file_store=cast(Any, object()),
+        user_id="u",
+    )
+    # Stays a bare item, now carrying inline data the provider can read.
+    assert out[0]["type"] == "input_file"
+    assert out[0]["file_data"].startswith("data:application/pdf;base64,")

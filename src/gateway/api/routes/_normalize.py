@@ -19,10 +19,40 @@ from any_llm import LLMProvider
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.routes._tools import _extract_code_execution_tool
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
+from gateway.services.file_service import SandboxFileBridge, StagedFile
 from gateway.services.model_capabilities import resolve_capabilities
+
+
+def sandbox_requested(tools: list[dict[str, Any]] | None) -> bool:
+    """Whether the request declared the gateway's own code-execution tool."""
+    entry, _remaining = _extract_code_execution_tool(tools)
+    return entry is not None
+
+
+def build_sandbox_file_bridge(
+    *,
+    config: GatewayConfig,
+    raw_request: Request,
+    hybrid_mode: bool,
+    user_id: str | None,
+    workspace_id: uuid.UUID | None,
+    inputs: list[StagedFile],
+) -> SandboxFileBridge | None:
+    """The file bridge a sandbox session gets, or ``None`` where files are unavailable.
+
+    Hybrid mode has no local file store or database to hold what a run produces,
+    so its sandbox runs without one, exactly as before.
+    """
+    file_store = getattr(raw_request.app.state, "file_store", None)
+    if hybrid_mode or not config.files_enabled or file_store is None or user_id is None or workspace_id is None:
+        return None
+    return SandboxFileBridge(
+        file_store=file_store, config=config, user_id=user_id, workspace_id=workspace_id, inputs=inputs
+    )
 
 
 async def normalize_request_messages(
@@ -37,8 +67,13 @@ async def normalize_request_messages(
     user_id: str | None,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    sandbox_requested: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
+
+    ``sandbox_requested`` is whether the request declared the gateway's
+    code-execution tool; the normalizer then records referenced uploads on the
+    stats for the sandbox backend to seed (see ``NormalizationStats.sandbox_inputs``).
 
     No-ops (returns the input untouched) when file understanding is disabled or
     the provider couldn't be parsed — the downstream provider call surfaces an
@@ -63,6 +98,7 @@ async def normalize_request_messages(
             file_store=file_store,
             user_id=user_id,
             workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request / leak the reservation
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)

@@ -54,6 +54,7 @@ _SETTING_NAMES = frozenset(
         "files_s3_bucket",
         "files_s3_endpoint_url",
         "files_s3_region",
+        "files_sweep_interval_sec",
         "guardrails_url",
         "host",
         "invitation_expiry_hours",
