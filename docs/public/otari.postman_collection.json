@@ -1635,7 +1635,7 @@
         {
           "name": "List Files",
           "request": {
-            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
+            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nPages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names\nthe last file of the previous page, and ``has_more`` says whether to ask\nagain. A cursor the caller cannot see (another user's file, a deleted one)\nis a 404, the same answer a direct read of it gets.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1664,16 +1664,40 @@
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "after",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "after_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "order",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/files?user=&purpose=&workspace_id="
+              "raw": "{{baseUrl}}/v1/files?user=&purpose=&workspace_id=&limit=&after=&after_id=&order="
             }
           }
         },
         {
           "name": "Create File",
           "request": {
-            "description": "OpenAI-compatible file upload endpoint.",
+            "description": "Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers.",
             "header": [],
             "method": "POST",
             "url": {

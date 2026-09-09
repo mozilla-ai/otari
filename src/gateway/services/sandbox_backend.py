@@ -20,6 +20,11 @@ three operations used here:
                                         timeout_seconds: int}``
                               → returns ``{result_block: {…}}``
 * ``DELETE /sessions/{id}``  → tears the session down
+* ``POST /sessions/{id}/files`` and ``GET /sessions/{id}/files?path=…``
+                              → seed the request's uploads into the workspace
+                              before the first call, and fetch what a run
+                              produced afterwards, when a
+                              :class:`SandboxFiles` bridge is attached
 
 Session lifecycle is per-request: enter creates a session, exit
 destroys it. State does not persist across separate chat-completion
@@ -38,7 +43,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 from opentelemetry import trace
@@ -49,6 +54,8 @@ from gateway.types.code_execution import ExecResponse, ResultBlock, SessionHandl
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+    from gateway.services.file_service import StagedFile
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -80,8 +87,36 @@ _EXEC_TIMEOUT_BUFFER_S = 10.0
 _DEFAULT_PURPOSE_HINT = (
     "Prefer `code_execution` for any computation, data analysis, date "
     "arithmetic, statistics, or anything that benefits from exact output. "
-    "Python with numpy/pandas/scipy/sympy/matplotlib pre-installed."
+    "Python with numpy/pandas/scipy/sympy/matplotlib pre-installed. Files the "
+    "user attached are in the working directory under their own names. A file "
+    "you write there comes back with a file_id; give the user that file_id so "
+    "they can download it."
 )
+
+
+class SandboxFiles(Protocol):
+    """What the backend needs to move files in and out of a session.
+
+    Implemented by :class:`gateway.services.file_service.SandboxFileBridge`;
+    a Protocol so the backend does not depend on the database-backed store and
+    a test can hand it a stub.
+    """
+
+    @property
+    def inputs(self) -> list[StagedFile]:
+        """The uploads to seed into the session, in message order."""
+        ...
+
+    @property
+    def max_output_bytes(self) -> int:
+        """Largest produced file worth fetching; a bigger one is named but not stored."""
+        ...
+
+    async def read_input(self, staged: StagedFile) -> bytes: ...
+
+    async def store_output(self, filename: str, data: bytes) -> str:
+        """Persist a produced file and return the ``file_id`` a caller downloads it by."""
+        ...
 
 
 def code_execution_tool_definition() -> dict[str, Any]:
@@ -161,8 +196,12 @@ class SandboxBackend:
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: ToolUsageTally | None = None,
+        files: SandboxFiles | None = None,
     ) -> None:
         self._sandbox_url = sandbox_url.rstrip("/")
+        # The request's file bridge, or None when it has no uploads to seed and
+        # nowhere to keep what a run produces (hybrid mode, tests, direct use).
+        self._files = files
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
@@ -208,7 +247,72 @@ class SandboxBackend:
         except (httpx.HTTPError, ValueError) as exc:
             await self._stack.aclose()
             raise SandboxNotReachableError(f"failed to create sandbox session at {self._sandbox_url}: {exc}") from exc
+        try:
+            await self._seed_inputs()
+        except BaseException:
+            # The session exists but the request cannot run as asked; release it
+            # rather than leaving it to the backend's idle reclaim.
+            await self.__aexit__(None, None, None)
+            raise
         return self
+
+    async def _seed_inputs(self) -> None:
+        """Write every staged upload into the session workspace before the model runs.
+
+        A refused seed is terminal for the request: the code the model writes
+        would look for a file that is not there, and a run over a silently
+        missing input is worse than no run.
+        """
+        if self._files is None or not self._files.inputs:
+            return
+        assert self._client is not None and self._session_id is not None
+        for staged in self._files.inputs:
+            try:
+                data = await self._files.read_input(staged)
+            except OSError as exc:
+                raise SandboxNotReachableError(f"could not read attachment {staged.file_id} for the sandbox") from exc
+            try:
+                response = await self._client.post(
+                    f"{self._sandbox_url}/sessions/{self._session_id}/files",
+                    files={"file": (staged.filename, data, staged.mime_type)},
+                    data={"path": staged.filename},
+                )
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise SandboxNotReachableError(f"sandbox refused attachment {staged.file_id}: {exc}") from exc
+            logger.info("sandbox session %s seeded with file %s", self._session_id, staged.file_id)
+
+    async def _collect_outputs(self, block: ResultBlock) -> dict[str, str]:
+        """Fetch the files a run produced and store each; returns filename to file_id.
+
+        Best-effort per file: one that cannot be fetched or stored is still named
+        in the rendered result, just without an id, and the run itself stands.
+        """
+        if self._files is None or not block.content.content:
+            return {}
+        assert self._client is not None and self._session_id is not None
+        ids: dict[str, str] = {}
+        for ref in block.content.content:
+            if not ref.filename:
+                continue
+            try:
+                response = await self._client.get(
+                    f"{self._sandbox_url}/sessions/{self._session_id}/files",
+                    params={"path": ref.filename},
+                )
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                logger.warning("sandbox output %r could not be fetched: %s", ref.filename, exc)
+                continue
+            data = response.content
+            if not data or len(data) > self._files.max_output_bytes:
+                logger.warning("sandbox output %r skipped: %d bytes", ref.filename, len(data))
+                continue
+            try:
+                ids[ref.filename] = await self._files.store_output(ref.filename, data)
+            except Exception as exc:  # noqa: BLE001 — a storage failure must not fail the run
+                logger.warning("sandbox output %r could not be stored: %s", ref.filename, exc)
+        return ids
 
     async def __aexit__(
         self,
@@ -309,13 +413,14 @@ class SandboxBackend:
                 span.set_status(trace.StatusCode.ERROR, str(exc))
                 raise SandboxNotReachableError(f"sandbox exec failed: {exc}") from exc
 
-            result = _flatten_result_block(exec_response.result_block)
+            file_ids = await self._collect_outputs(exec_response.result_block)
+            result = _flatten_result_block(exec_response.result_block, file_ids)
             if result.startswith("[tool error]"):
                 span.set_status(trace.StatusCode.ERROR, result)
             return result
 
 
-def _flatten_result_block(block: ResultBlock) -> str:
+def _flatten_result_block(block: ResultBlock, file_ids: dict[str, str] | None = None) -> str:
     """Render the structured result as a single string for the model.
 
     The tool loop hands the model one string per tool call, so the block's
@@ -323,11 +428,14 @@ def _flatten_result_block(block: ResultBlock) -> str:
     ``return_code`` or a non-empty ``stderr``; the contract has no top-level
     ``is_error`` flag.
 
-    Passing the full structured result through to the caller (file refs as
-    content blocks, per-step exit codes) is a future enhancement that lands
-    alongside the Anthropic-content-block lift.
+    ``file_ids`` maps a produced filename to the ``file_id`` it was stored
+    under, so the model can hand the user something downloadable. Passing the
+    full structured result through to the caller (file refs as content blocks,
+    per-step exit codes) is a future enhancement that lands alongside the
+    Anthropic-content-block lift.
     """
     content = block.content
+    file_ids = file_ids or {}
 
     parts: list[str] = []
     if content.stdout:
@@ -337,7 +445,11 @@ def _flatten_result_block(block: ResultBlock) -> str:
     if content.return_code not in (None, 0):
         parts.append(f"return_code: {content.return_code}")
     if content.content:
-        parts.append("files: " + ", ".join(ref.filename or "?" for ref in content.content))
+        names = []
+        for ref in content.content:
+            name = ref.filename or "?"
+            names.append(f"{name} (file_id: {file_ids[name]})" if name in file_ids else name)
+        parts.append("files: " + ", ".join(names))
 
     flattened = "\n".join(parts)
     if not flattened:

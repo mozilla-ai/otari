@@ -939,6 +939,28 @@ class FileObject(Base):
             "purpose": self.purpose,
         }
 
+    def to_anthropic_dict(self) -> dict[str, Any]:
+        """Convert to the Anthropic Files API ``FileMetadata`` shape.
+
+        Anthropic's SDK reads ``size_bytes`` and ``mime_type`` where OpenAI's
+        reads ``bytes`` and nothing, and takes ``created_at`` as an RFC 3339
+        string rather than an epoch. ``downloadable`` is always true here: the
+        gateway serves every stored file's bytes back, unlike Anthropic, which
+        withholds user uploads.
+        """
+        created_at = self.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        return {
+            "id": self.id,
+            "type": "file",
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "size_bytes": self.bytes,
+            "created_at": created_at.isoformat().replace("+00:00", "Z"),
+            "downloadable": True,
+        }
+
 
 class BatchRecord(Base):
     """Ownership and accounting record for an asynchronous batch job.

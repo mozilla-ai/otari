@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import ModelProviderPortDep, get_config, get_db_if_needed, get_log_writer
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages
+from gateway.api.routes._normalize import build_sandbox_file_bridge, normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
@@ -43,6 +43,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -359,6 +360,10 @@ async def chat_completions(
             detail="Invalid request: model is required",
         )
 
+    # Uploads the normalizer found for the code-execution sandbox, handed to the
+    # sandbox session once the billed user and workspace are resolved.
+    sandbox_inputs: list[StagedFile] = []
+
     async def _normalize(
         user_id: str,
         provider: LLMProvider | None,
@@ -381,7 +386,9 @@ async def chat_completions(
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested(request.tools),
         )
+        sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)), stats.vision_usage()
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
@@ -416,6 +423,14 @@ async def chat_completions(
         mcp_server_ids=request.mcp_server_ids,
         max_tool_iterations=request.max_tool_iterations,
         tools_header=request.tools_header,
+        sandbox_files=build_sandbox_file_bridge(
+            config=config,
+            raw_request=raw_request,
+            hybrid_mode=ctx.hybrid_mode,
+            user_id=ctx.user_id,
+            workspace_id=ctx.workspace_id,
+            inputs=sandbox_inputs,
+        ),
     )
 
     request_fields = _strip_gateway_fields(

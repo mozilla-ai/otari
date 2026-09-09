@@ -891,3 +891,150 @@ async def test_served_tool_names_is_what_the_backend_actually_advertises() -> No
     advertised = tuple(tool["function"]["name"] for tool in backend.openai_tools)
 
     assert advertised == SERVED_TOOL_NAMES
+
+
+class _FakeFiles:
+    """A stand-in for ``SandboxFileBridge``: inputs to seed, outputs it was handed."""
+
+    def __init__(self, inputs: list[Any], *, max_output_bytes: int = 1 << 20) -> None:
+        self.inputs = inputs
+        self.max_output_bytes = max_output_bytes
+        self.stored: list[tuple[str, bytes]] = []
+
+    async def read_input(self, staged: Any) -> bytes:
+        return b"a,b\n1,2\n"
+
+    async def store_output(self, filename: str, data: bytes) -> str:
+        self.stored.append((filename, data))
+        return f"file-{len(self.stored)}"
+
+
+def _staged(file_id: str = "file-csv", filename: str = "data.csv") -> Any:
+    from gateway.services.file_service import StagedFile
+
+    return StagedFile(file_id, filename, "text/csv", f"x/{file_id}")
+
+
+@pytest.mark.asyncio
+async def test_staged_inputs_are_seeded_before_the_first_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/files"): httpx.Response(201, json={"path": "data.csv", "size": 8}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([_staged()])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files):
+        pass
+
+    put = next(r for r in transport.captured if r.method == "POST" and r.url.path == "/sessions/s1/files")
+    body = put.read()
+    assert b'filename="data.csv"' in body
+    assert b"a,b\n1,2\n" in body
+    assert b'name="path"' in body
+
+
+@pytest.mark.asyncio
+async def test_refused_seed_is_terminal_and_releases_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/files"): httpx.Response(413, json={"error": "too large"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    with pytest.raises(SandboxNotReachableError, match="file-csv"):
+        async with SandboxBackend(sandbox_url="http://sandbox:8080", files=_FakeFiles([_staged()])):
+            pass
+    assert ("DELETE", "/sessions/s1") in [(r.method, r.url.path) for r in transport.captured]
+
+
+@pytest.mark.asyncio
+async def test_produced_files_are_fetched_stored_and_named_with_file_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "saved\n",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "chart.png"}],
+        },
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"\x89PNG"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
+
+    assert files.stored == [("chart.png", b"\x89PNG")]
+    assert "chart.png (file_id: file-1)" in result
+
+
+@pytest.mark.asyncio
+async def test_unfetchable_output_is_still_named_and_does_not_fail_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "ok\n",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "out.csv"}],
+        },
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("GET", "/sessions/s1/files"): httpx.Response(404, json={"error": "gone"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == []
+    assert "files: out.csv" in result
+    assert "file_id" not in result
+
+
+@pytest.mark.asyncio
+async def test_no_bridge_leaves_outputs_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "a.txt"}],
+        },
+    }
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+    assert result == "files: a.txt"
+    assert all(r.url.path != "/sessions/s1/files" for r in transport.captured)

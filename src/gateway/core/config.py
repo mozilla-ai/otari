@@ -982,8 +982,16 @@ class GatewayConfig(BaseSettings):
         ge=1,
         description=(
             "Stop serving files older than this many hours: expired files become inaccessible "
-            "(404) and can no longer be referenced. Their stored bytes are not yet reclaimed "
-            "automatically, so periodic cleanup is an operator task. None keeps files indefinitely."
+            "(404) and can no longer be referenced, and the file sweep then reclaims their bytes "
+            "and rows. None keeps files indefinitely."
+        ),
+    )
+    files_sweep_interval_sec: int = Field(
+        default=3600,
+        ge=0,
+        description=(
+            "How often the background file sweep reclaims the bytes and rows of expired and "
+            "deleted files. 0 disables the sweep, leaving cleanup to the operator."
         ),
     )
     file_understanding_enabled: bool = Field(

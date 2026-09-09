@@ -84,6 +84,7 @@ providers:
 # files_local_dir: "./otari-files"
 # files_max_bytes: 536870912
 # files_retention_hours: 168
+# files_sweep_interval_sec: 3600
 # vision_strategy: describe
 # vision_describe_model: "ollama:qwen2-vl"
 # model_capabilities:

@@ -25,7 +25,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages
+from gateway.api.routes._normalize import build_sandbox_file_bridge, normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -57,6 +57,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
@@ -614,6 +615,10 @@ async def create_message(
     # independent of whether the current request enables the same tool again.
     request.messages = _strip_gateway_minted_blocks(request.messages)
 
+    # Uploads the normalizer found for the code-execution sandbox, handed to the
+    # sandbox session once the billed user and workspace are resolved.
+    sandbox_inputs: list[StagedFile] = []
+
     async def _normalize(
         user_id: str,
         provider: LLMProvider | None,
@@ -635,7 +640,9 @@ async def create_message(
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested(request.tools),
         )
+        sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
     try:
@@ -690,6 +697,14 @@ async def create_message(
         mcp_server_ids=request.mcp_server_ids,
         max_tool_iterations=request.max_tool_iterations,
         tools_header=request.tools_header,
+        sandbox_files=build_sandbox_file_bridge(
+            config=config,
+            raw_request=raw_request,
+            hybrid_mode=ctx.hybrid_mode,
+            user_id=ctx.user_id,
+            workspace_id=ctx.workspace_id,
+            inputs=sandbox_inputs,
+        ),
     )
 
     # Strip gateway-internal fields, convert any caller-supplied OpenAI-shaped

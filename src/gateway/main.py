@@ -26,6 +26,7 @@ from gateway.services.alias_service import load_aliases_at_startup, reset_alias_
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budget_reservation_ledger import run_reservation_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
+from gateway.services.file_service import run_file_sweeper
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -310,6 +311,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         discovery_refresher: asyncio.Task[None] | None = None
         catalog_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
+        file_sweeper: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -423,6 +425,12 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                         retention_sec=config.budget_reservation_retention_sec,
                     )
                 )
+            # Same posture for uploaded files: expiry hides a file, this gives its
+            # bytes back. Standalone only, since hybrid mode stores no files.
+            if config.files_enabled and config.files_sweep_interval_sec > 0:
+                file_sweeper = asyncio.create_task(
+                    run_file_sweeper(config.files_sweep_interval_sec, app.state.file_store)
+                )
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -443,6 +451,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 (discovery_refresher, "model discovery"),
                 (catalog_refresher, "models.dev catalog"),
                 (reservation_sweeper, "budget reservation sweep"),
+                (file_sweeper, "file retention sweep"),
             ]
             await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
             if alias_refresher is not None:

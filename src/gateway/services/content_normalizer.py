@@ -6,7 +6,11 @@ resolved :class:`~gateway.services.model_capabilities.Capabilities` — whether 
 * **pass through** to a natively-capable provider (resolving any ``file_id`` to
   inline bytes first, since the upstream provider doesn't know our file ids), or
 * **extract to text** for a text-only model: documents via markitdown, images
-  via a vision side-call / OCR, scanned PDFs via rasterize-then-describe.
+  via a vision side-call / OCR, scanned PDFs via rasterize-then-describe, or
+* **stage into the code-execution sandbox** when the request runs one: an
+  Anthropic ``container_upload`` block names a file for the sandbox rather than
+  the model, so it is recorded on the stats for the sandbox backend to seed and
+  replaced by a short text marker telling the model the file is there.
 
 The normalizer is format-aware (OpenAI chat, Anthropic messages, OpenAI
 Responses) because each wire shape names its blocks and its text block
@@ -29,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.file_service import fetch_file, read_file_bytes
+from gateway.services.file_service import StagedFile, fetch_file, read_file_bytes
 from gateway.services.file_store import FileStore
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
@@ -39,6 +43,10 @@ WireFormat = Literal["openai", "anthropic", "responses"]
 # Kinds of content we normalize.
 _IMAGE = "image"
 _DOCUMENT = "document"
+# Anthropic's block for a file the code-execution container should see. Not a
+# kind the model reads: with a sandbox in the request it is staged, without one
+# it is treated as a document.
+_CONTAINER = "container_upload"
 
 
 @dataclass
@@ -55,6 +63,13 @@ class NormalizationStats:
     vision_prompt_tokens: int = 0
     vision_completion_tokens: int = 0
     details: list[str] = field(default_factory=list)
+    # Uploads the request referenced for the code-execution sandbox, in message
+    # order and without repeats. Only filled when the caller said a sandbox runs.
+    sandbox_inputs: list[StagedFile] = field(default_factory=list)
+
+    def stage(self, staged: StagedFile) -> None:
+        if all(existing.file_id != staged.file_id for existing in self.sandbox_inputs):
+            self.sandbox_inputs.append(staged)
 
     @property
     def touched(self) -> bool:
@@ -92,6 +107,9 @@ class _Source:
     # the block rewritten to inline data. Already-inline / remote blocks pass
     # through unchanged (no wasteful decode→re-encode round-trip).
     needs_inline: bool = False
+    # The stored upload behind a file_id block, so it can be staged into the
+    # sandbox. None for inline and remote sources, which have no file to stage.
+    staged: StagedFile | None = None
 
 
 def _text_block(fmt: WireFormat, text: str) -> dict[str, Any]:
@@ -118,6 +136,19 @@ def _to_data_url(data: bytes, mime: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 
+@dataclass
+class _Resolved:
+    """A descriptor resolved to bytes. ``staged`` is set when they came from a stored upload."""
+
+    data: bytes | None
+    mime: str
+    filename: str | None
+    staged: StagedFile | None = None
+
+    def source(self, kind: str) -> _Source:
+        return _Source(kind, self.data, self.mime, self.filename, None, self.staged is not None, self.staged)
+
+
 async def _resolve_from_ref(
     ref: dict[str, Any],
     *,
@@ -125,12 +156,13 @@ async def _resolve_from_ref(
     file_store: FileStore | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
-) -> tuple[bytes, str, str | None, bool] | None:
+    read_bytes: bool = True,
+) -> _Resolved | None:
     """Resolve a ``{file_data|url|file_id, filename}`` descriptor to bytes.
 
-    Returns ``(data, mime, filename, from_file_id)``; ``from_file_id`` is True
-    when the bytes came from a stored upload (so a native model needs the block
-    rewritten to inline data).
+    ``read_bytes=False`` resolves a ``file_id`` to its record without loading
+    the blob, for a block that is only staged into the sandbox and never shown
+    to the model.
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
@@ -139,14 +171,15 @@ async def _resolve_from_ref(
         if record is None:
             logger.warning("content normalizer: file_id %s not found for user %s", file_id, user_id)
             return None
-        data = await read_file_bytes(file_store, record)
-        return data, record.mime_type, record.filename, True
+        staged = StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)
+        data = await read_file_bytes(file_store, record) if read_bytes else None
+        return _Resolved(data, record.mime_type, record.filename, staged)
 
     url = ref.get("file_data") or ref.get("url")
     if isinstance(url, str) and url.startswith("data:"):
         decoded, mime = _decode_data_url(url)
         if decoded is not None:
-            return decoded, mime, filename, False
+            return _Resolved(decoded, mime, filename)
     return None
 
 
@@ -158,9 +191,24 @@ async def _classify(
     file_store: FileStore | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
+    sandbox_requested: bool = False,
 ) -> _Source | None:
-    """Identify an image/document block and resolve its bytes, or return None."""
+    """Identify an image/document/container block and resolve its bytes, or return None."""
     btype = block.get("type")
+
+    # --- sandbox input blocks ------------------------------------------
+    if fmt == "anthropic" and btype == _CONTAINER:
+        # Read the bytes only when there is no sandbox to stage into and the
+        # block falls back to being a document the model reads.
+        resolved = await _resolve_from_ref(
+            block,
+            db=db,
+            file_store=file_store,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            read_bytes=not sandbox_requested,
+        )
+        return resolved.source(_CONTAINER) if resolved else None
 
     # --- image blocks ---------------------------------------------------
     if (fmt in ("openai", "responses") and btype in ("image_url", "input_image")) or (
@@ -176,7 +224,7 @@ async def _classify(
                     src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
                 )
                 if resolved:
-                    return _Source(_IMAGE, resolved[0], resolved[1], resolved[2], None, resolved[3])
+                    return resolved.source(_IMAGE)
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
         # openai / responses image
         image_url = block.get("image_url")
@@ -186,7 +234,7 @@ async def _classify(
                 block, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
             )
             if resolved:
-                return _Source(_IMAGE, resolved[0], resolved[1], resolved[2], None, resolved[3])
+                return resolved.source(_IMAGE)
         if isinstance(url, str):
             data, mime = _decode_data_url(url)
             return _Source(_IMAGE, data, mime or "image/png", None, None if data else url)
@@ -208,14 +256,14 @@ async def _classify(
                     src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
                 )
                 if resolved:
-                    return _Source(_DOCUMENT, resolved[0], resolved[1], resolved[2], None, resolved[3])
+                    return resolved.source(_DOCUMENT)
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
         resolved = await _resolve_from_ref(
             ref, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
         )
         if resolved:
-            return _Source(_DOCUMENT, resolved[0], resolved[1], resolved[2], None, resolved[3])
+            return resolved.source(_DOCUMENT)
         return None
 
     return None
@@ -314,18 +362,33 @@ async def _normalize_block(
     file_store: FileStore | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
+    sandbox_requested: bool = False,
 ) -> Any:
     if not isinstance(block, dict):
         return block
     try:
         src = await _classify(
-            block, fmt, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+            block,
+            fmt,
+            db=db,
+            file_store=file_store,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
         return block
     if src is None:
         return block
+
+    if sandbox_requested and src.staged is not None:
+        stats.stage(src.staged)
+    if src.kind == _CONTAINER:
+        if sandbox_requested and src.staged is not None:
+            # The sandbox gets the bytes; the model gets told where they are.
+            return _text_block(fmt, f"[File available in the code execution sandbox: {src.staged.filename}]")
+        src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf
     if native:
@@ -354,6 +417,21 @@ async def _normalize_block(
     return _text_block(fmt, text)
 
 
+# Content parts the Responses API also accepts as bare ``input`` items.
+_RESPONSES_ITEM_TYPES = frozenset({"input_file", "input_image"})
+
+
+def _wrap_bare_responses_item(item: Any) -> Any:
+    """Put a bare item the normalizer turned into text back into a valid position.
+
+    A file or image item is valid at the top level of a Responses ``input``, but
+    the text it extracts to is not: ``input_text`` only lives inside a message.
+    """
+    if isinstance(item, dict) and item.get("type") == "input_text":
+        return {"role": "user", "content": [item]}
+    return item
+
+
 async def normalize_messages(
     messages: list[dict[str, Any]],
     *,
@@ -364,6 +442,7 @@ async def normalize_messages(
     file_store: FileStore | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
+    sandbox_requested: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Return (possibly-rewritten messages, stats).
 
@@ -371,8 +450,15 @@ async def normalize_messages(
     workspace of the API key that authenticated the request. ``None`` means "any",
     which is what a master-key request gets: the operator acting deployment-wide.
 
+    ``sandbox_requested`` says the request runs the gateway's code-execution
+    sandbox. Every stored upload the messages reference is then also recorded on
+    ``stats.sandbox_inputs`` for the sandbox to seed, and ``container_upload``
+    blocks are staged instead of read.
+
     Messages whose ``content`` is a plain string are returned untouched (the
-    common, zero-overhead path). Only list-content messages are walked.
+    common, zero-overhead path). Only list-content messages are walked, plus, on
+    the Responses format, a file or image item placed directly in ``input``
+    rather than inside a message.
 
     The Responses endpoint accepts a bare-string ``input``; iterating that would
     walk it character-by-character, so non-list ``messages`` are returned as-is.
@@ -381,26 +467,30 @@ async def normalize_messages(
     if not config.file_understanding_enabled or not isinstance(messages, list):
         return messages, stats
 
+    async def _block(block: Any) -> Any:
+        return await _normalize_block(
+            block,
+            fmt,
+            caps,
+            config,
+            stats,
+            db=db,
+            file_store=file_store,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested,
+        )
+
     out: list[dict[str, Any]] = []
     for message in messages:
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, list):
-            out.append(message)
+            if fmt == "responses" and isinstance(message, dict) and message.get("type") in _RESPONSES_ITEM_TYPES:
+                out.append(_wrap_bare_responses_item(await _block(message)))
+            else:
+                out.append(message)
             continue
-        new_content = [
-            await _normalize_block(
-                block,
-                fmt,
-                caps,
-                config,
-                stats,
-                db=db,
-                file_store=file_store,
-                user_id=user_id,
-                workspace_id=workspace_id,
-            )
-            for block in content
-        ]
+        new_content = [await _block(block) for block in content]
         out.append({**message, "content": new_content})
 
     if stats.touched:

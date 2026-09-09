@@ -1157,7 +1157,7 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
 
     async def fake_normalize_messages(input_messages: Any, **kwargs: Any) -> Any:
         captured["normalized_messages"] = input_messages
-        return input_messages, SimpleNamespace(vision_usage=lambda: None)
+        return input_messages, SimpleNamespace(vision_usage=lambda: None, sandbox_inputs=[])
 
     async def fake_resolve_request_context(**kwargs: Any) -> Any:
         captured.update(kwargs)
