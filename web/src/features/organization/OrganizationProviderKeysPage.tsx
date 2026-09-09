@@ -149,7 +149,6 @@ function KeyForm({
     // The typed fields and the textarea are two views of one `client_args`
     // object, so they are recombined before it goes out.
     const clientArgs = mergeCredentialFields(
-      credentialFields,
       draft.credentials,
       parsedClientArgs.value,
       draft.redacted,

@@ -22,10 +22,13 @@
 // either a 403 on the page that needs it or a new public route for what is
 // static, per-release data with no deployment variance.
 //
-// The names themselves are the wire contract in `docs/hybrid-mode-protocol.md`
-// and are read gateway-side by `src/gateway/services/bedrock_gateway_auth.py`;
-// `providerCredentialFields.test.ts` pins them so a rename here has to be a
-// deliberate edit in both places.
+// The names are boto3's own, and nothing between this file and the SDK call
+// validates them: `org_provider_key_service` hands `client_args` to
+// `provider_kwargs.get_provider_kwargs`, which spreads it into `AnyLLM.create`.
+// `providerCredentialFields.test.ts` pins them against a silent edit here, not
+// against an upstream rename, which still surfaces as a provider error at
+// request time. `services/bedrock_gateway_auth.py` builds the same names on the
+// hybrid path, out of the platform's `extra_params` rather than out of these.
 
 /** One `client_args` entry a provider expects, and how to ask for it. */
 export interface ProviderCredentialFieldSpec {
@@ -34,10 +37,11 @@ export interface ProviderCredentialFieldSpec {
   label: string
   isRequired: boolean
   /**
-   * Holds a credential. Rendered masked, and never prefilled with what came
-   * back from the API: the gateway returns `REDACTED_CLIENT_ARG` in place of
-   * the stored value (`redact_secret_like_values`), and re-sending that mask
-   * is what keeps the stored value (`restore_redacted_values`).
+   * Rendered as a password input. Narrower than what the gateway masks on read:
+   * `redact_secret_like_values` matches a key *name* against "key", "secret",
+   * "token" and three more, so `aws_access_key_id` also comes back as
+   * `REDACTED_CLIENT_ARG` without being one. Whether a stored value came back
+   * masked is read off the value itself, in {@link splitClientArgs}.
    */
   isSecret?: boolean
   placeholder?: string
@@ -161,9 +165,9 @@ export type CredentialFieldValues = Record<string, string>
  * Split stored `client_args` into the values the typed fields own and the rest,
  * which stays in the JSON escape hatch.
  *
- * A secret whose stored value came back masked is dropped from `typed` rather
- * than shown: a masked value in a password box reads as a real one three
- * characters long. `redacted` records that it was set, so
+ * A value that came back masked is dropped from `typed` rather than shown: a
+ * mask in a control reads as a real value three characters long, and typing
+ * over it is the only way to tell. `redacted` records that it was set, so
  * {@link mergeCredentialFields} can send the mask back and keep it.
  */
 export function splitClientArgs(
@@ -185,7 +189,10 @@ export function splitClientArgs(
       rest[key] = value
       continue
     }
-    if (field.isSecret && value === REDACTED_CLIENT_ARG) {
+    // Keyed on the value, not on `isSecret`: the gateway masks by key name, so
+    // `aws_access_key_id` arrives masked too and a plain text field would show
+    // the mask as if the operator had typed it.
+    if (value === REDACTED_CLIENT_ARG) {
       redacted.push(key)
       continue
     }
@@ -204,7 +211,7 @@ export function splitClientArgs(
  * textarea still holds. Null when nothing is left, which is how the API reads
  * "clear it".
  *
- * A blank secret whose stored value was masked is sent as the mask, so the
+ * A blank field whose stored value was masked is sent as the mask, so the
  * gateway keeps what it has: the same bargain the API key field makes by
  * omitting itself when it was not retyped.
  *
@@ -213,20 +220,24 @@ export function splitClientArgs(
  * than deleting: `splitClientArgs` hands the box only what a text control
  * cannot edit, and dropping that would silently discard a value the operator
  * can see.
+ *
+ * Driven by what `splitClientArgs` took out rather than by the current field
+ * list, because the two can disagree: `/providers` lets an instance's provider
+ * type be retyped mid-edit, and a field that stops rendering must not take the
+ * stored option with it.
  */
 export function mergeCredentialFields(
-  fields: ProviderCredentialFieldSpec[],
   values: CredentialFieldValues,
   rest: Record<string, unknown> | null,
   redacted: readonly string[] = [],
 ): Record<string, unknown> | null {
   const merged: Record<string, unknown> = { ...(rest ?? {}) }
-  for (const field of fields) {
-    const value = (values[field.key] ?? "").trim()
+  for (const key of new Set([...Object.keys(values), ...redacted])) {
+    const value = (values[key] ?? "").trim()
     if (value !== "") {
-      merged[field.key] = value
-    } else if (field.isSecret && redacted.includes(field.key)) {
-      merged[field.key] = REDACTED_CLIENT_ARG
+      merged[key] = value
+    } else if (redacted.includes(key)) {
+      merged[key] = REDACTED_CLIENT_ARG
     }
   }
   return Object.keys(merged).length > 0 ? merged : null

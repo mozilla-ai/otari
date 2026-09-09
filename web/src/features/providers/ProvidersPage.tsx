@@ -173,7 +173,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   // object, so the request body is built in one place for both the save and the
   // connection test.
   const buildPayload = (): CreateStoredProviderRequest | null =>
-    providerId === "" || !clientArgs.ok
+    providerId === "" ||
+    !clientArgs.ok ||
+    Object.keys(credentialErrors).length > 0
       ? null
       : {
           instance: renamed ? name.trim() : providerId,
@@ -182,11 +184,7 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
           provider_type: renamed ? providerId : null,
           api_base: apiBase.trim() || null,
           api_key: apiKey.trim() || null,
-          client_args: mergeCredentialFields(
-            credentialFields,
-            credentials,
-            clientArgs.value,
-          ),
+          client_args: mergeCredentialFields(credentials, clientArgs.value),
         }
 
   const submit = () => {
@@ -498,7 +496,6 @@ function EditProviderForm({
       api_base: apiBase.trim() || null,
       // Sent on every save, so emptying the field clears the stored options.
       client_args: mergeCredentialFields(
-        credentialFields,
         credentials,
         clientArgs.value,
         stored.redacted,

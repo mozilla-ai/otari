@@ -308,10 +308,11 @@ describe("OrganizationProviderKeysPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("keeps a stored client_args secret the form was never shown", async () => {
-    // The gateway masks a credential-shaped option on read, so there is nothing
-    // to prefill the box with. Sending the mask back is what tells the gateway
-    // to keep what it holds.
+  it("keeps a stored client_args credential the form was never shown", async () => {
+    // The gateway masks a credential-shaped option on read, by key name, so
+    // both halves of the IAM pair come back as the mask and neither has a value
+    // to prefill with. Sending the mask back is what tells the gateway to keep
+    // what it holds.
     const requests = mockApi({
       catalog: [{ id: "bedrock", name: "Bedrock" }],
       keys: [
@@ -319,7 +320,7 @@ describe("OrganizationProviderKeysPage", () => {
           provider: "bedrock",
           client_args: {
             region_name: "us-east-1",
-            aws_access_key_id: "AKIAIOSFODNN7EXAMPLE",
+            aws_access_key_id: "***",
             aws_secret_access_key: "***",
             timeout: 1800,
           },
@@ -333,13 +334,23 @@ describe("OrganizationProviderKeysPage", () => {
     expect(
       await screen.findByRole("textbox", { name: /AWS region/ }),
     ).toHaveValue("us-east-1")
-    // Never prefilled with the mask: three characters in a password box read as
-    // a real value.
+    // Never prefilled with the mask: three characters in a control read as a
+    // real value, whether or not the control is a password box.
     expect(screen.getByLabelText(/AWS secret access key/)).toHaveValue("")
+    const accessKeyId = screen.getByRole("textbox", {
+      name: /AWS access key ID/,
+    })
+    expect(accessKeyId).toHaveValue("")
+    expect(
+      screen.getAllByText(/Set already, and never shown again/),
+    ).toHaveLength(2)
     // Only what has no typed field of its own is left in the JSON escape hatch.
     expect(
       screen.getByRole("textbox", { name: "Client options (JSON)" }),
     ).toHaveValue('{\n  "timeout": 1800\n}')
+
+    // A stored half counts as filled in, so the pair does not read as half done.
+    expect(screen.queryByText(/is required alongside/)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Save" }))
 
@@ -351,7 +362,7 @@ describe("OrganizationProviderKeysPage", () => {
     ).toMatchObject({
       client_args: {
         region_name: "us-east-1",
-        aws_access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        aws_access_key_id: "***",
         aws_secret_access_key: "***",
         timeout: 1800,
       },

@@ -13,10 +13,9 @@ import {
 const bedrock = () => credentialFieldsFor("bedrock")
 
 describe("the registry", () => {
-  // These are boto3's own constructor keyword arguments, and they are the wire
-  // contract in docs/hybrid-mode-protocol.md that
-  // gateway/services/bedrock_gateway_auth.py reads. Pinned so a rename here has
-  // to be a deliberate edit on both sides rather than a silent one on this one.
+  // boto3's own constructor keyword arguments, spread into AnyLLM.create by
+  // gateway/services/provider_kwargs.py. Pinned so an edit here is a deliberate
+  // one; nothing checks them against the SDK that consumes them.
   it("names Bedrock's fields with the kwargs boto3 takes", () => {
     expect(bedrock().map((field) => field.key)).toEqual([
       "region_name",
@@ -33,7 +32,9 @@ describe("the registry", () => {
     ).toEqual(["region_name"])
   })
 
-  it("marks the IAM secret as a secret and the access key id as not one", () => {
+  it("masks the input for the IAM secret and not for the access key id", () => {
+    // `isSecret` decides how the control renders. What the gateway masks on
+    // read is a wider, key-name rule that catches the id as well.
     const byKey = new Map(bedrock().map((field) => [field.key, field]))
     expect(byKey.get("aws_secret_access_key")?.isSecret).toBe(true)
     expect(byKey.get("aws_access_key_id")?.isSecret).toBeUndefined()
@@ -76,17 +77,21 @@ describe("splitClientArgs", () => {
     })
   })
 
-  it("records a masked secret as set instead of putting the mask in the box", () => {
+  it("records a masked value as set instead of putting the mask in a control", () => {
+    // The gateway masks by key name, so both halves of the IAM pair come back
+    // as the mask: `aws_access_key_id` contains "key". Neither may be prefilled
+    // with it, or the operator reads a three-character placeholder as the value
+    // they stored.
     const split = splitClientArgs(bedrock(), {
       region_name: "eu-west-1",
-      aws_access_key_id: "AKIA…",
+      aws_access_key_id: REDACTED_CLIENT_ARG,
       aws_secret_access_key: REDACTED_CLIENT_ARG,
     })
-    expect(split.typed).toEqual({
-      region_name: "eu-west-1",
-      aws_access_key_id: "AKIA…",
-    })
-    expect(split.redacted).toEqual(["aws_secret_access_key"])
+    expect(split.typed).toEqual({ region_name: "eu-west-1" })
+    expect(split.redacted).toEqual([
+      "aws_access_key_id",
+      "aws_secret_access_key",
+    ])
   })
 
   it("leaves a non-string under a registered name in the JSON box", () => {
@@ -109,7 +114,6 @@ describe("mergeCredentialFields", () => {
   it("puts the typed values back beside whatever the JSON box still holds", () => {
     expect(
       mergeCredentialFields(
-        bedrock(),
         { region_name: "us-east-1" },
         {
           timeout: 1800,
@@ -119,29 +123,43 @@ describe("mergeCredentialFields", () => {
   })
 
   it("trims a value rather than storing the whitespace around it", () => {
-    expect(
-      mergeCredentialFields(bedrock(), { region_name: " us-east-1 " }, null),
-    ).toEqual({ region_name: "us-east-1" })
+    expect(mergeCredentialFields({ region_name: " us-east-1 " }, null)).toEqual(
+      { region_name: "us-east-1" },
+    )
   })
 
-  it("sends the mask back for a stored secret left blank, so the gateway keeps it", () => {
+  it("sends the mask back for a stored value left blank, so the gateway keeps it", () => {
     expect(
       mergeCredentialFields(
-        bedrock(),
         { region_name: "us-east-1", aws_secret_access_key: "" },
         null,
-        ["aws_secret_access_key"],
+        ["aws_access_key_id", "aws_secret_access_key"],
       ),
     ).toEqual({
       region_name: "us-east-1",
+      aws_access_key_id: REDACTED_CLIENT_ARG,
       aws_secret_access_key: REDACTED_CLIENT_ARG,
+    })
+  })
+
+  it("keeps a value whose field has stopped rendering", () => {
+    // `/providers` lets an instance's provider type be retyped mid-edit, which
+    // changes the field list under values that are already out of client_args.
+    // Dropping them here would delete the stored credential on save.
+    expect(
+      mergeCredentialFields({ region_name: "us-east-1" }, { timeout: 1800 }, [
+        "aws_secret_access_key",
+      ]),
+    ).toEqual({
+      region_name: "us-east-1",
+      aws_secret_access_key: REDACTED_CLIENT_ARG,
+      timeout: 1800,
     })
   })
 
   it("lets a filled-in field win over the same name in the JSON box", () => {
     expect(
       mergeCredentialFields(
-        bedrock(),
         { region_name: "us-east-1" },
         {
           region_name: "eu-west-1",
@@ -155,7 +173,6 @@ describe("mergeCredentialFields", () => {
     // is not an instruction to delete what is sitting there.
     expect(
       mergeCredentialFields(
-        bedrock(),
         { region_name: "" },
         {
           region_name: 42,
@@ -165,7 +182,7 @@ describe("mergeCredentialFields", () => {
   })
 
   it("reads an empty result as null, which is how the API clears the column", () => {
-    expect(mergeCredentialFields(bedrock(), {}, null)).toBeNull()
+    expect(mergeCredentialFields({}, null)).toBeNull()
   })
 })
 

@@ -79,7 +79,7 @@ export function ProviderCredentialFields({
   onChange: (next: CredentialFieldValues) => void
   /** Per-field messages from `validateCredentialFields`, keyed by field key. */
   errors: Record<string, string>
-  /** Fields whose stored secret came back masked, so blank means "keep it". */
+  /** Fields whose stored value came back masked, so blank means "keep it". */
   redacted?: readonly string[]
 }) {
   const fields = credentialFieldsFor(provider)
@@ -91,6 +91,12 @@ export function ProviderCredentialFields({
         const value = values[field.key] ?? ""
         const error = errors[field.key]
         const set = (next: string) => onChange({ ...values, [field.key]: next })
+        // The gateway masks anything credential-shaped by key name, so a stored
+        // value is often unreadable whether or not the registry calls it a
+        // secret. Say it is set instead of prefilling the mask.
+        const description = redacted.includes(field.key)
+          ? `Set already, and never shown again. Leave blank to keep it. ${field.helpText}`
+          : field.helpText
         if (field.isSecret) {
           return (
             <SecretField
@@ -99,11 +105,7 @@ export function ProviderCredentialFields({
               value={value}
               onChange={set}
               placeholder={field.placeholder ?? "••••••••"}
-              description={
-                redacted.includes(field.key)
-                  ? `Set already, and never shown again. Leave blank to keep it. ${field.helpText}`
-                  : field.helpText
-              }
+              description={description}
               isInvalid={error !== undefined}
               errorMessage={error}
             />
@@ -117,7 +119,7 @@ export function ProviderCredentialFields({
             onChange={set}
             isRequired={field.isRequired}
             placeholder={field.placeholder}
-            description={field.helpText}
+            description={description}
             isInvalid={error !== undefined}
             errorMessage={error}
           />

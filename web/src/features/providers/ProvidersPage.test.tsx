@@ -484,6 +484,58 @@ describe("ProvidersPage", () => {
     ).toHaveValue('{\n  "timeout": 1800\n}')
   })
 
+  it("keeps a split-out option when the provider type is retyped mid-edit", async () => {
+    // The field list follows the provider type, which is an editable box here,
+    // while the values were split out of client_args at mount. A field that
+    // stops rendering must not take the stored option with it.
+    const fetchMock = mockApi({
+      stored: [
+        storedProvider("bedrock", "0000", true, {
+          region_name: "us-east-1",
+          aws_secret_access_key: "***",
+        }),
+      ],
+      catalog: [
+        {
+          id: "bedrock",
+          name: "Bedrock",
+          env_key: "AWS_BEARER_TOKEN_BEDROCK",
+          default_api_base: null,
+          requires_api_key: true,
+          env_key_present: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await screen.findByRole("textbox", { name: /AWS region/ })
+    await user.type(
+      screen.getByRole("textbox", { name: "Provider type" }),
+      "openai",
+    )
+    expect(
+      screen.queryByRole("textbox", { name: /AWS region/ }),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+
+    const patch = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([, init]) => (init?.method ?? "") === "PATCH",
+      )
+      expect(call).toBeDefined()
+      return call!
+    })
+    expect(JSON.parse(String(patch[1]?.body))).toMatchObject({
+      client_args: {
+        region_name: "us-east-1",
+        aws_secret_access_key: "***",
+      },
+    })
+  })
+
   it("fetches provider autofill hints lazily, only after one is selected", async () => {
     const fetchMock = mockApi({
       stored: [storedProvider("anthropic", "0000")],
