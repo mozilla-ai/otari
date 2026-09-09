@@ -444,11 +444,14 @@ function OrganizationOverview() {
     void previous.refetch()
     void recent.refetch()
     void keys.refetch()
-    void members.refetch()
-    // Both guarded because `refetch` runs a disabled query: the catalog would be
-    // asked with no workspace to use it, and the ceilings with a role the server
-    // refuses.
-    if (scope !== undefined) void models.refetch()
+    // All three guarded because `refetch` runs a disabled query: the roster
+    // would be asked for a caller who is in no workspace (and its id
+    // interpolates as `null`, which the route refuses), the catalog with no
+    // workspace to use it, and the ceilings with a role the server refuses.
+    if (scope !== undefined) {
+      void members.refetch()
+      void models.refetch()
+    }
     if (managesSpend) void ceilings.refetch()
   }
   const isRefreshing =
@@ -513,9 +516,8 @@ function OrganizationOverview() {
                   ? noCeilingReason
                   : "no data"
             }
-            // `SpendMeter`, not the plain accent `Meter`, and the same
-            // component the Spend page's own rows use, so the two cannot say
-            // different things about one ceiling.
+            // `SpendMeter`, not the plain accent `Meter`: a one-color bar
+            // draws over and under a limit identically.
             graphic={
               ceilings.data && ceilingHealth.worst ? (
                 <SpendMeter
