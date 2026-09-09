@@ -8,6 +8,8 @@ on:
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
+      # Two unit tests read the tool cards to pin the UI ceilings to the server's.
+      - 'web/src/features/tools/**'
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -19,6 +21,8 @@ on:
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
+      # Two unit tests read the tool cards to pin the UI ceilings to the server's.
+      - 'web/src/features/tools/**'
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'

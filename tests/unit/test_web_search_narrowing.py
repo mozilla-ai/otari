@@ -219,7 +219,8 @@ _CARD = Path(__file__).resolve().parents[2] / "web" / "src" / "features" / "tool
 
 
 def _card_constant(name: str) -> int:
-    match = re.search(rf"^export const {name} = (\d+)$", _CARD.read_text(), re.MULTILINE)
+    """Read the constant whether or not the card exports it: only the number is mirrored here."""
+    match = re.search(rf"^(?:export )?const {name} = (\d+)$", _CARD.read_text(), re.MULTILINE)
     assert match is not None, f"{name} is no longer declared in {_CARD.name}; update this test with it"
     return int(match.group(1))
 
