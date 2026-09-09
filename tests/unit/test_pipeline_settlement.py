@@ -1316,6 +1316,37 @@ async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_combined_standalone_request_domains_narrow_fetch_without_workspace_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_workspace_web_search_config",
+        AsyncMock(return_value=None),
+    )
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False, web_search_url="https://search.example"),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+
+    tool_ctx = await _call_prepare_gateway_tools(
+        ctx,
+        tools=[
+            {
+                "type": "otari_web_search",
+                "allowed_domains": ["docs.example.com"],
+                "blocked_domains": ["private.docs.example.com"],
+            },
+            {"type": "otari_web_fetch"},
+        ],
+    )
+
+    assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["docs.example.com"]
+    assert [rule.value for rule in tool_ctx.web_fetch_policy.blocked] == ["private.docs.example.com"]
+
+
+@pytest.mark.asyncio
 async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = ResolvedWebSearchConfig(
         enabled=True,

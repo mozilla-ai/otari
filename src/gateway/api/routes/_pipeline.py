@@ -297,9 +297,7 @@ MALFORMED_WEB_ACCESS_POLICY_DETAIL = "Authorization service returned a malformed
 WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL = "A requested managed web tool is not authorized for this workspace"
 WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL = "The request and workspace web-access domain policies do not overlap"
 WEB_FETCH_DECLARATION_INVALID_DETAIL = "otari_web_fetch declarations may contain only the type field"
-WEB_SEARCH_DECLARATION_INVALID_DETAIL = (
-    "otari_web_search declarations contain an unsupported field"
-)
+WEB_SEARCH_DECLARATION_INVALID_DETAIL = "otari_web_search declarations contain an unsupported field"
 WEB_TOOL_DUPLICATE_DETAIL = "A managed web tool may be declared at most once"
 WEB_TOOL_RESERVED_NAME_DETAIL = "A caller-defined function uses a reserved managed web-tool name"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
@@ -421,11 +419,7 @@ _UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
 # either: the two definitions of "settable by a caller" are one definition, and
 # spelling it twice is how they drift.
 _FORWARDED_PARAMS: frozenset[str] = frozenset(
-    (
-        set(CompletionParams.model_fields)
-        | set(MessagesParams.model_fields)
-        | set(ResponsesParams.model_fields)
-    )
+    (set(CompletionParams.model_fields) | set(MessagesParams.model_fields) | set(ResponsesParams.model_fields))
     - SENSITIVE_PARAM_FIELDS
 )
 
@@ -2456,7 +2450,15 @@ def _canonicalize_web_search_request_domains(tool_entry: dict[str, Any]) -> None
 
 
 _WEB_SEARCH_DECLARATION_FIELDS = frozenset(
-    {"type", "max_results", "allowed_domains", "blocked_domains", "purpose_hint", "provider_options"}
+    {
+        "type",
+        "max_uses",
+        "max_results",
+        "allowed_domains",
+        "blocked_domains",
+        "purpose_hint",
+        "provider_options",
+    }
 )
 
 
@@ -2494,9 +2496,7 @@ def _validate_managed_web_declarations(
         if entry.get("type") == "otari_web_search" and not set(entry) <= _WEB_SEARCH_DECLARATION_FIELDS:
             raise adapter.error(400, WEB_SEARCH_DECLARATION_INVALID_DETAIL, ErrorKind.INVALID_REQUEST)
     managed_names = {
-        name
-        for name, count in ((WEB_SEARCH_TOOL_NAME, search_count), (WEB_FETCH_TOOL_NAME, fetch_count))
-        if count
+        name for name, count in ((WEB_SEARCH_TOOL_NAME, search_count), (WEB_FETCH_TOOL_NAME, fetch_count)) if count
     }
     if any(_function_tool_name(entry) in managed_names for entry in entries):
         raise adapter.error(400, WEB_TOOL_RESERVED_NAME_DETAIL, ErrorKind.INVALID_REQUEST)
@@ -2621,9 +2621,7 @@ async def prepare_gateway_tools(
             await _validate_mcp_server_urls(adapter, mcp_servers)
         if mcp_server_ids:
             stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
-            await _validate_mcp_server_urls(
-                adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
-            )
+            await _validate_mcp_server_urls(adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id)
             stored_name_counts = Counter(server.name for server in stored_servers)
             # Standalone cannot reach this: `uq_workspace_mcp_servers_workspace_name`
             # makes stored names unique per workspace and `resolve_workspace_mcp_servers`
@@ -2814,8 +2812,10 @@ async def prepare_gateway_tools(
         if use_web_search or use_web_fetch:
             if ctx.hybrid_mode:
                 assert ctx.user_token is not None
-                if use_web_search and web_search_url is not None and url_targets_platform(
-                    web_search_url, ctx.config.platform.get("base_url")
+                if (
+                    use_web_search
+                    and web_search_url is not None
+                    and url_targets_platform(web_search_url, ctx.config.platform.get("base_url"))
                 ):
                     web_search_auth_token = ctx.config.platform_token
                 requested_tools = [
@@ -2869,6 +2869,7 @@ async def prepare_gateway_tools(
                     workspace_search = await resolve_workspace_web_search_config(ctx.db, ctx.workspace_id)
                 except InvalidStoredWebSearchDomainError as exc:
                     raise adapter.error(503, WEB_SEARCH_CONFIG_INVALID_DETAIL, ErrorKind.API) from exc
+                mandatory_policy = DomainPolicy()
                 if workspace_search is not None:
                     if not workspace_search.enabled:
                         detail = WEB_ACCESS_NOT_ENABLED_DETAIL if use_web_fetch else WEB_SEARCH_NOT_ENABLED_DETAIL
@@ -2877,22 +2878,22 @@ async def prepare_gateway_tools(
                         workspace_search.allowed_domains,
                         workspace_search.blocked_domains,
                     )
+                try:
+                    web_fetch_policy = _combined_fetch_policy(
+                        mandatory_policy,
+                        web_search_tool_entry if use_web_fetch else None,
+                    )
+                except DisjointDomainAllowListsError as exc:
+                    raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
+                if workspace_search is not None and web_search_tool_entry is not None:
                     try:
-                        web_fetch_policy = _combined_fetch_policy(
-                            mandatory_policy,
-                            web_search_tool_entry if use_web_fetch else None,
+                        web_search_tool_entry = narrow_web_search_tool_entry(
+                            web_search_tool_entry,
+                            workspace_search,
+                            baseline_max_results=web_search_max_results_baseline(ctx.config),
                         )
-                    except DisjointDomainAllowListsError as exc:
-                        raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
-                    if web_search_tool_entry is not None:
-                        try:
-                            web_search_tool_entry = narrow_web_search_tool_entry(
-                                web_search_tool_entry,
-                                workspace_search,
-                                baseline_max_results=web_search_max_results_baseline(ctx.config),
-                            )
-                        except WorkspaceWebSearchDomainsExcludedError as exc:
-                            raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
+                    except WorkspaceWebSearchDomainsExcludedError as exc:
+                        raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
 
         # Inside the try so a rejection releases the budget reservation the
         # request already took, like every other admission failure here.

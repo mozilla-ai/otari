@@ -378,9 +378,7 @@ def test_summary_dimensions_none_skips_every_breakdown(
     _make_log(db_session, user_id="bare", timestamp=datetime.now(UTC) - timedelta(hours=1), cost=0.25)
     db_session.commit()
 
-    body = client.get(
-        SUMMARY_PATH, headers=master_key_header, params={"user_id": "bare", "dimensions": "none"}
-    ).json()
+    body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "bare", "dimensions": "none"}).json()
     assert all(body[field] == [] for field in _BREAKDOWN_FIELDS)
     assert body["totals"]["cost"] == pytest.approx(0.25)
     assert body["series"]
@@ -1127,10 +1125,10 @@ def test_web_fetch_filter_and_breakdown_cover_list_count_and_summary(
     db_session.commit()
 
     params = {"tool": "web_fetch", "user_id": "fetch-tools"}
-    rows = client.get("/v1/usage", params=params, headers=master_key_header)
-    count = client.get("/v1/usage/count", params=params, headers=master_key_header)
+    rows = client.get(f"{API_ROOT}/usage", params=params, headers=master_key_header)
+    count = client.get(f"{API_ROOT}/usage/count", params=params, headers=master_key_header)
     summary = client.get(
-        "/v1/usage/summary",
+        f"{API_ROOT}/usage/summary",
         params={**params, "dimensions": "tool"},
         headers=master_key_header,
     )

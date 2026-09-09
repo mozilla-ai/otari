@@ -255,7 +255,7 @@ A runnable example lives under `demo/web-search/`.
 
 A workspace web-access policy can:
 
-- disable `otari_web_search`, `otari_web_fetch`, and `POST /v1/search`
+- disable `otari_web_search`, `otari_web_fetch`, and `POST /api/v1/search`
 - lower `max_results`
 - narrow allowed domains or add blocked domains for Search results and Fetch
   destinations, including redirects
