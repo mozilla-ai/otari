@@ -36,10 +36,6 @@ const SCREENSHOT_VIEWPORTS = {
 
 const SCREENSHOT_THEMES = ["light", "dark"] as const
 
-// The second gateway this suite boots, in hybrid mode (e2e/serve-hybrid.sh). The
-// port is e2e/otari.hybrid.yml's, and the host is 127.0.0.1 rather than
-// localhost so the page's own `window.location.origin` matches this string,
-// which the hybrid spec asserts against.
 // One project per cell. The theme reaches the app through localStorage (see
 // e2e/screenshots/fixtures.ts, which reads it back off the project name);
 // `colorScheme` here is the OS-level preference underneath it, set to match so
