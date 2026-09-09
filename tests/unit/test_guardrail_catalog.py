@@ -228,3 +228,26 @@ async def test_more_profiles_than_a_picker_could_serve_is_refused(monkeypatch: p
 
     assert catalog.available is False
     assert catalog.profiles == []
+
+
+@pytest.mark.asyncio
+async def test_an_unusable_configured_url_is_a_reason_not_a_500(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the dashboard PATCH validates ``guardrails_url``; env and YAML reach this raw.
+
+    ``httpx.InvalidURL`` is not an ``HTTPError``, so it is named in the handler
+    alongside one. Raised from the client here rather than reached through a
+    malformed address, because the stub transport below is what would otherwise
+    answer it: the real client refuses the protocol before any transport sees
+    the request, which is the arm that catches it either way.
+    """
+
+    def factory(*_args: object, **_kwargs: object) -> httpx.AsyncClient:
+        raise httpx.InvalidURL("no host")
+
+    monkeypatch.setattr("gateway.services.guardrail_catalog.httpx.AsyncClient", factory)
+
+    catalog = await fetch_guardrail_catalog("http://")
+
+    assert catalog.available is False
+    assert catalog.profiles == []
+    assert catalog.reason is not None

@@ -222,9 +222,15 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
     except _CatalogTooLargeError:
         logger.warning("Guardrail catalog from %s exceeded %d bytes", shown, _MAX_CATALOG_BYTES)
         return GuardrailCatalog(available=False, reason=_TOO_LARGE)
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         # The address goes to the log and not to the response, for the reason
         # `services/guardrails.py` keeps it out of a 502 body.
+        #
+        # `InvalidURL` alongside, because it is not an `HTTPError`: this reads
+        # `guardrails_url` as configured, and only the dashboard's PATCH runs
+        # that field through `validate_url`, so a malformed env or YAML value
+        # arrives here whole. The docstring promises this never raises, and a
+        # mistyped setting is exactly the case an operator opens the page to fix.
         logger.warning("Guardrail catalog unavailable from %s: %s", shown, exc.__class__.__name__)
         return GuardrailCatalog(available=False, reason=_UNREACHABLE)
     except ValueError:
