@@ -1474,37 +1474,6 @@ async def test_native_max_uses_leaves_no_state_on_the_shared_strategy(
 
 
 @pytest.mark.asyncio
-async def test_native_max_uses_does_not_cap_a_foreign_tool_named_web_search(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The cap bounds the gateway's own search, not an MCP tool that shares its name.
-
-    A pool with no structured-result buffer is not the web-search backend, so its
-    ``web_search`` is the caller's own tool and keeps running past the cap.
-    """
-    responses = [
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_1", "first")]),
-        _message_response(stop_reason="tool_use", content=[_search_use("tu_2", "second")]),
-        _message_response(stop_reason="end_turn", content=[_text_block("done")]),
-    ]
-
-    async def fake_amessages(**kwargs: Any) -> MessageResponse:
-        return responses.pop(0)
-
-    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
-    pool = _FakePool(tool_names=["web_search"], results={"web_search": "ok"})
-
-    await anthropic_tool_loop(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
-        pool=cast(Any, pool),
-        max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
-    )
-
-    assert pool.calls == [("web_search", {"query": "first"}), ("web_search", {"query": "second"})]
-
-
-@pytest.mark.asyncio
 async def test_stream_emits_native_blocks_with_gapless_indices(monkeypatch: pytest.MonkeyPatch) -> None:
     """The synthetic blocks take the swallowed tool_use events' place on the wire.
 

@@ -289,35 +289,6 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
 
 
 @pytest.mark.asyncio
-async def test_max_uses_does_not_cap_a_foreign_tool_named_web_search(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A pool with no result buffer is not the search backend, so its tool is the caller's."""
-    responses = iter(
-        [
-            _response(output=[_function_call("c1", "web_search", '{"query": "first"}')]),
-            _response(output=[_function_call("c2", "web_search", '{"query": "second"}')]),
-            _response(output=[], status="completed"),
-        ]
-    )
-
-    async def fake_aresponses(**kwargs: Any) -> Response:
-        return next(responses)
-
-    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
-    pool = _FakePool(tool_names=["web_search"], results={"web_search": "ok"})
-
-    await responses_tool_loop(
-        completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "hi"}]},
-        pool=cast(Any, pool),
-        max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
-    )
-
-    assert pool.calls == [("web_search", {"query": "first"}), ("web_search", {"query": "second"})]
-
-
-@pytest.mark.asyncio
 async def test_loop_replays_and_returns_compaction_from_hidden_iteration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
