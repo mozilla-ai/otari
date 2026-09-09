@@ -1371,13 +1371,9 @@ describe("ModelsPage", () => {
     expect(urls.some((url) => url.includes("/v1/models/metadata"))).toBe(false)
   })
 
-  // Bulk price editing was removed (otari-ai#2096): mass-editing prices was
-  // never a capability the models page should have offered. Selection existed
-  // only to feed it, so the checkbox column goes with it. Asserted against an
-  // operator, the role that used to have both. The checkbox assertions are the
-  // real check (they fail if selection comes back); the last two are weaker
-  // guards that would only bite on a bulk bar reintroduced without selection,
-  // since with no checkbox there is no way to make a selection here.
+  // The models page offers no row selection, because there is no bulk price
+  // write for it to feed (otari-ai#2096). The checkbox assertions are the real
+  // check; the last two only bite on a bulk bar reintroduced without selection.
   it("offers no row selection and no bulk pricing, even to an operator", async () => {
     mockApi()
     renderWithClient(<ModelsPage />)
