@@ -97,7 +97,7 @@ jobs:
         pnpm exec node .storybook/smoke.mjs | tee smoke.log
         grep -q "ALL RENDERED CLEAN" smoke.log
 
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: design-system-catalog
         path: web/storybook-static
@@ -108,7 +108,7 @@ jobs:
     # ability to overwrite the reference site.
     - name: Upload the Pages artifact
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda1b5a13765 # v3.0.1
+      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
       with:
         path: web/storybook-static
 
@@ -128,4 +128,4 @@ jobs:
 
     steps:
     - id: deploy
-      uses: actions/deploy-pages@d6db90164ac5dbe5cbe9c2c62d91d1a5d9dbc51f # v4.0.5
+      uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
