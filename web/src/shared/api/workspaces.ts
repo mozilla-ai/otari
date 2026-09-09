@@ -361,12 +361,17 @@ export function useWorkspaceProviderKeyModels(
       staleTime: 60_000,
     })),
     combine: (results) => ({
-      // A key whose read has not answered maps to `undefined`, not to `[]`:
-      // an empty list is the answer "every model is allowed", so defaulting to
-      // one would report a narrowed workspace as open for as long as the read
-      // takes, and a refused read as open forever.
+      // Three states per key, not two. `models` is `undefined` rather than `[]`
+      // until the read answers, because an empty list is the answer "every model
+      // is allowed" and defaulting to one would report a narrowed workspace as
+      // open. `failed` is what separates a read still in flight from one that
+      // will never answer, so the caller can say which rather than showing a
+      // refusal as a wait that does not end.
       data: new Map(
-        results.map((result, index) => [keyIds[index], result.data]),
+        results.map((result, index) => [
+          keyIds[index],
+          { models: result.data, failed: result.error !== null },
+        ]),
       ),
       // The first failure rather than a swallowed one, as the fan-outs above do.
       error: results.find((result) => result.error)?.error ?? null,

@@ -78,12 +78,15 @@ function ModelAllowList({
   keyId,
   keyName,
   models,
+  failed,
 }: {
   workspaceId: string
   keyId: string
   keyName: string
   /** Undefined until this key's own read answers; an empty list is a real answer. */
   models: string[] | undefined
+  /** Whether that read was refused, which is a wait that never ends otherwise. */
+  failed: boolean
 }) {
   const add = useAddWorkspaceProviderKeyModel()
   const remove = useRemoveWorkspaceProviderKeyModel()
@@ -94,7 +97,14 @@ function ModelAllowList({
   return (
     <div className="flex flex-col gap-2">
       <ErrorBanner error={add.error ?? remove.error} />
-      {models === undefined ? (
+      {failed ? (
+        // Said on the row as well as in the banner above: without this the row
+        // waits forever on a read that already answered, and a caption saying
+        // "loading" is a claim that the answer is still coming.
+        <span className="text-caption">
+          The allowed models for this key could not be read.
+        </span>
+      ) : models === undefined ? (
         // Not "every model is allowed", which is what an empty list means and
         // what an unanswered read would otherwise be read as: a narrowed
         // workspace would say it was open for as long as the read took.
@@ -109,7 +119,10 @@ function ModelAllowList({
             <li key={model}>
               <DismissChip
                 value={model}
-                dismissLabel={`Allow every model again by removing ${model} from ${keyName}`}
+                // Only what the press does: dropping one entry leaves the rest
+                // of the allow-list in force, so a label promising every model
+                // back is true of the last entry alone.
+                dismissLabel={`Stop allowing ${model} on ${keyName}`}
                 onDismiss={() => remove.mutate({ workspaceId, keyId, model })}
               />
             </li>
@@ -247,7 +260,8 @@ export function WorkspaceProviderKeys({
                     workspaceId={workspaceId}
                     keyId={keyId}
                     keyName={name}
-                    models={models.data.get(keyId)}
+                    models={models.data.get(keyId)?.models}
+                    failed={models.data.get(keyId)?.failed ?? false}
                   />
                 )}
               </li>

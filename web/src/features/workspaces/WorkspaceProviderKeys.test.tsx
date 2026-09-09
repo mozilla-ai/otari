@@ -141,7 +141,7 @@ describe("WorkspaceProviderKeys", () => {
 
     await user.click(
       await screen.findByRole("button", {
-        name: /Allow every model again by removing gpt-4o/,
+        name: "Stop allowing gpt-4o on openai / Production",
       }),
     )
 
@@ -264,10 +264,11 @@ describe("WorkspaceProviderKeys", () => {
     )
   })
 
-  it("does not read an unanswered allow-list as an open one", async () => {
+  it("says a refused allow-list was refused, not that it is open or loading", async () => {
     // An empty list is the answer "every model is allowed", so a read that
-    // failed must not borrow it: that would report a narrowing still in force
-    // as lifted.
+    // failed must not borrow it: that would report a narrowing still in force as
+    // lifted. Nor may it sit on "loading", which claims an answer is still
+    // coming from a read that already gave one.
     mockApi({
       modelsRefusal: { status: 403, detail: "Not a member of this workspace" },
     })
@@ -275,8 +276,14 @@ describe("WorkspaceProviderKeys", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Not a member/)
     expect(
+      await screen.findByText(
+        "The allowed models for this key could not be read.",
+      ),
+    ).toBeInTheDocument()
+    expect(
       screen.queryByText("Every model this key serves is allowed."),
     ).toBeNull()
+    expect(screen.queryByText("Loading allowed models…")).toBeNull()
   })
 
   it("names a key the organization list does not carry by its id", async () => {
