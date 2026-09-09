@@ -5,9 +5,9 @@ import {
   budgetHealth,
   errorRateHealth,
   providerHealthStatus,
-  toStatStatus,
+  spendCeilingHealth,
 } from "@/features/overview/overview"
-import { usageTotals } from "@/tests/fixtures"
+import { organizationSpendCeiling, usageTotals } from "@/tests/fixtures"
 
 function budget(over: Partial<Budget>): Budget {
   return {
@@ -135,11 +135,80 @@ describe("budgetHealth", () => {
   })
 })
 
-describe("toStatStatus", () => {
-  it("maps neutral to undefined and passes the rest through", () => {
-    expect(toStatStatus("neutral")).toBeUndefined()
-    expect(toStatStatus("ok")).toBe("ok")
-    expect(toStatStatus("warn")).toBe("warn")
-    expect(toStatStatus("alert")).toBe("alert")
+describe("spendCeilingHealth", () => {
+  const named = (ceiling: { name: string | null }) => ceiling.name ?? "a scope"
+
+  it("is neutral with nothing capped", () => {
+    expect(spendCeilingHealth([], named).status).toBe("neutral")
+    expect(
+      spendCeilingHealth(
+        [organizationSpendCeiling({ max_budget: null, current_spend: 9999 })],
+        named,
+      ).cappedCount,
+    ).toBe(0)
+  })
+
+  it("judges spend plus what is reserved against the ceiling's own figure", () => {
+    // A ceiling refuses on the sum, so the cell has to judge the sum. Its
+    // `max_budget` is the pooled figure, not a per-user cap, so no roster
+    // multiplies it the way `budgetHealth` multiplies a budget's.
+    const result = spendCeilingHealth(
+      [
+        organizationSpendCeiling({
+          name: "Staging cap",
+          max_budget: 250,
+          current_spend: 180,
+          reserved_spend: 20,
+        }),
+      ],
+      named,
+    )
+    expect(result.status).toBe("warn")
+    expect(result.worst).toEqual({
+      name: "Staging cap",
+      spent: 200,
+      allocated: 250,
+      pct: 0.8,
+    })
+  })
+
+  it("counts a ceiling the organization may not edit", () => {
+    // `manageable` is descriptive, never a permission: the row is enforcing
+    // against this organization whoever set its figure, so it is judged.
+    const result = spendCeilingHealth(
+      [
+        organizationSpendCeiling({
+          name: "Deployment cap",
+          manageable: false,
+          max_budget: 100,
+          current_spend: 150,
+        }),
+      ],
+      named,
+    )
+    expect(result.status).toBe("alert")
+    expect(result.overCount).toBe(1)
+    expect(result.worst?.name).toBe("Deployment cap")
+  })
+
+  it("picks the worst-off ceiling", () => {
+    const result = spendCeilingHealth(
+      [
+        organizationSpendCeiling({
+          id: "a",
+          max_budget: 100,
+          current_spend: 10,
+        }),
+        organizationSpendCeiling({
+          id: "b",
+          name: "tightest",
+          max_budget: 100,
+          current_spend: 90,
+        }),
+      ],
+      named,
+    )
+    expect(result.worst?.name).toBe("tightest")
+    expect(result.nearCount).toBe(1)
   })
 })

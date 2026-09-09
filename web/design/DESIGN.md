@@ -125,23 +125,23 @@ not already in its list, naming what to use instead.
 
 | Do not use | Use instead | Still in |
 | --- | --- | --- |
-| `deprecated/PageHeader` | `layout/PageIntro` | 4 pages, one use each |
-| `deprecated/StatCard` | `metrics/KpiStrip` + `KpiCell` | Overview only, 4 uses |
+| `deprecated/PageHeader` | `layout/PageIntro` | 3 pages, one use each |
+| `deprecated/StatCard` | `metrics/KpiStrip` + `KpiCell` | **nothing. Dead code** |
 | `deprecated/RowActions` | `actions/RowActionRow` | 1 use, in `PasskeysCard` |
 | `deprecated/SettingsSection` | `layout/SettingsGroup` | **nothing. Dead code** |
 | HeroUI `Card` | `Section`, or a bare band | 6 components |
 
 The gate derives **which files** import each one, so a row naming a page that no
-longer reaches for it fails. It does not count usages, so the "one use each" and
-"4 uses" figures are prose and can drift the way the previous two did (`StatCard`
+longer reaches for it fails. It does not count usages, so the "one use each"
+figures are prose and can drift the way the previous two did (`StatCard`
 was listed on Usage after Usage stopped using it, and `RowActions` on two call
 sites when it had one). Check them against the tree rather than against this
 table.
 
-`SettingsSection` is the row to act on: it has no call site anywhere, and it
-shadowed `layout/SettingsGroup` while diverging from this tree's
-`export function` convention. It is a deletion waiting for a maintainer rather
-than a migration.
+`SettingsSection` and `StatCard` are the rows to act on: neither has a call
+site anywhere. `SettingsSection` also shadowed `layout/SettingsGroup` while
+diverging from this tree's `export function` convention. Both are deletions
+waiting for a maintainer rather than migrations.
 
 HeroUI `Card` is the one row with no module of ours behind it, so it stays a
 review note rather than a gate.

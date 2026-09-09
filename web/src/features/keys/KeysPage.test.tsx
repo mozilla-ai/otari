@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ApiKey, DeploymentBootstrap, User } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationMember } from "@/tests/fixtures"
+import { apiKey, bootstrap, organizationMember } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { pickOption } from "@/tests/select"
 
@@ -30,27 +30,6 @@ function user(overrides: Partial<User> = {}): User {
     blocked: false,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
-    metadata: {},
-    ...overrides,
-  }
-}
-
-function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
-  return {
-    capture_agent_telemetry: null,
-    id: "key-1",
-    // NOT NULL on the server: a key always belongs to exactly one workspace.
-    workspace_id: "11111111-1111-1111-1111-111111111111",
-    key_prefix: "gw-AbC3dE",
-    key_name: "ci-bot",
-    user_id: "alice",
-    created_at: "2026-01-01T00:00:00+00:00",
-    last_used_at: null,
-    expires_at: null,
-    is_active: true,
-    allowed_models: null,
-    exclude_from_budget: false,
-    reject_user_mismatch: null,
     metadata: {},
     ...overrides,
   }

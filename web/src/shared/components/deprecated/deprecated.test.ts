@@ -42,7 +42,6 @@ const REPLACEMENT: Record<string, string> = {
  */
 const KNOWN: Record<string, readonly string[]> = {
   "features/budgets/OrganizationBudgetsPage.tsx": ["PageHeader"],
-  "features/overview/OverviewPage.tsx": ["PageHeader", "StatCard"],
   "features/tools/McpServersPage.tsx": ["PageHeader"],
   "features/workspaces/WorkspaceMembersPage.tsx": ["PageHeader"],
   "features/account/PasskeysCard.tsx": ["RowActions"],

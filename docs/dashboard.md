@@ -104,6 +104,12 @@ manages every key in the organization and chooses each key's owner, while a
 member sees the same page scoped to their own keys, always billed to themselves
 and never budget-exempt.
 
+Overview splits the same way. Everyone lands on their own spend, traffic and
+recent requests. An organization owner or admin also gets a budget-health
+figure, read from the spend ceilings holding their organization, while a
+deployment operator gets provider health and the deployment's own budgets
+instead.
+
 ## Observability
 
 Activity is the per-request log. Usage provides aggregates and time series.
