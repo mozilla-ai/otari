@@ -213,6 +213,24 @@ describe("OrganizationAlertsPage", () => {
     expect(await screen.findByText("Test failed")).toBeInTheDocument()
   })
 
+  it("says so when the test request itself fails, rather than going silent", async () => {
+    // The state a chip keyed on isSuccess alone renders nothing for: the
+    // operator presses the button, the spinner clears, and nothing appears.
+    // Distinct from a refused delivery, because the fix is different.
+    mockApi({
+      rules: [alertRule()],
+      test: () => new Response("nope", { status: 503 }),
+    })
+    renderPage(<OrganizationAlertsPage />)
+
+    await screen.findByText("Platform team Slack")
+    await userEvent.click(screen.getByRole("button", { name: "Send test" }))
+
+    expect(await screen.findByText(/Couldn't send test/)).toBeInTheDocument()
+    expect(screen.queryByText("Test delivered")).not.toBeInTheDocument()
+    expect(screen.queryByText("Test failed")).not.toBeInTheDocument()
+  })
+
   it("tells a plain member they may not manage alerts, and offers no controls", async () => {
     mockApi({
       rules: [],

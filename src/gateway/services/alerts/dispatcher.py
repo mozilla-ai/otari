@@ -37,10 +37,23 @@ import apprise
 
 from gateway.log_config import logger
 
-# One send's ceiling, covering Apprise's own connect, read and internal retry.
-# A destination that has gone away must not hold an executor thread for the
-# length of a TCP timeout on every tick.
+# How long this coroutine waits for a send before giving up on it.
 SEND_TIMEOUT_SECONDS: Final = 15.0
+
+# The socket bounds that make the number above mean something.
+#
+# ``asyncio.wait_for`` cancels the *await*, not the work: ``async_notify`` runs
+# each plugin's blocking ``requests`` call through ``run_in_executor``, and a
+# thread already inside a socket read cannot be cancelled. So the timeout alone
+# stops this coroutine waiting while leaving the thread occupied, and the thing
+# that actually bounds the thread is the socket timeout the plugin uses.
+#
+# Apprise defaults both to 4 seconds, but they are per-plugin values an operator
+# can raise from the destination URL itself (``?cto=600&rto=600``), which would
+# park a shared executor thread for ten minutes per tick. :func:`_bound_sockets`
+# clamps them instead of trusting the URL.
+SOCKET_CONNECT_TIMEOUT_SECONDS: Final = 5.0
+SOCKET_READ_TIMEOUT_SECONDS: Final = 10.0
 
 # Explicit rather than inherited: see the module docstring. ``secure_logging``
 # is what keeps a bot token out of Apprise's own log records.
@@ -95,6 +108,40 @@ def parse_destination(destination: str) -> str:
     return str(service_name) if service_name else "Unknown"
 
 
+def _bound_sockets(client: apprise.Apprise) -> None:
+    """Clamp every loaded plugin's socket timeouts to this module's ceilings.
+
+    Set on the plugin objects rather than appended to the URL as ``?cto=&rto=``,
+    which is what an Apprise reader would reach for first: a destination can
+    already carry a query string and a fragment (``slack://tok/#channel``), so
+    concatenating parameters onto an operator's URL risks corrupting a
+    destination that worked. The attributes are ``URLBase``'s own and are what
+    ``cto``/``rto`` set anyway.
+
+    Clamped, not overwritten, so an operator who asked for a *shorter* timeout
+    keeps it and only an unreasonably long one is brought down.
+
+    The bound is per socket operation rather than per send: Apprise may retry a
+    plugin, so the guarantee here is that no single operation parks a thread
+    indefinitely, not that a send finishes within
+    :data:`SEND_TIMEOUT_SECONDS`. Closing the remaining gap would mean owning
+    Apprise's retry loop, which is not worth the coupling.
+
+    Defensive about the attributes existing: they come from ``URLBase``, so
+    every built-in plugin has them, but an entry loaded from a custom plugin
+    path need not, and a missing one must not turn one bad rule into a failed
+    pass.
+    """
+    for server in client:
+        for attribute, ceiling in (
+            ("socket_connect_timeout", SOCKET_CONNECT_TIMEOUT_SECONDS),
+            ("socket_read_timeout", SOCKET_READ_TIMEOUT_SECONDS),
+        ):
+            current = getattr(server, attribute, None)
+            if isinstance(current, int | float) and current > ceiling:
+                setattr(server, attribute, ceiling)
+
+
 async def send_alert(destination: str, *, title: str, body: str) -> AlertDispatchResult:
     """Deliver one alert, reporting failure rather than raising it.
 
@@ -110,6 +157,7 @@ async def send_alert(destination: str, *, title: str, body: str) -> AlertDispatc
         client = apprise.Apprise(asset=_ASSET)
         if not client.add(destination):
             return AlertDispatchResult(delivered=False, detail="Apprise rejected the destination URL")
+        _bound_sockets(client)
         sent = await asyncio.wait_for(
             client.async_notify(body=body, title=title),
             timeout=SEND_TIMEOUT_SECONDS,

@@ -126,7 +126,7 @@ A destination is an [Apprise](https://github.com/caronc/apprise) URL, which is
 what makes Slack, Discord, PagerDuty, Telegram, email and a plain webhook one
 field rather than one integration each:
 
-```
+```text
 slack://token/channel
 discord://webhook_id/webhook_token
 pagerduty://integration_key@api_key
@@ -156,10 +156,11 @@ Three things are worth knowing before relying on it:
   by default; `0` turns alerting off deployment-wide while leaving the rules in
   place). An alert therefore arrives within about a minute of a crossing rather
   than instantly.
-- A webhook-shaped destination (the `json`, `xml` and `form` schemas) is
-  refused if it resolves to a private, loopback or reserved address. Set
-  `alert_allow_private_hosts` to alert an internal receiver on the deployment's
-  own network. Vendor schemas post to their own endpoints and are unaffected.
+- A webhook-shaped destination (`json`, `jsons`, `xml`, `xmls`, `form` or
+  `forms`) is refused if it resolves to a private, loopback or reserved
+  address. Set `alert_allow_private_hosts` to alert an internal receiver on the
+  deployment's own network. Vendor schemas post to their own endpoints and are
+  unaffected.
 
 Budgets with no owning organization are the deployment's own and are not covered
 by these rules.

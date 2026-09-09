@@ -112,8 +112,7 @@ class AlertRuleCreate(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)] = Field(
         description="How this rule is identified in the dashboard and in the alert body, unique per organization",
     )
-    destination: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(
-        max_length=4096,
+    destination: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)] = Field(
         description=(
             "Apprise destination URL, for example slack://token/channel, "
             "discord://webhook_id/webhook_token, pagerduty://key@apikey, or json://host/path for a "
@@ -174,9 +173,15 @@ class AlertRuleUpdate(BaseModel):
     name: (
         Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)] | SkipJsonSchema[None]
     ) = None
-    destination: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | SkipJsonSchema[None] = Field(
-        default=None, max_length=4096
-    )
+    # ``max_length`` lives in ``StringConstraints`` rather than on ``Field``: on
+    # an optional union a ``Field(max_length=...)`` is applied to the whole
+    # union, and pydantic then raises ``TypeError: Unable to apply constraint
+    # 'max_length' to supplied value None`` instead of a ``ValidationError``, so
+    # an explicit null reached the caller as a 500 rather than a 422.
+    destination: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
+        | SkipJsonSchema[None]
+    ) = None
     warn_at_percent: int | None = Field(default=None, gt=0, lt=100)
     notify_on_exceeded: bool | SkipJsonSchema[None] = None
     enabled: bool | SkipJsonSchema[None] = None

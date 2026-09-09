@@ -10,13 +10,17 @@ and query would return a live bot token to anybody who can read the rule list.
 """
 
 import asyncio
+from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
 
 from gateway.services.alerts.dispatcher import (
     SEND_TIMEOUT_SECONDS,
+    SOCKET_CONNECT_TIMEOUT_SECONDS,
+    SOCKET_READ_TIMEOUT_SECONDS,
     UnsupportedAlertDestinationError,
+    _bound_sockets,
     parse_destination,
     send_alert,
 )
@@ -224,6 +228,47 @@ async def test_send_alert_reraises_cancellation(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("apprise.Apprise.async_notify", _cancelled)
     with pytest.raises(asyncio.CancelledError):
         await send_alert("json://example.com/hook", title="t", body="b")
+
+
+def test_socket_timeouts_are_clamped_down_from_a_greedy_url() -> None:
+    """An operator's ``?cto=&rto=`` must not park a shared executor thread.
+
+    ``asyncio.wait_for`` cannot cancel a thread already inside a socket read, so
+    the URL's own timeouts are the real bound on thread occupancy.
+    """
+    import apprise
+
+    client = apprise.Apprise()
+    assert client.add("json://example.com/hook?cto=600&rto=900")
+    _bound_sockets(client)
+    for server in client:
+        assert server.socket_connect_timeout == SOCKET_CONNECT_TIMEOUT_SECONDS
+        assert server.socket_read_timeout == SOCKET_READ_TIMEOUT_SECONDS
+
+
+def test_a_shorter_socket_timeout_is_left_alone() -> None:
+    """Clamped, not overwritten: an operator asking for less keeps it."""
+    import apprise
+
+    client = apprise.Apprise()
+    assert client.add("json://example.com/hook?cto=1&rto=2")
+    _bound_sockets(client)
+    for server in client:
+        assert server.socket_connect_timeout == 1.0
+        assert server.socket_read_timeout == 2.0
+
+
+def test_bounding_sockets_survives_a_plugin_without_the_attributes() -> None:
+    """A custom plugin need not derive the timeouts; one must not fail the pass."""
+
+    class _Bare:
+        pass
+
+    class _FakeClient:
+        def __iter__(self) -> Iterator[object]:
+            return iter([_Bare()])
+
+    _bound_sockets(_FakeClient())  # type: ignore[arg-type]
 
 
 def test_send_timeout_is_a_sane_bound() -> None:

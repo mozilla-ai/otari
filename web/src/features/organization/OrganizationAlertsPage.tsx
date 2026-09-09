@@ -178,6 +178,20 @@ function RuleForm({ onClose }: { onClose: () => void }) {
  * Per-row state rather than page state: two rows tested in a row must not show
  * each other's result, and the mutation is deliberately not invalidating the
  * list (a test writes nothing), so there is no refetch to hang the answer off.
+ *
+ * Three outcomes rather than two, and the third is the one that matters. If the
+ * request itself fails (a network error, a 403, a 5xx) then `isSuccess` is
+ * false, `data` is undefined, and a chip keyed on success alone renders nothing
+ * once the spinner clears: the operator presses the button and gets silence,
+ * which is exactly the state this button exists to rule out. The page-level
+ * `ErrorBanner` does not cover it either, because this mutation belongs to one
+ * row rather than to the page.
+ *
+ * "Test failed" and "Couldn't send test" are kept apart on purpose. The first
+ * means the gateway reached the destination and the destination refused, which
+ * is a bad Apprise URL. The second means the gateway never got that far, which
+ * is a session, network or server problem. They need different fixes, so
+ * collapsing them into one label would hide the difference.
  */
 function TestRuleButton({ rule }: { rule: AlertRule }) {
   const test = useTestAlertRule()
@@ -185,7 +199,11 @@ function TestRuleButton({ rule }: { rule: AlertRule }) {
 
   return (
     <div className="flex items-center justify-end gap-1.5">
-      {test.isSuccess ? (
+      {test.isError ? (
+        <Chip size="sm" color="danger">
+          Couldn't send test
+        </Chip>
+      ) : test.isSuccess ? (
         <Chip size="sm" color={result?.delivered ? "accent" : "warning"}>
           {result?.delivered ? "Test delivered" : "Test failed"}
         </Chip>

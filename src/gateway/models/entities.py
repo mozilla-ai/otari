@@ -1910,7 +1910,16 @@ class AlertRule(Base):
     # Percent of the cap at which a warning fires, or NULL for no warning. The
     # useful half of this feature: a refusal is already too late to act on,
     # where 80 percent is a number somebody can still do something about.
-    warn_at_percent: Mapped[int | None] = mapped_column(default=80)
+    #
+    # **No column default, deliberately.** A scalar ``default=80`` here fires
+    # whenever the attribute is None at INSERT, and SQLAlchemy cannot tell an
+    # explicit ``None`` from an omission, so it silently overwrote the one value
+    # a caller most needs to be able to send: ``warn_at_percent: null`` means
+    # "no early warning, alert only on refusal", and it was being stored as 80,
+    # handing an operator the warnings they had just declined. The default
+    # belongs to the request schema (``AlertRuleCreate``), which is the layer
+    # that can distinguish "not sent" from "sent as null".
+    warn_at_percent: Mapped[int | None] = mapped_column(default=None)
     # Whether reaching the cap itself fires. Separable from the warning because
     # a deployment that routes refusals through its own error monitoring wants
     # the warning and not the duplicate.

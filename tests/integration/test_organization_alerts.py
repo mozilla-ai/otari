@@ -10,12 +10,15 @@ Webhook destinations here use IP literals in public ranges, or are rejected
 before any lookup happens. ``validate_alert_destination_url`` resolves a
 hostname through DNS, so a test naming one would pass or fail on whether the
 runner has egress.
+
+The pure request-body validation cases live in
+``tests/unit/test_alert_rule_schemas.py`` instead: they need no database, and
+keeping them here made them unrunnable on a machine without Docker.
 """
 
 from collections.abc import Iterator
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -347,15 +350,23 @@ async def test_a_null_warn_threshold_clears_the_warning(async_db: AsyncSession) 
     assert updated.notify_on_exceeded is True
 
 
-async def test_a_rule_that_could_never_fire_is_refused_at_create() -> None:
-    """No warning and no exceeded alert is storable and meaningless."""
-    with pytest.raises(ValidationError):
-        AlertRuleCreate(
-            name="Inert",
-            destination=SLACK_DESTINATION,
-            warn_at_percent=None,
-            notify_on_exceeded=False,
-        )
+async def test_a_rule_created_with_no_warning_keeps_it_null(async_db: AsyncSession) -> None:
+    """The service must store an explicit null rather than the schema's 80.
+
+    The end-to-end form of the bug ``warn_at_percent``'s model comment
+    describes: a column default fired on the explicit None and handed the
+    operator the early warnings they had just declined.
+    ``tests/unit/test_alert_rule_schemas.py`` guards the column itself.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationAlertService(async_db)
+
+    created = await service.create_rule(user=owner, request=_create(warn_at_percent=None))
+    assert created.warn_at_percent is None
+
+    row = (await async_db.execute(select(AlertRule).where(AlertRule.id == created.id))).scalar_one()
+    assert row.warn_at_percent is None
 
 
 async def test_a_patch_cannot_reach_the_inert_state_either(async_db: AsyncSession) -> None:
@@ -373,17 +384,3 @@ async def test_a_patch_cannot_reach_the_inert_state_either(async_db: AsyncSessio
         await service.update_rule(
             user=owner, rule_id=created.id, request=AlertRuleUpdate(notify_on_exceeded=False)
         )
-
-
-@pytest.mark.parametrize("field", ["name", "destination", "notify_on_exceeded", "enabled"])
-async def test_an_explicit_null_is_refused_for_a_not_null_column(field: str) -> None:
-    """Caught in the schema so a NOT NULL violation is never reported as a name collision."""
-    with pytest.raises(ValidationError):
-        AlertRuleUpdate.model_validate({field: None})
-
-
-@pytest.mark.parametrize("percent", [0, 100, 101, -1])
-async def test_the_warn_threshold_stays_inside_its_range(percent: int) -> None:
-    """0 and 100 are both meaningless: one always fires, the other is the refusal."""
-    with pytest.raises(ValidationError):
-        AlertRuleCreate(name="Bad", destination=SLACK_DESTINATION, warn_at_percent=percent)
