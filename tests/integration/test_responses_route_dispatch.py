@@ -480,7 +480,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",
@@ -843,16 +843,8 @@ def test_stream_context_management_and_compaction_events_pass_through(
 
     assert resp.status_code == 200, resp.text
     assert captured["context_management"] == context_management
-    payloads = [
-        json.loads(line.removeprefix("data: "))
-        for line in resp.iter_lines()
-        if line.startswith("data: {")
-    ]
-    compactions = [
-        payload
-        for payload in payloads
-        if payload.get("item", {}).get("type") == "compaction"
-    ]
+    payloads = [json.loads(line.removeprefix("data: ")) for line in resp.iter_lines() if line.startswith("data: {")]
+    compactions = [payload for payload in payloads if payload.get("item", {}).get("type") == "compaction"]
     assert [payload["type"] for payload in compactions] == [
         "response.output_item.added",
         "response.output_item.done",

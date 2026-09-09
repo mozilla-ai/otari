@@ -1632,7 +1632,7 @@ def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
         if url.endswith("/gateway/provider-keys/resolve"):
             return _two_attempt_resolve_response(request_id="ws-cap-req")
         if url.endswith("/gateway/web-search/resolve"):
-            return httpx.Response(200, json={"enabled": True})
+            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"]})
         return httpx.Response(204)
 
     calls: list[str] = []
@@ -1692,7 +1692,7 @@ def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
         return _stream()
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _CappedSearchBackend)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _CappedSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
@@ -1915,7 +1915,7 @@ def test_hybrid_mode_web_access_contract_matrix(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],

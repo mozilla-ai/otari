@@ -335,9 +335,7 @@ describe("WorkspaceWebSearchCard", () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/^Search only\. Lowers/)).toBeInTheDocument()
     expect(screen.getByText(/^Search only\. Used/)).toBeInTheDocument()
-    expect(
-      screen.getByText(/redirected Fetch destinations/),
-    ).toBeInTheDocument()
+    expect(screen.getAllByText(/redirected Fetch destinations/)).toHaveLength(2)
   })
 
   it("does not read the row at all for a member who cannot manage the workspace", async () => {
