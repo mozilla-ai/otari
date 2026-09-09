@@ -33,8 +33,10 @@ export type TelemetryProperties = Readonly<
  * Part of the seam rather than an assumption inside it. Consent is what gates
  * every call in the platform's working implementation, and a seam that did not
  * carry it would leave the base able to hand an identity to a tracker that had
- * no permission to hold one. `"unknown"` is "nothing decided", which is what a
- * build with no consent UI answers and is not a synonym for `"granted"`.
+ * no permission to hold one. `"unknown"` is "nothing decided", and it is what a
+ * build with no Mixpanel key answers: absence of a tracker, not a refusal.
+ * A build with a key answers `"granted"`, because this dashboard has no consent
+ * UI and `VITE_MIXPANEL_TOKEN` is the deployment's opt-in standing in for one.
  */
 export type TelemetryConsent = "granted" | "denied" | "unknown"
 
@@ -70,10 +72,11 @@ export interface TelemetryIdentity {
  * `identify` and not for `recordEvent`, and the split is deliberate rather than
  * an oversight: an identity is the one call that hands a tracker something
  * durable about a person, so `TelemetryIdentity` withholds it here, while every
- * `recordEvent` call site fires unconditionally and a replacement owns that
- * gate. That is where the platform's own gate lives (`trackEvent` in
- * `otari-ai/frontend/src/shared/helpers/mixpanel.ts` checks `hasConsent`
- * itself), and it is why `consent` is on this interface at all: an
+ * `recordEvent` call site fires unconditionally and whichever module implements
+ * this interface owns that gate. `createMixpanelTelemetry` is that module in
+ * this build and makes the check itself, which is where the platform's own gate
+ * lives too (`trackEvent` in `otari-ai/frontend/src/shared/helpers/mixpanel.ts`
+ * checks `hasConsent`). It is why `consent` is on this interface at all: an
  * implementation cannot gate what it is never told.
  */
 export interface Telemetry {

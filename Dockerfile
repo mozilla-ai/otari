@@ -27,6 +27,12 @@ COPY web ./
 # it from outside web/. .dockerignore excludes docs/ but re-includes this file.
 COPY docs/dashboard.md /app/docs/dashboard.md
 
+# Optional. Vite inlines VITE_* at build time. Unset is the OSS default, and it
+# builds a dashboard that neither bundles nor loads Mixpanel. Pass the project
+# token only when building a deployment that should record into Mixpanel.
+ARG VITE_MIXPANEL_TOKEN
+ENV VITE_MIXPANEL_TOKEN=$VITE_MIXPANEL_TOKEN
+
 # web/vite.config.ts writes to ../src/gateway/static/dashboard, so the bundle
 # lands at /app/src/gateway/static/dashboard for the runtime stage to copy.
 RUN pnpm run build

@@ -17,13 +17,13 @@ import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
  * **Withheld until consent is stored.** The identity is the one call that hands
  * a tracker something durable about a person, so this refuses to make it on an
  * undecided browser rather than leaving that decision to whichever module the
- * build resolved the seam to. The base build answers `"unknown"` and always
- * will, so nothing is sent here; a replacement that stores a decision is what
- * turns this on, and flipping that decision re-runs this effect. This is
- * `otari-ai/frontend/src/app/AnalyticsIdentity.tsx`'s gate, kept on the base
- * side of the seam. Withdrawing a decision is the other half of it and forgets
- * an identity already sent, which is the case a gate written only as an early
- * return would miss.
+ * build resolved the seam to. A build with no Mixpanel key answers `"unknown"`,
+ * so nothing is sent there; a key, or a replacement that stores a real
+ * decision, is what turns this on, and flipping that answer re-runs this
+ * effect. This is `otari-ai/frontend/src/app/AnalyticsIdentity.tsx`'s gate,
+ * kept on the base side of the seam. Withdrawing a decision is the other half
+ * of it and forgets an identity already sent, which is the case a gate written
+ * only as an early return would miss.
  *
  * The fields are read out before the effect rather than assembled into an
  * object in the render body, so the effect's dependencies are the values
