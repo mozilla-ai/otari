@@ -34,14 +34,9 @@ updates:
           - "minor"
           - "patch"
 
-  # Dashboard dependencies. pnpm lives under the "npm" ecosystem, and the
-  # directory is where package.json and pnpm-lock.yaml sit, not the repo root.
-  - package-ecosystem: "npm"
-    directory: "/web"
-    schedule:
-      interval: "weekly"
-    groups:
-      dashboard-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
+  # No entry for the dashboard, deliberately. pnpm belongs to the "npm"
+  # ecosystem, but Dependabot documents pnpm support only through v10 and
+  # web/package.json requires pnpm 11.25.0, so an entry here would target a
+  # lockfile format it cannot resolve. Revisit when the supported-ecosystems
+  # table lists pnpm 11; until then web/ dependencies move by hand or through a
+  # tool that supports pnpm 11 (Renovate does).

@@ -56,9 +56,10 @@ Most dependencies are floored (`>=`) rather than pinned, and `uv.lock` is commit
 because CI and the Docker image both install from it with `--frozen`. Two mechanisms
 keep it current, and they cover different things:
 
-- **Dependabot** (`.github/dependabot.yml`) opens weekly PRs for the `uv`, `npm`
-  (in `web/`), and `github-actions` ecosystems. It acts on a changed constraint or a
-  security advisory.
+- **Dependabot** (`.github/dependabot.yml`) opens weekly PRs for the `uv` and
+  `github-actions` ecosystems. It acts on a changed constraint or a security
+  advisory. The dashboard is not covered: Dependabot documents pnpm support only
+  through v10 and `web/` requires pnpm 11, so `web/` dependencies move by hand.
 - **`.github/workflows/otari-lock-refresh.yml`** re-resolves `uv.lock` weekly against
   the newest versions the existing constraints already allow, which is the case
   Dependabot does not open PRs for. A floored dependency can otherwise stay at
