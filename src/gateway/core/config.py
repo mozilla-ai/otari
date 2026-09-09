@@ -111,6 +111,7 @@ ENV_BRIDGED_FIELDS = (
     "mcp_allow_loopback",
     "mcp_allow_private_hosts",
     "provider_allow_private_hosts",
+    "alert_allow_private_hosts",
 )
 
 
@@ -839,6 +840,15 @@ class GatewayConfig(BaseSettings):
             "concurrent request past a cap the in-flight one is already spending against."
         ),
     )
+    alert_evaluation_interval_sec: int = Field(
+        default=60,
+        ge=0,
+        description=(
+            "How often to check the organization budget ceilings against their alert rules' "
+            "thresholds and send what has crossed one. 0 disables alert evaluation entirely, "
+            "leaving configured rules in place and sending nothing. Standalone mode only."
+        ),
+    )
     budget_reservation_sweep_interval_sec: int = Field(
         default=300,
         ge=0,
@@ -1174,6 +1184,16 @@ class GatewayConfig(BaseSettings):
         description=(
             "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
             "hostnames that fail to resolve at validation time. Off by default."
+        ),
+    )
+    alert_allow_private_hosts: bool = Field(
+        default=False,
+        description=(
+            "SSRF gate: allow a webhook-style alert destination (the json/jsons/xml/xmls/form/forms "
+            "Apprise schemas) that resolves to a private/loopback/reserved host. Off by default. "
+            "Enable it to alert an internal chat server or webhook receiver on the deployment's own "
+            "network. Vendor schemas with fixed endpoints (slack, discord, pagerduty and the rest) "
+            "are unaffected either way. Also settable via OTARI_ALERT_ALLOW_PRIVATE_HOSTS."
         ),
     )
     provider_allow_private_hosts: bool = Field(

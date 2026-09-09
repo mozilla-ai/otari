@@ -176,15 +176,20 @@ describe("DocsPage code blocks", () => {
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull()
   })
 
-  it("renders the guide's one fence with the block treatment", () => {
-    // The guide carries exactly one fence outside the dropped walkthrough (a
-    // `bash` block for `otari gen-secret-key`), which is what puts the label
-    // row and copy control on this page. Pinned at one rather than at zero, so
-    // a second fence appearing still says so.
+  it("renders every fence in the guide with the block treatment", () => {
+    // The guide carries two fences outside the dropped walkthrough: a `bash`
+    // block for `otari gen-secret-key`, and the alert-destination URL examples
+    // under Budget alerts. Both are what put the label row and copy control on
+    // this page. Pinned at a count rather than at zero, so a fence appearing or
+    // disappearing still says so, and the label count is asserted against the
+    // block count rather than separately, so a fence that rendered without its
+    // label row would fail here too.
     const { container } = render(<DocsPage />)
     const blocks = container.querySelectorAll("pre")
-    expect(blocks).toHaveLength(1)
-    expect(container.querySelectorAll(".otari-code-label")).toHaveLength(1)
+    expect(blocks).toHaveLength(2)
+    expect(container.querySelectorAll(".otari-code-label")).toHaveLength(
+      blocks.length,
+    )
     expect(container.querySelectorAll("code").length).toBeGreaterThan(0)
   })
 })

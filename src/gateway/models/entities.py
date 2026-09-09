@@ -1858,6 +1858,148 @@ class WorkspaceWebSearchConfig(Base):
     )
 
 
+class AlertRule(Base):
+    """Where an organization wants to be told about its budgets, and when.
+
+    One row is one destination plus the thresholds that reach it. The
+    destination is an `Apprise <https://github.com/caronc/apprise>`_ URL, which
+    is what keeps this table one column wide instead of one column per vendor:
+    ``slack://``, ``discord://``, ``pagerduty://``, ``mailto://`` and a plain
+    ``json://`` webhook are all the same string, and adding a destination Otari
+    has never heard of needs no migration and no code.
+
+    **Organization-scoped, so a tenant is told about its own budgets.** The
+    ceilings a rule watches are the ``scoped_budgets`` rows whose ``budgets``
+    row carries this ``organization_id``. A budget with a NULL
+    ``organization_id`` is therefore never alerted on, which is not an
+    oversight: ``entities.Budget`` records that NULL means the deployment's own
+    and that the organization-scoped surface never lists, offers or repoints
+    one, so from a tenant's side it does not exist. Deployment-wide rules for
+    those are the operator's plane and are deliberately not in this table yet;
+    ``alert_deliveries`` keys on ``alert_rule_id``, so adding them later needs
+    no change to the dedupe shape.
+
+    The URL is a credential. A ``slack://`` URL embeds a bot token and a
+    ``json://`` one can embed basic-auth, so it is encrypted at rest with
+    ``OTARI_SECRET_KEY`` and never returned over the API, the same convention
+    ``ProviderCredential`` and ``OrganizationGuardrail`` use. The API returns
+    ``redact_url_secrets`` output instead, which keeps the scheme and host a
+    reader needs to recognize the row without echoing the secret in it.
+    """
+
+    __tablename__ = "alert_rules"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_alert_rules_org_name"),
+        CheckConstraint(
+            "warn_at_percent IS NULL OR (warn_at_percent > 0 AND warn_at_percent < 100)",
+            name="ck_alert_rules_warn_percent_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(nullable=False)
+    encrypted_destination: Mapped[str] = mapped_column(Text, nullable=False)
+    # Kept in the clear beside the ciphertext so the list endpoint and the
+    # evaluator's log lines can name the destination without holding the secret
+    # key. `redact_url_secrets` output, so it carries scheme and host and no
+    # userinfo, token or query string.
+    redacted_destination: Mapped[str] = mapped_column(nullable=False)
+    # Percent of the cap at which a warning fires, or NULL for no warning. The
+    # useful half of this feature: a refusal is already too late to act on,
+    # where 80 percent is a number somebody can still do something about.
+    warn_at_percent: Mapped[int | None] = mapped_column(default=80)
+    # Whether reaching the cap itself fires. Separable from the warning because
+    # a deployment that routes refusals through its own error monitoring wants
+    # the warning and not the duplicate.
+    notify_on_exceeded: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The organization's kill switch, matching `OrganizationGuardrail.enabled`:
+    # stop the alerts without losing the destination it took to set up.
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class AlertDelivery(Base):
+    """One alert that has already been sent, so it is not sent again.
+
+    **This table is the load-bearing part of the feature, and the unique
+    constraint is the mechanism.** Two separate duplicate sources collapse into
+    one answer here. A threshold stays crossed for the rest of the budget
+    period, so an evaluator that only compared spend against the cap would
+    re-alert on every tick; and every refresher in ``gateway.main`` runs once
+    per worker, so N workers would each send the same alert at the same time.
+    Both are settled by inserting this row *before* dispatching and treating an
+    ``IntegrityError`` as "somebody already did it": the database is the only
+    thing all the workers agree on. No advisory lock and no leader election,
+    matching ``services/budget_reservation_ledger.py``'s no-row-locks stance.
+
+    ``period_start`` is copied off the ``scoped_budgets`` row rather than
+    referenced, which is what re-arms an alert after a budget resets: a new
+    period is a different key, so the next crossing inserts rather than
+    colliding, and nothing has to go back and clear this table. It also means a
+    row here outlives the period it describes, which is why
+    ``purge_delivered_before`` exists.
+
+    Nullable ``period_start`` is a budget with no period at all (neither
+    ``budget_duration_sec`` nor ``reset_alignment``), whose ceiling never rolls.
+    NULL in a unique constraint does not collide on PostgreSQL, so those rows
+    are deduped by the partial index below instead of by the constraint.
+    """
+
+    __tablename__ = "alert_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "alert_rule_id",
+            "scoped_budget_id",
+            "period_start",
+            "kind",
+            name="uq_alert_deliveries_rule_budget_period_kind",
+        ),
+        # The periodless case the class docstring describes. PostgreSQL treats
+        # two NULL ``period_start`` values as distinct, so the constraint above
+        # would let a never-rolling ceiling alert once per tick forever.
+        Index(
+            "uq_alert_deliveries_rule_budget_kind_no_period",
+            "alert_rule_id",
+            "scoped_budget_id",
+            "kind",
+            unique=True,
+            sqlite_where=text("period_start IS NULL"),
+            postgresql_where=text("period_start IS NULL"),
+        ),
+        # The evaluator asks "which of these ceilings have I already alerted
+        # on", so the lookup is by rule and period, not by id.
+        Index("ix_alert_deliveries_rule_period", "alert_rule_id", "period_start"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    alert_rule_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("alert_rules.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Not a foreign key, matching ``scoped_budgets``' own columns: that table
+    # declares none because the rows its scopes name live in four tables and a
+    # provider instance may be configured in ``config.yml`` with no row at all.
+    # A ceiling that is deleted leaves its delivery rows to ``purge_delivered_before``.
+    scoped_budget_id: Mapped[str] = mapped_column(nullable=False)
+    # ``warning`` or ``exceeded``. A plain string rather than a database enum,
+    # for the reason ``ScopedBudget.scope_type`` is one: a third kind should not
+    # need an enum migration.
+    kind: Mapped[str] = mapped_column(nullable=False)
+    period_start: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # Whether the send itself succeeded. The row is claimed before dispatch, so
+    # a false here is an alert that was suppressed and never arrived, which is
+    # the state an operator debugging a silent destination needs to see.
+    delivered: Mapped[bool] = mapped_column(default=False, nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+
 class OrganizationGuardrail(Base):
     """A guardrail an organization runs over the requests of its workspaces.
 

@@ -233,6 +233,29 @@ async def async_db(postgres_url: str, clean_database: None) -> AsyncGenerator[As
         await async_engine.dispose()
 
 
+@pytest_asyncio.fixture
+async def async_session_factory(
+    postgres_url: str, clean_database: None
+) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+    """A factory for *independent* async sessions on the test database.
+
+    For a test that needs more than one session at a time, which ``async_db``
+    cannot give it: the concurrency behavior of anything settled by a unique
+    constraint (the ``alert_deliveries`` claim, say) is invisible inside one
+    session, because two coroutines sharing it serialize on the session rather
+    than on the database.
+
+    Deliberately not ``gateway.core.database.create_session``: that resolves the
+    process-global engine, which these tests never point at the per-worker test
+    database.
+    """
+    async_engine = create_async_engine(_to_async_url(postgres_url), pool_pre_ping=True)
+    try:
+        yield async_sessionmaker(async_engine, expire_on_commit=False)
+    finally:
+        await async_engine.dispose()
+
+
 @pytest.fixture
 def db_session(test_config: GatewayConfig) -> Generator[Session]:
     """Create a standalone DB session for verifying state outside the test client."""

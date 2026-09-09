@@ -1076,6 +1076,217 @@
         "title": "AgentTelemetryUsage",
         "type": "object"
       },
+      "AlertRuleCreate": {
+        "description": "Request body for a new alert rule.\n\n``destination`` is an Apprise URL. It is validated for parseability at this\nboundary rather than at send time, so an operator learns their URL is\nunusable while the form is still open instead of discovering it from an\nalert that never arrived.",
+        "example": {
+          "destination": "slack://xoxb-token/C0123456789",
+          "name": "Platform team Slack",
+          "notify_on_exceeded": true,
+          "warn_at_percent": 80
+        },
+        "properties": {
+          "destination": {
+            "description": "Apprise destination URL, for example slack://token/channel, discord://webhook_id/webhook_token, pagerduty://key@apikey, or json://host/path for a plain webhook. Encrypted at rest and never returned",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Destination",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "description": "False stops this rule sending without discarding it",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "How this rule is identified in the dashboard and in the alert body, unique per organization",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "notify_on_exceeded": {
+            "default": true,
+            "description": "Send an alert when a ceiling reaches a limit and starts refusing requests",
+            "title": "Notify On Exceeded",
+            "type": "boolean"
+          },
+          "warn_at_percent": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 100.0,
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 80,
+            "description": "Send a warning once a ceiling reaches this percent of any of its limits. Null sends no warning, leaving only the exceeded alert",
+            "title": "Warn At Percent"
+          }
+        },
+        "required": [
+          "name",
+          "destination"
+        ],
+        "title": "AlertRuleCreate",
+        "type": "object"
+      },
+      "AlertRulePublic": {
+        "description": "The API-facing shape. Carries the redacted destination, never the real one.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "destination": {
+            "title": "Destination",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notify_on_exceeded": {
+            "title": "Notify On Exceeded",
+            "type": "boolean"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "warn_at_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn At Percent"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "name",
+          "destination",
+          "warn_at_percent",
+          "notify_on_exceeded",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AlertRulePublic",
+        "type": "object"
+      },
+      "AlertRuleTestResult": {
+        "description": "The outcome of one on-demand send.\n\n``detail`` carries the dispatcher's reason on failure, which names what went\nwrong without naming the destination, since the caller already knows which\nrule they asked about.",
+        "properties": {
+          "delivered": {
+            "title": "Delivered",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "delivered"
+        ],
+        "title": "AlertRuleTestResult",
+        "type": "object"
+      },
+      "AlertRuleUpdate": {
+        "description": "Partial update. Only the fields the caller sets are applied.\n\n``destination`` has two states rather than three, unlike the credential\nfields on `organization_guardrail_service`: the column is NOT NULL, so there\nis nothing to clear it to. Omit it to keep the stored destination, send a\nvalue to replace it.\n\n``warn_at_percent`` is the opposite: an explicit ``null`` is meaningful\nthere and means \"stop warning, alert only on refusal\", so it is the one\nfield here where null is accepted as a value.",
+        "example": {
+          "enabled": false,
+          "warn_at_percent": 90
+        },
+        "properties": {
+          "destination": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Destination",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "notify_on_exceeded": {
+            "title": "Notify On Exceeded",
+            "type": "boolean"
+          },
+          "warn_at_percent": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 100.0,
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn At Percent"
+          }
+        },
+        "title": "AlertRuleUpdate",
+        "type": "object"
+      },
+      "AlertRulesPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AlertRulePublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "AlertRulesPublic",
+        "type": "object"
+      },
       "AliasRequest": {
         "description": "Request to create or update an alias.",
         "properties": {
@@ -18472,6 +18683,287 @@
         "summary": "Update Active Organization",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/alert-rules": {
+      "get": {
+        "description": "List where the caller's organization sends its budget alerts.\n\nOrganization owners and admins only. Each rule's destination is returned\nredacted to its scheme and host: an Apprise URL carries its credentials in\nthe path, so the stored value is never echoed back.",
+        "operationId": "list_alert_rules_v1_organizations_me_alert_rules_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRulesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Alert Rules",
+        "tags": [
+          "organization-alerts"
+        ]
+      },
+      "post": {
+        "description": "Send this organization's budget alerts somewhere. Organization owners and admins only.\n\n``destination`` is an Apprise URL, so one field covers Slack, Discord,\nPagerDuty, Telegram, mail and a plain JSON webhook. It is validated for\nparseability here, and a webhook-shaped destination is additionally checked\nagainst the same SSRF rules the MCP and web-search write paths apply.\n\n``warn_at_percent`` defaults to 80, which is the useful half of this\nfeature: a refusal is already too late to act on. Set it to null to alert\nonly when a ceiling starts refusing requests.",
+        "operationId": "create_alert_rule_v1_organizations_me_alert_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Alert Rule",
+        "tags": [
+          "organization-alerts"
+        ]
+      }
+    },
+    "/v1/organizations/me/alert-rules/{rule_id}": {
+      "delete": {
+        "description": "Discard a rule and its delivery history. Organization owners and admins only.\n\nUse ``enabled: false`` instead to stop the alerts while keeping the\ndestination. Deleting drops the record of what has already been sent, so a\nceiling that is still over its threshold alerts again once a rule is\nrecreated.",
+        "operationId": "delete_alert_rule_v1_organizations_me_alert_rules__rule_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Alert Rule",
+        "tags": [
+          "organization-alerts"
+        ]
+      },
+      "patch": {
+        "description": "Change a rule's name, destination, thresholds, or enabled flag.\n\nOrganization owners and admins only. Omitted fields are left as they are.\n``warn_at_percent`` is the one field where an explicit null is a value\nrather than an omission: it means stop warning and alert only on refusal.",
+        "operationId": "update_alert_rule_v1_organizations_me_alert_rules__rule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertRuleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Alert Rule",
+        "tags": [
+          "organization-alerts"
+        ]
+      }
+    },
+    "/v1/organizations/me/alert-rules/{rule_id}/test": {
+      "post": {
+        "description": "Send a sample alert to this rule's destination now. Organization owners and admins only.\n\nThe counterpart of ``POST /v1/settings/mail/test``: a destination that\nsilently accepts nothing looks exactly like a budget that never crossed a\nthreshold, so proving the path works belongs at setup time rather than\nduring the incident it was meant to warn about.\n\nRecords nothing. A test is not an alert about a ceiling, and claiming a\ndedupe key here would suppress the real alert it is rehearsing for.",
+        "operationId": "test_alert_rule_v1_organizations_me_alert_rules__rule_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRuleTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Alert Rule",
+        "tags": [
+          "organization-alerts"
         ]
       }
     },

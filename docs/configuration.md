@@ -258,6 +258,25 @@ and guardrail configuration. Common startup settings are:
 See [Built-in tools](tools.md), [MCP](mcp.md), and
 [Guardrails](guardrails.md) for behavior and security boundaries.
 
+## Budget alert variables
+
+Alert destinations themselves are configured per organization in the dashboard,
+not here (see [Budget alerts](dashboard.md#budget-alerts)). Two startup settings
+govern how the deployment acts on them:
+
+- `alert_evaluation_interval_sec` (default `60`): how often the organization's
+  budget ceilings are checked against their alert rules' thresholds. `0`
+  disables alert evaluation entirely, leaving configured rules in place and
+  sending nothing. Standalone mode only.
+- `alert_allow_private_hosts` (default `false`): an SSRF gate. A
+  webhook-shaped destination (the `json`, `jsons`, `xml`, `xmls`, `form` and
+  `forms` Apprise schemas) is refused when it resolves to a private, loopback or
+  reserved address. Enable it to alert an internal chat server or webhook
+  receiver on the deployment's own network. Vendor schemas such as `slack://`
+  post to their own endpoints and are unaffected either way. Like the other
+  outbound network gates, this is a startup setting rather than a dashboard
+  toggle.
+
 ## Documentation links
 
 By default the dashboard's Documentation link opens the bundled guide at

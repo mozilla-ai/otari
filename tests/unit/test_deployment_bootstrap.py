@@ -220,6 +220,7 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
 # different access. Listed here rather than in the surface tuple itself so the
 # tuple stays the plain list of names the dashboard gates on.
 SURFACE_ROUTE_PREFIXES = {
+    "organization_alerts": "/v1/organizations/me/alert-rules",
     "organization_providers": "/v1/organizations/me/provider-keys",
     "organization_usage": "/v1/organizations/me/usage",
 }

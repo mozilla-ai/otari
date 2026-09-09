@@ -134,6 +134,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "mcp_allow_loopback",
             "mcp_allow_private_hosts",
             "provider_allow_private_hosts",
+            "alert_allow_private_hosts",
         ),
     ),
     (
@@ -214,6 +215,7 @@ _DELIBERATELY_OMITTED: tuple[str, ...] = (
     "bootstrap",
     "budget_reservation_retention_sec",
     "budget_reservation_sweep_batch",
+    "alert_evaluation_interval_sec",
     "budget_reservation_sweep_interval_sec",
     "budget_reservation_ttl_sec",
     "capture_agent_telemetry",

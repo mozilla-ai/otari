@@ -83,6 +83,18 @@ STANDALONE_SURFACES: tuple[str, ...] = (
     "budgets",
     "keys",
     "models",
+    # The organization's budget alert rules
+    # (``/v1/organizations/me/alert-rules``). Its own surface rather than a
+    # reading of ``budgets``: the two are different pages with different access,
+    # and a deployment that runs the alert evaluator with
+    # ``alert_evaluation_interval_sec`` at zero still serves the router, so the
+    # page is where a tenant sees the rules it has configured either way.
+    #
+    # Inherited by ``HOSTED_SURFACES`` through the splat below, which is
+    # correct: a hosted tenant's ceilings accumulate spend from the usage its
+    # hybrid gateways report, so it has exactly the same reason to be told a cap
+    # is approaching.
+    "organization_alerts",
     "organizations",
     "pricing",
     "providers",

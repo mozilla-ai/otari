@@ -73,6 +73,7 @@ describe("nav registry", () => {
       "Email domains",
       "Providers",
       "Spend & budgets",
+      "Budget alerts",
       "Model pricing",
       "Guardrails",
       "Org settings",
@@ -152,6 +153,7 @@ describe("nav registry", () => {
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Spend & budgets", "budgets"],
+      ["Budget alerts", "organization_alerts"],
       ["Model pricing", "pricing"],
     ])
     // No row gates on `users` any more. The gateway still serves that surface
@@ -276,6 +278,7 @@ describe("nav registry", () => {
       "budgets",
       "keys",
       "models",
+      "organization_alerts",
       "organizations",
       "pricing",
       "providers",

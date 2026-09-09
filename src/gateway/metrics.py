@@ -94,6 +94,18 @@ AUTH_FAILURES = Counter(
     registry=REGISTRY,
 )
 
+# Labeled by outcome as well as kind, because "the alert fired" and "the alert
+# arrived" are the two different things an operator needs to tell apart: a
+# destination that has quietly stopped accepting deliveries looks identical to a
+# budget that never crossed a threshold unless the failures are counted
+# separately.
+ALERT_DELIVERIES = Counter(
+    "gateway_alert_deliveries",
+    "Total number of budget alerts dispatched, by kind and outcome",
+    ["kind", "outcome"],
+    registry=REGISTRY,
+)
+
 LOG_WRITER_QUEUE_DEPTH = Gauge(
     "gateway_usage_log_queue_depth",
     "Number of usage log entries waiting to be written",
@@ -230,6 +242,11 @@ def record_budget_exceeded() -> None:
 def record_auth_failure(reason: str) -> None:
     """Record an authentication failure."""
     AUTH_FAILURES.labels(reason=reason).inc()
+
+
+def record_alert_delivery(*, kind: str, delivered: bool) -> None:
+    """Record one dispatched budget alert and whether it reached its destination."""
+    ALERT_DELIVERIES.labels(kind=kind, outcome="delivered" if delivered else "failed").inc()
 
 
 log_writer_queue_depth = LOG_WRITER_QUEUE_DEPTH

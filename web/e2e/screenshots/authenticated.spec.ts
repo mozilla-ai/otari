@@ -43,6 +43,15 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "organization-domains",
     heading: /email domains/i,
   },
+  // Beside the budgets it watches, on the organization rail. Its own entry
+  // because the rule table and the per-row test outcome are what this page is,
+  // and the budgets page above shows neither. Captured at rest, so the create
+  // form is covered by the vitest suite rather than here.
+  {
+    route: "/organization/alerts",
+    name: "organization-alerts",
+    heading: /budget alerts/i,
+  },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },

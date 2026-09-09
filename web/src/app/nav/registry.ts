@@ -2,6 +2,7 @@ import {
   FiActivity,
   FiAtSign,
   FiBarChart2,
+  FiBell,
   FiBox,
   FiCode,
   FiDollarSign,
@@ -341,6 +342,17 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Spend & budgets",
         surface: "budgets",
         icon: FiDollarSign,
+      },
+      // Beside the budgets it watches, because it is only ever configured
+      // right after one: a cap nobody is told about is the gap #410 opened.
+      // Its own surface rather than a reading of `budgets`, since the router
+      // behind it is the organization-scoped one and a deployment could serve
+      // the caps without it.
+      {
+        to: "/organization/alerts",
+        label: "Budget alerts",
+        surface: "organization_alerts",
+        icon: FiBell,
       },
       // Tenant-scoped in fact as well as in the design: a rate applies to every
       // workspace and every key in the deployment. The catalog had no home

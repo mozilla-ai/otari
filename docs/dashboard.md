@@ -81,6 +81,7 @@ The organization view contains tenant-wide administration:
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
+- Budget alerts, for being told when a ceiling is running out
 - Organization pricing
 - Organization settings and, in hosted mode, provider keys
 
@@ -113,6 +114,55 @@ source and does not consume a budget.
 
 Use Prometheus at `/metrics` for process-level monitoring when
 `enable_metrics` is enabled.
+
+### Budget alerts
+
+Budget alerts push a message out when one of the organization's budget ceilings
+is running out, so nobody has to be watching a page. Budget alerts on the
+organization rail holds the destinations; each one covers every ceiling the
+organization owns.
+
+A destination is an [Apprise](https://github.com/caronc/apprise) URL, which is
+what makes Slack, Discord, PagerDuty, Telegram, email and a plain webhook one
+field rather than one integration each:
+
+```
+slack://token/channel
+discord://webhook_id/webhook_token
+pagerduty://integration_key@api_key
+mailto://alerts@example.com
+json://hooks.example.com/incoming
+```
+
+Each rule sends at two points, either of which can be turned off: a warning at
+a percentage of the limit (80 by default), and a message when a ceiling reaches
+its limit and starts refusing requests. The warning is the useful one; by the
+time requests are being refused, the overspend has already happened. A rule
+sends each of those once per budget period, so a ceiling that stays over its
+threshold does not repeat, and a period reset re-arms it.
+
+A ceiling is measured on whichever of its limits is closest to being reached,
+counting reservations as well as settled spend, which matches how the gateway
+decides to refuse a request in the first place.
+
+Three things are worth knowing before relying on it:
+
+- The destination is stored encrypted and never shown again, because an Apprise
+  URL carries its credentials. The page displays only the scheme and host. Use
+  **Send test** to prove a destination works while setting it up: a webhook that
+  silently accepts nothing looks exactly like a budget that never crossed a
+  threshold.
+- Ceilings are checked on a timer, `alert_evaluation_interval_sec` (60 seconds
+  by default; `0` turns alerting off deployment-wide while leaving the rules in
+  place). An alert therefore arrives within about a minute of a crossing rather
+  than instantly.
+- A webhook-shaped destination (the `json`, `xml` and `form` schemas) is
+  refused if it resolves to a private, loopback or reserved address. Set
+  `alert_allow_private_hosts` to alert an internal receiver on the deployment's
+  own network. Vendor schemas post to their own endpoints and are unaffected.
+
+Budgets with no owning organization are the deployment's own and are not covered
+by these rules.
 
 ## Organization
 

@@ -1585,6 +1585,104 @@ export interface paths {
         patch: operations["update_active_organization_v1_organizations_me_patch"];
         trace?: never;
     };
+    "/v1/organizations/me/alert-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Alert Rules
+         * @description List where the caller's organization sends its budget alerts.
+         *
+         *     Organization owners and admins only. Each rule's destination is returned
+         *     redacted to its scheme and host: an Apprise URL carries its credentials in
+         *     the path, so the stored value is never echoed back.
+         */
+        get: operations["list_alert_rules_v1_organizations_me_alert_rules_get"];
+        put?: never;
+        /**
+         * Create Alert Rule
+         * @description Send this organization's budget alerts somewhere. Organization owners and admins only.
+         *
+         *     ``destination`` is an Apprise URL, so one field covers Slack, Discord,
+         *     PagerDuty, Telegram, mail and a plain JSON webhook. It is validated for
+         *     parseability here, and a webhook-shaped destination is additionally checked
+         *     against the same SSRF rules the MCP and web-search write paths apply.
+         *
+         *     ``warn_at_percent`` defaults to 80, which is the useful half of this
+         *     feature: a refusal is already too late to act on. Set it to null to alert
+         *     only when a ceiling starts refusing requests.
+         */
+        post: operations["create_alert_rule_v1_organizations_me_alert_rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/alert-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Alert Rule
+         * @description Discard a rule and its delivery history. Organization owners and admins only.
+         *
+         *     Use ``enabled: false`` instead to stop the alerts while keeping the
+         *     destination. Deleting drops the record of what has already been sent, so a
+         *     ceiling that is still over its threshold alerts again once a rule is
+         *     recreated.
+         */
+        delete: operations["delete_alert_rule_v1_organizations_me_alert_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Alert Rule
+         * @description Change a rule's name, destination, thresholds, or enabled flag.
+         *
+         *     Organization owners and admins only. Omitted fields are left as they are.
+         *     ``warn_at_percent`` is the one field where an explicit null is a value
+         *     rather than an omission: it means stop warning and alert only on refusal.
+         */
+        patch: operations["update_alert_rule_v1_organizations_me_alert_rules__rule_id__patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/alert-rules/{rule_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Alert Rule
+         * @description Send a sample alert to this rule's destination now. Organization owners and admins only.
+         *
+         *     The counterpart of ``POST /v1/settings/mail/test``: a destination that
+         *     silently accepts nothing looks exactly like a budget that never crossed a
+         *     threshold, so proving the path works belongs at setup time rather than
+         *     during the incident it was meant to warn about.
+         *
+         *     Records nothing. A test is not an alert about a ceiling, and claiming a
+         *     dedupe key here would suppress the real alert it is rehearsing for.
+         */
+        post: operations["test_alert_rule_v1_organizations_me_alert_rules__rule_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/aliases": {
         parameters: {
             query?: never;
@@ -4892,6 +4990,131 @@ export interface components {
              * @default 0
              */
             requests: number;
+        };
+        /**
+         * AlertRuleCreate
+         * @description Request body for a new alert rule.
+         *
+         *     ``destination`` is an Apprise URL. It is validated for parseability at this
+         *     boundary rather than at send time, so an operator learns their URL is
+         *     unusable while the form is still open instead of discovering it from an
+         *     alert that never arrived.
+         * @example {
+         *       "destination": "slack://xoxb-token/C0123456789",
+         *       "name": "Platform team Slack",
+         *       "notify_on_exceeded": true,
+         *       "warn_at_percent": 80
+         *     }
+         */
+        AlertRuleCreate: {
+            /**
+             * Destination
+             * @description Apprise destination URL, for example slack://token/channel, discord://webhook_id/webhook_token, pagerduty://key@apikey, or json://host/path for a plain webhook. Encrypted at rest and never returned
+             */
+            destination: string;
+            /**
+             * Enabled
+             * @description False stops this rule sending without discarding it
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Name
+             * @description How this rule is identified in the dashboard and in the alert body, unique per organization
+             */
+            name: string;
+            /**
+             * Notify On Exceeded
+             * @description Send an alert when a ceiling reaches a limit and starts refusing requests
+             * @default true
+             */
+            notify_on_exceeded: boolean;
+            /**
+             * Warn At Percent
+             * @description Send a warning once a ceiling reaches this percent of any of its limits. Null sends no warning, leaving only the exceeded alert
+             * @default 80
+             */
+            warn_at_percent: number | null;
+        };
+        /**
+         * AlertRulePublic
+         * @description The API-facing shape. Carries the redacted destination, never the real one.
+         */
+        AlertRulePublic: {
+            /** Created At */
+            created_at: string;
+            /** Destination */
+            destination: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Notify On Exceeded */
+            notify_on_exceeded: boolean;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Updated At */
+            updated_at: string;
+            /** Warn At Percent */
+            warn_at_percent: number | null;
+        };
+        /**
+         * AlertRuleTestResult
+         * @description The outcome of one on-demand send.
+         *
+         *     ``detail`` carries the dispatcher's reason on failure, which names what went
+         *     wrong without naming the destination, since the caller already knows which
+         *     rule they asked about.
+         */
+        AlertRuleTestResult: {
+            /** Delivered */
+            delivered: boolean;
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * AlertRuleUpdate
+         * @description Partial update. Only the fields the caller sets are applied.
+         *
+         *     ``destination`` has two states rather than three, unlike the credential
+         *     fields on `organization_guardrail_service`: the column is NOT NULL, so there
+         *     is nothing to clear it to. Omit it to keep the stored destination, send a
+         *     value to replace it.
+         *
+         *     ``warn_at_percent`` is the opposite: an explicit ``null`` is meaningful
+         *     there and means "stop warning, alert only on refusal", so it is the one
+         *     field here where null is accepted as a value.
+         * @example {
+         *       "enabled": false,
+         *       "warn_at_percent": 90
+         *     }
+         */
+        AlertRuleUpdate: {
+            /** Destination */
+            destination?: string;
+            /** Enabled */
+            enabled?: boolean;
+            /** Name */
+            name?: string;
+            /** Notify On Exceeded */
+            notify_on_exceeded?: boolean;
+            /** Warn At Percent */
+            warn_at_percent?: number | null;
+        };
+        /** AlertRulesPublic */
+        AlertRulesPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["AlertRulePublic"][];
         };
         /**
          * AliasRequest
@@ -12940,6 +13163,170 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_alert_rules_v1_organizations_me_alert_rules_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRulesPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_alert_rule_v1_organizations_me_alert_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_alert_rule_v1_organizations_me_alert_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_alert_rule_v1_organizations_me_alert_rules__rule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertRuleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_alert_rule_v1_organizations_me_alert_rules__rule_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRuleTestResult"];
                 };
             };
             /** @description Validation Error */

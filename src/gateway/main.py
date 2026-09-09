@@ -22,6 +22,7 @@ from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
+from gateway.services.alerts import run_budget_alert_evaluator
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budget_reservation_ledger import run_reservation_sweeper
@@ -310,6 +311,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         discovery_refresher: asyncio.Task[None] | None = None
         catalog_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
+        alert_evaluator: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -424,6 +426,17 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                     )
                 )
 
+            # Budget alerts are read off the ceilings on a timer rather than
+            # fired from the reserve/settle path, which is deliberately left
+            # untouched: see `services/alerts/__init__.py`. Standalone only, for
+            # the same reason the sweeper above is, and skipped entirely when the
+            # interval is zero, which is the operator's off switch for the
+            # feature as a whole.
+            if config.alert_evaluation_interval_sec > 0:
+                alert_evaluator = asyncio.create_task(
+                    run_budget_alert_evaluator(config.alert_evaluation_interval_sec)
+                )
+
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
         log_writer_started = False
@@ -443,6 +456,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 (discovery_refresher, "model discovery"),
                 (catalog_refresher, "models.dev catalog"),
                 (reservation_sweeper, "budget reservation sweep"),
+                (alert_evaluator, "budget alert evaluation"),
             ]
             await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
             if alias_refresher is not None:

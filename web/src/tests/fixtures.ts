@@ -8,6 +8,7 @@
 
 import type {
   ActivationAttempt,
+  AlertRule,
   Budget,
   CallerOrganizationMembership,
   DeploymentBootstrap,
@@ -93,6 +94,7 @@ const STANDALONE_SURFACES = [
   "budgets",
   "keys",
   "models",
+  "organization_alerts",
   "organizations",
   "pricing",
   "providers",
@@ -509,6 +511,24 @@ export function organizationGuardrail(
     workspace_ids: [],
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: "2026-08-24T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function alertRule(overrides: Partial<AlertRule> = {}): AlertRule {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    name: "Platform team Slack",
+    // The redaction the server returns, not an Apprise URL: the real
+    // destination is encrypted and never read back, so a fixture carrying one
+    // would let a test assert against a shape the API cannot produce.
+    destination: "slack://***",
+    warn_at_percent: 80,
+    notify_on_exceeded: true,
+    enabled: true,
+    created_at: "2026-09-09T00:00:00+00:00",
+    updated_at: "2026-09-09T00:00:00+00:00",
     ...overrides,
   }
 }

@@ -70,6 +70,10 @@ export const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
 // The organization's email-domain claims. Its own key for the same reason:
 // one page reads it, and claiming a domain has no bearing on anything else.
 export const ORGANIZATION_DOMAINS = "organization-domains"
+// Its own key rather than a child of ORGANIZATION_BUDGETS: a rule is edited
+// from its own page and a budget change never invalidates the rule list, so
+// nesting them would refetch one whenever the other moved.
+export const ORGANIZATION_ALERT_RULES = "organization-alert-rules"
 export const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make

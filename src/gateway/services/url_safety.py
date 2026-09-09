@@ -38,6 +38,23 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit, urluns
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 
+# Apprise schemas whose netloc is a host the operator picked rather than a
+# credential Apprise parses into that position. These are the webhook-shaped
+# ones, and the only ones an SSRF check can meaningfully apply to: every other
+# schema posts to a vendor endpoint compiled into its plugin.
+_HOST_BEARING_ALERT_SCHEMES = frozenset({"json", "jsons", "xml", "xmls", "form", "forms"})
+
+# What each of those maps onto on the wire, so the SSRF gate checks the address
+# Apprise will actually connect to.
+ALERT_SCHEME_TRANSPORT = {
+    "json": "http",
+    "jsons": "https",
+    "xml": "http",
+    "xmls": "https",
+    "form": "http",
+    "forms": "https",
+}
+
 
 def redact_url_secrets(value: str) -> str:
     """Mask credentials in a URL while keeping its shape recognizable.
@@ -84,6 +101,40 @@ def redact_url_secrets(value: str) -> str:
     if netloc == parts.netloc and query == parts.query:
         return value
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def redact_alert_destination(value: str) -> str:
+    """Mask an Apprise destination down to the part that is safe to display.
+
+    Stricter than :func:`redact_url_secrets`, and the difference is the whole
+    reason this exists: Apprise carries credentials in the URL **path**, not
+    only in the userinfo and query. ``slack://botA/botB/botC/#channel`` and
+    ``discord://webhook_id/webhook_token`` are both entirely path, so passing
+    one through :func:`redact_url_secrets` would return the token untouched.
+
+    Scheme and host survive, because those are what makes a row recognizable in
+    a list ("the Slack one", "the webhook at hooks.internal"). Everything that
+    can carry a secret is replaced wholesale rather than inspected: userinfo,
+    every path segment, and every query value. A vendor schema like ``slack://``
+    parses its first token into the netloc, so that is masked too, which is why
+    the result is ``slack://***`` rather than ``slack://botA``.
+
+    Not reversible and not meant to be: the ciphertext beside it is what the
+    dispatcher reads.
+    """
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "***"
+    scheme = parts.scheme.lower()
+    if not scheme:
+        return "***"
+
+    host = parts.hostname if scheme in _HOST_BEARING_ALERT_SCHEMES else None
+    netloc = host or "***"
+    path = "/***" if parts.path.strip("/") else ""
+    query = "***" if parts.query else ""
+    return urlunsplit((parts.scheme, netloc, path, query, ""))
 
 
 class UnsafeURLError(ValueError):
@@ -249,6 +300,46 @@ async def _reject_internal_host(host: str, *, host_label: str, override_var: str
                 f"{host_label} host {host!r} resolves to {addr} which is {reason}; "
                 f"rejecting to prevent SSRF. Set {override_var}=true to override."
             )
+
+
+def _allow_alert_private_hosts() -> bool:
+    return otari_env("ALERT_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
+
+
+async def validate_alert_destination_url(url: str) -> None:
+    """Reject an alert webhook destination that points inside the deployment.
+
+    A gate of its own rather than reusing :func:`validate_outbound_fetch_url`,
+    whose override is ``OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS``: an operator
+    turning on private alert destinations must not thereby let the web-search
+    backend fetch internal hosts, and the reverse. The behavior is the same
+    fail-closed shape as the other gates, and the loop itself is shared through
+    :func:`_reject_internal_host`.
+
+    Loopback and private ranges are refused by default because the destination
+    is stored through a management API and then posted to by a background
+    worker, which is the shape that turns a configuration surface into an SSRF
+    primitive. The override exists because posting to an internal chat server is
+    a legitimate self-hosted setup, and it is deliberately a startup config flag
+    rather than a dashboard toggle, matching the rule
+    ``services/runtime_settings_service.py`` states about SSRF gates.
+
+    Only the Apprise schemas that carry an operator-chosen host reach this; see
+    ``services/tenancy/organization_alert_service._validate_destination``.
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise UnsafeURLError(f"alert destination must use http or https, got {scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURLError("alert destination must include a hostname")
+
+    if _allow_alert_private_hosts():
+        return
+
+    await _reject_internal_host(host, host_label="alert destination", override_var="OTARI_ALERT_ALLOW_PRIVATE_HOSTS")
 
 
 def _allow_provider_private_hosts() -> bool:

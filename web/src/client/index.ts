@@ -327,6 +327,15 @@ export type CreateOrganizationDomainRequest =
 export type UpdateOrganizationDomainRequest =
   Schemas["OrganizationDomainUpdateRequest"]
 
+// An organization's budget alert rules. `destination` on the public shape is
+// the redaction, not the Apprise URL: the stored value is a live bot token and
+// the server never returns it, so the UI can display this field but can never
+// round-trip it back into an update.
+export type AlertRule = Schemas["AlertRulePublic"]
+export type CreateAlertRuleRequest = Schemas["AlertRuleCreate"]
+export type UpdateAlertRuleRequest = Schemas["AlertRuleUpdate"]
+export type AlertRuleTestResult = Schemas["AlertRuleTestResult"]
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------

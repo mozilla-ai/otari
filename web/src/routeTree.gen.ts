@@ -29,6 +29,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
+import { Route as OrganizationAlertsRouteImport } from './routes/organization.alerts'
 import { Route as OrganizationDomainsRouteImport } from './routes/organization.domains'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
@@ -141,6 +142,11 @@ const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
   path: '/',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const OrganizationAlertsRoute = OrganizationAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => OrganizationRoute,
+} as any)
 const OrganizationDomainsRoute = OrganizationDomainsRouteImport.update({
   id: '/domains',
   path: '/domains',
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/alerts': typeof OrganizationAlertsRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
@@ -249,6 +256,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/alerts': typeof OrganizationAlertsRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
@@ -283,6 +291,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
+  '/organization/alerts': typeof OrganizationAlertsRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
@@ -318,6 +327,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/alerts'
     | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
@@ -349,6 +359,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/alerts'
     | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
@@ -382,6 +393,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
+    | '/organization/alerts'
     | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
@@ -560,6 +572,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationIndexRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/organization/alerts': {
+      id: '/organization/alerts'
+      path: '/alerts'
+      fullPath: '/organization/alerts'
+      preLoaderRoute: typeof OrganizationAlertsRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
     '/organization/domains': {
       id: '/organization/domains'
       path: '/domains'
@@ -641,6 +660,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface OrganizationRouteChildren {
+  OrganizationAlertsRoute: typeof OrganizationAlertsRoute
   OrganizationDomainsRoute: typeof OrganizationDomainsRoute
   OrganizationGuardrailsRoute: typeof OrganizationGuardrailsRoute
   OrganizationMembersRoute: typeof OrganizationMembersRoute
@@ -651,6 +671,7 @@ interface OrganizationRouteChildren {
 }
 
 const OrganizationRouteChildren: OrganizationRouteChildren = {
+  OrganizationAlertsRoute: OrganizationAlertsRoute,
   OrganizationDomainsRoute: OrganizationDomainsRoute,
   OrganizationGuardrailsRoute: OrganizationGuardrailsRoute,
   OrganizationMembersRoute: OrganizationMembersRoute,

@@ -224,6 +224,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "mcp_allow_private_hosts",
         "web_search_allow_private_hosts",
         "provider_allow_private_hosts",
+        "alert_allow_private_hosts",
         "sandbox_url",
         "guardrails_url",
     ):

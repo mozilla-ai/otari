@@ -276,6 +276,17 @@ GET /v1/organizations/me/spend-ceilings                     # dashboard-only
 POST /v1/organizations/me/spend-ceilings                    # dashboard-only
 PATCH /v1/organizations/me/spend-ceilings/{ceiling_id}      # dashboard-only
 DELETE /v1/organizations/me/spend-ceilings/{ceiling_id}     # dashboard-only
+# Budget alert rules. Dashboard-only for the reason the organization budget
+# family above is: the organization is resolved from the caller's dashboard
+# session rather than named in the request, so an SDK caller holding a workspace
+# key has no organization for these to act on. The destination is also a stored
+# credential the API never returns, which makes a rule something to configure
+# once in a browser rather than something to drive from code.
+GET /v1/organizations/me/alert-rules                        # dashboard-only
+POST /v1/organizations/me/alert-rules                       # dashboard-only
+PATCH /v1/organizations/me/alert-rules/{rule_id}            # dashboard-only
+DELETE /v1/organizations/me/alert-rules/{rule_id}           # dashboard-only
+POST /v1/organizations/me/alert-rules/{rule_id}/test        # dashboard-only
 GET /v1/organizations/me/guardrails                         # operator surface
 POST /v1/organizations/me/guardrails                        # operator surface
 PATCH /v1/organizations/me/guardrails/{guardrail_id}        # operator surface

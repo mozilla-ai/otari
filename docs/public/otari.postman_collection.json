@@ -2979,6 +2979,178 @@
     {
       "item": [
         {
+          "name": "List Alert Rules",
+          "request": {
+            "description": "List where the caller's organization sends its budget alerts.\n\nOrganization owners and admins only. Each rule's destination is returned\nredacted to its scheme and host: an Apprise URL carries its credentials in\nthe path, so the stored value is never echoed back.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "alert-rules"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/alert-rules?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Alert Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"destination\": \"slack://xoxb-token/C0123456789\",\n  \"name\": \"Platform team Slack\",\n  \"notify_on_exceeded\": true,\n  \"warn_at_percent\": 80\n}"
+            },
+            "description": "Send this organization's budget alerts somewhere. Organization owners and admins only.\n\n``destination`` is an Apprise URL, so one field covers Slack, Discord,\nPagerDuty, Telegram, mail and a plain JSON webhook. It is validated for\nparseability here, and a webhook-shaped destination is additionally checked\nagainst the same SSRF rules the MCP and web-search write paths apply.\n\n``warn_at_percent`` defaults to 80, which is the useful half of this\nfeature: a refusal is already too late to act on. Set it to null to alert\nonly when a ceiling starts refusing requests.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "alert-rules"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/alert-rules"
+            }
+          }
+        },
+        {
+          "name": "Update Alert Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false,\n  \"warn_at_percent\": 90\n}"
+            },
+            "description": "Change a rule's name, destination, thresholds, or enabled flag.\n\nOrganization owners and admins only. Omitted fields are left as they are.\n``warn_at_percent`` is the one field where an explicit null is a value\nrather than an omission: it means stop warning and alert only on refusal.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "alert-rules",
+                ":rule_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/alert-rules/:rule_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "rule_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Alert Rule",
+          "request": {
+            "description": "Discard a rule and its delivery history. Organization owners and admins only.\n\nUse ``enabled: false`` instead to stop the alerts while keeping the\ndestination. Deleting drops the record of what has already been sent, so a\nceiling that is still over its threshold alerts again once a rule is\nrecreated.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "alert-rules",
+                ":rule_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/alert-rules/:rule_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "rule_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Test Alert Rule",
+          "request": {
+            "description": "Send a sample alert to this rule's destination now. Organization owners and admins only.\n\nThe counterpart of ``POST /v1/settings/mail/test``: a destination that\nsilently accepts nothing looks exactly like a budget that never crossed a\nthreshold, so proving the path works belongs at setup time rather than\nduring the incident it was meant to warn about.\n\nRecords nothing. A test is not an alert about a ceiling, and claiming a\ndedupe key here would suppress the real alert it is rehearsing for.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "alert-rules",
+                ":rule_id",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/alert-rules/:rule_id/test",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "rule_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-alerts"
+    },
+    {
+      "item": [
+        {
           "name": "List Organization Budgets",
           "request": {
             "description": "List the budgets this organization has defined. Owners and admins only.",
