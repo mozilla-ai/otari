@@ -39,6 +39,17 @@ describe("the registry", () => {
     expect(byKey.get("aws_access_key_id")?.isSecret).toBeUndefined()
   })
 
+  it("pairs the two IAM fields from both sides", () => {
+    const byKey = new Map(bedrock().map((field) => [field.key, field]))
+    expect(byKey.get("aws_access_key_id")?.pairedWith).toBe(
+      "aws_secret_access_key",
+    )
+    expect(byKey.get("aws_secret_access_key")?.pairedWith).toBe(
+      "aws_access_key_id",
+    )
+    expect(byKey.get("region_name")?.pairedWith).toBeUndefined()
+  })
+
   it("renames the API key field where the provider does not call it one", () => {
     expect(credentialSpecFor("bedrock")?.apiKeyLabel).toBe("Bedrock API key")
     expect(credentialSpecFor("openai")).toBeUndefined()
@@ -189,6 +200,50 @@ describe("validateCredentialFields", () => {
         aws_access_key_id: "AKIAIOSFODNN7EXAMPLE",
         aws_secret_access_key: "secret",
       }),
+    ).toEqual({})
+  })
+
+  it("accepts the bearer-token shape, which fills in neither IAM field", () => {
+    // The API key field carries the whole credential there, so an empty pair is
+    // a complete answer rather than a half-filled one.
+    expect(
+      validateCredentialFields(bedrock(), { region_name: "us-east-1" }),
+    ).toEqual({})
+  })
+
+  it("asks for the secret when only the access key id is given", () => {
+    // An id with no secret reaches boto3 as a credential that cannot sign, and
+    // the gateway reads the id alone as "this is the classic IAM shape".
+    expect(
+      validateCredentialFields(bedrock(), {
+        region_name: "us-east-1",
+        aws_access_key_id: "AKIAIOSFODNN7EXAMPLE",
+      }),
+    ).toEqual({
+      aws_secret_access_key:
+        "AWS secret access key is required alongside AWS access key ID.",
+    })
+  })
+
+  it("asks for the access key id when only the secret is given", () => {
+    expect(
+      validateCredentialFields(bedrock(), {
+        region_name: "us-east-1",
+        aws_secret_access_key: "secret",
+      }),
+    ).toEqual({
+      aws_access_key_id:
+        "AWS access key ID is required alongside AWS secret access key.",
+    })
+  })
+
+  it("counts a stored, masked half of the pair as filled in", () => {
+    expect(
+      validateCredentialFields(
+        bedrock(),
+        { region_name: "us-east-1", aws_access_key_id: "AKIA…" },
+        ["aws_secret_access_key"],
+      ),
     ).toEqual({})
   })
 

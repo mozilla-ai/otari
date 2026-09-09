@@ -45,6 +45,14 @@ export interface ProviderCredentialFieldSpec {
   /** A non-empty value must match this, checked before the form can submit. */
   pattern?: RegExp
   patternMessage?: string
+  /**
+   * Another field of the same provider that has to be filled in with this one.
+   * Neither is required on its own, but half a pair is worse than none of it:
+   * it reaches the SDK as a credential that cannot authenticate, and for
+   * Bedrock it also decides which credential shape the gateway thinks is in
+   * play (`bedrock_uses_bearer_token` keys on `aws_access_key_id` alone).
+   */
+  pairedWith?: string
 }
 
 /** A provider whose credential fields differ from the plain api_key + api_base pair. */
@@ -88,15 +96,17 @@ const BEDROCK: ProviderCredentialSpec = {
       key: "aws_access_key_id",
       label: "AWS access key ID",
       isRequired: false,
+      pairedWith: "aws_secret_access_key",
       placeholder: "AKIAIOSFODNN7EXAMPLE",
       helpText:
-        "Only for a classic IAM key pair. Leave blank when the API key above is a Bedrock bearer token.",
+        "Only for a classic IAM key pair, and then both halves are needed. Leave blank when the API key above is a Bedrock bearer token.",
     },
     {
       key: "aws_secret_access_key",
       label: "AWS secret access key",
       isRequired: false,
       isSecret: true,
+      pairedWith: "aws_access_key_id",
       helpText:
         "The other half of the IAM key pair. Masked when read back, but stored unencrypted, unlike the API key above.",
     },
@@ -223,8 +233,9 @@ export function mergeCredentialFields(
 }
 
 /**
- * Per-field messages for what the form cannot submit, keyed by field. A
- * required secret already stored (and therefore masked) counts as filled in.
+ * Per-field messages for what the form cannot submit, keyed by field. A secret
+ * already stored (and therefore masked) counts as filled in, here as everywhere
+ * else: the form is not shown it and is not asking for it again.
  */
 export function validateCredentialFields(
   fields: ProviderCredentialFieldSpec[],
@@ -232,6 +243,10 @@ export function validateCredentialFields(
   redacted: readonly string[] = [],
 ): Record<string, string> {
   const errors: Record<string, string> = {}
+  const byKey = new Map(fields.map((field) => [field.key, field]))
+  const isFilled = (field: ProviderCredentialFieldSpec) =>
+    (values[field.key] ?? "").trim() !== "" || redacted.includes(field.key)
+
   for (const field of fields) {
     const value = (values[field.key] ?? "").trim()
     if (value === "") {
@@ -244,6 +259,15 @@ export function validateCredentialFields(
       errors[field.key] =
         field.patternMessage ?? `${field.label} is not in the expected format.`
     }
+  }
+
+  // Half a pair, reported on the half that is missing. Declared from both
+  // sides, so filling in either one alone asks for the other.
+  for (const field of fields) {
+    const partner = field.pairedWith ? byKey.get(field.pairedWith) : undefined
+    if (!partner || !isFilled(field) || isFilled(partner)) continue
+    errors[partner.key] ??=
+      `${partner.label} is required alongside ${field.label}.`
   }
   return errors
 }

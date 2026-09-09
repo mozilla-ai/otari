@@ -227,6 +227,45 @@ describe("OrganizationProviderKeysPage", () => {
     expect(requests.some((request) => request.method === "POST")).toBe(false)
   })
 
+  it("will not add a Bedrock key with half of an IAM key pair", async () => {
+    const requests = mockApi({ catalog: [{ id: "bedrock", name: "Bedrock" }] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
+    await user.type(
+      screen.getByRole("textbox", { name: /AWS region/ }),
+      "us-east-1",
+    )
+
+    const submit = screen.getByRole("button", {
+      name: "Add provider key",
+      hidden: false,
+    })
+    // The region alone is the bearer-token shape, which is complete.
+    await waitFor(() => expect(submit).toBeEnabled())
+
+    await user.type(
+      screen.getByRole("textbox", { name: /AWS access key ID/ }),
+      "AKIAIOSFODNN7EXAMPLE",
+    )
+    expect(
+      screen.getByText(
+        "AWS secret access key is required alongside AWS access key ID.",
+      ),
+    ).toBeInTheDocument()
+    expect(submit).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/AWS secret access key/), "s3cret")
+    await waitFor(() => expect(submit).toBeEnabled())
+    expect(requests.some((request) => request.method === "POST")).toBe(false)
+  })
+
   it("does not advise against the credential Bedrock's IAM shape requires", async () => {
     // The old copy said to keep secrets out of client_args, which is the only
     // supported place for Bedrock's aws_secret_access_key.
