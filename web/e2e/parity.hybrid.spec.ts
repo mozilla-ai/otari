@@ -65,6 +65,9 @@ test.describe("hybrid deployment", () => {
       oauth_providers: [],
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
+      // Never open here: the catalog is the control plane's to show, and a
+      // hybrid gateway serves no dashboard page to open it on.
+      public_catalog: false,
     })
   })
 

@@ -62,5 +62,8 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
     mail_ready: false,
+    // The catalog stays behind the sign-in screen unless an operator opens it
+    // with public_catalog; see docs/configuration.md#a-public-catalog.
+    public_catalog: false,
   })
 })
