@@ -85,6 +85,14 @@ Validate on submit and on blur. Never on the first keystroke: a message that
 appears while someone is halfway through typing their own key name is telling them
 they are wrong before they have finished being right.
 
+On an autosaving page (see [layout.md](layout.md)) blur is also the commit, so
+the two coincide: a text field validates and saves when it is left or when Enter
+is pressed, and only if the value changed. A select saves on change, having
+nothing typed to lose. Success is silent; a refused save keeps the value that
+caused it, marks the control `aria-invalid`, and puts the message in the row
+through `SettingRow`'s `error`. `useAutosave` owns that state, one instance per
+control, and its `isSaving` is what disables the control mid-write.
+
 ## Toggle
 
 `Toggle` is `role="switch"` with an `aria-label`. The visible track is 44x24 with a

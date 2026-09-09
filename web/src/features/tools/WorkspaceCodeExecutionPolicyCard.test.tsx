@@ -18,6 +18,8 @@ import {
 import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
+const STANCE = "Code execution for this workspace"
+const IMAGE = "Sandbox image for this workspace"
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
@@ -46,14 +48,20 @@ function mockApi({
   return calls
 }
 
-// The form hydrates from the policy once it arrives, so a test that types
-// before then would have its input overwritten by the load. The Save button is
-// disabled while the query is in flight, which is the signal to wait on.
+// Every control is disabled until the policy has arrived, so a save cannot race
+// the load that would overwrite the field under it. That is the signal to wait
+// on before typing.
 async function renderLoaded() {
   renderCard()
+  await waitFor(() => expect(selectTrigger(STANCE)).toBeEnabled())
+}
+
+/** The one PUT body, once the write has gone out. */
+async function putBody(calls: { method: string; body: unknown }[]) {
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
+    expect(calls.some((call) => call.method === "PUT")).toBe(true),
   )
+  return calls.filter((call) => call.method === "PUT").at(-1)?.body
 }
 
 function renderCard() {
@@ -63,7 +71,7 @@ function renderCard() {
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <WorkspaceCodeExecutionPolicyCard onSaved={() => {}} />
+        <WorkspaceCodeExecutionPolicyCard docsHref="https://docs.example/tools" />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
   )
@@ -75,14 +83,14 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     window.localStorage.clear()
   })
 
-  it("reads an unconfigured workspace as using the deployment default", async () => {
+  it("reads an unconfigured workspace as the deployment default, with nothing to narrow", async () => {
     mockApi()
-    renderCard()
+    await renderLoaded()
 
-    expect(await screen.findByText("NO POLICY SET")).toBeInTheDocument()
-    expect(selectTrigger("Code execution")).toHaveTextContent(
-      "Deployment default",
-    )
+    expect(selectTrigger(STANCE)).toHaveTextContent("Deployment default")
+    // There is no stored policy, so the rows below have nothing to write.
+    expect(screen.getByLabelText("Max tool-loop iterations")).toBeDisabled()
+    expect(screen.getByLabelText("Prompt hint")).toBeDisabled()
   })
 
   it("shows a stored policy's stance and limits", async () => {
@@ -97,44 +105,58 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(selectTrigger("Code execution")).toHaveTextContent("Blocked")
+    expect(selectTrigger(STANCE)).toHaveTextContent("Blocked")
     expect(screen.getByLabelText("Max tool-loop iterations")).toHaveValue("3")
-    expect(screen.getByLabelText("Execution timeout (seconds)")).toHaveValue(
-      "12",
-    )
-    expect(screen.queryByText("No policy set")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Execution timeout")).toHaveValue("12")
   })
 
-  it("saves the stance and the limits the operator typed", async () => {
+  it("saves the stance the moment it changes, with no Save button anywhere", async () => {
     const calls = mockApi()
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Code execution", "Allowed")
-    await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await pickOption(user, STANCE, "Allowed")
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toEqual({
+    expect(await putBody(calls)).toEqual({
       enabled: true,
       default_purpose_hint: null,
-      max_iterations: 4,
+      max_iterations: null,
       exec_timeout_s: null,
       image: null,
       tools: null,
     })
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
+  })
+
+  it("saves a limit when the field is left", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
+    await user.tab()
+
+    expect(await putBody(calls)).toMatchObject({ max_iterations: 4 })
   })
 
   it("offers only the images the operator approved, plus the deployment default", async () => {
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
         allowed_images: ["mzdotai/otari-sandbox-container:latest"],
       }),
     })
     await renderLoaded()
 
-    await userEvent.setup().click(selectTrigger("Sandbox image"))
+    await userEvent.setup().click(selectTrigger(IMAGE))
     expect(
       screen.getAllByRole("option").map((option) => option.textContent),
     ).toEqual(["Deployment default", "mzdotai/otari-sandbox-container:latest"])
@@ -145,31 +167,28 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     await renderLoaded()
 
     expect(
-      screen.queryByRole("button", { name: /Sandbox image$/ }),
+      screen.queryByRole("button", { name: IMAGE }),
     ).not.toBeInTheDocument()
-    expect(screen.getByText(/approved no sandbox images/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/runs whatever the sandbox runs/i),
+    ).toBeInTheDocument()
   })
 
   it("saves the image the operator chose", async () => {
     const calls = mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
         allowed_images: ["mzdotai/otari-sandbox-container:latest"],
       }),
     })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Code execution", "Allowed")
-    await pickOption(
-      user,
-      "Sandbox image",
-      "mzdotai/otari-sandbox-container:latest",
-    )
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await pickOption(user, IMAGE, "mzdotai/otari-sandbox-container:latest")
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toMatchObject({
+    expect(await putBody(calls)).toMatchObject({
       image: "mzdotai/otari-sandbox-container:latest",
       tools: null,
     })
@@ -183,7 +202,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     await renderLoaded()
 
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-    expect(screen.getByText(/serves code_execution/i)).toBeInTheDocument()
+    expect(screen.getByText("code_execution only")).toBeInTheDocument()
   })
 
   it("offers a checkbox per tool once the sandbox serves more than one", async () => {
@@ -224,10 +243,8 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     await user.click(
       screen.getByRole("checkbox", { name: "bash_code_execution" }),
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toMatchObject({ tools: null })
+    expect(await putBody(calls)).toMatchObject({ tools: null })
   })
 
   it("preserves a stored tool policy this deployment no longer serves", async () => {
@@ -249,10 +266,9 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
 
     // The operator came here to change something else entirely.
     await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.tab()
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toMatchObject({
+    expect(await putBody(calls)).toMatchObject({
       max_iterations: 4,
       tools: ["bash_code_execution"],
     })
@@ -302,11 +318,9 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
         name: "bash_code_execution (no longer served)",
       }),
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
 
     // Everything served, nothing else: narrows nothing, so no list is stored.
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toMatchObject({ tools: null })
+    expect(await putBody(calls)).toMatchObject({ tools: null })
   })
 
   it("names a withdrawn pin instead of showing it bare", async () => {
@@ -325,7 +339,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(selectTrigger("Sandbox image")).toHaveTextContent(
+    expect(selectTrigger(IMAGE)).toHaveTextContent(
       "ghcr.io/acme/withdrawn:1 (no longer approved)",
     )
     expect(
@@ -345,7 +359,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(selectTrigger("Sandbox image")).toHaveTextContent(
+    expect(selectTrigger(IMAGE)).toHaveTextContent(
       "ghcr.io/acme/withdrawn:1 (no longer approved)",
     )
   })
@@ -363,11 +377,9 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Sandbox image", "Deployment default")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await pickOption(user, IMAGE, "Deployment default")
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toMatchObject({ image: null })
+    expect(await putBody(calls)).toMatchObject({ image: null })
   })
 
   it("shows a stored image", async () => {
@@ -382,9 +394,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(selectTrigger("Sandbox image")).toHaveTextContent(
-      "ghcr.io/acme/sandbox:2",
-    )
+    expect(selectTrigger(IMAGE)).toHaveTextContent("ghcr.io/acme/sandbox:2")
   })
 
   it("clears the policy rather than storing one when set back to the deployment default", async () => {
@@ -398,25 +408,33 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Code execution", "Deployment default")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await pickOption(user, STANCE, "Deployment default")
 
-    expect(calls.some((call) => call.method === "DELETE")).toBe(true)
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "DELETE")).toBe(true),
+    )
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
   it("refuses a limit the deployment could never honor without asking the server", async () => {
-    const calls = mockApi()
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Code execution", "Allowed")
-    await user.type(screen.getByLabelText("Execution timeout (seconds)"), "600")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.type(screen.getByLabelText("Execution timeout"), "600")
+    await user.tab()
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Execution timeout must be a whole number of seconds from 1 to 60.",
-    )
+    expect(
+      await screen.findByText(
+        `A whole number of seconds from 1 to ${MAX_EXEC_TIMEOUT_S}.`,
+      ),
+    ).toBeInTheDocument()
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
@@ -460,9 +478,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(
       await screen.findByText(/set by an owner or admin/i),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Max tool-loop iterations")).toBeNull()
     expect(policyRequests).toEqual([])
   })
 

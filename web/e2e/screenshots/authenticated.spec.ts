@@ -46,10 +46,19 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },
-  // The one Tools child with an entry of its own. The other two render the
-  // page above filtered to one service, so its entry covers them; this one is a
-  // page in its own right, and nothing else captures its table. Captured at
-  // rest, so its two dialogs are covered by neither this nor the vitest suite.
+  // A narrowed Tools child is no longer the page above with two services
+  // hidden: it heads with the tool's own status row, and its group titles drop
+  // the service prefix the combined page needs. One of the two is enough for
+  // that difference, and web search is the one that also carries the search
+  // tools drill-in.
+  {
+    route: "/tools/web-search",
+    name: "tools-web-search",
+    heading: /web search/i,
+  },
+  // A page in its own right rather than a filtered view, and nothing else
+  // captures its table. Captured at rest, so its two dialogs are covered by
+  // neither this nor the vitest suite.
   {
     route: "/tools/mcp-servers",
     name: "tools-mcp-servers",

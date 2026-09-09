@@ -1,34 +1,35 @@
-import { Button } from "@heroui/react"
-import { useEffect, useState } from "react"
-
+import type { UpdateWorkspaceWebSearchConfigRequest } from "@/client"
 import { canManageWorkspace } from "@/features/organization/roles"
+import {
+  ceilingParser,
+  type Parse,
+  PolicyRow,
+  parsePhrase,
+} from "@/features/tools/PolicyRow"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
 import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Field } from "@/shared/components/forms/Field"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { Section } from "@/shared/components/layout/Section"
+import { SettingRow } from "@/shared/components/layout/SettingRow"
+import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
 import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useAutosave } from "@/shared/hooks/useAutosave"
 
-// The layer above the deployment-wide web-search settings this card sits under:
-// the settings above say which backend runs a search, this says which
+// The layer above the deployment-wide web-search settings this group sits
+// under: the settings above say which backend runs a search, this says which
 // workspaces may ask for one and how far it may reach. A row can only narrow,
 // so there is no control here that turns anything on the deployment has not
-// configured; when it has configured nothing, the banner says so rather than
-// letting the form imply otherwise.
+// configured.
 //
 // Three states, not two, which is why the first control is a select rather than
 // a toggle: a workspace can be allowed, blocked, or carry no row at all.
 // "Deployment default" is the last of those and is a delete, not a saved
-// `enabled: true`. Same shape as `WorkspaceCodeExecutionPolicyCard`, which is
-// the sibling plane.
+// `enabled: true`. While it is chosen there is no row to narrow, so the four
+// rows below it have nothing to write and are disabled.
 
 type Stance = "default" | "allowed" | "blocked"
 
@@ -36,23 +37,7 @@ type Stance = "default" | "allowed" | "blocked"
 // what the backend honors could never take effect, and the list bound stops one
 // workspace's row growing without limit.
 export const MAX_RESULTS = 20
-export const MAX_DOMAINS = 100
-
-function parseCeiling(
-  raw: string,
-  max: number,
-): { value: number | null; valid: boolean } {
-  const trimmed = raw.trim()
-  if (trimmed === "") return { value: null, valid: true }
-  // Digits only, so `0x10` and `1e1` are refused rather than silently read as
-  // 16 and 10 by `Number`.
-  if (!/^\d+$/.test(trimmed)) return { value: null, valid: false }
-  const parsed = Number(trimmed)
-  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > max) {
-    return { value: null, valid: false }
-  }
-  return { value: parsed, valid: true }
-}
+const MAX_DOMAINS = 100
 
 // Anything that means the entry is not a bare host. The server compares each
 // entry against a result URL's hostname, so a scheme, port or path matches
@@ -65,28 +50,33 @@ const NOT_IN_A_HOSTNAME = /[/:@?#*\\\s]/
 // rather than sent, so a trailing comma is not a domain named "". A leading dot
 // is stripped, matching the server: an entry already covers its subdomains, so
 // `.example.com` is the same rule in cookie syntax.
-function parseDomains(raw: string): {
-  value: string[] | null
-  invalid: string | null
-  tooMany: boolean
-} {
+const parseDomains: Parse<string[] | null> = (raw) => {
   const hosts = raw
     .split(",")
     .map((host) => host.trim().toLowerCase().replace(/^\.+/, ""))
     .filter((host) => host !== "")
-  const invalid = hosts.find((host) => NOT_IN_A_HOSTNAME.test(host)) ?? null
-  return {
-    value: hosts.length > 0 ? hosts : null,
-    invalid,
-    tooMany: hosts.length > MAX_DOMAINS,
+  const malformed = hosts.find((host) => NOT_IN_A_HOSTNAME.test(host))
+  if (malformed !== undefined) {
+    return {
+      value: null,
+      error: `"${malformed}" is not a bare hostname. Give a domain such as example.com, with no scheme, port or path.`,
+    }
   }
+  if (hosts.length > MAX_DOMAINS) {
+    return { value: null, error: `At most ${MAX_DOMAINS} domains.` }
+  }
+  return { value: hosts.length > 0 ? hosts : null, error: "" }
 }
 
-export function WorkspaceWebSearchCard({
-  onSaved,
-}: {
-  onSaved: (message: string) => void
-}) {
+/**
+ * Whether requests billed to this workspace may search the web, and how far a
+ * search may reach.
+ *
+ * Blocking covers both doors: the `otari_web_search` tool and `POST /v1/search`.
+ * The rest narrows the in-loop tool only. Nothing here grants a backend the
+ * deployment has not configured, and nothing here holds a credential.
+ */
+export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
   // The client half of the gate the service enforces, and it gates the *read*
@@ -98,27 +88,7 @@ export function WorkspaceWebSearchCard({
   const query = useWorkspaceWebSearchConfig(workspaceId)
   const setConfig = useSetWorkspaceWebSearchConfig()
   const clearConfig = useClearWorkspaceWebSearchConfig()
-
-  const [stance, setStance] = useState<Stance>("default")
-  const [maxResults, setMaxResults] = useState("")
-  const [hint, setHint] = useState("")
-  const [allowedDomains, setAllowedDomains] = useState("")
-  const [blockedDomains, setBlockedDomains] = useState("")
-  const [error, setError] = useState("")
-
-  const config = query.data
-  // Hydrate from whatever the server last said, including after a save or a
-  // clear, so the form never drifts from the stored row.
-  useEffect(() => {
-    if (!config) return
-    setStance(
-      !config.configured ? "default" : config.enabled ? "allowed" : "blocked",
-    )
-    setMaxResults(config.max_results !== null ? String(config.max_results) : "")
-    setHint(config.purpose_hint ?? "")
-    setAllowedDomains((config.allowed_domains ?? []).join(", "))
-    setBlockedDomains((config.blocked_domains ?? []).join(", "))
-  }, [config])
+  const stanceSave = useAutosave()
 
   if (!selected) {
     return (
@@ -139,168 +109,133 @@ export function WorkspaceWebSearchCard({
     )
   }
 
-  // Disabled while the row is in flight, so a save cannot race the load that
-  // would overwrite the form under it, and disabled outright until the read has
-  // succeeded. Without that last part a failed GET leaves `isLoading` false and
-  // `config` undefined, so the form sits at its initial "Deployment default"
-  // stance over a workspace that may well have a stored row, and one click on
-  // an apparently harmless Save issues the DELETE that drops it.
-  const busy =
-    setConfig.isPending ||
-    clearConfig.isPending ||
-    query.isLoading ||
-    query.isError ||
-    !config
+  const config = query.data
+  const stance: Stance = !config?.configured
+    ? "default"
+    : config.enabled
+      ? "allowed"
+      : "blocked"
 
-  const save = () => {
-    setError("")
-    if (stance === "default") {
-      clearConfig.mutate(
-        { workspaceId: selected.workspace_id },
-        {
-          onSuccess: () =>
-            onSaved(`${selected.name} uses the deployment default`),
-          onError: (err) => setError(errorMessage(err)),
-        },
-      )
-      return
-    }
-    const results = parseCeiling(maxResults, MAX_RESULTS)
-    if (!results.valid) {
-      setError(`Max results must be a whole number from 1 to ${MAX_RESULTS}.`)
-      return
-    }
-    const allowed = parseDomains(allowedDomains)
-    const blocked = parseDomains(blockedDomains)
-    if (allowed.tooMany || blocked.tooMany) {
-      setError(`A domain list may name at most ${MAX_DOMAINS} domains.`)
-      return
-    }
-    const malformed = allowed.invalid ?? blocked.invalid
-    if (malformed !== null) {
-      setError(
-        `"${malformed}" is not a bare hostname. Give a domain such as example.com, with no scheme, port or path.`,
-      )
-      return
-    }
-    setConfig.mutate(
-      {
-        workspaceId: selected.workspace_id,
-        body: {
-          enabled: stance === "allowed",
-          max_results: results.value,
-          purpose_hint: hint.trim() === "" ? null : hint.trim(),
-          allowed_domains: allowed.value,
-          blocked_domains: blocked.value,
-          // Not editable here. The opaque provider bag is a per-backend knob
-          // with no form that could validate it, so the card preserves whatever
-          // the API holds rather than clearing it on every save: this is a PUT,
-          // and omitting it would silently drop a value set over the API.
-          provider_options: config?.provider_options ?? null,
-        },
+  // Disabled until the read has succeeded. Without that a failed GET leaves the
+  // rows sitting at "Deployment default" over a workspace that may well have a
+  // stored row, and one blur issues the write that drops it.
+  const unreadable = query.isLoading || query.isError || !config
+  const narrowingDisabled = unreadable || stance === "default"
+
+  // A PUT replaces the row, so one field's save carries the rest of it, and
+  // `provider_options` with them: it is a per-backend bag with no form that
+  // could validate it, and omitting it would silently drop a value set over the
+  // API.
+  const commitField = (patch: Partial<UpdateWorkspaceWebSearchConfigRequest>) =>
+    setConfig.mutateAsync({
+      workspaceId: selected.workspace_id,
+      body: {
+        enabled: stance !== "blocked",
+        max_results: config?.max_results ?? null,
+        purpose_hint: config?.purpose_hint ?? null,
+        allowed_domains: config?.allowed_domains ?? null,
+        blocked_domains: config?.blocked_domains ?? null,
+        provider_options: config?.provider_options ?? null,
+        ...patch,
       },
-      {
-        onSuccess: () =>
-          onSaved(`Web search settings saved for ${selected.name}`),
-        onError: (err) => setError(errorMessage(err)),
-      },
+    })
+
+  const setStance = (next: Stance) =>
+    void stanceSave.run(() =>
+      next === "default"
+        ? clearConfig.mutateAsync({ workspaceId: selected.workspace_id })
+        : commitField({ enabled: next === "allowed" }),
     )
-  }
 
   return (
-    <Section
-      aria-label={`This workspace (${selected.name})`}
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <SettingsGroup
+      bounded
+      title="This workspace"
+      description={`Narrows what the deployment allows for requests billed to ${selected.name}. Never widens it, and holds no credential.`}
+      docsHref={docsHref}
     >
-      <div className="flex flex-col gap-2">
-        <h2 className="text-title">This workspace ({selected.name})</h2>
-        <p className="max-w-prose text-sm text-muted">
-          Whether requests billed to this workspace may search the web, and how
-          far a search may reach. Blocking covers both doors: the
-          otari_web_search tool and POST /v1/search. The rest narrows the
-          in-loop tool only. These settings can only narrow what the deployment
-          above allows; they never grant a backend the deployment has not
-          configured, and they hold no credential.
-        </p>
-      </div>
-      <ErrorBanner error={query.error} />
-      {/* A ceiling, not a caution: nothing is broken and nothing on this
-              page can change it, so it reads on the subtle dot. The danger
-              dot is for the things worth acting on. */}
       {config && !config.web_search_configured ? (
-        <InfoBanner>
-          This deployment has no in-loop search backend configured, so
-          otari_web_search is unavailable here whatever this workspace allows.
-          The search URL is set above. Blocking still takes effect on POST
-          /v1/search, which runs off the search tools below.
-        </InfoBanner>
+        <div className="px-4 py-3">
+          <InfoBanner>
+            This deployment has no in-loop search backend configured, so
+            otari_web_search is unavailable here whatever this workspace allows.
+            Blocking still takes effect on POST /v1/search.
+          </InfoBanner>
+        </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <FilterSelect
-          label="Web search"
-          value={stance}
-          onChange={(next) => setStance(next as Stance)}
-          options={[
-            { value: "default", label: "Deployment default" },
-            { value: "allowed", label: "Allowed" },
-            // Named for what it covers: an admin choosing this is also
-            // switching off the workspace's POST /v1/search calls, which
-            // "Blocked" alone would not have told them.
-            { value: "blocked", label: "Blocked (tool and /v1/search)" },
-          ]}
-          disabled={busy}
-        />
-        {config?.configured === false ? (
-          // The absence of a stored row, stated rather than boxed: this
-          // workspace has not departed from the deployment default.
-          <span className="flex items-center gap-2 text-mono-caption text-subtle">
-            <Dot className="bg-text-subtle" />
-            NOTHING SET
-          </span>
-        ) : null}
-      </div>
+      <SettingRow
+        label="Web search"
+        help="Allow or block the otari_web_search tool and POST /v1/search for requests billed here."
+        error={
+          stanceSave.error ||
+          (query.isError
+            ? "Could not read this workspace's setting. Reload before editing."
+            : "")
+        }
+        control={
+          <FilterSelect
+            ariaLabel="Web search for this workspace"
+            value={stance}
+            onChange={(next) => setStance(next as Stance)}
+            options={[
+              { value: "default", label: "Deployment default" },
+              { value: "allowed", label: "Allowed" },
+              // Named for what it covers: an admin choosing this is also
+              // switching off the workspace's POST /v1/search calls, which
+              // "Blocked" alone would not have told them.
+              { value: "blocked", label: "Blocked (tool and /v1/search)" },
+            ]}
+            disabled={unreadable || stanceSave.isSaving}
+          />
+        }
+      />
 
-      <Field
+      <PolicyRow
+        key={`results-${selected.workspace_id}`}
         label="Max results"
-        value={maxResults}
-        onChange={setMaxResults}
-        placeholder={`Blank for the request's own limit (max ${MAX_RESULTS})`}
-        description="Lowers how many results one search returns. It never raises the number."
+        help="Lowers how many results one search returns. Never raises it."
+        placeholder="10"
+        numeric
+        committed={
+          config?.max_results == null ? "" : String(config.max_results)
+        }
+        parse={ceilingParser(MAX_RESULTS, "results")}
+        commit={(max_results) => commitField({ max_results })}
+        disabled={narrowingDisabled}
       />
-      <Field
+      <PolicyRow
+        key={`hint-${selected.workspace_id}`}
         label="Prompt hint"
-        value={hint}
-        onChange={setHint}
-        placeholder="Leave blank to use the deployment's hint"
-        description="Used only when a request declares otari_web_search without a hint of its own."
+        help="Used when a request declares otari_web_search without a hint of its own."
+        placeholder="Prefer official sources"
+        committed={config?.purpose_hint ?? ""}
+        parse={parsePhrase}
+        commit={(purpose_hint) => commitField({ purpose_hint })}
+        disabled={narrowingDisabled}
       />
-      <Field
+      <PolicyRow
+        key={`allowed-${selected.workspace_id}`}
         label="Allowed domains"
-        value={allowedDomains}
-        onChange={setAllowedDomains}
-        placeholder="Comma separated, blank for no restriction"
-        description="Results are kept only from these domains. A request that names its own list is narrowed to the domains on both."
+        help="Results are kept only from these; a request's own list is narrowed to both."
+        placeholder="mozilla.org, wikipedia.org"
+        machine
+        committed={(config?.allowed_domains ?? []).join(", ")}
+        parse={parseDomains}
+        commit={(allowed_domains) => commitField({ allowed_domains })}
+        disabled={narrowingDisabled}
       />
-      <Field
+      <PolicyRow
+        key={`blocked-${selected.workspace_id}`}
         label="Blocked domains"
-        value={blockedDomains}
-        onChange={setBlockedDomains}
-        placeholder="Comma separated, blank for none"
-        description="Results from these domains are always dropped, whatever a request asks for."
+        help="Always dropped, whatever a request asks for."
+        placeholder="reddit.com, pinterest.com"
+        machine
+        committed={(config?.blocked_domains ?? []).join(", ")}
+        parse={parseDomains}
+        commit={(blocked_domains) => commitField({ blocked_domains })}
+        disabled={narrowingDisabled}
       />
-
-      {error ? (
-        <p role="alert" className="text-caption text-danger">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex justify-end">
-        <Button size="sm" isDisabled={busy} onPress={save}>
-          Save
-        </Button>
-      </div>
-    </Section>
+    </SettingsGroup>
   )
 }

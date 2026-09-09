@@ -173,6 +173,7 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
       <CopyField
         label={`TXT record for ${row.domain}`}
         value={row.verification_record}
+        inFieldCopy
         action={
           <Button
             variant="primary"

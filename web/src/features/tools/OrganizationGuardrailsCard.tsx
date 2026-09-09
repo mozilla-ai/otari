@@ -457,6 +457,7 @@ export function OrganizationGuardrailsCard({
 
   return (
     <SettingsGroup
+      bounded
       title="Organization guardrails"
       description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
     >

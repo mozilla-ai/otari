@@ -75,6 +75,7 @@ type CopyFieldProps = {
 } & (
   | {
       multiline?: boolean
+      inFieldCopy?: false
       /**
        * Excluded here rather than guarded at runtime, so a call site that passes
        * both fails to compile. The multiline field is a `<textarea>`, where the
@@ -86,15 +87,19 @@ type CopyFieldProps = {
   | {
       multiline?: false
       /**
-       * A control to sit beside the field, which moves the copy affordance
-       * inside the field and drops the button from the label row. Absent, the
-       * field renders the arrangement it always has.
+       * Put the copy control inside the field and drop the button from the
+       * label row. Right for a value an operator copies and then acts on, where
+       * a separate Copy button competes with the action that follows it.
+       */
+      inFieldCopy: true
+      /**
+       * A control beside the field, for the action the copied value feeds.
        *
        * `ReactElement` rather than `ReactNode`: the latter admits `false`, so
        * `action={enabled && <Button />}` compiled and then silently fell back
-       * to the default arrangement, which is the one this exists to replace.
+       * to the other arrangement, which is the one this exists to replace.
        */
-      action: ReactElement
+      action?: ReactElement
     }
 )
 
@@ -103,6 +108,7 @@ export function CopyField({
   value,
   multiline = false,
   fieldRef,
+  inFieldCopy = false,
   action,
 }: CopyFieldProps) {
   const internalRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(
@@ -144,7 +150,7 @@ export function CopyField({
   const shared =
     "w-full rounded-lg border border-border bg-surface-alt px-3 py-2 font-mono text-xs text-foreground"
 
-  if (action !== undefined) {
+  if (inFieldCopy) {
     return (
       <div className="flex flex-col gap-1">
         {/* The label keeps its own row and stays a real `<label>`: it is what
@@ -155,9 +161,14 @@ export function CopyField({
         </label>
         {/* Wraps below `xl`, where 757px of content does not fit beside the
             rail, so `action` drops to its own line rather than squeezing the
-            field below the width the whole record needs. */}
+            field below the width the whole record needs. With no action the
+            field simply takes the width it is given. */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full xl:w-[37.5rem] xl:shrink-0">
+          <div
+            className={`relative w-full ${
+              action ? "xl:w-[37.5rem] xl:shrink-0" : ""
+            }`}
+          >
             <input
               id={fieldId}
               ref={ref as React.RefObject<HTMLInputElement>}

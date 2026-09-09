@@ -46,7 +46,7 @@ classifier and the meter that reads it).
 | Module | Exports you will reach for |
 | --- | --- |
 | `@heroui/react` | `Button`, `Select`, `Tooltip`, `Spinner`, and the rest of HeroUI v3 |
-| `layout/Section` · `/PageIntro` · `/SettingsGroup` · `/Toolbar` · `/TableScrollFrame` | one component each, named for its file |
+| `layout/Section` · `/PageIntro` · `/SettingsGroup` · `/SettingRow` · `/Toolbar` · `/TableScrollFrame` | one component each, named for its file |
 | `metrics/KpiStrip` · `/KpiCell` · `/Meter` | one each |
 | `metrics/SpendMeter` | `SpendMeter`, `spendState`, and the `SpendState` type |
 | `metrics/SeverityMark` | `SeverityMark`, and the `Severity` type |
@@ -65,7 +65,7 @@ classifier and the meter that reads it).
 | `data/TablePagination` | `TablePagination`, `PAGE_SIZE_OPTIONS` |
 | `data/BulkActionBar` | `BulkActionBar` |
 | `navigation/TabRow` | `TabRow`, `Tab` |
-| `navigation/Segmented` · `/FilterSelect` · `/FilterMultiComboBox` | one each |
+| `navigation/Segmented` · `/FilterSelect` · `/FilterMultiComboBox` · `/DisclosureRow` · `/DocsLink` | one each |
 | `navigation/FilterChips` | `FilterChips`, and the `FilterChip` type |
 | `indicators/Dot` · `/Badge` · `/DismissChip` | one each |
 | `access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | one each |
@@ -101,7 +101,7 @@ and [web/AGENTS.md](../AGENTS.md).
 | --- | --- |
 | [colors.md](colors.md) | Surfaces, text ramp, borders, the accent's five jobs, status, chart slots |
 | [typography.md](typography.md) | The 12 type roles, the ladder rule, the three families |
-| [layout.md](layout.md) | Bands, the bleed rule, `Section`, `PageIntro`, `SettingsGroup`, page recipes |
+| [layout.md](layout.md) | Bands, the bleed rule, `Section`, `PageIntro`, `SettingsGroup`, `SettingRow`, page recipes |
 | [actions.md](actions.md) | The three button variants, sizes, places, icon-only, the two-step confirm, and the other action shapes (`RowAction`, `RefreshButton`, `CopyButton`) |
 | [forms.md](forms.md) | `Field`, `SecretField`, `Toggle`, `Checkbox`, selects, validation timing |
 | [data.md](data.md) | `DataTable`, pagination, bulk actions |

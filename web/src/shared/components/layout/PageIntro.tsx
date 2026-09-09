@@ -1,5 +1,7 @@
 import type { ReactNode } from "react"
 
+import { DocsLink } from "../navigation/DocsLink"
+
 /**
  * A page's opening: its title, the paragraph under it, and the one action that
  * belongs beside rather than below them.
@@ -19,11 +21,18 @@ import type { ReactNode } from "react"
 export function PageIntro({
   title,
   action,
+  docsHref,
   descriptionClassName = "",
   children,
 }: {
   title: string
   action?: ReactNode
+  /**
+   * Trails the description rather than sitting in `action`: a link to the
+   * manual is not the one thing the page exists to do, and putting it in the
+   * action slot is how a page ends up with two things competing to be that.
+   */
+  docsHref?: string
   /**
    * Overrides the description's measure. One caller uses it: the guide, whose
    * own prose is 560px, so the paragraph introducing it should not be the
@@ -36,9 +45,15 @@ export function PageIntro({
     <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
       <div className="max-w-[38.75rem]">
         <h1 className="text-display">{title}</h1>
-        {children ? (
+        {children || docsHref ? (
           <p className={`mt-1 text-sm text-muted ${descriptionClassName}`}>
             {children}
+            {docsHref ? (
+              <>
+                {children ? " " : null}
+                <DocsLink href={docsHref} />
+              </>
+            ) : null}
           </p>
         ) : null}
       </div>

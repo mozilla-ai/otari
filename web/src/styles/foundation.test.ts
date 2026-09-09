@@ -882,15 +882,6 @@ describe("content text wears a type role", () => {
       "consequence notes in the button row, and the candidate cap",
     ],
     ["features/usage/ShareDialog.tsx", "a notice in the dialog's button row"],
-    // Excluded on its own grounds rather than the referent one: this is a
-    // `<legend>` carrying `font-medium`, and `text-caption` sets
-    // `font-weight: normal`, so converting it would trade this failure for
-    // the one that bans a weight beside a role. A fix that moves a failure
-    // sideways is not a fix.
-    [
-      "features/tools/WorkspaceCodeExecutionPolicyCard.tsx",
-      "a legend, not a caption, and it carries a weight",
-    ],
   ]
   const RULED = new Map(CAPTION_SIZE_IS_RULED)
 

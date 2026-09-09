@@ -37,7 +37,8 @@ constants for these; `Section` is the one place the pair is named.
 | `Section` | `className`, `contentClassName`, `bleed = true`, children | Any band of a page |
 | `PageIntro` | `title`, `action?`, children | The opening of every page |
 | `Toolbar` | `className?`, children | Above a table or list |
-| `SettingsGroup` | `title?`, `description?`, `count?`, children | A form page |
+| `SettingsGroup` | `title?`, `description?`, `docsHref?`, `count?`, `bounded?`, children | A form page |
+| `SettingRow` | `label`, `configKey?`, `help?`, `control`, `nested?`, `error?` | One setting inside a group |
 | `KpiStrip` + `KpiCell` | see [metrics.md](metrics.md) | The metrics band |
 | `TableScrollFrame` | `className`, children | Around a wide table |
 
@@ -87,6 +88,26 @@ InfoBanner         only if there is a standing condition to state
 SettingsGroup      one per topic, each with its own Save at its own foot
 ```
 
+An autosaving settings page, which is the other shape:
+
+```
+PageIntro          title, sentence, a trailing docsHref
+SettingsGroup      bounded, one per topic
+  SettingRow       label + key left, control right
+  DisclosureRow    a list or an explanation that belongs to the row
+```
+
+No Save anywhere on that one: a text field commits on blur and on Enter, a
+select on change. Reach for it when the settings are independent of one another,
+so no single button could say what it is about to write.
+`features/tools/ToolsGuardrailsPage` is the worked example.
+
+**A save that worked says nothing.** The control disables while the write is in
+flight and that is the whole acknowledgement: a confirmation mark on every row
+is one the reader learns to ignore by the third row, and it has to be held out
+of flow to keep from moving the row it is congratulating. Only a refusal gets a
+line.
+
 `EmptyState`, `PageLoading` and a page-level `ErrorBanner` are bands like any other
 and need no bleed helper; they already run the width they should.
 
@@ -115,15 +136,25 @@ lines.
 </SettingsGroup>
 ```
 
-There is no shared `SettingsRow` component; a row is a flex div the feature writes,
-label left and control right in a shared lane. Copy the shape from a sibling group
-rather than inventing a width.
+**A row is a `SettingRow`.** Label and config key left, help under them, control
+right in a lane every row shares; below `md` the control stacks full width. The
+row draws no rule of its own, because the group divides its children. `nested`
+indents it to `pl-8`, which is how a row says it belongs to the one above it: a
+`DisclosureRow`'s panel is rows, not prose.
+
+`bounded` frames the rows inside the page column instead of bleeding them, and
+the frame is also the dense place (`.otari-settings`), so its controls come out
+32px on a desk and 36px at 16px on a phone. **No row picks a field height or a
+field font size.** Use it where a page stacks several small groups, which run
+together into one striped field as full-width bands. `docsHref` trails the
+description with a `DocsLink`.
 
 - Two border strengths and that is the whole hierarchy: `border-border-subtle`
   between rows (supplied), `border-border` around the group (supplied).
-- **One Save per group, at that group's foot**, as the group's last child. Never a
-  floating Save for the whole page: a page-level Save cannot say what it is about to
-  write.
+- **One Save per group, at that group's foot**, as the group's last child, on a
+  group that submits as a unit. Never a floating Save for the whole page: a
+  page-level Save cannot say what it is about to write. A group of independent
+  settings autosaves instead and has no Save at all.
 - `count` puts a muted number beside the title, for a group that lists things.
 
 ## Spacing

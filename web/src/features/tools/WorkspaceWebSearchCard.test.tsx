@@ -14,6 +14,7 @@ import { organizationContext, workspaceWebSearchConfig } from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
+const STANCE = "Web search for this workspace"
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
@@ -42,16 +43,6 @@ function mockApi({
   return calls
 }
 
-// The form hydrates from the row once it arrives, so a test that types before
-// then would have its input overwritten by the load. The Save button is
-// disabled while the query is in flight, which is the signal to wait on.
-async function renderLoaded() {
-  renderCard()
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled(),
-  )
-}
-
 function renderCard() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -59,10 +50,18 @@ function renderCard() {
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <WorkspaceWebSearchCard onSaved={() => {}} />
+        <WorkspaceWebSearchCard docsHref="https://docs.example/tools" />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
   )
+}
+
+// Every control is disabled until the row has arrived, so a save cannot race
+// the load that would overwrite the field under it. That is the signal to wait
+// on before typing.
+async function renderLoaded() {
+  renderCard()
+  await waitFor(() => expect(selectTrigger(STANCE)).toBeEnabled())
 }
 
 describe("WorkspaceWebSearchCard", () => {
@@ -71,12 +70,14 @@ describe("WorkspaceWebSearchCard", () => {
     window.localStorage.clear()
   })
 
-  it("reads an unconfigured workspace as using the deployment default", async () => {
+  it("reads an unconfigured workspace as the deployment default, with nothing to narrow", async () => {
     mockApi()
-    renderCard()
+    await renderLoaded()
 
-    expect(await screen.findByText("NOTHING SET")).toBeInTheDocument()
-    expect(selectTrigger("Web search")).toHaveTextContent("Deployment default")
+    expect(selectTrigger(STANCE)).toHaveTextContent("Deployment default")
+    // There is no stored row, so the four rows below have nothing to write.
+    expect(screen.getByLabelText("Max results")).toBeDisabled()
+    expect(screen.getByLabelText("Allowed domains")).toBeDisabled()
   })
 
   it("shows a stored row's stance, ceiling and domain lists", async () => {
@@ -92,7 +93,7 @@ describe("WorkspaceWebSearchCard", () => {
     })
     await renderLoaded()
 
-    expect(selectTrigger("Web search")).toHaveTextContent(
+    expect(selectTrigger(STANCE)).toHaveTextContent(
       "Blocked (tool and /v1/search)",
     )
     expect(screen.getByLabelText("Max results")).toHaveValue("3")
@@ -102,33 +103,78 @@ describe("WorkspaceWebSearchCard", () => {
     expect(screen.getByLabelText("Blocked domains")).toHaveValue(
       "example.invalid",
     )
-    expect(screen.queryByText("Nothing set")).not.toBeInTheDocument()
   })
 
-  it("saves the stance, the ceiling and the domains the operator typed", async () => {
+  it("saves the stance the moment it changes, with no Save button anywhere", async () => {
     const calls = mockApi()
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Web search", "Allowed")
+    await pickOption(user, STANCE, "Allowed")
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "PUT")).toBe(true),
+    )
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
+  })
+
+  it("saves a ceiling and a domain list when the field is left", async () => {
+    const calls = mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
     await user.type(screen.getByLabelText("Max results"), "4")
+    await user.tab()
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({
+        max_results: 4,
+      }),
+    )
+
     await user.type(
       screen.getByLabelText("Blocked domains"),
       "Bad.Example, , other.example",
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.tab()
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toEqual({
-      enabled: true,
-      max_results: 4,
-      purpose_hint: null,
-      allowed_domains: null,
-      // Normalized and de-blanked here so the server is not asked to store a
-      // domain named "".
-      blocked_domains: ["bad.example", "other.example"],
-      provider_options: null,
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.method === "PUT").at(-1)?.body,
+      ).toMatchObject({
+        // Normalized and de-blanked here so the server is not asked to store a
+        // domain named "".
+        blocked_domains: ["bad.example", "other.example"],
+      }),
+    )
+  })
+
+  it("commits on Enter without leaving the field by hand", async () => {
+    const calls = mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
     })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.type(
+      screen.getByLabelText("Prompt hint"),
+      "Official docs{Enter}",
+    )
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({
+        purpose_hint: "Official docs",
+      }),
+    )
   })
 
   it("preserves provider options it has no form for", async () => {
@@ -145,12 +191,14 @@ describe("WorkspaceWebSearchCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.type(screen.getByLabelText("Max results"), "4")
+    await user.tab()
 
-    const put = calls.find((call) => call.method === "PUT")
-    expect(put?.body).toMatchObject({
-      provider_options: { search_depth: "advanced" },
-    })
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({
+        provider_options: { search_depth: "advanced" },
+      }),
+    )
   })
 
   it("clears the row rather than storing one when set back to the deployment default", async () => {
@@ -164,25 +212,33 @@ describe("WorkspaceWebSearchCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Web search", "Deployment default")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await pickOption(user, STANCE, "Deployment default")
 
-    expect(calls.some((call) => call.method === "DELETE")).toBe(true)
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "DELETE")).toBe(true),
+    )
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
   it("refuses a ceiling the backend could never honor without asking the server", async () => {
-    const calls = mockApi()
+    const calls = mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Web search", "Allowed")
     await user.type(screen.getByLabelText("Max results"), "500")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.tab()
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Max results must be a whole number from 1 to 20.",
-    )
+    expect(
+      await screen.findByText(
+        `A whole number of results from 1 to ${MAX_RESULTS}.`,
+      ),
+    ).toBeInTheDocument()
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
@@ -190,27 +246,32 @@ describe("WorkspaceWebSearchCard", () => {
     // The server matches an entry against a result URL's hostname, so a scheme
     // or a path matches nothing: on a block-list that is a guardrail that reads
     // as set and blocks nothing.
-    const calls = mockApi()
+    const calls = mockApi({
+      config: workspaceWebSearchConfig({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, "Web search", "Allowed")
     await user.type(
       screen.getByLabelText("Blocked domains"),
       "https://evil.example",
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.tab()
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "is not a bare hostname",
-    )
+    expect(
+      await screen.findByText(/is not a bare hostname/),
+    ).toBeInTheDocument()
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
-  it("keeps Save disabled when the initial read failed, so a click cannot drop a stored row", async () => {
-    // A failed GET leaves isLoading false and config undefined, so the form sits
-    // at its initial "Deployment default" stance over a workspace that may have
-    // a row. Saving from there would DELETE it.
+  it("keeps every control disabled when the initial read failed, so a change cannot drop a stored row", async () => {
+    // A failed GET leaves isLoading false and config undefined, so the rows sit
+    // at "Deployment default" over a workspace that may have a row, and one
+    // change would DELETE it.
     const calls: { url: string; method: string }[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
@@ -228,9 +289,8 @@ describe("WorkspaceWebSearchCard", () => {
     })
     renderCard()
 
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
-    )
+    await waitFor(() => expect(selectTrigger(STANCE)).toBeDisabled())
+    expect(screen.getByLabelText("Max results")).toBeDisabled()
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
   })
 
@@ -280,9 +340,7 @@ describe("WorkspaceWebSearchCard", () => {
     expect(
       await screen.findByText(/set by an owner or admin/i),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Max results")).toBeNull()
     expect(configRequests).toEqual([])
   })
 

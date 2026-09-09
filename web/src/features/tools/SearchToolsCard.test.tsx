@@ -56,6 +56,14 @@ function renderWithClient(ui: ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
+// The list is a drill-in now, so every assertion about it opens the row first.
+async function renderOpened(user: ReturnType<typeof userEvent.setup>) {
+  renderWithClient(<SearchToolsCard docsHref="https://docs.example/tools" />)
+  await user.click(
+    await screen.findByRole("button", { name: /Configure search tools/ }),
+  )
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -105,14 +113,15 @@ describe("SearchToolsCard", () => {
 
   it("lists stored tools as editable and config-file tools as read-only", async () => {
     mockApi()
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    const user = userEvent.setup()
+    await renderOpened(user)
 
     expect(await screen.findByText("local")).toBeInTheDocument()
     expect(screen.getByLabelText("Backend URL for local")).toHaveValue(
       "http://searxng:8080",
     )
     expect(screen.getByText("from-file")).toBeInTheDocument()
-    expect(screen.getByText("Config file")).toBeInTheDocument()
+    expect(screen.getByText(/config file/)).toBeInTheDocument()
     // A config-file tool has no editable box of its own.
     expect(
       screen.queryByLabelText("Backend URL for from-file"),
@@ -121,15 +130,16 @@ describe("SearchToolsCard", () => {
 
   it("says the endpoint refuses everything when nothing is configured", async () => {
     mockApi({ tools: { stored: [], config: [] } })
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    renderWithClient(<SearchToolsCard docsHref="https://docs.example/tools" />)
 
     expect(await screen.findByText(/refuses every request/)).toBeInTheDocument()
+    expect(await screen.findByText("0 tools")).toBeInTheDocument()
   })
 
   it("adds a tool with the chosen provider", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    await renderOpened(user)
     await screen.findByText("local")
 
     await user.type(screen.getByLabelText("Search tool name"), "second")
@@ -157,7 +167,7 @@ describe("SearchToolsCard", () => {
   it("will not submit an exa tool without the key exa requires", async () => {
     mockApi()
     const user = userEvent.setup()
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    await renderOpened(user)
     await screen.findByText("local")
 
     await user.type(screen.getByLabelText("Search tool name"), "keyless-exa")
@@ -170,7 +180,7 @@ describe("SearchToolsCard", () => {
   it("omits api_key from a save that only changes the backend URL", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    await renderOpened(user)
     await screen.findByText("local")
 
     const input = screen.getByLabelText("Backend URL for local")
@@ -199,7 +209,7 @@ describe("SearchToolsCard", () => {
       writeDetail: "search_tools.local.api_key is required for provider 'exa'.",
     })
     const user = userEvent.setup()
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    await renderOpened(user)
     await screen.findByText("local")
 
     const input = screen.getByLabelText("Backend URL for local")
@@ -213,12 +223,12 @@ describe("SearchToolsCard", () => {
   it("removes a tool after the confirm step", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    renderWithClient(<SearchToolsCard onSaved={() => {}} />)
+    await renderOpened(user)
     await screen.findByText("local")
 
     // The two steps read differently now: the trigger names the object and the
     // armed confirm names the consequence, which is what the second click does.
-    await user.click(screen.getByRole("button", { name: "Remove tool" }))
+    await user.click(screen.getByRole("button", { name: "Remove" }))
     await user.click(screen.getByRole("button", { name: "Remove permanently" }))
 
     await waitFor(() => {

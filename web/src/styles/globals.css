@@ -1931,6 +1931,41 @@ main {
     gap: 8px;
   }
 }
+/* A settings row is the third dense place, after the pagination strip and the
+   toolbar. Its control sits in a lane beside the label it belongs to, and at
+   the form height each row comes out taller than the sentence explaining it, so
+   a column of them reads as a stack of boxes.
+
+   Below `md` the control stops sharing the row and stacks full width, so it
+   takes the form size back and 16px with it: iOS zooms the page when a field
+   under 16px takes focus, and a full-width field is the one shape where that
+   zoom has nowhere to go. */
+.otari-settings .input,
+.otari-settings .select__trigger {
+  height: 32px;
+  min-height: 32px;
+  padding-block: 4px;
+}
+@media (width < 48rem) {
+  .otari-settings .input,
+  .otari-settings .select__trigger {
+    height: 36px;
+    min-height: 36px;
+    padding-block: 6px;
+  }
+  .otari-settings .input {
+    font-size: var(--text-base);
+  }
+}
+/* A field holding a machine value (a URL, an engine list, a domain list, a
+   number) takes the mono family a step down, so a long value fits the lane and
+   reads as data rather than as prose. The rule above hands it 16px back where
+   the field goes full width. */
+.field-machine {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 /* Same for a toolbar's controls, which the min-height above cannot bring down
    on its own for the same reason. */
 .otari-toolbar .input,

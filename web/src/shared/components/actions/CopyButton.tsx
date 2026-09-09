@@ -66,6 +66,12 @@ export function CopyButton({
         isIconOnly
         aria-label={`Copy ${label}`}
         onPress={copy}
+        // 32px is under the 44px floor motion-and-access.md sets, and this
+        // button is 32px everywhere it appears. The pseudo-element grows the
+        // target without moving anything, which is the same device the toggle
+        // track uses; 6px each way is the gap a 32px control already has inside
+        // a 44px row, so no two of these overlap.
+        className="relative before:absolute before:-inset-1.5 before:content-['']"
       >
         <FiCopy aria-hidden="true" className="h-3.5 w-3.5" />
       </Button>

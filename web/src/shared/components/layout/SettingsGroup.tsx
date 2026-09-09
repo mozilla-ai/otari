@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { DocsLink } from "../navigation/DocsLink"
 import { Section } from "./Section"
 
 /**
@@ -11,11 +12,18 @@ import { Section } from "./Section"
  * Two bands rather than one, which is what puts the heading *between* rules
  * rather than above them: the first carries the rule over the heading, the
  * second the rule under it and the rule closing the last row.
+ *
+ * `bounded` is the other shape: the heading sits unruled above a framed block
+ * of rows, inside the page column rather than bleeding to the scroll area's
+ * edges. It reads as one object on a page that stacks several small groups,
+ * where the full-width bands run together into a single striped field.
  */
 export function SettingsGroup({
   title,
   count,
   description,
+  docsHref,
+  bounded = false,
   children,
 }: {
   /**
@@ -33,26 +41,65 @@ export function SettingsGroup({
    * error banner, in the same place.
    */
   description?: ReactNode
+  /** Trails the description, for the page of the manual this group is about. */
+  docsHref?: string
+  /** Frame the rows instead of bleeding them. See the note above. */
+  bounded?: boolean
   children: ReactNode
 }) {
+  const heading =
+    title === undefined ? null : (
+      <h2 className="text-title">
+        {title}
+        {count === undefined ? null : (
+          <span className="font-normal text-subtle"> ({count})</span>
+        )}
+      </h2>
+    )
+  const blurb =
+    description === undefined && docsHref === undefined ? null : (
+      <div className="max-w-prose text-sm text-muted">
+        {description}
+        {docsHref ? (
+          <>
+            {description ? " " : null}
+            <DocsLink href={docsHref} />
+          </>
+        ) : null}
+      </div>
+    )
+
+  if (bounded) {
+    return (
+      <section className="flex flex-col gap-3">
+        {heading === null && blurb === null ? null : (
+          <div className="flex flex-col gap-1">
+            {heading}
+            {blurb}
+          </div>
+        )}
+        {/* `otari-settings` is the dense place, the way `otari-toolbar` is:
+            it declares `--field-height` and `--field-font-size` for everything
+            inside, so a row's control is 32px beside its label on a desk and
+            36px at 16px where it goes full width on a phone. globals.css
+            carries the argument for why a place declares a variable rather
+            than restyling its descendants. */}
+        <div className="otari-settings flex flex-col divide-y divide-border-subtle border border-border">
+          {children}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <>
-      {title === undefined && description === undefined ? null : (
+      {heading === null && blurb === null ? null : (
         <Section
           className="border-t border-border pt-6 pb-3"
           contentClassName="flex flex-col gap-2"
         >
-          {title === undefined ? null : (
-            <h2 className="text-title">
-              {title}
-              {count === undefined ? null : (
-                <span className="font-normal text-subtle"> ({count})</span>
-              )}
-            </h2>
-          )}
-          {description ? (
-            <div className="max-w-prose text-sm text-muted">{description}</div>
-          ) : null}
+          {heading}
+          {blurb}
         </Section>
       )}
       {/* `border-subtle` between the rows, `border` around the group. The two
