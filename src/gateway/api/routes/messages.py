@@ -74,6 +74,9 @@ from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1", tags=["messages"])
 
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/messages"
+
 
 def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -> list[str] | None:
     """Combine legacy body betas with Anthropic's standard beta header."""
@@ -404,7 +407,7 @@ class _MessagesAdapter:
     """
 
     name = "messages"
-    endpoint = "/v1/messages"
+    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
     # A successful non-streaming call without provider usage data skips the
     # usage-log row (only the reservation is settled), matching the wire

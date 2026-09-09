@@ -57,6 +57,10 @@ from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
+# The label written to a usage-log row. An identifier, not a URL: it stays as
+# it is so new rows compare with old ones.
+USAGE_ENDPOINT = "/v1/chat/completions"
+
 __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
@@ -151,7 +155,7 @@ class _ChatAdapter:
     """
 
     name = "chat"
-    endpoint = "/v1/chat/completions"
+    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 

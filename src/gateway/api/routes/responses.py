@@ -57,6 +57,9 @@ from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1", tags=["responses"])
 
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/responses"
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 _CODEX_CLIENT_METADATA_FIELD = "client_metadata"
@@ -254,7 +257,7 @@ class _ResponsesAdapter:
     """
 
     name = "responses"
-    endpoint = "/v1/responses"
+    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
     log_success_without_usage = True
 

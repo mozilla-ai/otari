@@ -22,6 +22,9 @@ UNSUPPORTED_MODERATION_SUBSTRING = "does not support moderation"
 
 router = APIRouter(prefix="/v1", tags=["moderations"])
 
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/moderations"
+
 
 class ModerationRequest(BaseModel):
     """OpenAI-compatible moderation request."""
@@ -92,7 +95,7 @@ async def create_moderation(
         return await amoderation(**moderation_kwargs)
 
     outcome = await run_passthrough(
-        endpoint="/v1/moderations",
+        endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,

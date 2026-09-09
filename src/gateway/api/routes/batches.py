@@ -52,6 +52,10 @@ from gateway.services.workspace_scope import (
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
 
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/batches"
+USAGE_ENDPOINT_RESULTS = "/v1/batches/results"
+
 # Metadata key stamped on provider batches at creation time so ownership can be
 # checked on retrieve/cancel/results. The gateway stores no batch table, so the
 # provider-side metadata is the ownership anchor.
@@ -455,7 +459,7 @@ async def create_batch(
             api_key_id=api_key_id,
             model=model,
             provider=resolved.instance,
-            endpoint="/v1/batches",
+            endpoint=USAGE_ENDPOINT,
             user_id=user_id,
             error=str(e),
             status_code=failure_status_code(e),
@@ -479,7 +483,7 @@ async def create_batch(
         api_key_id=api_key_id,
         model=model,
         provider=resolved.instance,
-        endpoint="/v1/batches",
+        endpoint=USAGE_ENDPOINT,
         user_id=user_id,
         prompt_tokens=0,
         completion_tokens=0,
@@ -827,7 +831,7 @@ async def retrieve_batch_results(
             api_key_id=api_key_id,
             model=batch_model,
             provider=provider,
-            endpoint="/v1/batches/results",
+            endpoint=USAGE_ENDPOINT_RESULTS,
             user_id=user_id,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

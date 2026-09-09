@@ -20,6 +20,9 @@ from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(prefix="/v1", tags=["embeddings"])
 
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/embeddings"
+
 
 class EmbeddingRequest(BaseModel):
     """OpenAI-compatible embedding request."""
@@ -94,7 +97,7 @@ async def create_embedding(
         return await aembedding(**embedding_kwargs)
 
     outcome = await run_passthrough(
-        endpoint="/v1/embeddings",
+        endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,

@@ -20,6 +20,9 @@ from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(prefix="/v1", tags=["images"])
 
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/images/generations"
+
 
 class ImageGenerationRequest(derive_request_base(ImageGenerationParams)):  # type: ignore[misc]
     """OpenAI-compatible image generation request.
@@ -102,7 +105,7 @@ async def create_image(
     # dataset at 5.0, which would bill $5.00 for one image and, because this route
     # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(
-        endpoint="/v1/images/generations",
+        endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,
