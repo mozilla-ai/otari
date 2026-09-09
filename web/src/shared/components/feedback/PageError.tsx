@@ -11,6 +11,14 @@ import { ErrorBanner } from "./ErrorBanner"
  * box. `children` is the sentence about what to do next, which the gateway case
  * puts in the banner itself and the two throwing cases cannot.
  */
+
+// `ErrorBanner` renders nothing at all for a falsy value, and both catch
+// boundaries hand over whatever was thrown: `throw ""` and `throw 0` are as
+// legal as `throw null`, and none of them carries a message to show. Substituted
+// here rather than at each caller, so neither can reach the panel with an empty
+// banner in it.
+const UNTYPED_FAILURE = new Error("Something went wrong.")
+
 export function PageError({
   error,
   children,
@@ -21,7 +29,7 @@ export function PageError({
   return (
     <div className="flex min-h-full items-center justify-center p-6">
       <div className="flex w-full max-w-md flex-col gap-3">
-        <ErrorBanner error={error} />
+        <ErrorBanner error={error || UNTYPED_FAILURE} />
         {children ? <p className="text-caption">{children}</p> : null}
       </div>
     </div>

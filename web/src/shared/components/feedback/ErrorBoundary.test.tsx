@@ -3,12 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ErrorBoundary } from "@/shared/components/feedback/ErrorBoundary"
 
-function Throws(): never {
+function Thrower(): never {
   throw new Error("the bootstrap said nothing about oauth")
 }
 
-function ThrowsNothing(): never {
-  throw null
+function throwing(value: unknown) {
+  return function Throws(): never {
+    throw value
+  }
 }
 
 describe("ErrorBoundary", () => {
@@ -33,7 +35,7 @@ describe("ErrorBoundary", () => {
 
     const { container } = render(
       <ErrorBoundary>
-        <Throws />
+        <Thrower />
       </ErrorBoundary>,
     )
 
@@ -50,7 +52,7 @@ describe("ErrorBoundary", () => {
 
     const { rerender } = render(
       <ErrorBoundary resetKey="#/verify-email">
-        <Throws />
+        <Thrower />
       </ErrorBoundary>,
     )
     expect(screen.getByRole("alert")).toBeInTheDocument()
@@ -70,7 +72,7 @@ describe("ErrorBoundary", () => {
 
     const { rerender } = render(
       <ErrorBoundary resetKey="#/verify-email">
-        <Throws />
+        <Thrower />
       </ErrorBoundary>,
     )
     rerender(
@@ -83,14 +85,24 @@ describe("ErrorBoundary", () => {
     expect(screen.queryByText("never reached")).toBeNull()
   })
 
-  it("catches a falsy thrown value rather than re-rendering the thrower", () => {
-    // A boundary keyed on the thrown value's truthiness renders the child
-    // again, and React answers a second throw by blanking the document.
+  // Two hazards meet in a falsy throw, and every one of these values is legal to
+  // throw. A boundary keyed on the thrown value's own truthiness renders the
+  // child again, and React answers the second throw by blanking the document; a
+  // banner keyed on it renders nothing, leaving a panel with no error in it.
+  // `null` alone exercises neither, being the one case a nullish coalesce covers.
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["an empty string", ""],
+    ["zero", 0],
+    ["false", false],
+  ])("shows a panel when the thrown value was %s", (_name, thrown) => {
     vi.spyOn(console, "error").mockImplementation(() => {})
+    const Throws = throwing(thrown)
 
     const { container } = render(
       <ErrorBoundary>
-        <ThrowsNothing />
+        <Throws />
       </ErrorBoundary>,
     )
 

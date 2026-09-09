@@ -25,9 +25,10 @@ export const router = createRouter({
   // thing `design/feedback.md` says never to render. `router.test.tsx` covers
   // why setting it is what makes a boundary catch the throw at all.
   defaultErrorComponent: ({ error }) => (
+    // No mention of the sidebar: this serves the root match too, and a throw in
+    // `AppShell` itself replaces the shell the sidebar lives in.
     <PageError error={error}>
-      This page could not finish rendering. Try another destination from the
-      sidebar, or reload.
+      This page could not finish rendering. Reload to try again.
     </PageError>
   ),
 })

@@ -38,11 +38,10 @@ interface State {
   seenKey: string | undefined
 }
 
-// `throw null` is legal, and a boundary that keys on the thrown value's own
+// A falsy throw is legal, and a boundary that keys on the thrown value's own
 // truthiness renders the child that threw it a second time, which React answers
 // by unmounting to the root: the failure this file exists to prevent. So the
-// flag is what decides, and this stands in where there is nothing to show.
-const UNTYPED_FAILURE = new Error("Something went wrong.")
+// flag is what decides. Showing such a value is `PageError`'s end.
 
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { caught: false, error: undefined, seenKey: undefined }
@@ -63,7 +62,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return this.props.children
     }
     return (
-      <PageError error={this.state.error ?? UNTYPED_FAILURE}>
+      <PageError error={this.state.error}>
         The dashboard could not finish rendering this page. Reload to try again.
         If it keeps happening, this gateway and the dashboard it serves may be
         out of step, and restarting the gateway on a matching build is what puts

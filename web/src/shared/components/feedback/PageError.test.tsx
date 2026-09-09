@@ -16,6 +16,22 @@ describe("PageError", () => {
     expect(container.querySelector("p")).toBeNull()
   })
 
+  // The banner renders nothing for a falsy value, so every one of these would
+  // otherwise be a panel with an explanation and no error in it. `null` is the
+  // only one a nullish coalesce would have caught.
+  it.each([
+    ["empty string", ""],
+    ["zero", 0],
+    ["false", false],
+    ["NaN", Number.NaN],
+    ["null", null],
+    ["undefined", undefined],
+  ])("still shows a banner when the thrown value was %s", (_name, thrown) => {
+    render(<PageError error={thrown} />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Something went wrong")
+  })
+
   it("renders what to do next beside the banner", () => {
     render(
       <PageError error={new Error("bare")}>Reload to try again.</PageError>,
