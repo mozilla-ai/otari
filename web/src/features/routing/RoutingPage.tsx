@@ -39,6 +39,7 @@ import {
 import { EmptyState } from "@/shared/components/feedback/EmptyState"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { Field } from "@/shared/components/forms/Field"
+import { FieldAction } from "@/shared/components/forms/FieldAction"
 import { ControlField } from "@/shared/components/forms/FieldMessages"
 import { Dot } from "@/shared/components/indicators/Dot"
 import { PageIntro } from "@/shared/components/layout/PageIntro"
@@ -822,14 +823,18 @@ function PolicyForm({
                     isRequired
                   />
                 </div>
-                <Button
-                  variant="ghost"
-                  onPress={() =>
-                    setConditions((prev) => prev.filter((_, i) => i !== index))
-                  }
-                >
-                  Remove
-                </Button>
+                <FieldAction>
+                  <Button
+                    variant="ghost"
+                    onPress={() =>
+                      setConditions((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
+                </FieldAction>
               </div>
             ))}
           </div>
@@ -892,29 +897,35 @@ function PolicyForm({
                     />
                   </div>
                 ) : null}
-                <label className="flex items-center gap-2 pb-2 text-xs text-foreground">
-                  <input
-                    type="radio"
-                    name="router-safe-choice"
-                    checked={safeIndex === index}
-                    onChange={() => setSafeIndex(index)}
-                  />
-                  {weighted ? "Serves on opt-out" : "Serves when unsure"}
-                </label>
-                <Button
-                  variant="ghost"
-                  onPress={() => {
-                    setCandidates((prev) => prev.filter((_, i) => i !== index))
-                    setWeights((prev) => prev.filter((_, i) => i !== index))
-                    // Keep the mark on the same model where possible; if the marked
-                    // one went, fall back to the first, never to nothing.
-                    setSafeIndex((prev) =>
-                      index < prev ? prev - 1 : index === prev ? 0 : prev,
-                    )
-                  }}
-                >
-                  Remove
-                </Button>
+                <FieldAction>
+                  <label className="flex items-center gap-2 text-xs text-foreground">
+                    <input
+                      type="radio"
+                      name="router-safe-choice"
+                      checked={safeIndex === index}
+                      onChange={() => setSafeIndex(index)}
+                    />
+                    {weighted ? "Serves on opt-out" : "Serves when unsure"}
+                  </label>
+                </FieldAction>
+                <FieldAction>
+                  <Button
+                    variant="ghost"
+                    onPress={() => {
+                      setCandidates((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      )
+                      setWeights((prev) => prev.filter((_, i) => i !== index))
+                      // Keep the mark on the same model where possible; if the marked
+                      // one went, fall back to the first, never to nothing.
+                      setSafeIndex((prev) =>
+                        index < prev ? prev - 1 : index === prev ? 0 : prev,
+                      )
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </FieldAction>
               </div>
             ))}
             <p className="text-caption">
@@ -1011,14 +1022,16 @@ function PolicyForm({
                     isRequired
                   />
                 </div>
-                <Button
-                  variant="ghost"
-                  onPress={() =>
-                    setChain((prev) => prev.filter((_, i) => i !== index))
-                  }
-                >
-                  Remove
-                </Button>
+                <FieldAction>
+                  <Button
+                    variant="ghost"
+                    onPress={() =>
+                      setChain((prev) => prev.filter((_, i) => i !== index))
+                    }
+                  >
+                    Remove
+                  </Button>
+                </FieldAction>
               </div>
             ))}
             <div className="flex flex-wrap items-baseline gap-2">
@@ -1103,16 +1116,18 @@ function PolicyForm({
                     }
                     hint="block fails closed, so a guardrails outage refuses every request through this policy."
                   />
-                  <Button
-                    variant="ghost"
-                    onPress={() =>
-                      setGuardrails((prev) =>
-                        prev.filter((_, i) => i !== index),
-                      )
-                    }
-                  >
-                    Remove
-                  </Button>
+                  <FieldAction>
+                    <Button
+                      variant="ghost"
+                      onPress={() =>
+                        setGuardrails((prev) =>
+                          prev.filter((_, i) => i !== index),
+                        )
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </FieldAction>
                 </div>
                 {guardrail.mode === "block" &&
                 (guardrail.on_unavailable ?? "block") === "block" ? (

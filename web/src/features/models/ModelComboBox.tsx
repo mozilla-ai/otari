@@ -2,6 +2,7 @@ import { ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo } from "react"
 import type { DiscoverableModel } from "@/client"
 import { useDiscoverableModels } from "@/shared/api/models"
+import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 
 // How many matches to render at once. A single provider can report a few hundred
 // models, and past this the popover is a wall of text nobody scrolls; typing one
@@ -126,7 +127,10 @@ export function ModelComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {hint ? <span className="text-caption">{hint}</span> : null}
+      {/* Reserved even when silent, so this control matches a `Field` beside it
+          in a row: `Field` always renders its own reserve, and a bare hint here
+          left the two roots a caption line apart under `items-end`. */}
+      <FieldMessages>{hint}</FieldMessages>
     </ComboBox.Root>
   )
 }

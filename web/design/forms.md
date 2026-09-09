@@ -113,3 +113,26 @@ the control.
 
 One `primary` at the foot of the group it saves. See [actions.md](actions.md).
 Never a floating page-level Save; see [layout.md](layout.md).
+
+## Control rows
+
+A row of controls laid out `items-end` bottom-aligns each child's whole box, and a
+field's box includes the caption line it reserves. These rows also wrap, and
+`items-end` aligns each flex line to its own cross-end. So the trailing caption rung
+is a property of the flex line, not of the control: in a control row every child
+holds one caption line whether or not it speaks, the trailing action included. In a
+stacked form the opposite holds, and a control that can never speak holds nothing.
+
+Wrap a trailing action in `FieldAction`, which gives it that rung and nothing above
+it. Reserve the line rather than nudging the control: a local `pb-*` on one child
+guesses a number, and the guess is wrong the moment the caption is retuned.
+
+```tsx
+// Correct
+<FieldAction>
+  <Button variant="ghost" onPress={remove}>Remove</Button>
+</FieldAction>
+
+// Wrong: a hand-tuned nudge that does not track the caption
+<Button variant="ghost" className="pb-2" onPress={remove}>Remove</Button>
+```
