@@ -8,7 +8,7 @@ import {
   useMemo,
   useState,
 } from "react"
-import type { Selection, SortDescriptor } from "react-aria-components"
+import type { SortDescriptor } from "react-aria-components"
 import { FiInfo } from "react-icons/fi"
 import type { DiscoverableProvider, ModelMetadata, PricingTier } from "@/client"
 import { isPricingTier } from "@/client"
@@ -33,7 +33,6 @@ import {
 import { useSettings } from "@/shared/api/settings"
 import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
 import { CopyableValue } from "@/shared/components/actions/CopyField"
-import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
 import {
   DataTable,
   type DataTableColumn,
@@ -56,10 +55,6 @@ import {
   formatCost,
   formatReleaseDate,
 } from "@/shared/helpers/format"
-import {
-  resolveSelectedIds,
-  useTableSelection,
-} from "@/shared/helpers/tableSelection"
 import { useUrlValue } from "@/shared/helpers/urlState"
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
@@ -1389,8 +1384,6 @@ function ModelTable({
   onSelect,
   onEditPricing,
   comparisonContextTokens,
-  selectedKeys,
-  onSelectionChange,
 }: {
   rows: ModelRow[]
   isLoading: boolean
@@ -1400,16 +1393,14 @@ function ModelTable({
   selectedKey: string | null
   onSelect: (key: string) => void
   // Absent for a caller who may not write pricing: the price cells render as
-  // text and row selection (which exists only to feed bulk pricing) is off.
+  // text.
   onEditPricing?: (key: string) => void
   comparisonContextTokens: number | null
-  selectedKeys: Selection
-  onSelectionChange: (keys: Selection) => void
 }) {
   // Memoized on their real inputs so DataTable's per-row cache holds across
-  // selection clicks (see the DataTable docstring). rowClassName intentionally
+  // re-renders (see the DataTable docstring). rowClassName intentionally
   // depends on selectedKey: the drilled-row highlight must invalidate the
-  // cache when the selection target changes.
+  // cache when the drilled row changes.
   const columns = useMemo<DataTableColumn<ModelRow>[]>(() => {
     const comparisonLabel =
       comparisonContextTokens == null
@@ -1542,12 +1533,6 @@ function ModelTable({
         getRowKey={getModelRowKey}
         isLoading={isLoading}
         emptyContent={empty}
-        // Selection exists to feed the bulk pricing action, so it is offered
-        // only to a caller who can price. `onEditPricing` arrives already
-        // gated on operator authority, which is what makes it the right key.
-        selectionMode={onEditPricing ? "multiple" : "none"}
-        selectedKeys={selectedKeys}
-        onSelectionChange={onSelectionChange}
         sortDescriptor={sortDescriptor}
         onSortChange={onSortChange}
         onRowAction={onSelect}
@@ -1661,10 +1646,6 @@ export function ModelsPage() {
   const [pricingKey, setPricingKey] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [sort, setSort] = useState<Sort>(readStoredSort)
-  const selection = useTableSelection()
-  const [bulkPriceOpen, setBulkPriceOpen] = useState(false)
-  const [bulkPending, setBulkPending] = useState(false)
-  const [bulkError, setBulkError] = useState<unknown>(undefined)
   // Non-null while the hand-pricing dialog is open, holding the key it opened
   // with: a searched selector, a provider prefix, or "" for a blank field.
   const [customPriceKey, setCustomPriceKey] = useState<string | null>(null)
@@ -2125,53 +2106,11 @@ export function ModelsPage() {
     [],
   )
 
-  // Selection targets the visible page; "select all matching" expands to every
-  // filtered model so a bulk price can be applied to the whole result set.
-  const selectableKeys = pageModels.map((row) => row.key)
-  const selectedModelKeys = resolveSelectedIds(
-    selection.selectedKeys,
-    selectableKeys,
-  )
-  const allPageSelected =
-    selectableKeys.length > 0 &&
-    selectedModelKeys.length === selectableKeys.length
-  const canSelectAllMatching =
-    allPageSelected && total > selectedModelKeys.length
-  const bulkTargetKeys = selection.allMatching
-    ? filteredModels.map((row) => row.key)
-    : selectedModelKeys
-  const bulkCount = selection.allMatching ? total : selectedModelKeys.length
   const pricingRow = pricingKey
     ? (filteredModels.find((row) => row.key === pricingKey) ??
       rowsByKey.get(pricingKey) ??
       null)
     : null
-
-  const runBulkPricing = async (rates: ManualRates) => {
-    setBulkPending(true)
-    setBulkError(undefined)
-    try {
-      for (const key of bulkTargetKeys) {
-        await setPricing.mutateAsync({
-          model_key: key,
-          input_price_per_million: rates.input_price_per_million,
-          output_price_per_million: rates.output_price_per_million,
-          cache_read_price_per_million:
-            rates.cache_read_price_per_million ?? null,
-          cache_write_price_per_million:
-            rates.cache_write_price_per_million ?? null,
-          cache_write_1h_price_per_million: null,
-          pricing_tiers: [],
-        })
-      }
-      selection.clear()
-      setBulkPriceOpen(false)
-    } catch (error) {
-      setBulkError(error)
-    } finally {
-      setBulkPending(false)
-    }
-  }
 
   // A backend with no /v1/models endpoint serves models the catalog never
   // lists, so the only way to meter them is a key typed by hand. The stored key
@@ -2354,29 +2293,6 @@ export function ModelsPage() {
           onPriceModel={setCustomPriceKey}
         />
 
-        {/* Gated on authority as well as on a selection. The table only offers
-            selection to an operator, so this is the second of two locks rather
-            than the only one: it means a non-operator reaching a selected key
-            by any other route still cannot open the pricing dialog. */}
-        {isOperator && selectedModelKeys.length > 0 ? (
-          <BulkActionBar
-            selectedCount={bulkCount}
-            allMatching={selection.allMatching}
-            matchingTotal={total}
-            canSelectAllMatching={canSelectAllMatching}
-            onSelectAllMatching={selection.enableAllMatching}
-            onClear={selection.clear}
-          >
-            <Button
-              size="sm"
-              variant="primary"
-              onPress={() => setBulkPriceOpen(true)}
-            >
-              Set pricing
-            </Button>
-          </BulkActionBar>
-        ) : null}
-
         <div
           className={`grid gap-4 lg:items-start ${
             selectedRow ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"
@@ -2393,8 +2309,6 @@ export function ModelsPage() {
               onSelect={setSelectedKey}
               onEditPricing={isOperator ? onEditPricing : undefined}
               comparisonContextTokens={comparisonContextTokens}
-              selectedKeys={selection.selectedKeys}
-              onSelectionChange={selection.onSelectionChange}
             />
 
             {pricingRow ? (
@@ -2448,21 +2362,6 @@ export function ModelsPage() {
           ) : null}
         </div>
       </div>
-
-      <SetPriceDialog
-        isOpen={bulkPriceOpen}
-        onOpenChange={setBulkPriceOpen}
-        targetCount={bulkCount}
-        isPending={bulkPending}
-        error={bulkError}
-        onSubmit={runBulkPricing}
-        title="Set pricing"
-        description={(count) =>
-          `Apply these per-1M rates to ${count.toLocaleString()} selected ${
-            count === 1 ? "model" : "models"
-          }. This replaces each model's price; pricing tiers and the 1h cache rate are cleared. Edit a single model for tiers.`
-        }
-      />
 
       <SetPriceDialog
         isOpen={customPriceKey !== null}
