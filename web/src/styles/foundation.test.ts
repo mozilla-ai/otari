@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { describe, expect, it } from "vitest"
@@ -569,6 +569,201 @@ it("has no comment opened inside another comment in globals.css", () => {
   )
 })
 
+// A token declared in the theme blocks, named as a class in the tree, and never
+// registered in `@theme`.
+//
+// This has now shipped three times, each time in the same shape and each time
+// invisible: `--color-border-subtle`, `--color-text-subtle` and
+// `--color-border-strong` were all declared in both theme blocks, documented in
+// `web/design/colors.md` as classes a component may use, and reachable from
+// nowhere but this stylesheet's own `var()` calls. Tailwind emits a rule only
+// for a REGISTERED key, so the class compiled, linted, passed every other gate
+// here, and produced no CSS: the border fell back to Tailwind's `currentColor`
+// and a dot to a surface value at 1.14:1. Nothing errors, which is the whole
+// problem.
+//
+// Asked the other way round from the "registers its non-HeroUI utilities"
+// assertion above. That one starts from the documented list and checks the
+// registration; this starts from what the SOURCE actually asks for, which is
+// what catches a token the docs promise and nobody registered.
+// The table's base treatment is the flat plane, and no per-table class repeats
+// it.
+//
+// `.otari-table` used to default to HeroUI's card (a `--color-surface` fill and
+// a `--color-primary-subtle` header) with the row separator on the 0.06 tier,
+// and all sixteen per-table classes carried the same three declarations to undo
+// it: forty-eight copies of one decision, each commented "Same terms as the
+// others" because there was nowhere to say it once. The base now IS those
+// terms.
+//
+// Both halves are asserted, because either one alone rots. Without the first, a
+// future edit puts the fill or the tint back and sixteen tables get a card.
+// Without the second, the copies creep back one page at a time and the base
+// stops being what decides.
+describe("a table is a region, not a card", () => {
+  const PLACES = [
+    "otari-accounts-table",
+    "otari-activity-table",
+    "otari-breakdown",
+    "otari-budgets-table",
+    "otari-domains-table",
+    "otari-keys-table",
+    "otari-mcp-table",
+    "otari-members-table",
+    "otari-models-table",
+    "otari-overview-activity",
+    "otari-pricing-table",
+    "otari-provider-keys-table",
+    "otari-providers-table",
+    "otari-rate-overrides-table",
+    "otari-routing-table",
+    "otari-workspaces-table",
+  ]
+
+  it("defaults the root and the header to no fill", () => {
+    expect(CSS).toMatch(
+      /\.otari-table\.table-root \{[^}]*background-color: transparent;/,
+    )
+    expect(CSS).toMatch(
+      /\.otari-table \.table__header \{[^}]*background-color: transparent;/,
+    )
+    // The accent has five jobs and a table header is none of them, so the tint
+    // must not come back as a default. Asked of a `background-color`
+    // DECLARATION on comment-stripped CSS, not of the token appearing anywhere
+    // in the rule: the rule's own comment names the tint to say it was removed,
+    // and the first spelling of this failed on that. Third time in this change
+    // that a gate read its own documentation as the offence.
+    const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, "")
+    expect(
+      /\.otari-table \.table__header \{[^}]*background-color:\s*var\(--color-primary-subtle\)/.test(
+        bare,
+      ),
+      "the table header is painting the accent as decoration again",
+    ).toBe(false)
+  })
+
+  it("defaults the row separator to the faint tier, on both halves", () => {
+    // HeroUI draws a border on the row AND on its cells, halving the row's on
+    // the way through, so the two are set together or one line renders at two
+    // strengths.
+    expect(CSS).toMatch(
+      /\.otari-table \.table__row \.table__cell \{\s*border-color: var\(--color-border-subtle\);/,
+    )
+    expect(CSS).toMatch(
+      /\.otari-table \.table__row \{\s*border-color: var\(--color-border-subtle\);/,
+    )
+  })
+
+  it.each(PLACES)("%s does not restate the base treatment", (place) => {
+    // Every rule whose selector names this place, with its declarations. A
+    // place may still set its own row height, lane widths, sticky column and
+    // outer rules; what it may not do is repeat one of the three the base owns.
+    const offenders: string[] = []
+    for (const match of CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const selector = match[1].replace(/\/\*[\s\S]*?\*\//g, "").trim()
+      if (!selector.includes(`.${place}`)) continue
+      const body = match[2].replace(/\s+/g, " ")
+      const isRoot = selector.includes("table-root")
+      const isHeader = selector.includes(".table__header")
+      const isRow =
+        selector.includes(".table__row") && !selector.includes(".table__header")
+      if (isRoot && /background-color: transparent/.test(body))
+        offenders.push(`${selector} sets the root fill the base already sets`)
+      if (isHeader && /background-color: transparent/.test(body))
+        offenders.push(`${selector} sets the header fill the base already sets`)
+      if (isRow && /border-color: var\(--color-border-subtle\)/.test(body))
+        offenders.push(`${selector} sets the row tier the base already sets`)
+    }
+    expect(
+      offenders,
+      "delete the declaration; `.otari-table` is what decides these three",
+    ).toEqual([])
+  })
+})
+
+describe("a token named as a class is registered", () => {
+  const SRC = join(WEB, "src")
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((name) => String(name).replaceAll("\\", "/"))
+    .filter((name) => /\.tsx?$/.test(name))
+
+  // Every `--color-*` this stylesheet declares anywhere.
+  const declared = new Set(
+    [...CSS.matchAll(/^\s*(--color-[\w-]+)\s*:/gm)].map((m) => m[1]),
+  )
+
+  // What is registered, from BOTH `@theme` blocks that reach the build. Ours is
+  // deliberately partial: the gate above asserts we register only the keys
+  // HeroUI does not, so `--color-border` and `--color-danger` live in HeroUI's
+  // and re-declaring them here would be the mistake. Reading its file is what
+  // keeps this gate from flagging every one of them. It is a pinned exact
+  // version, so a move shows up as a failure here rather than as a rule that
+  // silently stopped covering anything, which the count guard below holds.
+  const HEROUI_THEME = join(
+    WEB,
+    "node_modules",
+    "@heroui",
+    "styles",
+    "dist",
+    "themes",
+    "shared",
+    "theme.css",
+  )
+  const registered = new Set([
+    ...[...block("@theme").matchAll(/(--color-[\w-]+)\s*:/g)].map((m) => m[1]),
+    ...(existsSync(HEROUI_THEME)
+      ? [
+          ...readFileSync(HEROUI_THEME, "utf8").matchAll(
+            /(--color-[\w-]+)\s*:/g,
+          ),
+        ].map((m) => m[1])
+      : []),
+  ])
+
+  it("covers the source tree and both theme blocks", () => {
+    expect(sources.length).toBeGreaterThan(30)
+    expect(declared.size).toBeGreaterThan(20)
+    // Ours alone is around 20 keys and HeroUI's is around 40, so a floor above
+    // either one proves both were read. Without this the rule passes vacuously
+    // the day HeroUI moves that file.
+    expect(
+      registered.size,
+      "HeroUI's @theme was not read, so every token it registers would read as unregistered",
+    ).toBeGreaterThan(45)
+  })
+
+  it("names no unregistered token as a class anywhere in src", () => {
+    // The four properties that take a color token. `divide-` and `fill-` are in
+    // because both are already used in the tree, and both fail the same silent
+    // way.
+    const CLASS = /\b(?:text|bg|border|divide|fill|stroke)-[a-z][\w-]*/g
+    const offenders: string[] = []
+    for (const name of sources) {
+      // Comments stripped, both kinds. This file's other sweeps strip block
+      // comments only, which is not enough here: the first run of this rule
+      // reported `bg-surface-muted` in two auth files and `text-primary` in
+      // `Chip`, and all three were LINE comments warning against the exact
+      // mistake being checked for. A gate that fails on its own documentation
+      // gets deleted rather than obeyed.
+      const source = readFileSync(join(SRC, name), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "")
+      for (const match of source.match(CLASS) ?? []) {
+        const token = `--color-${match.replace(/^(?:text|bg|border|divide|fill|stroke)-/, "")}`
+        if (declared.has(token) && !registered.has(token)) {
+          offenders.push(
+            `${name}: ${match} (${token} is declared but not in @theme)`,
+          )
+        }
+      }
+    }
+    expect(
+      [...new Set(offenders)],
+      "register the key in @theme; a declared-but-unregistered token produces no rule and the class silently changes nothing",
+    ).toEqual([])
+  })
+})
+
 describe("semantic tokens only", () => {
   // Every source file that styles anything, which is the whole of `src`: there
   // is no bridge tree left to be exempt, so the rule is the repo's.
@@ -853,7 +1048,7 @@ describe("content text wears a type role", () => {
       "an error-count figure and a chart's figcaption",
     ],
     [
-      "shared/components/metrics/KpiCell.tsx",
+      "design-system/metrics/KpiCell.tsx",
       "the KPI cell's severity and delta line",
     ],
     [
@@ -1061,11 +1256,26 @@ describe("the shell chrome's type roles", () => {
     // to `text-shell-monogram` and the call site was moved back to the old
     // name, so the span carried a class that produces no CSS. Asserting the
     // declaration could not catch that, because the declaration was fine.
-    const APP = join(WEB, "src", "app")
-    const users = readdirSync(APP, { recursive: true })
-      .map((name) => String(name).replaceAll("\\", "/"))
-      .filter((name) => /\.tsx$/.test(name) && !/\.test\.tsx$/.test(name))
-      .filter((name) => readFileSync(join(APP, name), "utf8").includes(role))
+    // Two roots, because one of the three roles left `src/app`. The monogram's
+    // only call site is `design-system/indicators/Avatar`, which the account
+    // row now composes instead of drawing the span itself; the other two roles
+    // are still the shell's own. Scanning both keeps the rule as strong as it
+    // was (a declared role with no call site anywhere still fails) rather than
+    // exempting the layer the call site moved to.
+    const ROOTS = [join(WEB, "src", "app"), join(WEB, "src", "design-system")]
+    const users = ROOTS.flatMap((root) =>
+      readdirSync(root, { recursive: true })
+        .map((name) => String(name).replaceAll("\\", "/"))
+        .filter(
+          (name) =>
+            /\.tsx$/.test(name) &&
+            !/\.test\.tsx$/.test(name) &&
+            !/\.stories\.tsx$/.test(name),
+        )
+        .filter((name) =>
+          readFileSync(join(root, name), "utf8").includes(role),
+        ),
+    )
 
     expect(
       users,
@@ -1120,11 +1330,17 @@ describe("the phone viewport's touch-target floor", () => {
     // `input[type="search"]` and a HeroUI select trigger are not, so the
     // toolbar's own 32px rule would otherwise outlive it on the phone layout.
     // Asserted as a pair: the dense height exists, and it is undone at 767px.
+    //
+    // Both halves are now a custom property on the PLACE rather than a height
+    // on its descendants, which is why these read `--field-height` (see
+    // globals.css, and Toolbar's docstring, for why a variable and not a
+    // descendant selector). What is being held is the pair, not the spelling:
+    // if a rewrite drops the 767px half, a phone gets a 32px search box.
     expect(CSS).toMatch(
-      /\.otari-toolbar \.input,\s*\.otari-toolbar \.select__trigger,\s*\.otari-toolbar input\[type="search"\] \{\s*height: 32px;/,
+      /\.otari-toolbar,\s*\.otari-pagination \{\s*--field-height: 32px;/,
     )
     expect(CSS).toMatch(
-      /@media \(max-width: 767px\) \{\s*\.otari-toolbar \.input,\s*\.otari-toolbar \.select__trigger,\s*\.otari-toolbar input\[type="search"\] \{\s*height: 44px;/,
+      /@media \(max-width: 767px\) \{\s*\.otari-toolbar \{\s*--field-height: 44px;/,
     )
   })
 
@@ -1133,18 +1349,40 @@ describe("the phone viewport's touch-target floor", () => {
   // `[data-slot="button"]` reaches none of them.
   it("raises the pager's own fields with its buttons on a coarse pointer", () => {
     expect(CSS).toMatch(
-      /\.otari-pagination \.input,\s*\.otari-pagination \.select__trigger \{\s*height: 44px;\s*min-height: 44px;/,
+      /@media \(pointer: coarse\)[\s\S]*?\.otari-pagination \{\s*--field-height: 44px;/,
     )
   })
 
   it("raises a table cell's select on the phone viewport", () => {
+    // Still a descendant selector, and deliberately: a table cell is HeroUI's
+    // own DOM rather than a place of ours, and a select is the only control
+    // that renders in one, so making it a place would put the dense height on
+    // an `.input` a future cell might hold.
     expect(CSS).toMatch(
       /\.table__cell \.select__trigger \{\s*height: 44px;\s*min-height: 44px;/,
     )
   })
+
+  // The rule the two places above hand their value TO. Without it each place
+  // would declare a property nothing reads, which is the failure mode a
+  // variable handoff has and a descendant selector does not: the old spelling
+  // could not be half-applied, this one can.
+  it("hands the place's variable to the controls that read it", () => {
+    expect(CSS).toMatch(
+      /\.input,\s*\.select__trigger \{\s*min-height: var\(--field-height\);\s*height: var\(--field-height\);\s*padding-block: var\(--field-padding-block\);/,
+    )
+    // The default, so a field outside every place still has a height at all.
+    expect(CSS).toMatch(/--field-height: 36px;/)
+    expect(CSS).toMatch(/--field-padding-block: 6px;/)
+    // The native search input is not one of HeroUI's classes, so it reads the
+    // property through a rule of its own, scoped to the toolbar.
+    expect(CSS).toMatch(
+      /\.otari-toolbar input\[type="search"\] \{\s*min-height: var\(--field-height\);\s*height: var\(--field-height\);/,
+    )
+  })
 })
 
-// Form controls. The shared `Checkbox` (`shared/components/forms/Checkbox.tsx`) is the one
+// Form controls. The shared `Checkbox` (`design-system/forms/Checkbox.tsx`) is the one
 // on the tokens, and a bare `<input type="checkbox">` is the browser's own:
 // system blue in both themes, and a 13px box on a page whose smallest touch
 // target is meant to be 44.
@@ -1161,7 +1399,7 @@ describe("checkboxes come from the design foundation", () => {
   it.each(sources)("uses no raw checkbox in %s", (name) => {
     expect(
       readFileSync(join(SRC, name), "utf8"),
-      `${name} hand-rolls a checkbox; use Checkbox from shared/components/ui`,
+      `${name} hand-rolls a checkbox; use Checkbox from design-system/forms/Checkbox`,
     ).not.toContain('type="checkbox"')
   })
 })
@@ -1228,7 +1466,7 @@ describe("a field's trailing glyph is spaced once", () => {
 
 // Three button variants, and the only thing that can hold them to three.
 //
-// `Button` is HeroUI's, re-exported directly from shared/components/ui, so its
+// `Button` is HeroUI's, re-exported directly from @heroui/react, so its
 // `variant` prop is typed by HeroUI's union and still accepts the four names
 // this product retired. Removing our CSS for them does not make
 // `variant="secondary"` a type error; it makes it a silently unstyled button,

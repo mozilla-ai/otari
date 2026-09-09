@@ -3,10 +3,10 @@ import { useId, useState } from "react"
 
 import type { ToolSettingField } from "@/client"
 import { useTestService } from "@/shared/api/tools"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { SettingRow } from "@/shared/components/layout/SettingRow"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SettingRow } from "@/design-system/layout/SettingRow"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
 // The control lane, one width for text and one for a number, and `scroll-mt-16`

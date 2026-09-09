@@ -2,6 +2,13 @@ import { AlertDialog, Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 
 import type { PricingRefreshPreview, PricingResponse } from "@/client"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { currentPricing } from "@/features/models/pricing"
 // Feature-to-feature, which the boundary rules allow: the overrides are the
 // organization's own rates above this catalog, so they belong on this page while
@@ -16,16 +23,6 @@ import {
   useRejectPricingRefresh,
 } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 
 // The organization's model pricing: what the gateway meters a request at, and

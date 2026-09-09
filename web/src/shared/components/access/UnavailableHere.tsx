@@ -1,4 +1,4 @@
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
 /**
  * A destination this build declares but does not serve.
  *

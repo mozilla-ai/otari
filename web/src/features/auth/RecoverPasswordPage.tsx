@@ -1,8 +1,7 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
-
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useRequestPasswordReset } from "@/shared/api/auth"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 
 import { AuthEmailField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"

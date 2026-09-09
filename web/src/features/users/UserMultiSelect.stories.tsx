@@ -18,7 +18,7 @@ const USERS = [
 ]
 
 const meta = {
-  title: "Users/UserMultiSelect",
+  title: "Dashboard/Users/UserMultiSelect",
   component: UserMultiSelect,
   args: {
     value: [],
@@ -49,9 +49,7 @@ export const WithSelection: Story = {
     return (
       <div className="flex w-[24rem] flex-col gap-3">
         <UserMultiSelect {...args} value={value} onChange={setValue} />
-        <p className="text-chrome-meta text-muted">
-          Selected: {value.join(", ") || "none"}
-        </p>
+        <p className="text-caption">Selected: {value.join(", ") || "none"}</p>
       </div>
     )
   },

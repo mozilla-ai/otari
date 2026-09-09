@@ -1,30 +1,55 @@
 # Component catalog
 
+The design system as running code: every component in `src/design-system/` with
+its variants, its states and both themes, one story per axis.
+[web/design/DESIGN.md](../design/DESIGN.md) is the specification; this is the
+thing you look at.
+
 ## Run it
 
     pnpm --dir web run storybook         # dev server on :6006
     pnpm --dir web run storybook:build   # static build into storybook-static/
 
+## Published
+
+`.github/workflows/otari-design-system.yml` publishes it to GitHub Pages from
+`main`, and runs the smoke test below on every pull request touching `web/`, so
+a story that stops compiling or stops rendering fails the PR rather than rotting
+until somebody opens the site.
+
+`STORYBOOK_BASE_PATH` is why the published build resolves its assets: Pages
+serves a project site under `/<repo>/`, and the merged `vite.config.ts` carries
+the app's own `base: "/"`. `main.ts` reads that variable and leaves the base
+alone when it is unset, so a local build and the dev server need nothing.
+
 ## Smoke test
 
-    pnpm --dir web exec node .storybook/smoke.mjs   # with the dev server running
+    pnpm --dir web exec node .storybook/smoke.mjs   # with a catalog served on :6006
 
 Renders every story in headless Chromium, in both themes, and reports any that
-error, render empty, or log an uncaught exception. Playwright is already a dev
+error, render nothing, or log an uncaught exception. Playwright is already a dev
 dependency here, so this needs nothing extra.
 
-Two traps it was written around, both worth keeping:
+Three traps it was written around, all worth keeping:
 
 - `#error-message` is always in Storybook's DOM, so it is no signal. The body's
   `sb-show-main` / `sb-show-errordisplay` class is.
-- Several stories wrap their subject in a sizing `<div>`, and a modal portals out
-  of `#storybook-root` entirely. So it waits for real text or SVG anywhere,
-  not for `childElementCount`.
+- Several stories wrap their subject in a sizing `<div>`, and a modal portals
+  out of `#storybook-root` entirely. So it waits for real content anywhere, not
+  for `childElementCount`.
+- **Some primitives render no text and no SVG at all.** A toggle's track, a
+  divider's hairline, a meter's bar and a skeleton's block are correct and
+  entirely graphical, so a text-or-SVG check reported nine of them as timeouts.
+  `RENDERED` therefore also accepts something that *paints*: a descendant with a
+  non-zero box and either a fill or a border. Deliberately not a child count,
+  which the sizing `<div>` above would satisfy while the component inside is
+  still null.
 
 ## Layout
 
-- `main.ts`: story glob, and the `viteFinal` that strips the TanStack Router
-  plugins so a Storybook run can never rewrite `src/routeTree.gen.ts`.
+- `main.ts`: story glob, the `viteFinal` that strips the TanStack Router plugins
+  so a Storybook run can never rewrite `src/routeTree.gen.ts`, and the
+  `STORYBOOK_BASE_PATH` seam.
 - `preview.tsx`: imports `globals.css` (the whole design system) and composes
   the decorators. Note the order: innermost first.
 - `theme.tsx`: the light/dark toolbar, writing the same three properties on
@@ -33,9 +58,23 @@ Two traps it was written around, both worth keeping:
   the feature components that read them. Override the bootstrap per story with
   `parameters.deployment`.
 - `apiMock.tsx`: a `fetch` stub driven by `parameters.api`. Failures use a
-  `{ $status, $body }` envelope; see the comment there for why it is `$`-prefixed
-  rather than sniffed.
+  `{ $status, $body }` envelope; see the comment there for why it is
+  `$`-prefixed rather than sniffed.
 
-Stories live beside their component under `src/`, so `pnpm run lint`,
-`pnpm run typecheck` and `src/styles/foundation.test.ts` all cover them, which
-is why a story styles from semantic tokens like anything else in the tree.
+Config, not stories, lives here. Stories sit beside the component they document,
+the way `Foo.test.tsx` sits beside `Foo.tsx`.
+
+## Titles
+
+Two roots, and which one a story belongs to is not a judgement call: it is the
+layer its subject lives in.
+
+- **`Design system/<Topic>/<Name>`** for `src/design-system/`, where `<Topic>`
+  is the directory, which is itself named for the file in `web/design/` that
+  specifies it.
+- **`Dashboard/<Feature>/<Name>`** for `src/features/` and the two directories
+  left in `src/shared/components/`. These are application components: they read
+  the deployment, the transport, or a domain type, and they are not part of the
+  library.
+
+A story's group therefore says whether its subject could leave in a package.

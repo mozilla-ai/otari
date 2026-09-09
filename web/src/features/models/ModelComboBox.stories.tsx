@@ -12,11 +12,20 @@ import { ModelComboBox } from "./ModelComboBox"
  * purpose: an operator knows the model name, not which provider is currently
  * routed to it.
  */
+// A `DiscoverableModel` is `{ id, key }`, not a string: `id` is the bare model id
+// the provider reports and `key` is the `instance:model` selector to send as
+// `model`. This builder takes the bare ids and derives both, because the mock
+// used to hand the component plain strings and `model.key.toLowerCase()` threw
+// on every story whose value was non-empty. That failed only when a query was
+// typed, so it surfaced as a different set of stories on each catalog run.
 function discoverable(providers: { provider: string; models: string[] }[]) {
   return {
     providers: providers.map((entry) => ({
       provider: entry.provider,
-      models: entry.models,
+      models: entry.models.map((id) => ({
+        id,
+        key: `${entry.provider}:${id}`,
+      })),
       ok: true,
       discovery_unsupported: false,
       checked_at: "2026-08-25T12:00:00Z",
@@ -37,7 +46,7 @@ const CATALOG = discoverable([
 ])
 
 const meta = {
-  title: "Models/ModelComboBox",
+  title: "Dashboard/Models/ModelComboBox",
   component: ModelComboBox,
   args: { label: "Model", value: "", onChange: () => {} },
   parameters: { api: { "/v1/models/discoverable": CATALOG } },

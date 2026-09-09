@@ -11,6 +11,31 @@ import type {
   UsageSeriesPoint,
   UsageSummary,
 } from "@/client"
+import { RefreshButton } from "@/design-system/actions/RefreshButton"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import {
+  ChartLegend,
+  type SeriesDef,
+  Sparkline,
+  type StackedPoint,
+  TrendChart,
+} from "@/design-system/metrics/charts"
+import { KpiCell } from "@/design-system/metrics/KpiCell"
+import { KpiStrip } from "@/design-system/metrics/KpiStrip"
+import { TrendChip } from "@/design-system/metrics/TrendChip"
+import {
+  type FilterChip,
+  FilterChips,
+} from "@/design-system/navigation/FilterChips"
+import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ShareDialog } from "@/features/usage/ShareDialog"
 import {
   billedTokenTotal,
@@ -25,34 +50,6 @@ import {
   useUsageSummary,
 } from "@/shared/api/usage"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import { RefreshButton } from "@/shared/components/actions/RefreshButton"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { EmptyMessage } from "@/shared/components/feedback/EmptyMessage"
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import {
-  ChartLegend,
-  type SeriesDef,
-  Sparkline,
-  type StackedPoint,
-  TrendChart,
-} from "@/shared/components/metrics/charts"
-import { KpiCell } from "@/shared/components/metrics/KpiCell"
-import { KpiStrip } from "@/shared/components/metrics/KpiStrip"
-import { TrendChip } from "@/shared/components/metrics/TrendChip"
-import {
-  type FilterChip,
-  FilterChips,
-} from "@/shared/components/navigation/FilterChips"
-import { FilterMultiComboBox } from "@/shared/components/navigation/FilterMultiComboBox"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
-import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import {
   deltaFraction,
   formatNumber,
@@ -78,7 +75,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // Compact currency (formatUsd), token counts (formatTokens), percentages
 // (formatPct) and the period-over-period delta (deltaFraction) are shared with
 // the overview page from @/shared/helpers/format, and the chip that renders one
-// comes from @/shared/components/TrendChip. Only the two formatters specific to
+// comes from @/design-system/metrics/TrendChip. Only the two formatters specific to
 // this page stay local.
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   const d = new Date(iso)

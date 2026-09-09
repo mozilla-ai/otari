@@ -1,17 +1,16 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
-
+import { CopyableValue } from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Field } from "@/design-system/forms/Field"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
 import {
   useOrganizationContext,
   useUpdateOrganization,
 } from "@/shared/api/organizations"
-import { CopyableValue } from "@/shared/components/actions/CopyField"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Field } from "@/shared/components/forms/Field"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
 
 import { canManage } from "./roles"
 

@@ -23,7 +23,7 @@ const USERS = [
 ]
 
 const meta = {
-  title: "Users/UserComboBox",
+  title: "Dashboard/Users/UserComboBox",
   component: UserComboBox,
   args: { value: "", onChange: () => {}, users: USERS },
 } satisfies Meta<typeof UserComboBox>

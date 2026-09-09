@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
-import { RefreshButton } from "@/shared/components/actions/RefreshButton"
+import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { ACTIVITY_PRESETS } from "@/shared/helpers/timeRange"
 import type { TimelinePoint } from "./ActivityTimeline"
 import { ActivityTimeline } from "./ActivityTimeline"
@@ -35,7 +35,7 @@ const WITH_ERRORS: TimelinePoint[] = HOURS.map((bucketStart, index) => ({
 }))
 
 const meta = {
-  title: "Activity/ActivityTimeline",
+  title: "Dashboard/Activity/ActivityTimeline",
   component: ActivityTimeline,
   args: {
     presets: ACTIVITY_PRESETS,
@@ -164,7 +164,7 @@ export const Interactive: Story = {
           onSelectRange={(start, end) => setRange({ start, end })}
           onSelectFull={() => setRange({})}
         />
-        <p className="text-chrome-meta text-muted">
+        <p className="text-caption">
           {range.start
             ? `Window: ${range.start} to ${range.end}`
             : `Extent: ${extentKey}, no sub-window selected.`}

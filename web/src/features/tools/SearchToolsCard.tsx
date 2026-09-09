@@ -14,13 +14,13 @@ import {
   useSearchTools,
   useUpdateSearchTool,
 } from "@/shared/api/tools"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { DisclosureRow } from "@/shared/components/navigation/DisclosureRow"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
 // Search tools are what POST /v1/search dispatches against. They used to be

@@ -6,6 +6,18 @@ import type {
   OrgProviderKey,
   UpdateOrgProviderKeyRequest,
 } from "@/client"
+import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
@@ -33,21 +45,6 @@ import {
   useSetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
-import { ConfirmRowAction } from "@/shared/components/actions/ConfirmRowAction"
-import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { Field } from "@/shared/components/forms/Field"
-import { SecretField } from "@/shared/components/forms/SecretField"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage } from "./roles"

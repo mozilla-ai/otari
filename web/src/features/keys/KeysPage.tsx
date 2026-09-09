@@ -37,23 +37,23 @@ import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingG
 import {
   CONCEALED_SECRET,
   CopyField,
-} from "@/shared/components/actions/CopyField"
-import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
-import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
+} from "@/design-system/actions/CopyField"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import {
   DataTable,
   type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { Field } from "@/shared/components/forms/Field"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+} from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { formatDate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,

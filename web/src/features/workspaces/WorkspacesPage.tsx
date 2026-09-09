@@ -2,6 +2,18 @@ import { Button, Spinner } from "@heroui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Field } from "@/design-system/forms/Field"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
 import { useBudgets } from "@/shared/api/budgets"
@@ -19,21 +31,6 @@ import {
   useWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/workspaces"
-import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Field } from "@/shared/components/forms/Field"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatDate } from "@/shared/helpers/format"
 
 // Workspaces are the unit inside an organization that work is scoped to. This

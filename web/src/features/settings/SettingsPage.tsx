@@ -13,16 +13,16 @@ import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import {
   CONCEALED_SECRET,
   CopyField,
-} from "@/shared/components/actions/CopyField"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { Toolbar } from "@/shared/components/layout/Toolbar"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+} from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { Toolbar } from "@/design-system/layout/Toolbar"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.

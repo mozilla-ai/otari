@@ -18,9 +18,9 @@ import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingG
 import {
   CONCEALED_SECRET,
   CopyField,
-} from "@/shared/components/actions/CopyField"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
+} from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,

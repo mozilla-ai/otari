@@ -253,7 +253,100 @@ describe("layer boundaries", () => {
     expect(messages).toEqual([])
   })
 
+  // src/design-system is the one layer whose rule names every sibling rather than
+  // a few, because what it protects is not a direction but a property: the
+  // directory has to still compile with the rest of src/ deleted. These are the
+  // probes for that, and they are what makes the claim in DESIGN.md's extraction
+  // contract checkable rather than aspirational.
+  it("reject the design system importing any other layer", () => {
+    const messages = rejects(
+      "design-system",
+      [
+        'import { formatUsd } from "@/shared/helpers/format";',
+        'import { UsagePage } from "@/features/usage/UsagePage";',
+        'import { router } from "@/app/router";',
+        'import { Route } from "@/routes/usage";',
+        'import type { User } from "@/client";',
+        "export const a = [formatUsd, UsagePage, router, Route];",
+        "export type B = User;",
+      ].join("\n"),
+    )
+    expect(messages).toHaveLength(5)
+    for (const message of messages) {
+      expect(message).toMatch(/may not import the rest of src/)
+    }
+  })
+
+  it("reject the design system reaching another layer by relative path", () => {
+    // A `../` walk out of the directory is the form this boundary would actually
+    // be broken by, since a component two levels down is already writing
+    // relative paths to its own siblings.
+    expect(
+      rejects(
+        "design-system",
+        'import { formatUsd } from "../shared/helpers/format";\nexport const a = formatUsd;\n',
+      ),
+    ).toHaveLength(1)
+    expect(
+      rejects(
+        "design-system",
+        'import { apiFetch } from "../../shared/api/client";\nexport const a = apiFetch;\n',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it("reject the design system importing a layer by its bare specifier", () => {
+    expect(
+      rejects(
+        "design-system",
+        'import { formatUsd } from "@/shared";\nexport const a = formatUsd;\n',
+      ),
+    ).toHaveLength(1)
+    expect(
+      rejects(
+        "design-system",
+        'import type { User } from "@/client";\nexport type B = User;\n',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it("allow the design system its own modules and its third-party dependencies", () => {
+    // The permitted set, spelled out: React, the two component libraries, the
+    // icons, the chart library, the Markdown renderer, and itself. If this list
+    // has to grow, that is a decision about what the package would depend on, so
+    // it belongs in a diff rather than in a component's import header.
+    const messages = rejects(
+      "design-system",
+      [
+        'import { useState } from "react";',
+        'import { Button } from "@heroui/react";',
+        'import { Checkbox } from "react-aria-components";',
+        'import { FiCopy } from "react-icons/fi";',
+        'import { LineChart } from "recharts";',
+        'import ReactMarkdown from "react-markdown";',
+        'import remarkGfm from "remark-gfm";',
+        'import { Section } from "@/design-system/layout/Section";',
+        'import { Dot } from "../indicators/Dot";',
+        "export const a = [useState, Button, Checkbox, FiCopy, LineChart, ReactMarkdown, remarkGfm, Section, Dot];",
+      ].join("\n"),
+    )
+    expect(messages).toEqual([])
+  })
+
   it.each(["app", "features", "shared"])(
+    "allow %s importing the design system",
+    (layer) => {
+      // The dependency is one-way, not forbidden. Every layer composes the
+      // primitives; none of them is visible from inside the package.
+      const messages = rejects(
+        layer,
+        'import { Section } from "@/design-system/layout/Section";\nexport const a = Section;\n',
+      )
+      expect(messages).toEqual([])
+    },
+  )
+
+  it.each(["app", "features", "shared", "design-system"])(
     "reject %s importing the overlay tree",
     (layer) => {
       // src/overlay does not exist here and is not meant to: an overlay is a separate
@@ -340,6 +433,7 @@ describe("the layout", () => {
     expect(dirs).toEqual([
       "app",
       "client",
+      "design-system",
       "features",
       "routes",
       "shared",

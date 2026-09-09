@@ -1,10 +1,9 @@
 import type { ComponentPropsWithoutRef, ReactElement, ReactNode } from "react"
 import { Children, isValidElement, useEffect, useRef, useState } from "react"
 import type { Components, ExtraProps } from "react-markdown"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { Markdown } from "@/design-system/content/Markdown"
 
-import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 // The operator user guide is bundled straight from the repo's docs so the
 // running dashboard ships the guide that matches it, instead of pointing at a
 // docs site that may describe a different version. Rebuilding the dashboard
@@ -106,7 +105,7 @@ export const markdownComponents: Components = {
   table: ({ node: _node, ...props }: MdProps<"table">) => (
     // biome-ignore lint/a11y/useSemanticElements: <section> would not make the overflow keyboard-reachable, which is the point
     <div
-      className="otari-markdown-scroll"
+      className="my-4 max-w-full overflow-x-auto"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be focusable (axe scrollable-region-focusable)
       tabIndex={0}
       role="region"
@@ -161,21 +160,34 @@ function CodeBlock({ node: _node, children, ...props }: MdProps<"pre">) {
   }
 
   return (
-    <div className="otari-code-block">
-      <div className="otari-code-label">
+    <div className="my-5">
+      {/* The label row: the language on the left, the copy affordance on the
+          right, both in mono at the caption step on the block's own surface.
+          The row is a cell of the block rather than a button floating on it,
+          which is how the copy family works everywhere else here. */}
+      <div className="flex items-center justify-between gap-3 border border-code-border bg-code-control px-4 py-1.5 text-mono-micro text-code-foreground">
         <span>{language || "code"}</span>
         {text ? (
-          <button type="button" onClick={copy}>
+          <button
+            type="button"
+            onClick={copy}
+            className="opacity-75 hover:opacity-100"
+          >
             {copied ? "Copied" : "Copy"}
           </button>
         ) : null}
       </div>
       {/* biome-ignore-start lint/a11y/noNoninteractiveTabindex: same as the table above; the block scrolls, so it has to be reachable */}
       {/* biome-ignore-start lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT */}
+      {/* A code block is a small object of its own on the prose ground, which
+          is the one place in this product where an edge is right: it is a
+          verbatim thing to be copied, not a division of the page. `border-t-0`
+          because the label row above already drew that edge. */}
       <pre
         tabIndex={0}
         role="region"
         aria-label={language ? `${language} code` : "Code"}
+        className="overflow-x-auto border border-code-border border-t-0 bg-code-surface px-4 py-3.5 text-mono-caption leading-5 text-code-foreground"
         {...props}
       >
         {children}
@@ -205,14 +217,9 @@ export function DocsPage() {
           the product uses, because this is read rather than scanned. */}
       <div className="flex flex-1 border-t border-border">
         <div className="min-w-0 border-r border-border px-4 py-8 md:px-6">
-          <div className="otari-markdown max-w-[560px]">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
-            >
-              {guideBody}
-            </ReactMarkdown>
-          </div>
+          <Markdown className="max-w-[560px]" components={markdownComponents}>
+            {guideBody}
+          </Markdown>
         </div>
       </div>
     </div>

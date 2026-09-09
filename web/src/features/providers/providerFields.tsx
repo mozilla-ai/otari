@@ -11,9 +11,9 @@ import {
 import { type ReactNode, useMemo, useState } from "react"
 
 import { useProviderCatalog } from "@/shared/api/providers"
-import { Field } from "@/shared/components/forms/Field"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
-import { SecretField } from "@/shared/components/forms/SecretField"
+import { Field } from "@/design-system/forms/Field"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { SecretField } from "@/design-system/forms/SecretField"
 
 import {
   type CredentialFieldValues,

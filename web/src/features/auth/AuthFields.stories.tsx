@@ -13,7 +13,7 @@ import { AuthEmailField, AuthPasswordField, AuthTextField } from "./AuthFields"
  * fills and saves the right thing, and no dependency on anything a session owns.
  */
 const meta = {
-  title: "Auth/AuthFields",
+  title: "Dashboard/Auth/AuthFields",
   component: AuthEmailField,
   args: { value: "", onChange: () => {} },
 } satisfies Meta<typeof AuthEmailField>

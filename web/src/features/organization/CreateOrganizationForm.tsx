@@ -1,12 +1,11 @@
 import { Button, Card } from "@heroui/react"
 import { useState } from "react"
-
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Field } from "@/design-system/forms/Field"
 import {
   useCreateOrganization,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { Field } from "@/shared/components/forms/Field"
 
 // Create an organization and move into it. Two calls, because the server keeps
 // them apart on purpose: creating one does not change which organization the

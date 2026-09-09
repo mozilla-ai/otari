@@ -31,7 +31,7 @@
 
 import { Button, Link } from "@heroui/react"
 import { useState } from "react"
-
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useAuth } from "@/features/auth/AuthContext"
 import {
   AuthPageShell,
@@ -43,7 +43,6 @@ import {
   useAcceptInvitation,
   useValidateInvitation,
 } from "@/shared/api/organizations"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 

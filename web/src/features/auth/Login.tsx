@@ -1,6 +1,7 @@
 import { Button, Input, Label, Link, TextField } from "@heroui/react"
 import { useState } from "react"
 import { FiAlertCircle, FiChevronRight, FiEye, FiEyeOff } from "react-icons/fi"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
 import type { SignInCredential } from "@/shared/api/client"
 import {
@@ -9,7 +10,6 @@ import {
   signInWithPasskey,
   startOAuthSignIn,
 } from "@/shared/api/client"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
 import {
   PasskeyCancelledError,
   supportsPasskeys,

@@ -17,7 +17,7 @@ tree today.
 Do not add an `index.ts` whose job is re-exporting its siblings. A barrel makes the bundler
 pull in unrelated modules, fills the editor with tabs called `index.ts`, hides the real
 location in a stack trace, and is the usual way a circular import gets introduced. Import the
-file itself: `import { DataTable } from "@/shared/components/data/DataTable"`.
+file itself: `import { DataTable } from "@/design-system/data/DataTable"`.
 
 Two `index` files in the tree are the framework's spelling rather than ours, and both stay:
 

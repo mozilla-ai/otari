@@ -63,11 +63,48 @@ Row states, and the only three:
 
 | State | Ground |
 | --- | --- |
-| Rest | `surface`, hairline bottom. The name is the only emphasis in the row |
+| Rest | **No fill.** The page ground shows through, divided by a `border-subtle` hairline. The name is the only emphasis in the row |
 | Hover | `surface-muted`. The whole row is the hit area, so the whole row lights |
 | Selected | `primary-subtle`. Translucent, so it still reads over a hovered row |
 
 Never zebra striping, never vertical rules between cells, never a bolder header.
+
+## The base decides; a per-table class carries only its own lanes
+
+`.otari-table` is the whole treatment: no fill on the root or the header, no
+radius, no padding, no column separators, and the row separator on the faint
+tier. **A table is a region of the one surface**, bounded by the section rules
+around it and by its own hairlines.
+
+That is worth stating because it was not true until recently and the shape of
+the mistake is instructive. HeroUI's `Table.Root` ships as a card, the base rule
+only half-neutralized it (it swapped HeroUI's fill for `--color-surface` and gave
+the header a `--color-primary-subtle` tint), and so all sixteen per-table classes
+carried the same three declarations to undo it:
+
+```css
+/* What each of sixteen classes said, each commented "Same terms as the others" */
+.otari-keys-table .otari-table.table-root      { background-color: transparent; }
+.otari-keys-table .otari-table .table__header  { background-color: transparent; … }
+.otari-keys-table .otari-table .table__row, …  { border-color: var(--color-border-subtle); }
+```
+
+Forty-eight copies of one decision, because there was nowhere to say it once.
+The base is now those terms and the copies are gone.
+
+**So a per-table class is for what is genuinely that table's:** its row height,
+its lane widths (keyed on `[data-key="…"]`, so a lane is named rather than
+counted), its sticky first column, and its own outer rules where it has them.
+If you find yourself writing one of the three above, the base already says it and
+`src/styles/foundation.test.ts` will reject the copy.
+
+Two consequences worth knowing. Sixteen consumers overriding a default with no
+exceptions is not a default: it is a base value that was wrong, and the fix is
+to move it rather than to keep overriding. And the three cards that render a bare
+`DataTable` with no wrapper class (`OrganizationBudgetsCard`,
+`SpendCeilingsCard`, `OrganizationRosterCard`) were the ones still showing the
+old treatment, so correcting the base is what converted them: their headers lose
+a teal tint and their row separators move to the faint tier.
 The lane does the aligning; see [layout.md](layout.md).
 
 **`TableScrollFrame`'s `className` is a declared place, not a free label.** It

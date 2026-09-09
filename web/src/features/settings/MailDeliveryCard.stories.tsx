@@ -12,7 +12,7 @@ import { MailDeliveryCard } from "./MailDeliveryCard"
  * suite mocks.
  */
 const meta = {
-  title: "Settings/MailDeliveryCard",
+  title: "Dashboard/Settings/MailDeliveryCard",
   component: MailDeliveryCard,
   parameters: { layout: "padded" },
 } satisfies Meta<typeof MailDeliveryCard>

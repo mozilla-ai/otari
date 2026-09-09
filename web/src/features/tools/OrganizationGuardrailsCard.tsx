@@ -2,6 +2,15 @@ import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { OrganizationGuardrail, Workspace } from "@/client"
+import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { Badge } from "@/design-system/indicators/Badge"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
@@ -11,15 +20,6 @@ import {
   useUpdateOrganizationGuardrail,
 } from "@/shared/api/tools"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { Badge } from "@/shared/components/indicators/Badge"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // The layer above the deployment-wide guardrail settings this card sits under.
 // The settings above say where guardrails run; these say which ones run whether

@@ -1,0 +1,95 @@
+import { Button, Tooltip } from "@heroui/react"
+import { useEffect, useRef, useState } from "react"
+import { FiCopy } from "react-icons/fi"
+import { copyToClipboard } from "@/design-system/helpers/clipboard"
+
+// A compact copy control for an identifier an operator has to paste elsewhere (a
+// model id, an alias target). Table rows own click-drag for selection, so the
+// text in a cell cannot be highlighted by hand (issue #478); this is how it gets
+// out. copyToClipboard covers the plain-HTTP origins this dashboard is routinely
+// served from, where the async Clipboard API does not exist; if even the legacy
+// path fails, this says so rather than claiming a copy it did not make (the same
+// rule as the Keys page's CopyField). Unlike that one, the value here is not a
+// form field this can select for the operator, so the failure message asks them
+// to select it rather than implying something already is.
+// The acknowledgement is a tooltip over the icon that was pressed, so the answer
+// appears where the operator is looking in a column of identical buttons. It is
+// controlled (never hover-opened) because it reports an event, not a hint, and it
+// renders in an overlay so it is not clipped by the table's scroll container and
+// does not reflow the row it reports on.
+export function CopyButton({
+  value,
+  label,
+  selectOnFailure,
+}: {
+  value: string
+  label: string
+  /**
+   * A field to focus and select if the copy fails, so the operator can reach
+   * Ctrl/Cmd-C without hunting for the value. Off by default: a table cell has
+   * no field to select, which is the majority of this button's call sites.
+   */
+  selectOnFailure?: React.RefObject<
+    HTMLInputElement | HTMLTextAreaElement | null
+  >
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle")
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
+
+  const copy = async () => {
+    const copied = await copyToClipboard(value)
+    if (!copied) {
+      // After the attempt, never before it: `copyToClipboard`'s legacy path
+      // restores the selection and focus it found on the way out, so a
+      // selection made first is undone by the very fallback this exists for.
+      selectOnFailure?.current?.focus()
+      selectOnFailure?.current?.select()
+    }
+    setState(copied ? "copied" : "failed")
+    clearTimeout(resetTimer.current)
+    // A failure has something to read and act on, so it lingers longer.
+    resetTimer.current = setTimeout(
+      () => setState("idle"),
+      copied ? 1_500 : 5_000,
+    )
+  }
+
+  return (
+    <Tooltip.Root isOpen={state !== "idle"}>
+      <Button
+        size="sm"
+        variant="ghost"
+        isIconOnly
+        aria-label={`Copy ${label}`}
+        onPress={copy}
+        // 32px is under the 44px floor motion-and-access.md sets, and this
+        // button is 32px everywhere it appears. The pseudo-element grows the
+        // target without moving anything, which is the same device the toggle
+        // track uses; 6px each way is the gap a 32px control already has inside
+        // a 44px row, so no two of these overlap.
+        className="relative before:absolute before:-inset-1.5 before:content-['']"
+      >
+        <FiCopy aria-hidden="true" className="h-3.5 w-3.5" />
+      </Button>
+      <Tooltip.Content placement="top" showArrow>
+        {state === "failed"
+          ? "Copy blocked, select the value and press Ctrl/Cmd-C"
+          : "Copied!"}
+      </Tooltip.Content>
+      {/* A tooltip opened by a press rather than by focus is not announced, and
+          the outcome is the whole point of the press. `CopyField` says its own
+          the same way. */}
+      <span aria-live="polite" className="sr-only">
+        {state === "copied"
+          ? `Copied ${label} to clipboard.`
+          : state === "failed"
+            ? `Could not copy ${label}. Select the value and press Ctrl/Cmd-C.`
+            : ""}
+      </span>
+    </Tooltip.Root>
+  )
+}

@@ -57,7 +57,7 @@ const MODELS: CardModel[] = [
 ]
 
 const meta = {
-  title: "Usage/ShareCard",
+  title: "Dashboard/Usage/ShareCard",
   component: ShareCard,
   args: {
     ratio: "square",

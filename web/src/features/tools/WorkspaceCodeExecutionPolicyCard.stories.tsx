@@ -45,7 +45,7 @@ function api(policy: ReturnType<typeof workspaceCodeExecutionPolicy>) {
 }
 
 const meta = {
-  title: "Tools/WorkspaceCodeExecutionPolicyCard",
+  title: "Dashboard/Tools/WorkspaceCodeExecutionPolicyCard",
   component: WorkspaceCodeExecutionPolicyCard,
   args: { onSaved: () => {} },
   parameters: {

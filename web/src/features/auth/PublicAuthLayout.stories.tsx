@@ -14,7 +14,7 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  * these pages run before the router is mounted.
  */
 const meta = {
-  title: "Auth/PublicAuthLayout",
+  title: "Dashboard/Auth/PublicAuthLayout",
   component: PublicAuthLayout,
   args: { title: "Create your account", children: null },
   parameters: { layout: "fullscreen" },

@@ -2,6 +2,8 @@ import { Button, Modal, Popover } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiCheck, FiChevronDown, FiMail, FiPlus } from "react-icons/fi"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { ProductMark } from "@/design-system/ProductMark"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import { CreateWorkspaceForm } from "@/features/workspaces/WorkspacesPage"
@@ -11,8 +13,6 @@ import {
   usePendingOrganizationInvitations,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { ProductMark } from "@/shared/components/ProductMark"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
 

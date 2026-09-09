@@ -1,0 +1,131 @@
+name: Otari Design System
+
+# Publishes web/.storybook as the design system's reference: every primitive
+# with its variants, states and both themes.
+#
+# Two jobs on purpose. `catalog` runs on every pull request touching the
+# dashboard and is the gate: it builds the catalog and renders every story in
+# both themes, so a component whose story stops compiling (or stops rendering)
+# fails here rather than rotting unnoticed until somebody opens the site. Only
+# `publish` needs Pages, and it runs on main alone.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - '.github/workflows/otari-design-system.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - '.github/workflows/otari-design-system.yml'
+  workflow_dispatch:
+
+# A superseded run has nothing to publish, and two publishes racing to the same
+# Pages deployment is the one way this workflow can leave the site half-updated.
+concurrency:
+  group: design-system-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    # The pnpm that web/package.json's `packageManager` pins, before setup-node,
+    # whose `cache: pnpm` shells out to pnpm for the store path. Same ordering
+    # and same reason as otari-dashboard.yml.
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        package_json_file: web/package.json
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 'lts/*'
+        cache: pnpm
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    # Chromium only: the smoke run below drives it, and the screenshot suite's
+    # browsers are another workflow's business.
+    - name: Install Chromium
+      run: pnpm run e2e:install
+
+    # `/otari/` because Pages serves a project site under the repository name,
+    # and the merged vite.config.ts carries the app's own `base: "/"`. Set for
+    # the pull-request build too, so the artifact a reviewer downloads is the
+    # same build that would publish rather than a differently-based one.
+    - name: Build the catalog
+      env:
+        STORYBOOK_BASE_PATH: /${{ github.event.repository.name }}/
+      run: pnpm run storybook:build
+
+    # The real check. `storybook build` is a bundler run: it does not execute a
+    # story, so a component that throws on render, a decorator that is missing a
+    # provider, and a story whose subject renders nothing all build clean. This
+    # renders all of them in headless Chromium in both themes and reports any
+    # that error, come up empty, or log an uncaught exception.
+    #
+    # It serves the static build rather than the dev server, because the static
+    # build is what publishes and so is what should be proven.
+    #
+    # Python's own module rather than `serve` or `http-server`: both would be new
+    # dependencies, and `npx --yes` would fetch one mid-run. A plain file server
+    # is enough here, since the catalog needs no SPA fallback: `/index.json` and
+    # `/iframe.html` are both real files on disk, and a rewrite-everything server
+    # would actually be worse, turning a missing asset into a 200 that renders.
+    #
+    # The exit status is the grep's, not the pipeline's: `smoke.mjs` reports its
+    # failures on stdout and exits 0 either way, so without the grep this step
+    # passes over a catalog where every story threw.
+    - name: Render every story in both themes
+      run: |
+        python3 -m http.server 6006 --directory storybook-static &
+        curl -s --retry 60 --retry-delay 2 --retry-connrefused \
+          -o /dev/null http://localhost:6006/index.json
+        pnpm exec node .storybook/smoke.mjs | tee smoke.log
+        grep -q "ALL RENDERED CLEAN" smoke.log
+
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: design-system-catalog
+        path: web/storybook-static
+        retention-days: 14
+
+    # Only main publishes. The artifact above is what a pull request gets, which
+    # is enough to review a component's variants without giving every branch the
+    # ability to overwrite the reference site.
+    - name: Upload the Pages artifact
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda1b5a13765 # v3.0.1
+      with:
+        path: web/storybook-static
+
+  publish:
+    needs: catalog
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # `pages: write` and `id-token: write` are what deploy-pages needs to claim
+    # the deployment; nothing here writes to the repository.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+    - id: deploy
+      uses: actions/deploy-pages@d6db90164ac5dbe5cbe9c2c62d91d1a5d9dbc51f # v4.0.5

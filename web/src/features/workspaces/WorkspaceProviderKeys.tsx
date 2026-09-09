@@ -11,10 +11,10 @@ import {
   useWorkspaceProviderKeyModels,
   useWorkspaceProviderKeys,
 } from "@/shared/api/workspaces"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { Field } from "@/shared/components/forms/Field"
-import { DismissChip } from "@/shared/components/indicators/DismissChip"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Field } from "@/design-system/forms/Field"
+import { DismissChip } from "@/design-system/indicators/DismissChip"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
 /**
  * One workspace's departures from the provider keys its organization holds.

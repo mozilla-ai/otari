@@ -60,7 +60,7 @@ const ROSTER = [
 const membersPath = `/v1/workspaces/${WORKSPACE_ID}/members`
 
 const meta = {
-  title: "Workspaces/WorkspaceMembersPanel",
+  title: "Dashboard/Workspaces/WorkspaceMembersPanel",
   component: WorkspaceMembersPanel,
   args: {
     workspaceId: WORKSPACE_ID,

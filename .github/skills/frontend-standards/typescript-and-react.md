@@ -21,7 +21,7 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
 - Let inference work for locals; annotate function signatures and exported values.
 - **`unknown`, not `any`, at a boundary you cannot type** (a thrown value, an opaque payload),
   and narrow it with a guard before use. `errorMessage(error: unknown)` in
-  `shared/components/feedback/errorMessage.ts` is the pattern: one place turns an unknown
+  `design-system/feedback/errorMessage.ts` is the pattern: one place turns an unknown
   into a display string.
   Biome's `noExplicitAny` is off in `web/biome.jsonc` because the tree still has older `any`s,
   which makes it a convention rather than a lint error; do not add to the pile.

@@ -46,7 +46,7 @@ function status(overrides: Record<string, unknown> = {}) {
 }
 
 const meta = {
-  title: "Routing/RouterReadiness",
+  title: "Dashboard/Routing/RouterReadiness",
   component: RouterReadiness,
   args: {
     policyName: "cost-aware",

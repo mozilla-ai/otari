@@ -13,6 +13,7 @@ import {
 } from "react-icons/fi"
 
 import type { OrganizationContext } from "@/client"
+import { Avatar } from "@/design-system/indicators/Avatar"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -312,9 +313,7 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
           expandedJustify: "start",
         })}
       >
-        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-control-border bg-surface-alt text-shell-monogram font-semibold text-muted">
-          {identity.initials}
-        </span>
+        <Avatar initials={identity.initials} />
         {collapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-foreground">

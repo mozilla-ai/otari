@@ -160,13 +160,17 @@ describe("DocsPage code blocks", () => {
     // temporary wide fence (the label stayed at x=312 with the block scrolled
     // 1812px right, both the language and Copy still on screen); this is what
     // holds that shape in place, since the guide has no fence to see it on.
+    // Reached through the block's role and the control's name rather than
+    // through class names: the styling moved onto the elements when the guide's
+    // prose became a component, so `.otari-code-label` no longer exists and a
+    // class was never what this test was about.
     const { container } = renderFence("```bash\necho hello\n```\n")
-    const block = container.querySelector(".otari-code-block")
-    const label = container.querySelector(".otari-code-label")
     const pre = container.querySelector("pre")
-    expect(label?.parentElement).toBe(block)
-    expect(pre?.parentElement).toBe(block)
-    expect(pre?.contains(label ?? null)).toBe(false)
+    const copy = screen.getByRole("button", { name: "Copy" })
+    const label = copy.parentElement
+    expect(pre).not.toBeNull()
+    expect(label?.parentElement).toBe(pre?.parentElement)
+    expect(pre?.contains(copy)).toBe(false)
   })
 
   it("renders no copy control when there is nothing to copy", () => {
@@ -184,7 +188,8 @@ describe("DocsPage code blocks", () => {
     const { container } = render(<DocsPage />)
     const blocks = container.querySelectorAll("pre")
     expect(blocks).toHaveLength(1)
-    expect(container.querySelectorAll(".otari-code-label")).toHaveLength(1)
+    // The label row, named by the control it carries rather than by a class.
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1)
     expect(container.querySelectorAll("code").length).toBeGreaterThan(0)
   })
 })

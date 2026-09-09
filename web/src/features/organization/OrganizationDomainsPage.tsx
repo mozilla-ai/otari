@@ -5,6 +5,16 @@ import type {
   CreateOrganizationDomainRequest,
   OrganizationDomain,
 } from "@/client"
+import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
+import { CopyField } from "@/design-system/actions/CopyField"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Field } from "@/design-system/forms/Field"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   useCreateOrganizationDomain,
   useDeleteOrganizationDomain,
@@ -13,19 +23,6 @@ import {
   useUpdateOrganizationDomain,
   useVerifyOrganizationDomain,
 } from "@/shared/api/organizations"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { CopyField } from "@/shared/components/actions/CopyField"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Field } from "@/shared/components/forms/Field"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage, membershipLabel } from "./roles"

@@ -144,10 +144,16 @@ value, so a reader can tell a deliberate last resort from a shortcut.
 
 ## Check the shared primitives before hand-rolling
 
-`shared/components/` is a directory per design topic (`layout/`, `metrics/`, `feedback/`,
-`forms/`, `actions/`, `data/`, `navigation/`, `indicators/`, `access/`), named after the topic
-file in `web/design/` that documents each one, plus `deprecated/` for the four that must not
-be used in new code. A new primitive is a file of its own in the topic it belongs to.
+`design-system/` is a directory per design topic (`layout/`, `metrics/`, `feedback/`,
+`forms/`, `actions/`, `data/`, `navigation/`, `indicators/`, `overlays/`), named after the
+topic file in `web/design/` that documents each one. A new primitive is a file of its own in
+the topic it belongs to, and it owes a `.stories.tsx` beside it.
+
+`shared/components/` keeps the two directories that are not primitives: `access/`, which
+renders what a deployment does not serve, and `deprecated/`, the four that must not be used
+in new code. The split is the extraction contract in DESIGN.md: `design-system/` may import
+nothing else under `src/`, so anything reading the transport, the deployment or a generated
+type lives on the other side of that line.
 `web/design/DESIGN.md` maps every export to its module.
 
 The table below gives each need its module. These are hand-rolled rather than rehomed (they
@@ -173,7 +179,7 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 
 ### The divided surface's own vocabulary
 
-The topic directories under `shared/components/` hold the pieces the pages are built from. They are there rather
+The topic directories under `design-system/` hold the pieces the pages are built from. They are there rather
 than in a feature because the second page to want one was the proof that it is the system
 rather than that screen's layout, and because a copy per page is how two pages come to disagree
 about what a thing is. Every one of them was extracted after the duplication had already

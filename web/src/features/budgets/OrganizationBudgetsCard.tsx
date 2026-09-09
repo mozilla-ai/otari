@@ -2,18 +2,15 @@ import { Button, Card } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationBudget } from "@/client"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import {
   useCreateOrganizationBudget,
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
   useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import {
   OrganizationBudgetDialog,
   type OrganizationBudgetDraft,

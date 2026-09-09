@@ -25,21 +25,21 @@ import {
 } from "@/shared/api/usage"
 import { useUsers } from "@/shared/api/users"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
-import { RefreshButton } from "@/shared/components/actions/RefreshButton"
+import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import {
   DataTable,
   type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { Sparkline } from "@/shared/components/metrics/charts"
-import { KpiCell } from "@/shared/components/metrics/KpiCell"
-import { KpiStrip } from "@/shared/components/metrics/KpiStrip"
-import { SpendMeter } from "@/shared/components/metrics/SpendMeter"
-import { TrendChip } from "@/shared/components/metrics/TrendChip"
+} from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { Sparkline } from "@/design-system/metrics/charts"
+import { KpiCell } from "@/design-system/metrics/KpiCell"
+import { KpiStrip } from "@/design-system/metrics/KpiStrip"
+import { SpendMeter } from "@/design-system/metrics/SpendMeter"
+import { TrendChip } from "@/design-system/metrics/TrendChip"
 import {
   deltaFraction,
   formatNumber,

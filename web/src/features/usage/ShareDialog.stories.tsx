@@ -66,7 +66,7 @@ const MODEL_ROWS: UsageGroupRow[] = [
 ]
 
 const meta = {
-  title: "Usage/ShareDialog",
+  title: "Dashboard/Usage/ShareDialog",
   component: ShareDialog,
   args: {
     totals: usageTotals({

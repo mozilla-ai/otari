@@ -41,7 +41,7 @@ function api(activation: ReturnType<typeof workspaceActivation>) {
 }
 
 const meta = {
-  title: "Onboarding/SetupGuideCard",
+  title: "Dashboard/Onboarding/SetupGuideCard",
   component: SetupGuideCard,
   args: { hasProviders: true },
   parameters: { api: api(workspaceActivation()), layout: "padded" },
@@ -73,9 +73,7 @@ export const NoProviders: Story = {
   render: (args) => (
     <div className="flex w-[46rem] flex-col gap-2">
       <SetupGuideCard {...args} />
-      <p className="text-chrome-meta text-muted">
-        Nothing above this line, deliberately.
-      </p>
+      <p className="text-caption">Nothing above this line, deliberately.</p>
     </div>
   ),
 }

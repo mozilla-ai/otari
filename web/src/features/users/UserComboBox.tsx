@@ -10,7 +10,7 @@ import type { ReactNode } from "react"
 import { useState } from "react"
 
 import type { User } from "@/client"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
 
 interface Option {
   id: string

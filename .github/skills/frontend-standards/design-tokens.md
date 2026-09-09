@@ -315,7 +315,7 @@ page: `bg-surface-subtle` on a 6px square measures about 1.1:1 in light and 1.2:
 which is not a quiet dot but no dot. The quiet state of a dot is `bg-text-subtle`, the same
 value the muted status words use, which measures about 6:1 against the page in both themes.
 Fourteen sites had the surface value, because "subtle" was the property being reached for and
-the ramp was incidental. `src/shared/components/dotRamp.test.ts` reads the source for a
+the ramp was incidental. `src/styles/dotRamp.test.ts` reads the source for a
 `<Dot>` or a `dot:` carrying a surface or background value, because a rule that lives in a
 class name needs something that reads class names.
 

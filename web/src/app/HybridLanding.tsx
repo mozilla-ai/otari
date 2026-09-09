@@ -1,6 +1,6 @@
 import { Card, Link } from "@heroui/react"
+import { CopyableValue } from "@/design-system/actions/CopyField"
 import { useGatewayHealth } from "@/shared/api/deployment"
-import { CopyableValue } from "@/shared/components/actions/CopyField"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**

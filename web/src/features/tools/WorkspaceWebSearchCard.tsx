@@ -13,10 +13,10 @@ import {
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { SettingRow } from "@/shared/components/layout/SettingRow"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { SettingRow } from "@/design-system/layout/SettingRow"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 

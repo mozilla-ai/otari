@@ -49,7 +49,7 @@ const EXISTING: OrganizationPricingOverride[] = [
 ]
 
 const meta = {
-  title: "Organization/PricingOverrideDialog",
+  title: "Dashboard/Organization/PricingOverrideDialog",
   component: PricingOverrideDialog,
   args: {
     isOpen: true,

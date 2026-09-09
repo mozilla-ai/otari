@@ -31,7 +31,7 @@ function settings(overrides: Record<string, unknown> = {}) {
 }
 
 const meta = {
-  title: "Models/PricingWarning",
+  title: "Dashboard/Models/PricingWarning",
   component: PricingWarning,
   parameters: { layout: "padded" },
 } satisfies Meta<typeof PricingWarning>
@@ -92,9 +92,7 @@ export const PricingNotRequired: Story = {
   render: () => (
     <div className="flex w-[44rem] flex-col gap-2">
       <PricingWarning />
-      <p className="text-chrome-meta text-muted">
-        Nothing above this line, deliberately.
-      </p>
+      <p className="text-caption">Nothing above this line, deliberately.</p>
     </div>
   ),
 }
@@ -113,9 +111,7 @@ export const DefaultPricingCoversIt: Story = {
   render: () => (
     <div className="flex w-[44rem] flex-col gap-2">
       <PricingWarning />
-      <p className="text-chrome-meta text-muted">
-        Nothing above this line, deliberately.
-      </p>
+      <p className="text-caption">Nothing above this line, deliberately.</p>
     </div>
   ),
 }

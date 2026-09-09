@@ -2,9 +2,9 @@ import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
 
 import type { User } from "@/client"
+import { ControlField } from "@/design-system/forms/FieldMessages"
+import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { ControlField } from "@/shared/components/forms/FieldMessages"
-import { DismissChip } from "@/shared/components/indicators/DismissChip"
 
 interface Option {
   id: string

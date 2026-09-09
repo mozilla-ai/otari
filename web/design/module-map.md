@@ -5,6 +5,16 @@ from DESIGN.md's topics table, because it describes work rather than a rule.
 Delete it once the follow-ups at the bottom are closed; the durable half (where a
 component lives) is already in DESIGN.md's "Where things come from" table.
 
+**Superseded, in one respect: every path below that reads
+`shared/components/<topic>/` is now `design-system/<topic>/`.** The ten topic
+directories this change created were moved wholesale into a layer that may
+import nothing else under `src/`, which is what makes them extractable as a
+package; DESIGN.md's "The extraction contract" is the current rule, and the two
+directories that stayed behind (`access/`, `deprecated/`) are named there. The
+paths are left as written here rather than rewritten, because this file records
+what a past change did and a record edited to match the present stops being one.
+Read it for the reasoning, not for a location.
+
 **Status: executed.** `surface.tsx` (876 lines, 22 exports), `ui.tsx` (1,075
 lines, 20 exports) and `shared/api/hooks.ts` (3,638 lines, 172 exports) are gone,
 replaced by 10 topic directories under `shared/components/` and 17 domain modules

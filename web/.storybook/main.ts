@@ -43,7 +43,15 @@ function withoutTanstackPlugins(plugins: PluginOption[]): PluginOption[] {
 }
 
 const config: StorybookConfig = {
-  stories: ["../src/**/*.stories.tsx"],
+  // A `_`-prefixed story file is a measuring harness rather than a catalog
+  // entry: it renders a component in every context some stylesheet rule
+  // targets, so a script can read the computed geometry before and after a
+  // change. Excluded here so it does not publish, which also keeps it out of
+  // the smoke run; see `__tableGeometry.mjs` for the one that exists.
+  stories: [
+    "../src/**/*.stories.tsx",
+    "!../src/**/_*.stories.tsx",
+  ],
   addons: ["@storybook/addon-docs"],
   framework: { name: "@storybook/react-vite", options: {} },
 
@@ -56,6 +64,18 @@ const config: StorybookConfig = {
   // Babel pass, so a story runs under the same memoization the app does.
   viteFinal: async (viteConfig) => {
     viteConfig.plugins = withoutTanstackPlugins(viteConfig.plugins ?? [])
+
+    // The merged config brings the app's `base: "/"` with it, which is right for
+    // a gateway serving the dashboard at an origin root and wrong for a catalog
+    // published under a repository path: GitHub Pages serves this at
+    // `/<repo>/`, and every asset URL the build emits would point one directory
+    // too high. Read from the environment rather than hardcoded, so the same
+    // build serves the dev server, a local `storybook build`, and Pages without
+    // three configs. Same problem the app's own `base` had in #857.
+    const base = process.env.STORYBOOK_BASE_PATH
+    if (base) {
+      viteConfig.base = base
+    }
     return viteConfig
   },
 }

@@ -7,10 +7,20 @@ An action inside a table row is a `RowAction`, not a `Button`.
 
 `variant`: `primary`, `ghost`, `danger`.
 
-`secondary`, `tertiary`, `outline` and `danger-soft` are retired. HeroUI's union
-still accepts all seven, so a retired name is **not** a type error: it is a silently
-unstyled button. `src/styles/foundation.test.ts` is what stops it, and it names the
-file and line.
+`secondary`, `tertiary`, `outline` and `danger-soft` are retired.
+
+**Import `Button` from `@/design-system/actions/Button`, not from
+`@heroui/react`.** It is the same component with the union narrowed to the three,
+which turns this rule into a compile error at the call site. Against HeroUI's own
+`Button` a retired name is *not* a type error: all seven still typecheck, and a
+retired one compiles, lints, ships, and paints an unstyled button.
+`src/styles/foundation.test.ts` catches that by scanning the source, which works,
+but reports it at the end of a test run rather than in the editor. That gate
+stays, because it still covers the direct imports this tree has not converted;
+new code should not need it.
+
+`ghost` is the wrapper's default, which is the direction the "one primary per
+band" rule wants the friction to point: the accent has to be asked for.
 
 - `primary`: the one thing a band exists to do. **One per band** (see the rule under
   the flowchart, which is the part people get wrong). Filled teal under white ink.
@@ -67,6 +77,13 @@ site never has to remember. Inside one of these, a ghost renders edgeless:
 Put the class on the container, not on the button. If you are building a new
 container that holds a row of ghosts and the edges read as a grid of boxes, add a
 place rather than styling the buttons.
+
+Two of those places carry a second job, field density, and
+[forms.md](forms.md) has that half: `.otari-toolbar` and `.otari-pagination`
+declare `--field-height` for the controls inside them. Worth reading before
+adding a place, because the density half is a custom property the place declares
+rather than a rule reaching into its descendants, and a new place should be
+written the same way.
 
 **An icon-only ghost never takes the edge**, and that rule is keyed on what the
 control *is*, not where it sits: `CopyButton` renders in tables, panels, banners and

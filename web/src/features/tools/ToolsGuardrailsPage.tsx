@@ -22,9 +22,9 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/tools"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { docsSourceHref } from "@/shared/helpers/docs"
 
 // One settable field maps onto one key of the update request; cast at this one

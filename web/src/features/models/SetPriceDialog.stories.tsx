@@ -14,7 +14,7 @@ import { SetPriceDialog } from "./SetPriceDialog"
  * easiest dialog in the tree to put in a catalog.
  */
 const meta = {
-  title: "Models/SetPriceDialog",
+  title: "Dashboard/Models/SetPriceDialog",
   component: SetPriceDialog,
   args: {
     isOpen: true,

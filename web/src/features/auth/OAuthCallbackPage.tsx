@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-
+import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
 import { ApiError, completeOAuthSignIn } from "@/shared/api/client"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
 import {
   analyticsErrorCode,
   analyticsStatusCode,

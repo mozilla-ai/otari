@@ -15,18 +15,28 @@ import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
  * alongside the value, so the page can hold its submit while an entry is
  * incomplete.
  */
+// A `DiscoverableModel` is `{ id, key }`, not a string: `id` is the bare model
+// id the provider reports and `key` is the `instance:model` selector. Same
+// correction ModelComboBox's stories needed, and for the same reason: a plain
+// string here reaches `model.key.toLowerCase()` as undefined.
 const DISCOVERABLE = {
   providers: [
     {
       provider: "openai",
-      models: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+      models: ["gpt-4o", "gpt-4o-mini", "o3-mini"].map((id) => ({
+        id,
+        key: `openai:${id}`,
+      })),
       ok: true,
       discovery_unsupported: false,
       checked_at: "2026-08-25T12:00:00Z",
     },
     {
       provider: "anthropic",
-      models: ["claude-opus-4", "claude-haiku-4-5"],
+      models: ["claude-opus-4", "claude-haiku-4-5"].map((id) => ({
+        id,
+        key: `anthropic:${id}`,
+      })),
       ok: true,
       discovery_unsupported: false,
       checked_at: "2026-08-25T12:00:00Z",
@@ -63,7 +73,7 @@ const API = {
 }
 
 const meta = {
-  title: "Models/ModelScopeControl",
+  title: "Dashboard/Models/ModelScopeControl",
   component: ModelScopeControl,
   args: { initial: null, onChange: () => {} },
   parameters: { api: API, layout: "padded" },
@@ -138,7 +148,7 @@ export const ReportsValidity: Story = {
           initial={["openai:gpt-4o-mini"]}
           onChange={(value, valid) => setState({ value, valid })}
         />
-        <p className="text-chrome-meta text-muted">
+        <p className="text-caption">
           valid: {String(state.valid)}, value:{" "}
           {state.value === null ? "any" : JSON.stringify(state.value)}
         </p>
@@ -166,7 +176,7 @@ export const AccessLabels: Story = {
                 : "text-foreground"
           return (
             <div key={index} className="flex items-center justify-between">
-              <span className="font-mono text-chrome-meta text-muted">
+              <span className="font-mono text-caption">
                 {allowed === null ? "null" : JSON.stringify(allowed)}
               </span>
               <span className={tone}>{label.text}</span>

@@ -17,7 +17,7 @@ import { PasswordCard } from "./PasswordCard"
  * settings page.
  */
 const meta = {
-  title: "Account/PasswordCard",
+  title: "Dashboard/Account/PasswordCard",
   component: PasswordCard,
   parameters: { layout: "padded" },
 } satisfies Meta<typeof PasswordCard>
