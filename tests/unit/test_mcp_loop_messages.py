@@ -33,6 +33,7 @@ from gateway.log_config import logger
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
+    WEB_SEARCH_TOOL_USE_ID_PREFIX,
     MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
@@ -1419,7 +1420,8 @@ async def test_native_blocks_prepended_to_final_content(monkeypatch: pytest.Monk
     assert server_use.input == {"query": "python release"}
     # The result block is paired to its server_tool_use by id, as a client expects.
     assert tool_result.tool_use_id == server_use.id
-    assert server_use.id.startswith("srvtoolu_")
+    # Reserved prefix: this is what tells an echoed pair from a provider's own.
+    assert server_use.id.startswith(WEB_SEARCH_TOOL_USE_ID_PREFIX)
     citation = tool_result.content[0]
     assert citation.url == "https://python.org"
     assert citation.title == "Python"

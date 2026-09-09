@@ -67,6 +67,7 @@ __all__ = [
     "MaxToolIterationsExceeded",
     "MCP_ACTIVITY_ID_PREFIX",
     "MCP_CLIENT_BETA",
+    "WEB_SEARCH_TOOL_USE_ID_PREFIX",
     "anthropic_tool_loop",
     "anthropic_tool_loop_stream",
 ]
@@ -83,6 +84,11 @@ _PAGE_AGE_MAX_CHARS = 128
 # route uses this prefix to remove only our synthetic pair while preserving
 # provider-native MCP blocks.
 MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
+
+# The gateway's own ``server_tool_use`` ids for web search. Anthropic issues
+# ``srvtoolu_``-prefixed ids of its own, so a reserved prefix is what lets an echoed
+# transcript be told apart from one describing a search the provider really ran.
+WEB_SEARCH_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
 
 # Anthropic beta capability a caller must declare before the Messages stream
 # includes the beta-only MCP activity block vocabulary.
@@ -103,7 +109,7 @@ def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list
     to Anthropic instead would be rejected there, which is the same trade-off the
     Responses path already accepts for its minted ``web_search_call`` items.
     """
-    tool_use_id = f"srvtoolu_{uuid.uuid4().hex}"
+    tool_use_id = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
     citations: list[WebSearchResultBlock] = []
     for result in results:
         url = str(result.get("url") or "").strip()
@@ -140,7 +146,7 @@ def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list
 
 def _native_web_search_max_uses_error_blocks(query: str) -> list[Any]:
     """Return native Anthropic blocks for a search rejected by ``max_uses``."""
-    tool_use_id = f"srvtoolu_{uuid.uuid4().hex}"
+    tool_use_id = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
     return [
         ServerToolUseBlock(
             id=tool_use_id,

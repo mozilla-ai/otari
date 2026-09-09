@@ -15,7 +15,7 @@ import pytest
 from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
-from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
+from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, WEB_SEARCH_TOOL_USE_ID_PREFIX
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -151,8 +151,8 @@ def _provider_pair() -> list[dict[str, Any]]:
     ]
 
 
-def _gateway_pair(tool_use_id: str = "srvtoolu_gw") -> list[dict[str, Any]]:
-    """What the gateway mints: the same shape with encrypted_content empty."""
+def _gateway_pair(tool_use_id: str = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}gw") -> list[dict[str, Any]]:
+    """What the gateway mints: the reserved id prefix, encrypted_content empty."""
     return [
         {"type": "server_tool_use", "id": tool_use_id, "name": "web_search", "input": {"query": "y"}},
         {
@@ -323,15 +323,66 @@ def test_a_provider_error_result_is_kept() -> None:
 
 def test_a_max_uses_error_result_and_its_call_are_stripped() -> None:
     """A capped gateway search must not be echoed back to the provider."""
+    gw = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}gw"
     messages: list[dict[str, Any]] = [
         {
             "role": "assistant",
             "content": [
-                {"type": "server_tool_use", "id": "srvtoolu_gw", "name": "web_search", "input": {}},
+                {"type": "server_tool_use", "id": gw, "name": "web_search", "input": {}},
                 {
                     "type": "web_search_tool_result",
-                    "tool_use_id": "srvtoolu_gw",
+                    "tool_use_id": gw,
                     "content": {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"},
+                },
+                {"type": "text", "text": "done"},
+            ],
+        }
+    ]
+
+    assert _strip_gateway_minted_blocks(messages) == [
+        {"role": "assistant", "content": [{"type": "text", "text": "done"}]}
+    ]
+
+
+def test_a_providers_own_capped_search_survives() -> None:
+    """The error code alone is not provenance: Anthropic emits it for its own cap.
+
+    A transcript recorded against the provider directly, replayed through a gateway
+    with interception on, must keep the record that a search was capped. Only the
+    reserved id prefix distinguishes the two, which is why provenance keys on it.
+    """
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "srvtoolu_prov", "name": "web_search", "input": {}},
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_prov",
+                    "content": {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"},
+                },
+            ],
+        }
+    ]
+
+    assert _strip_gateway_minted_blocks(messages) == messages
+
+
+def test_a_pre_prefix_gateway_pair_is_still_stripped() -> None:
+    """A conversation that began before the prefix existed keeps scrubbing.
+
+    Its ids are Anthropic-shaped, so the empty ``encrypted_content`` is all there is
+    to go on. That older signal stays for exactly this case.
+    """
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "srvtoolu_old", "name": "web_search", "input": {}},
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_old",
+                    "content": [{"type": "web_search_result", "url": "https://a", "encrypted_content": ""}],
                 },
                 {"type": "text", "text": "done"},
             ],

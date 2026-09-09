@@ -63,6 +63,7 @@ from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
     MCP_CLIENT_BETA,
+    WEB_SEARCH_TOOL_USE_ID_PREFIX,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
@@ -158,34 +159,27 @@ class CountTokensResponse(BaseModel):
 def _is_gateway_minted_result(block: Any) -> bool:
     """Whether a ``web_search_tool_result`` block was minted by this gateway.
 
-    Provenance is the empty ``encrypted_content``: Anthropic always populates that
-    field with a signed blob, and the gateway cannot, so it sends the field empty
-    (see ``mcp_loop_messages._native_web_search_blocks``). A result block whose hits
-    all carry an empty value is therefore ours; one carrying real signed content came
-    from a provider that ran the search itself and must survive untouched.
+    Provenance is the reserved id prefix the gateway mints its ``server_tool_use``
+    with (``mcp_loop_messages.WEB_SEARCH_TOOL_USE_ID_PREFIX``), matched here on the
+    ``tool_use_id`` the result carries back. Anthropic issues ``srvtoolu_`` ids of its
+    own and cannot produce that prefix, so a provider's blocks survive untouched
+    whatever they contain, including a ``max_uses_exceeded`` error from its own capped
+    search. Same rule as :func:`_is_gateway_minted_mcp_block`.
 
-    An empty ``content`` list counts as ours: that is what a gateway search with no
-    usable hits produces, and a provider reporting no results uses the error shape
-    instead.
-
-    The error shape has no ``encrypted_content`` to reason about, so
-    ``max_uses_exceeded`` is claimed by its error code alone and every other provider
-    error is preserved. Anthropic emits that same code for its own capped search and
-    inbound the two are indistinguishable, so a transcript recorded against the
-    provider directly loses its capped pair here. That is the side to err on: keeping
-    it would echo a ``server_tool_use`` whose ``srvtoolu_`` id the gateway invented,
-    and an error block describes a search rather than carrying results, so dropping
-    one costs the model nothing.
+    The empty ``encrypted_content`` below is the older signal, kept for transcripts
+    minted before the prefix existed: Anthropic always populates that field with a
+    signed blob and the gateway cannot, so hits that all carry an empty value are
+    ours. It only recognizes the success shape, which is why the prefix replaced it.
+    An empty ``content`` list counts as ours too: that is what a gateway search with
+    no usable hits produces, and a provider reporting no results uses the error shape.
     """
     if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
         return False
+    if str(block.get("tool_use_id") or "").startswith(WEB_SEARCH_TOOL_USE_ID_PREFIX):
+        return True
     hits = block.get("content")
     if not isinstance(hits, list):
-        return (
-            isinstance(hits, dict)
-            and hits.get("type") == "web_search_tool_result_error"
-            and hits.get("error_code") == "max_uses_exceeded"
-        )
+        return False
     return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
 
 
@@ -212,8 +206,8 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
     internal loop already consumed. Neither should be shipped to a provider on the
     next request. Mirrors ``responses._strip_gateway_minted_items``, but where
     Responses has no way to tell its own minted items from a provider's, here it can:
-    web search uses the empty signed-content field and MCP uses an Otari-prefixed call
-    id. Genuine provider-run pairs therefore round-trip untouched. Each use is removed
+    both web search and MCP mint an Otari-prefixed call id a provider cannot produce.
+    Genuine provider-run pairs therefore round-trip untouched. Each use is removed
     only alongside the result that answers it, matched by ``tool_use_id``, so a
     provider's pair is never split.
 
