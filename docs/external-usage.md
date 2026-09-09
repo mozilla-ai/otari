@@ -32,6 +32,13 @@ analytics would count the session twice.
 Prefer a dedicated API key for each importer. It limits attribution mistakes and
 keeps the master key out of collectors.
 
+## Backfill Claude Code from local transcripts
+
+For Claude Code specifically, the bundled `otari import claude-code` reads the
+transcripts already on disk and posts them here, which is how history from before
+any exporter was configured gets in. See
+[Use with Claude Code](use-with-claude-code.md#backfill-history-from-local-transcripts).
+
 ## Import normalized events
 
 ```bash

@@ -41,11 +41,10 @@ _IDENT_ALLOWED = re.compile(r"[^A-Za-z0-9._:/\-]")
 # priced model, so it is stripped: keeping it would leave every such event
 # unpriced under a model id no price list has.
 _CONTEXT_TAG = re.compile(r"\[[^\]]*\]")
-# A project directory is the session's working directory with separators
-# replaced by dashes ("-Users-alice-Projects-otari"). Only the last segment is
-# meaningful as a label, and reconstructing the original path is impossible
-# anyway, because a dash in a real directory name is indistinguishable from a
-# separator.
+# A project directory is the session's working directory with separators and dots
+# replaced by dashes ("-Users-alice-Projects-otari"). Reconstructing the original
+# path is impossible, because a dash in a real directory name is
+# indistinguishable from a separator.
 _LEADING_DASH = re.compile(r"^-+")
 # Claude Code writes an assistant line with this model for text it produced
 # locally rather than fetched, most often an API error notice shown in the
@@ -165,12 +164,33 @@ def provider_for_model(model: str) -> str:
     return UNKNOWN_PROVIDER
 
 
-def session_label(project_dir: str, prefix: str) -> str:
-    """Build ``<prefix>:<project>`` from a transcript's project directory name."""
+def mangle_path(path: Path) -> str:
+    """Encode a path the way Claude Code names its project directories.
+
+    Not a path operation, which is why pathlib cannot do it: the encoding flattens
+    a path into one directory name, replacing dots as well as separators, so
+    ``~/.claude/worktrees`` arrives as ``-Users-alice--claude-worktrees``. Only the
+    separators are pathlib's business, and ``as_posix`` is what makes them one
+    character to replace on Windows too.
+    """
+    return path.as_posix().replace("/", "-").replace(".", "-")
+
+
+def session_label(project_dir: str, prefix: str, *, home: Path | None = None) -> str:
+    """Build ``<prefix>:<project>`` from a transcript's project directory name.
+
+    The home directory's own prefix is dropped, which keeps a username out of the
+    label; what remains is kept whole rather than reduced to its last segment,
+    because the last segment collides badly in practice. Sessions run from
+    worktrees under ``.claude/worktrees`` would all label as a bare branch name,
+    identical across every repository on the machine.
+    """
     trimmed = _LEADING_DASH.sub("", project_dir)
-    project = trimmed.rsplit("-", 1)[-1] if trimmed else ""
+    home_prefix = _LEADING_DASH.sub("", mangle_path(home if home is not None else Path.home()))
+    if home_prefix and trimmed.startswith(f"{home_prefix}-"):
+        trimmed = trimmed[len(home_prefix) + 1 :]
     host = _IDENT_ALLOWED.sub("-", prefix).strip("-") or "local"
-    name = _IDENT_ALLOWED.sub("-", project).strip("-") or "unknown"
+    name = _IDENT_ALLOWED.sub("-", trimmed).strip("-") or "unknown"
     return f"{host}:{name}"[:256]
 
 
@@ -186,8 +206,15 @@ def iter_transcripts(projects_dir: Path, since: datetime | None = None) -> Itera
         return
     cutoff = since.timestamp() if since is not None else None
     for path in sorted(projects_dir.rglob("*.jsonl")):
-        if cutoff is not None and path.stat().st_mtime < cutoff:
-            continue
+        if cutoff is not None:
+            try:
+                if path.stat().st_mtime < cutoff:
+                    continue
+            except OSError:
+                # Tolerated for the same reason the read loop tolerates one: a
+                # transcript that vanished or cannot be read is not a reason to
+                # abandon the scan.
+                continue
         yield path
 
 

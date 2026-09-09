@@ -1,5 +1,6 @@
 """Unit tests for reading Claude Code transcripts into importable usage events."""
 
+import errno
 import json
 import os
 import time
@@ -41,6 +42,15 @@ def _assistant_line(
             },
         }
     )
+
+
+_HOME = Path("/Users/alice")
+
+
+@pytest.fixture(autouse=True)
+def pinned_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A label drops the home directory's prefix, so these tests fix a home to compare against."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: _HOME))
 
 
 def _write_transcript(projects_dir: Path, project: str, session: str, lines: list[str]) -> Path:
@@ -213,15 +223,26 @@ def test_provider_is_admitted_unknown_rather_than_guessed(model: str, expected: 
 @pytest.mark.parametrize(
     ("project_dir", "expected"),
     [
-        ("-Users-alice-Projects-otari", "box:otari"),
-        ("-home-alice-src-my-app", "box:app"),
+        ("-Users-alice-Projects-otari", "box:Projects-otari"),
+        # The last segment alone would label this "box:files", naming a project it
+        # is not, and every worktree under .claude/worktrees after its branch.
+        ("-Users-alice-otari-files", "box:otari-files"),
+        ("-Users-alice-otari--claude-worktrees-issue-42", "box:otari--claude-worktrees-issue-42"),
+        # Outside the home directory there is no prefix to drop.
+        ("-opt-src-app", "box:opt-src-app"),
         ("plain", "box:plain"),
         ("", "box:unknown"),
     ],
 )
-def test_session_label_uses_the_last_path_segment(project_dir: str, expected: str) -> None:
-    """The directory name is a mangled path; only its last segment survives as a label."""
-    assert session_label(project_dir, "box") == expected
+def test_session_label_drops_the_home_prefix_and_keeps_the_rest(project_dir: str, expected: str) -> None:
+    """The directory name is a mangled path: the home prefix is noise, the rest identifies the project."""
+    assert session_label(project_dir, "box", home=_HOME) == expected
+
+
+def test_session_label_stays_within_the_endpoints_length_bound() -> None:
+    """A deeply nested working directory must not push the label past max_length=256."""
+    label = session_label("-opt" + "-segment" * 100, "box")
+    assert len(label) == 256
 
 
 def test_since_skips_transcripts_by_modification_time(tmp_path: Path) -> None:
@@ -293,6 +314,8 @@ class _FakeClient:
 
     posted: list[dict[str, Any]] = []
     response = _FakeResponse(200, {"accepted": 1, "duplicate": 0, "rejected": 0, "errors": []})
+    # Consumed one per post when set, for a run whose batches must answer differently.
+    responses: list[Any] = []
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
@@ -305,7 +328,11 @@ class _FakeClient:
 
     def post(self, url: str, *, json: dict[str, Any], headers: dict[str, str]) -> _FakeResponse:
         type(self).posted.append({"url": url, "body": json, "headers": headers})
-        return type(self).response
+        queued = type(self).responses
+        outcome = queued.pop(0) if queued else type(self).response
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
 
 @pytest.fixture
@@ -313,6 +340,7 @@ def fake_httpx(monkeypatch: pytest.MonkeyPatch) -> type[_FakeClient]:
     import httpx
 
     _FakeClient.posted = []
+    _FakeClient.responses = []
     _FakeClient.response = _FakeResponse(200, {"accepted": 1, "duplicate": 0, "rejected": 0, "errors": []})
     monkeypatch.setattr(httpx, "Client", _FakeClient)
     return _FakeClient
@@ -362,7 +390,7 @@ def test_a_run_posts_the_batch_to_the_external_events_endpoint(
     assert sent["headers"]["Authorization"] == "Bearer gw-test"
     assert sent["body"]["source"] == "claude_code"
     assert sent["body"]["user_id"] == "alice"
-    assert sent["body"]["events"][0]["session_label"] == "box:otari"
+    assert sent["body"]["events"][0]["session_label"] == "box:Projects-otari"
     assert "prompt" not in sent["body"]["events"][0]
 
 
@@ -415,3 +443,184 @@ def test_a_bad_since_is_a_usage_error(tmp_path: Path, fake_httpx: type[_FakeClie
 
     assert result.exit_code == 2
     assert "--since" in result.output
+
+
+def test_a_credential_is_only_required_to_send(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
+    """A dry run reaches nothing, so it must not demand a key to preview a scan."""
+    _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
+
+    preview = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--dry-run"])
+    send = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path)])
+
+    assert preview.exit_code == 0, preview.output
+    assert fake_httpx.posted == []
+    assert send.exit_code == 2
+    assert "OTARI_MASTER_KEY" in send.output
+
+
+def test_the_master_key_env_var_also_supplies_the_credential(
+    tmp_path: Path, fake_httpx: type[_FakeClient]
+) -> None:
+    """Either credential the endpoint accepts should be readable from its own env var."""
+    _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
+
+    result = CliRunner(env={"OTARI_MASTER_KEY": "master-secret"}).invoke(
+        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--user-id", "alice"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake_httpx.posted[0]["headers"]["Authorization"] == "Bearer master-secret"
+
+
+def test_the_first_event_is_posted_alone_before_the_rest(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
+    """A mistake that rejects every event should cost one request to discover, not all of them."""
+    _write_transcript(
+        tmp_path,
+        "-Users-alice-Projects-otari",
+        "session-a",
+        [_assistant_line(f"msg_{index:02d}") for index in range(5)],
+    )
+    fake_httpx.responses = [
+        _FakeResponse(200, {"accepted": 1, "duplicate": 0, "rejected": 0, "errors": []}),
+        _FakeResponse(200, {"accepted": 4, "duplicate": 0, "rejected": 0, "errors": []}),
+    ]
+
+    result = CliRunner().invoke(
+        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [len(post["body"]["events"]) for post in fake_httpx.posted] == [1, 4]
+    assert "Imported 5 event(s)" in result.output
+
+
+def test_a_rejected_first_event_stops_the_import(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
+    """An unknown user_id rejects every event, so the rest must not be sent to learn that twice."""
+    _write_transcript(
+        tmp_path,
+        "-Users-alice-Projects-otari",
+        "session-a",
+        [_assistant_line(f"msg_{index:02d}") for index in range(5)],
+    )
+    fake_httpx.response = _FakeResponse(
+        200,
+        {
+            "accepted": 0,
+            "duplicate": 0,
+            "rejected": 1,
+            "errors": [{"index": 0, "detail": "user_id 'ghost' not found."}],
+        },
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test", "--user-id", "ghost"],
+    )
+
+    assert result.exit_code == 1
+    assert len(fake_httpx.posted) == 1
+    assert "not found" in result.output
+    assert "remaining 4" in result.output
+
+
+def test_a_refused_first_batch_stops_the_import(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
+    """A 403 on the preflight is the whole run's answer; sending the rest only repeats it."""
+    _write_transcript(
+        tmp_path,
+        "-Users-alice-Projects-otari",
+        "session-a",
+        [_assistant_line(f"msg_{index:02d}") for index in range(5)],
+    )
+    fake_httpx.response = _FakeResponse(403, {"detail": "key is not budget-exempt"})
+
+    result = CliRunner().invoke(
+        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
+    )
+
+    assert result.exit_code == 1
+    assert len(fake_httpx.posted) == 1
+    assert "Batch 1 of 2 was refused" in result.output
+    assert "Nothing else was sent" in result.output
+
+
+def test_a_transport_failure_stops_with_a_message_rather_than_a_traceback(
+    tmp_path: Path, fake_httpx: type[_FakeClient]
+) -> None:
+    """A long backfill can lose its connection; re-running it is safe and should say so."""
+    import httpx
+
+    _write_transcript(
+        tmp_path,
+        "-Users-alice-Projects-otari",
+        "session-a",
+        [_assistant_line(f"msg_{index:02d}") for index in range(3)],
+    )
+    fake_httpx.responses = [
+        _FakeResponse(200, {"accepted": 1, "duplicate": 0, "rejected": 0, "errors": []}),
+        httpx.ConnectError("connection reset"),
+    ]
+
+    result = CliRunner().invoke(
+        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
+    )
+
+    assert result.exit_code == 1
+    assert "Import stopped after 1 event(s)" in result.output
+    assert "duplicates" in result.output
+
+
+def test_a_batch_size_above_the_endpoints_cap_is_a_usage_error(
+    tmp_path: Path, fake_httpx: type[_FakeClient]
+) -> None:
+    """The cap belongs to the endpoint, so the CLI reads it rather than restating a number."""
+    from gateway.services.external_usage_service import MAX_EVENTS_PER_BATCH
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "import",
+            "claude-code",
+            "--projects-dir",
+            str(tmp_path),
+            "--api-key",
+            "gw-test",
+            "--batch-size",
+            str(MAX_EVENTS_PER_BATCH + 1),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert str(MAX_EVENTS_PER_BATCH) in result.output
+
+
+def test_undecodable_lines_are_reported_rather_than_silently_dropped(
+    tmp_path: Path, fake_httpx: type[_FakeClient]
+) -> None:
+    """A truncated transcript finds nothing to import, and silence there reads as no usage."""
+    _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", ['{"message": {"usage": {"input'])
+
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "1 line(s) could not be decoded" in result.output
+    assert "Nothing to import." in result.output
+
+
+def test_a_transcript_that_vanishes_mid_scan_does_not_abort_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--since stats every file, and one that cannot be stat'd is not a reason to stop."""
+    _write_transcript(tmp_path, "-Users-alice-Projects-a", "session-a", [_assistant_line("msg_01")])
+    kept = _write_transcript(tmp_path, "-Users-alice-Projects-b", "session-b", [_assistant_line("msg_02")])
+    real_stat = Path.stat
+
+    def exploding_stat(self: Path, **kwargs: Any) -> os.stat_result:
+        if self.suffix == ".jsonl" and self != kept:
+            raise OSError(errno.ENOENT, "gone")
+        return real_stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", exploding_stat)
+
+    result = scan_transcripts(tmp_path, label_prefix="host", since=datetime.now(timezone.utc) - timedelta(days=1))
+
+    assert [event.source_event_id for event in result.events] == ["msg_02"]
