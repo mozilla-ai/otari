@@ -1808,13 +1808,14 @@ class _FakeWebSearchBackend:
     def __init__(
         self,
         *,
-        base_url: str,
-        tool_entry: dict[str, Any],
+        base_url: str | None,
+        search_tool_entry: dict[str, Any] | None,
         auth_token: str | None = None,
         config: Any = None,
         tally: Any = None,
+        **_kwargs: Any,
     ) -> None:
-        type(self).last_tool_entry = dict(tool_entry)
+        type(self).last_tool_entry = dict(search_tool_entry or {})
         type(self).last_auth_token = auth_token
         # The real backend records each call on the request's tally; accept it so
         # the constructor contract matches, even though this double runs no search.
@@ -1875,7 +1876,7 @@ def test_hybrid_mode_web_search_403_when_disabled(
         if url.endswith("/gateway/provider-keys/resolve"):
             return _single_attempt_resolve_response(request_id="ws-req-disabled")
         if url.endswith("/gateway/web-search/resolve"):
-            return httpx.Response(200, json={"enabled": False})
+            return httpx.Response(200, json={"enabled": False, "authorized_tools": []})
         return httpx.Response(204)
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
@@ -1914,6 +1915,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
                 200,
                 json={
                     "enabled": True,
+                    "authorized_tools": ["web_search"],
                     "max_results": 9,
                     "allowed_domains": ["docs.python.org"],
                     "purpose_hint": "workspace hint",
@@ -1939,7 +1941,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
         )
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
@@ -1984,7 +1986,7 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
         if url.endswith("/gateway/provider-keys/resolve"):
             return _single_attempt_resolve_response(request_id="ws-req-platform")
         if url.endswith("/gateway/web-search/resolve"):
-            return httpx.Response(200, json={"enabled": True})
+            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"]})
         return httpx.Response(204)
 
     async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -2004,7 +2006,7 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
         )
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
@@ -2037,7 +2039,14 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
         if url.endswith("/gateway/provider-keys/resolve"):
             return _single_attempt_resolve_response(request_id="ws-req-empty")
         if url.endswith("/gateway/web-search/resolve"):
-            return httpx.Response(200, json={"enabled": True, "allowed_domains": ["docs.python.org"]})
+            return httpx.Response(
+                200,
+                json={
+                    "enabled": True,
+                    "authorized_tools": ["web_search"],
+                    "allowed_domains": ["docs.python.org"],
+                },
+            )
         return httpx.Response(204)
 
     async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -2057,7 +2066,7 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
         )
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
@@ -2416,7 +2425,7 @@ def test_platform_mode_streaming_sandbox_gets_the_same_image(
         if url.endswith("/gateway/provider-keys/resolve"):
             return _single_attempt_resolve_response(request_id="sbx-stream-image")
         if url.endswith("/gateway/code-execution/resolve"):
-            return httpx.Response(200, json={"enabled": True})
+            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"]})
         return httpx.Response(204)
 
     async def fake_loop_acompletion(**kwargs: Any) -> Any:
@@ -2621,7 +2630,7 @@ def test_platform_mode_web_search_unreachable_returns_502(
         if url.endswith("/gateway/provider-keys/resolve"):
             return _single_attempt_resolve_response(request_id="ws-down")
         if url.endswith("/gateway/web-search/resolve"):
-            return httpx.Response(200, json={"enabled": True})
+            return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"]})
         usage_reports.append(body)
         return httpx.Response(204)
 
@@ -2636,7 +2645,7 @@ def test_platform_mode_web_search_unreachable_returns_502(
         return _DownWebSearchBackend()
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", fake_build_web_search_backend)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", fake_build_web_search_backend)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",

@@ -294,6 +294,8 @@ async def _execute_tool_uses(
             continue
         try:
             text = await pool.call_tool(block.name, arguments)
+        except MaxToolIterationsExceeded:
+            raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             logger.warning("MCP tool %s execution failed: %s", block.name, exc)
             text = f"[tool error] {exc}"
@@ -473,6 +475,8 @@ async def _call_stream_tool(
             )
         text = await pool.call_tool(name, arguments)
         return text, text, is_tool_error(text), False
+    except MaxToolIterationsExceeded:
+        raise
     except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
         # An unexpected backend exception may include URLs, headers, or credentials.
         # Neither logs, client events, nor the model-facing result receives its detail.
