@@ -17,9 +17,10 @@ dependencies = [
     # `parameter_registry` is a stdlib+pydantic leaf built so a consumer can
     # render a configuration form without importing a model backend, so no
     # extra is taken and nothing here ever constructs a guardrail: this
-    # gateway runs them against the operator's any-guardrail sidecar. Bounded
-    # below 0.8 rather than trusting a 0.x minor to keep `ParameterSpec`,
-    # which is the whole of what is imported.
+    # gateway runs them against the operator's any-guardrail sidecar. What is
+    # imported is `GuardrailName` and `get_parameter_schema`, and the shape of
+    # the `ParameterSpec` they return; bounded below 0.8 rather than trusting a
+    # 0.x minor to keep those three.
     "any-guardrail>=0.7.7,<0.8.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
