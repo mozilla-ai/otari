@@ -45,6 +45,11 @@ dependencies = [
     # let a proof taken on one domain admit addresses at another.
     "idna>=3.7",
     "fastapi>=0.115.0",
+    # The generic files backend (`FsspecFileStore`): one URL reaches whichever
+    # filesystem the operator has an fsspec implementation installed for.
+    # Already in the tree through any-llm, declared because the gateway imports
+    # it directly.
+    "fsspec>=2024.6.0",
     "genai-prices>=0.1.0",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     "mcp>=1.28.1,<2.0.0",
@@ -194,6 +199,11 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["trafilatura.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# fsspec ships no stubs; the file store drives it through a handful of calls.
+module = ["fsspec", "fsspec.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -947,7 +947,10 @@ class GatewayConfig(BaseSettings):
     )
     files_backend: str = Field(
         default="local",
-        description="Blob backend for uploaded file bytes: 'local' (filesystem) or 's3'. Future: 'gcs'.",
+        description=(
+            "Blob backend for uploaded file bytes: 'local' (a directory), 's3' (boto3), or 'fsspec' "
+            "(any filesystem fsspec has an implementation for, named by files_url)."
+        ),
     )
     files_local_dir: str = Field(
         default="./otari-files",
@@ -970,6 +973,25 @@ class GatewayConfig(BaseSettings):
             "AWS region for the 's3' files backend. Most self-hosted S3-compatible stores "
             "(e.g. MinIO) ignore this; it still must resolve to some value, so it defaults to "
             "'us-east-1' when unset."
+        ),
+    )
+    files_url: str | None = Field(
+        default=None,
+        description=(
+            "Root URL for the 'fsspec' files backend, e.g. 'gcs://bucket/otari-files', "
+            "'abfs://container/prefix', 's3://bucket/prefix', 'sftp://host/path' or "
+            "'file:///var/lib/otari/files'. The protocol picks the fsspec implementation, which "
+            "must be installed (gcsfs, adlfs, s3fs, paramiko, ...). Required when files_backend "
+            "is 'fsspec'."
+        ),
+    )
+    files_storage_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Keyword arguments for the fsspec implementation behind files_url: credentials, "
+            "endpoint URLs, regions, project ids. Passed through untouched and never logged; "
+            "most implementations also read their standard environment variables, so this "
+            "can usually stay empty."
         ),
     )
     files_max_bytes: int = Field(

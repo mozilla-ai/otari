@@ -82,6 +82,10 @@ providers:
 # File and image normalization. See docs/files.md.
 # files_enabled: true
 # files_local_dir: "./otari-files"
+# Any fsspec filesystem instead of a local directory or boto3 S3:
+# files_backend: fsspec
+# files_url: "gcs://my-bucket/otari-files"
+# files_storage_options: { project: "my-project" }
 # files_max_bytes: 536870912
 # files_retention_hours: 168
 # files_sweep_interval_sec: 3600
