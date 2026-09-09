@@ -22,7 +22,13 @@ compares the returned state against the stored one and, only then, posts the
 code and the state here, where the state is checked again against the row
 ``/authorize`` wrote. Two checks that fail in different directions: the
 browser's binds a callback to the tab that started the flow, and this one binds
-it to a flow this deployment started. See ``gateway.services.oauth_service``.
+it to a flow this deployment started.
+
+**And to the browser that started it.** ``/authorize`` also sets an HttpOnly
+flow cookie whose digest the row keeps, and the callback refuses without it.
+The code and the state share one redirect URL that the access log and browser
+history both record; the cookie is the half of the flow that neither does. See
+``gateway.services.oauth_service``.
 
 **What this route decides, and what it does not.** It proves the person holds
 the provider account. Who that makes them *here* is behind
@@ -35,7 +41,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,8 +63,11 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.oauth_service import (
+    FLOW_COOKIE_NAME,
+    apply_flow_cookie,
     authorization_url,
     exchange_code,
+    flow_secret_for,
     provider_label,
     require_configured,
 )
@@ -81,6 +90,12 @@ _MAX_SUBMITTED_STATE = 512
 # answers at all, so an unknown segment is the framework's own 422 rather than a
 # handler deciding what to do with it. Spelled from the config vocabulary so the
 # two cannot drift.
+# The browser's flow cookie, when it sent one. Bounded for the same reason the
+# state is: it is hashed before anything looks at it.
+FlowCookie = Annotated[
+    str | None, Cookie(alias=FLOW_COOKIE_NAME, max_length=_MAX_SUBMITTED_STATE, include_in_schema=False)
+]
+
 ProviderPath = Annotated[
     str,
     Path(
@@ -104,7 +119,9 @@ class AuthorizeResponse(BaseModel):
             "'state' the provider returns, and send back with the authorization code. A callback "
             "whose state does not match the one held by the browser that started the flow should "
             "be abandoned by the client rather than sent here; one that does is checked again "
-            "against this deployment's own record of it."
+            "against this deployment's own record of it. The response also sets an HttpOnly "
+            "cookie that the callback requires, so the exchange can only be completed from the "
+            "browser this call was made from."
         )
     )
 
@@ -120,7 +137,8 @@ class OAuthCallbackRequest(BaseModel):
     ``state`` is required, and is what binds this callback to an authorization
     request this deployment actually made: it is claimed from
     ``oauth_pending_state`` before the code is sent anywhere, and the row it
-    claims is what carries the PKCE verifier the exchange needs.
+    claims is what carries the PKCE verifier the exchange needs. The flow
+    cookie ``/authorize`` set travels alongside and binds it to the browser.
     """
 
     code: str = Field(
@@ -180,24 +198,29 @@ def require_oauth_provider(
 async def authorize(
     provider: ProviderPath,
     request: Request,
+    response: Response,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    flow_cookie: FlowCookie = None,
 ) -> AuthorizeResponse:
     """Start an OAuth sign-in: where to send the browser, and the state to keep.
 
     A GET that writes, which is the one thing to know about it. It records the
-    authorization it is about to start (the state's hash, and the PKCE verifier
-    the exchange will need) so the callback has something to check against, and
-    that record is the whole reason the callback can refuse a code this
-    deployment never asked for.
+    authorization it is about to start (the state's hash, the PKCE verifier the
+    exchange will need, and the digest of a flow secret it sets as an HttpOnly
+    cookie) so the callback has something to check against, and that record is
+    the whole reason the callback can refuse a code this deployment never asked
+    for, or one presented from a browser other than the one that asked.
 
     Still safe to repeat: each call mints its own state, and only the one the
     browser kept is the one it sends back. The rows the others leave expire on
-    their own and are swept by the next call.
+    their own and are swept by the next call. The cookie is reused when the
+    browser already holds one, so a second tab does not break the first.
     """
     throttle_public_auth(request)
+    flow_secret = flow_secret_for(flow_cookie)
     try:
-        url, state = await authorization_url(config, provider, db=db)
+        url, state = await authorization_url(config, provider, db=db, flow_secret=flow_secret)
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
@@ -206,6 +229,7 @@ async def authorize(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
         ) from None
+    apply_flow_cookie(response, flow_secret, secure=request_is_https(request))
     return AuthorizeResponse(authorization_url=url, state=state)
 
 
@@ -222,6 +246,7 @@ async def callback(
     identity_provider: IdentityProviderPortDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    flow_cookie: FlowCookie = None,
 ) -> OAuthSessionResponse:
     """Exchange an authorization code and set the HttpOnly session cookie.
 
@@ -251,7 +276,9 @@ async def callback(
             detail=MAINTENANCE_MODE_REFUSAL,
         )
     try:
-        external = await exchange_code(config, provider, code=body.code, state=body.state, db=db)
+        external = await exchange_code(
+            config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
+        )
         identity = await identity_provider.resolve(
             provider=external.provider,
             email=external.email,

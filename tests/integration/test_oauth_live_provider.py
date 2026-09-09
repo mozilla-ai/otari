@@ -28,10 +28,12 @@ To run it for Google::
     #      OTARI_OAUTH_GOOGLE_CLIENT_ID=...
     #      OTARI_OAUTH_GOOGLE_CLIENT_SECRET=...
     #      OTARI_DATABASE_URL=...   (the same one this test will read)
-    # 2. Open the URL that GET /v1/auth/oauth/google/authorize returns and
+    # 2. Call GET /v1/auth/oauth/google/authorize with curl -c so the flow
+    #    cookie (otari_oauth_flow) it sets is kept, open the URL it returns and
     #    complete the consent screen. The browser lands on
     #    /#/auth/google/callback?code=...&state=...; copy both out of the
-    #    address bar. The state is what finds the verifier.
+    #    address bar, and the cookie value out of the jar. The state finds the
+    #    verifier; the cookie is what the row is bound to.
     # 3. Run immediately, since the code expires in minutes and is single-use,
     #    and the pending state expires in ten.
     OTARI_OAUTH_LIVE_TESTS=1 \\
@@ -41,6 +43,7 @@ To run it for Google::
     OTARI_OAUTH_GOOGLE_CLIENT_SECRET=... \\
     OTARI_OAUTH_LIVE_GOOGLE_CODE='4/0Ax...' \\
     OTARI_OAUTH_LIVE_GOOGLE_STATE='...' \\
+    OTARI_OAUTH_LIVE_GOOGLE_FLOW_SECRET='...' \\
     uv run pytest tests/integration/test_oauth_live_provider.py -k google -v
 
 GitHub is the same with ``GITHUB`` in place of ``GOOGLE``. The redirect URI is
@@ -84,6 +87,14 @@ def _live_state(provider: str) -> str:
     return state
 
 
+def _live_flow_secret(provider: str) -> str:
+    """The flow cookie ``/authorize`` set, or skip: the row answers to nothing else."""
+    secret = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET", "")
+    if not secret:
+        pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_SECRET is required")
+    return secret
+
+
 def _live_config(provider: str) -> GatewayConfig:
     """The deployment's own configuration, or skip if it does not offer ``provider``."""
     config = GatewayConfig()
@@ -110,11 +121,12 @@ async def test_a_real_authorization_code_exchanges_for_an_identity(provider: str
     config = _live_config(provider)
     code = _live_code(provider)
     state = _live_state(provider)
+    flow_secret = _live_flow_secret(provider)
 
     init_db(config)
     async with create_session() as db:
         identity = await oauth_service.exchange_code(
-            config, provider, code=code, state=state, db=db
+            config, provider, code=code, state=state, flow_secret=flow_secret, db=db
         )
         # Committed, because the state was consumed for real: leaving it
         # spendable would contradict what this module is checking.

@@ -10,7 +10,9 @@ a ``StateStore`` protocol and full PKCE support since the version otari#765
 pinned.
 
 One row per authorization in flight, deleted as it is consumed, so a replayed
-state matches nothing. Keyed by the SHA-256 of the state rather than the state
+state matches nothing, and bound to the browser that started it through the
+digest of a cookie-held flow secret, so a redirect URL read out of an access log
+or a history entry cannot finish the sign-in from anywhere else. Keyed by the SHA-256 of the state rather than the state
 itself, which is where it departs from ``webauthn_challenge``: that table stores
 its nonce in the clear because nothing is stored *under* it, while a row here
 holds the PKCE ``code_verifier``, and a reader of this table must not come away
@@ -48,6 +50,8 @@ def upgrade() -> None:
         # SHA-256 as hex, so 64 characters exactly.
         sa.Column("state_hash", sa.String(length=64), nullable=False),
         sa.Column("provider", sa.String(length=32), nullable=False),
+        # SHA-256 as hex of the browser's flow-cookie secret.
+        sa.Column("flow_hash", sa.String(length=64), nullable=False),
         # RFC 7636 caps a verifier at 128 characters. Nullable because
         # apron-auth's pending state models it that way for providers that
         # cannot do PKCE, not because either provider offered here needs it.

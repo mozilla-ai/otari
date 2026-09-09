@@ -16,17 +16,18 @@ check, behind an opt-in flag.
 import logging
 from collections.abc import Generator
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.services import oauth_service
-from gateway.services.tenancy.errors import OAuthExchangeError, OAuthNotConfiguredError
+from gateway.services.tenancy.errors import OAuthExchangeError, OAuthNotConfiguredError, OAuthStateError
 
 
 class FakeSession:
@@ -51,9 +52,21 @@ class FakeSession:
         return None
 
 
+def fake_db() -> AsyncSession:
+    return cast("AsyncSession", FakeSession())
+
+
+FLOW_SECRET = "a-flow-secret"
+
+
 async def authorize(config: GatewayConfig, provider: str) -> tuple[str, str]:
     """``authorization_url`` over a throwaway session, for the URL assertions."""
-    return await oauth_service.authorization_url(config, provider, db=FakeSession())  # type: ignore[arg-type]
+    return await oauth_service.authorization_url(
+        config,
+        provider,
+        db=fake_db(),
+        flow_secret=FLOW_SECRET,
+    )
 
 
 def configured(**overrides: Any) -> GatewayConfig:
@@ -291,7 +304,12 @@ class TestAuthorizationUrl:
         # A row that stored the challenge would prove nothing at exchange time:
         # the challenge is the public half and travels in the URL above.
         session = FakeSession()
-        url, state = await oauth_service.authorization_url(configured(), provider, db=session)  # type: ignore[arg-type]
+        url, state = await oauth_service.authorization_url(
+            configured(),
+            provider,
+            db=cast("AsyncSession", session),
+            flow_secret=FLOW_SECRET,
+        )
         query = parse_qs(urlsplit(url).query)
         (row,) = session.added
 
@@ -300,6 +318,9 @@ class TestAuthorizationUrl:
         assert row.provider == provider
         # Keyed by the digest, so a reader of the table cannot present the value.
         assert row.state_hash != state
+        # The browser's flow secret is kept the same way.
+        assert row.flow_hash != FLOW_SECRET
+        assert FLOW_SECRET not in url
         assert query["code_challenge"] != [row.code_verifier]
 
     @pytest.mark.asyncio
@@ -316,6 +337,37 @@ class TestAuthorizationUrl:
     async def test_a_provider_this_build_never_named_is_refused(self) -> None:
         with pytest.raises(OAuthNotConfiguredError):
             await authorize(configured(), "not-a-provider")
+
+
+class TestFlowSecret:
+    def test_a_missing_or_foreign_cookie_is_replaced(self) -> None:
+        minted = oauth_service.flow_secret_for(None)
+
+        assert len(minted) == 43
+        assert oauth_service.flow_secret_for("") != ""
+        assert oauth_service.flow_secret_for("not ours") != "not ours"
+        assert oauth_service.flow_secret_for("x" * 43 + "!") != "x" * 43 + "!"
+
+    def test_one_of_ours_is_reused_so_a_second_tab_does_not_break_the_first(self) -> None:
+        existing = oauth_service.flow_secret_for(None)
+
+        assert oauth_service.flow_secret_for(existing) == existing
+
+    @pytest.mark.asyncio
+    async def test_a_callback_without_the_cookie_is_refused_before_the_database(self) -> None:
+        class _NoSession:
+            async def execute(self, *_a: Any, **_k: Any) -> Any:
+                raise AssertionError("the database must not be touched")
+
+        with pytest.raises(OAuthStateError):
+            await oauth_service.exchange_code(
+                configured(),
+                "google",
+                code="c",
+                state="s",
+                flow_secret=None,
+                db=cast("AsyncSession", _NoSession()),
+            )
 
 
 class TestState:
@@ -371,7 +423,9 @@ class TestExchange:
     async def test_returns_the_identity_the_provider_vouches_for(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._stub_client(monkeypatch, self._profile())
 
-        identity = await oauth_service.exchange_code(configured(), "google", code="c", state="s", db=FakeSession())  # type: ignore[arg-type]
+        identity = await oauth_service.exchange_code(
+            configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+        )
 
         assert identity.provider == "google"
         assert identity.email == "member@example.com"
@@ -386,7 +440,9 @@ class TestExchange:
         # tri-state model, once, on the platform.
         self._stub_client(monkeypatch, self._profile(email_verified=None))
 
-        identity = await oauth_service.exchange_code(configured(), "google", code="c", state="s", db=FakeSession())  # type: ignore[arg-type]
+        identity = await oauth_service.exchange_code(
+            configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+        )
 
         assert identity.email_verified is False
 
@@ -394,7 +450,9 @@ class TestExchange:
     async def test_an_explicit_false_is_unverified_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._stub_client(monkeypatch, self._profile(email_verified=False))
 
-        identity = await oauth_service.exchange_code(configured(), "google", code="c", state="s", db=FakeSession())  # type: ignore[arg-type]
+        identity = await oauth_service.exchange_code(
+            configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+        )
 
         assert identity.email_verified is False
 
@@ -417,7 +475,9 @@ class TestExchange:
         monkeypatch.setattr(oauth_service, "_client", lambda *_a, **_k: _Client())
 
         with pytest.raises(OAuthExchangeError) as caught:
-            await oauth_service.exchange_code(configured(), "google", code="c", state="s", db=FakeSession())  # type: ignore[arg-type]
+            await oauth_service.exchange_code(
+                configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+            )
 
         assert secret not in caught.value.message
         assert caught.value.message == "Google did not complete the sign-in. Try again."
@@ -441,7 +501,8 @@ class TestExchange:
                 "github",
                 code="c",
                 state="s",
-                db=FakeSession(),  # type: ignore[arg-type]
+                flow_secret=FLOW_SECRET,
+                db=fake_db(),
             )
 
     @pytest.mark.asyncio
@@ -452,7 +513,8 @@ class TestExchange:
                 "google",
                 code="c",
                 state="s",
-                db=FakeSession(),  # type: ignore[arg-type]
+                flow_secret=FLOW_SECRET,
+                db=fake_db(),
             )
 
 

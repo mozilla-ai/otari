@@ -28,7 +28,7 @@ from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import User
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
-from gateway.services.oauth_service import OAuthIdentity
+from gateway.services.oauth_service import FLOW_COOKIE_NAME, OAuthIdentity
 
 ORIGIN = "http://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -58,7 +58,9 @@ def stub_exchange(
     """
     spent: list[str] = []
 
-    async def _exchange(_config: GatewayConfig, provider: str, *, code: str, state: str, db: Any) -> OAuthIdentity:
+    async def _exchange(
+        _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
+    ) -> OAuthIdentity:
         spent.append(code)
         return OAuthIdentity(
             provider=provider,
@@ -561,6 +563,73 @@ def test_a_refused_exchange_leaves_the_state_spendable_for_the_retry(
     assert retried.status_code == 200, retried.text
 
 
+def test_authorize_sets_the_flow_cookie_the_callback_requires(
+    client: TestClient,
+    oauth_configured: None,
+) -> None:
+    started = client.get("/v1/auth/oauth/google/authorize")
+
+    assert started.status_code == 200, started.text
+    cookie = started.headers["set-cookie"]
+    assert cookie.startswith(f"{FLOW_COOKIE_NAME}=")
+    assert "HttpOnly" in cookie
+    assert "Path=/v1/auth/oauth" in cookie
+    assert "samesite=lax" in cookie.lower()
+
+
+def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reviewer's vector: the redirect URL, code and state both, read out of a log.
+
+    Holding the whole redirect query is not enough, because the flow cookie
+    never left the browser that called ``/authorize``. Without it the callback
+    is refused before any outbound call; with a different browser's cookie it is
+    refused too.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch)
+    state = client.get("/v1/auth/oauth/google/authorize").json()["state"]
+    victims_cookie = client.cookies[FLOW_COOKIE_NAME]
+
+    client.cookies.clear()
+    without = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    assert without.status_code == 400, without.text
+    assert posted == []
+
+    client.get("/v1/auth/oauth/google/authorize")  # a different browser's own cookie
+    assert client.cookies[FLOW_COOKIE_NAME] != victims_cookie
+    other = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    assert other.status_code == 400, other.text
+    assert posted == []
+
+    # The refusals rolled the claim back, so the browser that started it can still finish.
+    client.cookies.set(FLOW_COOKIE_NAME, victims_cookie)
+    finished = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    assert finished.status_code == 200, finished.text
+
+
+def test_two_tabs_in_one_browser_share_the_cookie_and_both_finish(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    first = client.get("/v1/auth/oauth/google/authorize").json()["state"]
+    cookie = client.cookies[FLOW_COOKIE_NAME]
+    second = client.get("/v1/auth/oauth/github/authorize").json()["state"]
+
+    # The second call reused the cookie instead of rotating it out from under the first tab.
+    assert client.cookies[FLOW_COOKIE_NAME] == cookie
+    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c1", "state": first}).status_code == 200
+    assert client.post("/v1/auth/oauth/github/callback", json={"code": "c2", "state": second}).status_code == 200
+
+
 def test_the_refusal_does_not_say_which_way_the_state_was_wrong(
     client: TestClient,
     oauth_configured: None,
@@ -581,9 +650,11 @@ def test_the_refusal_does_not_say_which_way_the_state_was_wrong(
 
     spent = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
     unknown = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "nope"})
+    client.cookies.clear()
+    no_cookie = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
 
-    assert spent.status_code == unknown.status_code
-    assert spent.json()["detail"] == unknown.json()["detail"]
+    assert spent.status_code == unknown.status_code == no_cookie.status_code
+    assert spent.json()["detail"] == unknown.json()["detail"] == no_cookie.json()["detail"]
 
 
 # ---------- the redirect a provider actually lands on ----------

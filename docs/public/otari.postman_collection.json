@@ -628,7 +628,7 @@
         {
           "name": "Authorize",
           "request": {
-            "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET that writes, which is the one thing to know about it. It records the\nauthorization it is about to start (the state's hash, and the PKCE verifier\nthe exchange will need) so the callback has something to check against, and\nthat record is the whole reason the callback can refuse a code this\ndeployment never asked for.\n\nStill safe to repeat: each call mints its own state, and only the one the\nbrowser kept is the one it sends back. The rows the others leave expire on\ntheir own and are swept by the next call.",
+            "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET that writes, which is the one thing to know about it. It records the\nauthorization it is about to start (the state's hash, the PKCE verifier the\nexchange will need, and the digest of a flow secret it sets as an HttpOnly\ncookie) so the callback has something to check against, and that record is\nthe whole reason the callback can refuse a code this deployment never asked\nfor, or one presented from a browser other than the one that asked.\n\nStill safe to repeat: each call mints its own state, and only the one the\nbrowser kept is the one it sends back. The rows the others leave expire on\ntheir own and are swept by the next call. The cookie is reused when the\nbrowser already holds one, so a second tab does not break the first.",
             "header": [],
             "method": "GET",
             "url": {

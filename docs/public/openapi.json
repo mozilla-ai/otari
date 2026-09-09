@@ -1284,7 +1284,7 @@
             "type": "string"
           },
           "state": {
-            "description": "An opaque CSRF value to keep for the length of the redirect, compare against the 'state' the provider returns, and send back with the authorization code. A callback whose state does not match the one held by the browser that started the flow should be abandoned by the client rather than sent here; one that does is checked again against this deployment's own record of it.",
+            "description": "An opaque CSRF value to keep for the length of the redirect, compare against the 'state' the provider returns, and send back with the authorization code. A callback whose state does not match the one held by the browser that started the flow should be abandoned by the client rather than sent here; one that does is checked again against this deployment's own record of it. The response also sets an HttpOnly cookie that the callback requires, so the exchange can only be completed from the browser this call was made from.",
             "title": "State",
             "type": "string"
           }
@@ -5870,7 +5870,7 @@
         "type": "object"
       },
       "OAuthCallbackRequest": {
-        "description": "The authorization code a provider handed the browser.\n\nNo ``redirect_uri``: this deployment derives its own from ``public_base_url``\nso the URI used to build the authorization request and the one sent with the\nexchange are the same string by construction, and a browser cannot choose\nwhat this server sends to a provider.\n\n``state`` is required, and is what binds this callback to an authorization\nrequest this deployment actually made: it is claimed from\n``oauth_pending_state`` before the code is sent anywhere, and the row it\nclaims is what carries the PKCE verifier the exchange needs.",
+        "description": "The authorization code a provider handed the browser.\n\nNo ``redirect_uri``: this deployment derives its own from ``public_base_url``\nso the URI used to build the authorization request and the one sent with the\nexchange are the same string by construction, and a browser cannot choose\nwhat this server sends to a provider.\n\n``state`` is required, and is what binds this callback to an authorization\nrequest this deployment actually made: it is claimed from\n``oauth_pending_state`` before the code is sent anywhere, and the row it\nclaims is what carries the PKCE verifier the exchange needs. The flow\ncookie ``/authorize`` set travels alongside and binds it to the browser.",
         "properties": {
           "code": {
             "description": "The authorization code from the provider's redirect.",
@@ -15652,7 +15652,7 @@
     },
     "/v1/auth/oauth/{provider}/authorize": {
       "get": {
-        "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET that writes, which is the one thing to know about it. It records the\nauthorization it is about to start (the state's hash, and the PKCE verifier\nthe exchange will need) so the callback has something to check against, and\nthat record is the whole reason the callback can refuse a code this\ndeployment never asked for.\n\nStill safe to repeat: each call mints its own state, and only the one the\nbrowser kept is the one it sends back. The rows the others leave expire on\ntheir own and are swept by the next call.",
+        "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET that writes, which is the one thing to know about it. It records the\nauthorization it is about to start (the state's hash, the PKCE verifier the\nexchange will need, and the digest of a flow secret it sets as an HttpOnly\ncookie) so the callback has something to check against, and that record is\nthe whole reason the callback can refuse a code this deployment never asked\nfor, or one presented from a browser other than the one that asked.\n\nStill safe to repeat: each call mints its own state, and only the one the\nbrowser kept is the one it sends back. The rows the others leave expire on\ntheir own and are swept by the next call. The cookie is reused when the\nbrowser already holds one, so a second tab does not break the first.",
         "operationId": "authorize_v1_auth_oauth__provider__authorize_get",
         "parameters": [
           {

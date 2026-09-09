@@ -1469,6 +1469,10 @@ class OAuthPendingState(SQLModel, table=True):
     # returned to GitHub's callback is a refusal that should say so, not one
     # that collapses into "unknown state".
     provider: str = Field(max_length=32)
+    # SHA-256 of the flow secret the browser holds in its cookie, so a row
+    # answers only to the browser that started it (RFC 9700, section 4.7.1).
+    # Hashed for the reason ``state_hash`` is.
+    flow_hash: str = Field(max_length=64)
     code_verifier: str | None = Field(default=None, max_length=128)
     # Kept rather than re-derived at exchange time so the URI sent with the
     # exchange is the one the authorization request was actually built with,
