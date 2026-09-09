@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "name": "search_only",
+      "tools": [{"type": "otari_web_search"}],
+      "platform_response": {
+        "enabled": true,
+        "authorized_tools": ["web_search"],
+        "allowed_domains": ["example.com"]
+      },
+      "expected_requested_tools": ["web_search"],
+      "expected_status": 200
+    },
+    {
+      "name": "fetch_only",
+      "tools": [{"type": "otari_web_fetch"}],
+      "platform_response": {
+        "enabled": true,
+        "authorized_tools": ["web_fetch"],
+        "blocked_domains": ["blocked.example"]
+      },
+      "expected_requested_tools": ["web_fetch"],
+      "expected_status": 200
+    },
+    {
+      "name": "combined",
+      "tools": [
+        {"type": "otari_web_search", "allowed_domains": ["docs.example.com"]},
+        {"type": "otari_web_fetch"}
+      ],
+      "platform_response": {
+        "enabled": true,
+        "authorized_tools": ["web_search", "web_fetch"],
+        "allowed_domains": ["example.com"]
+      },
+      "expected_requested_tools": ["web_search", "web_fetch"],
+      "expected_status": 200
+    },
+    {
+      "name": "denied",
+      "tools": [{"type": "otari_web_fetch"}],
+      "platform_response": {
+        "enabled": false,
+        "authorized_tools": []
+      },
+      "expected_requested_tools": ["web_fetch"],
+      "expected_status": 403
+    },
+    {
+      "name": "malformed",
+      "tools": [{"type": "otari_web_fetch"}],
+      "platform_response": {
+        "enabled": "true",
+        "authorized_tools": ["web_fetch"]
+      },
+      "expected_requested_tools": ["web_fetch"],
+      "expected_status": 502
+    },
+    {
+      "name": "legacy_response",
+      "tools": [{"type": "otari_web_fetch"}],
+      "platform_response": {
+        "enabled": true
+      },
+      "expected_requested_tools": ["web_fetch"],
+      "expected_status": 502
+    }
+  ]
+}
