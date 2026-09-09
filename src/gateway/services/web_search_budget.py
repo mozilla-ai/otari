@@ -24,9 +24,9 @@ MAX_USES_EXCEEDED_ERROR = "[tool error] max_uses_exceeded"
 class WebSearchBudget:
     """The searches one request has left.
 
-    Created only when the caller declared a positive cap, so an uncapped request
-    carries no budget and the loops keep their previous behavior. One belongs to
-    one request, for the reason :class:`~gateway.services.tool_usage.ToolUsageTally`
+    Created whenever the caller declared a cap, ``0`` included, so an uncapped
+    request carries no budget and the loops keep their previous behavior. One
+    belongs to one request, for the reason :class:`~gateway.services.tool_usage.ToolUsageTally`
     does: a multi-attempt request re-runs its searches and every one of them is
     billed, so the cap has to be spent by the request rather than refilled per
     attempt. It is built once on ``ToolContext`` and handed to whichever loop runs.

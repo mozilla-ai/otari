@@ -44,8 +44,9 @@ honored on every endpoint (`/v1/messages`, `/v1/chat/completions`,
 A failed search does not count against it, matching what is billed.
 
 `max_uses: 0` is a cap of zero searches, not the absence of a cap, so every
-search is refused. A negative or non-numeric value is a caller mistake and is
-rejected with a 400 rather than guessed at.
+search is refused. A negative or non-integer value is a caller mistake and is
+rejected with a 400 rather than guessed at; `1.5` and `5.0` are both non-integer
+here, so a float that happens to be whole is rejected too.
 
 Past the cap, the model is told the search was refused and can answer without it.
 An Anthropic-native declaration is answered in its own vocabulary, a

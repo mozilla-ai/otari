@@ -141,9 +141,14 @@ def _is_gateway_minted_result(block: Any) -> bool:
     usable hits produces, and a provider reporting no results uses the error shape
     instead.
 
-    The error shape has no ``encrypted_content`` to reason about. The gateway emits
-    only ``max_uses_exceeded``, so that error is treated as gateway-minted while
-    other provider errors are preserved.
+    The error shape has no ``encrypted_content`` to reason about, so
+    ``max_uses_exceeded`` is claimed by its error code alone and every other provider
+    error is preserved. Anthropic emits that same code for its own capped search and
+    inbound the two are indistinguishable, so a transcript recorded against the
+    provider directly loses its capped pair here. That is the side to err on: keeping
+    it would echo a ``server_tool_use`` whose ``srvtoolu_`` id the gateway invented,
+    and an error block describes a search rather than carrying results, so dropping
+    one costs the model nothing.
     """
     if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
         return False

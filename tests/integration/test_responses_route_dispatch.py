@@ -440,6 +440,86 @@ def test_web_search_dispatches_through_web_search_backend(
     assert pool_seen == [fake_backend]
 
 
+def test_web_search_max_uses_reaches_the_responses_tool_loop(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap the caller declared arrives at this format's loop, by value.
+
+    Counterpart to
+    ``test_messages_route_dispatch.test_intercept_routes_provider_keywords_to_the_gateway_backend``:
+    the adapter's ``web_search_budget`` plumbing is only reachable through the route,
+    so the unit tests that call the loop functions directly cannot cover it.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+
+    budgets_seen: list[Any] = []
+
+    async def fake_loop(
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        web_search_budget: Any = None,
+    ) -> Response:
+        budgets_seen.append(web_search_budget)
+        return _response()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+    ):
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": _MODEL,
+                "input": "search",
+                "tools": [{"type": "otari_web_search", "max_uses": 2}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    budget = budgets_seen[0]
+    assert budget is not None, "the cap never reached the loop"
+    # Arrived by value, not just as "some budget": spending it exactly twice exhausts it.
+    budget.record("results")
+    assert not budget.exhausted()
+    budget.record("results")
+    assert budget.exhausted()
+
+
+def test_invalid_web_search_max_uses_is_rejected_by_this_format(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed cap is a 400 in this format's own envelope, not an uncapped request."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+
+    resp = client.post(
+        "/v1/responses",
+        json={
+            "model": _MODEL,
+            "input": "search",
+            "tools": [{"type": "otari_web_search", "max_uses": -1}],
+        },
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "web_search max_uses must be a non-negative integer"
+
+
 # ---------- provider-named keyword passthrough ----------
 
 
