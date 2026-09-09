@@ -1,5 +1,9 @@
 import { chromium } from "@playwright/test"
 
+// Override with SMOKE_ORIGIN to point at another port; the catalog is served
+// on 6006 by `storybook dev` and by the static server CI runs.
+const ORIGIN = process.env.SMOKE_ORIGIN ?? "http://localhost:6006"
+
 // A story has rendered when it put something on screen: real text, an SVG, a
 // portalled dialog, or something that PAINTS.
 //
@@ -45,19 +49,41 @@ const RENDERED = () => {
   })
 }
 
-const index = await fetch("http://localhost:6006/index.json").then((r) => r.json())
+const index = await fetch(`${ORIGIN}/index.json`).then((r) => r.json())
 const ids = Object.keys(index.entries).filter((id) => index.entries[id].type === "story")
+
+// One flat work list, drained by a pool of pages.
+//
+// It used to be two sequential loops over one page each, which on a CI runner
+// took over 45 minutes for 327 stories and printed nothing until the end, so a
+// slow run and a hung one were indistinguishable. Both halves of that are fixed
+// here: the pool gives it the runner's cores, and the progress line means an
+// instrument that has stopped moving says so. AGENTS.md makes the same point
+// about a probe whose silence reads as success.
+//
+// The pool size is deliberately modest. The catalog is served by a plain file
+// server and each navigation pulls the whole bundle, so past a handful of pages
+// the server, not the browser, is the limit.
+const TASKS = ["light", "dark"].flatMap((theme) =>
+  ids.map((id) => ({ theme, id })),
+)
+const CONCURRENCY = Number(process.env.SMOKE_CONCURRENCY ?? 6)
 
 const browser = await chromium.launch()
 const failures = []
+let cursor = 0
+let finished = 0
 
-for (const theme of ["light", "dark"]) {
+async function drain() {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
-  for (const id of ids) {
+  while (true) {
+    const next = cursor++
+    if (next >= TASKS.length) break
+    const { theme, id } = TASKS[next]
     const errors = []
     const onErr = (e) => errors.push(String(e.message ?? e).split("\n")[0])
     // Only uncaught exceptions and React errors count. A bare "Failed to load
-    // resource" is this probe's own fault: it reuses one page across ~180 rapid
+    // resource" is this probe's own fault: it reuses one page across many rapid
     // navigations, so in-flight requests abort as it moves on.
     const onConsole = (m) => {
       if (m.type() !== "error") return
@@ -69,7 +95,7 @@ for (const theme of ["light", "dark"]) {
     page.on("pageerror", onErr)
     page.on("console", onConsole)
     try {
-      await page.goto(`http://localhost:6006/iframe.html?id=${id}&globals=theme:${theme}`, { waitUntil: "domcontentloaded" })
+      await page.goto(`${ORIGIN}/iframe.html?id=${id}&globals=theme:${theme}`, { waitUntil: "domcontentloaded" })
       // See RENDERED at the top for what counts as rendered and why. The one
       // thing worth repeating here: a card gated on two sequential queries
       // (context, then a per-workspace one) legitimately renders nothing until
@@ -98,9 +124,15 @@ for (const theme of ["light", "dark"]) {
     }
     page.off("pageerror", onErr)
     page.off("console", onConsole)
+    finished += 1
+    if (finished % 50 === 0 || finished === TASKS.length) {
+      console.log(`  rendered ${finished}/${TASKS.length}, ${failures.length} failing so far`)
+    }
   }
   await page.close()
 }
+
+await Promise.all(Array.from({ length: CONCURRENCY }, drain))
 
 console.log(`checked ${ids.length} stories x 2 themes`)
 console.log(failures.length === 0 ? "ALL RENDERED CLEAN" : JSON.stringify(failures, null, 1))

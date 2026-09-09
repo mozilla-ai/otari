@@ -28,7 +28,20 @@ alone when it is unset, so a local build and the dev server need nothing.
 
 Renders every story in headless Chromium, in both themes, and reports any that
 error, render nothing, or log an uncaught exception. Playwright is already a dev
-dependency here, so this needs nothing extra.
+dependency here, so this needs nothing extra. Around ten seconds for the whole
+catalog against a static build.
+
+Two knobs, both with working defaults: `SMOKE_ORIGIN` points it at another port,
+and `SMOKE_CONCURRENCY` sets how many pages drain the work list (6). The pool is
+what makes it quick, and the reason it exists is worth keeping: as two sequential
+loops over one page each, the same run took over 45 minutes on a CI runner and
+printed nothing until it finished, so a slow run and a hung one looked identical.
+It now prints a progress line every 50 renders.
+
+**It catches what it claims to.** Verified by breaking a story on purpose: the
+throw was reported against `design-system-indicators-kbd--default` in both
+themes, by name and with its message. Worth repeating that positive control after
+any change to `RENDERED`, because every failure mode here is silent by nature.
 
 Three traps it was written around, all worth keeping:
 
