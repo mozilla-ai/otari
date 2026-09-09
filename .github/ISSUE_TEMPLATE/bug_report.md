@@ -11,6 +11,7 @@ assignees: ''
 **Run mode:** <!-- standalone / hybrid -->
 **How you're running Otari:** <!-- Docker / docker compose / from source / Railway -->
 **Provider and model:** <!-- e.g. openai:gpt-4o-mini -->
+**Reproduces with a direct any-llm call?** <!-- yes / no / haven't tried. Otari dispatches through any-llm; if a plain any_llm call shows the same behavior, please file it at mozilla-ai/any-llm instead. -->
 
 ### What happened
 

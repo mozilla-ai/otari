@@ -6,6 +6,9 @@ contact_links:
   - name: Discord
     url: https://discord.gg/ZfZPfTdtSe
     about: Chat with the community and maintainers in real time.
+  - name: Provider integration bug (missing provider, dropped param, bad response shape)
+    url: https://github.com/mozilla-ai/any-llm/issues
+    about: Otari dispatches provider calls through any-llm. If a plain any-llm call reproduces it, report it there so every any-llm user gets the fix.
   - name: Documentation
     url: https://github.com/mozilla-ai/otari/blob/main/docs/index.md
     about: Quickstart, configuration, and API reference.
