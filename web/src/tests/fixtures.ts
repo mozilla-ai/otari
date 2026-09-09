@@ -32,6 +32,7 @@ import type {
   WorkspaceCodeExecutionPolicy,
   WorkspaceMcpServer,
   WorkspaceMember,
+  WorkspaceProviderKeyOverride,
   WorkspaceWebSearchConfig,
 } from "@/client"
 
@@ -612,6 +613,23 @@ export function orgProviderKey(
     archived_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspaceProviderKeyOverride(
+  overrides: Partial<WorkspaceProviderKeyOverride> = {},
+): WorkspaceProviderKeyOverride {
+  return {
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    org_provider_key_id: "66666666-6666-6666-6666-666666666666",
+    // Full inheritance, which is what a workspace with no override row looks
+    // like on the wire: neither flag set, and the key still resolving because
+    // it is the organization's.
+    is_default: false,
+    disabled: false,
+    is_effective_default: true,
+    is_effective_enabled: true,
     ...overrides,
   }
 }

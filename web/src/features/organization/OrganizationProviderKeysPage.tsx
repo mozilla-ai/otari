@@ -63,11 +63,11 @@ import { canManage } from "./roles"
 // (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
 // `src/gateway/api/routes/bootstrap.py`).
 //
-// What is deliberately absent is the per-workspace half of the same API
-// (`/v1/workspaces/{id}/provider-keys`: pin, disable, restrict to models). Those
-// are one workspace's departure from what this page sets, so they belong beside
-// that workspace rather than here, and the organization view would have to ask
-// "which workspace" before it could show any of it.
+// The per-workspace half of the same API (`/v1/workspaces/{id}/provider-keys`:
+// pin, disable, restrict to models) is deliberately not here. Those are one
+// workspace's departure from what this page sets, so they belong beside that
+// workspace: `WorkspaceProviderKeys`, on the Workspaces page, which has already
+// asked "which workspace" before it shows any of it.
 
 /** A key's editable fields, seeded from a row when one is being edited. */
 interface KeyDraft {

@@ -72,6 +72,11 @@ function mockApi(
       }
       return jsonResponse(members[0] ?? workspaceMember())
     }
+    if (url.includes("provider-keys")) {
+      if (url.includes("/models")) return jsonResponse({ models: [] })
+      if (url.includes("/v1/workspaces/")) return jsonResponse({ data: [] })
+      return jsonResponse({ data: [], count: 0 })
+    }
     if (url.includes("member-budget-policies")) {
       const id = url.split("/v1/workspaces/")[1]?.split("/")[0] ?? ""
       const rows = budgetDefaults[id] ?? []
@@ -387,6 +392,53 @@ describe("WorkspacesPage", () => {
       requests.filter((request) =>
         operatorOnly.some((path) => request.url.includes(path)),
       ),
+    ).toEqual([])
+  })
+
+  it("offers the workspace's provider keys on an admin's edit form", async () => {
+    // The per-workspace half of the organization's provider keys, which the
+    // roles matrix has at Edit for an admin and hidden from everyone else. Not
+    // withheld from a non-operator, unlike the budget controls above it: these
+    // are the tenant's own credentials rather than the deployment's.
+    const requests = mockApi({
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+
+    expect(await screen.findByText("Provider keys")).toBeInTheDocument()
+    expect(
+      requests.some((request) =>
+        request.url.includes(
+          "/v1/workspaces/44444444-4444-4444-4444-444444444444/provider-keys",
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      requests.some((request) =>
+        request.url.includes("/v1/organizations/me/provider-keys"),
+      ),
+    ).toBe(true)
+  })
+
+  it("keeps the provider keys and their reads away from a member", async () => {
+    // A member cannot open the edit form, which is where the section lives, so
+    // it is never mounted and neither of its reads is made. The gateway agrees
+    // on the writes (`require_workspace_management_access`) and refuses the
+    // organization's key list to anyone who does not manage the organization.
+    const requests = mockApi({
+      context: organizationContext({ role: "member" }),
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+    })
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Bravo")
+    expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()
+    expect(screen.queryByText("Provider keys")).toBeNull()
+    expect(
+      requests.filter((request) => request.url.includes("provider-keys")),
     ).toEqual([])
   })
 })

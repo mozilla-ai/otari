@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
 import { useBudgets } from "@/shared/api/budgets"
 import { ApiError } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
@@ -600,6 +601,15 @@ function EditWorkspaceForm({
           />
         </>
       ) : null}
+      {/* Not withheld from a non-operator, unlike everything above it: these are
+          the tenant's own credentials rather than the deployment's, and the two
+          reads behind them (the organization's keys, and this workspace's
+          departures from them) answer an organization owner or admin. The page
+          already only opens this form to one, which is the same rule the gateway
+          applies to the writes (`require_workspace_management_access`), narrowed
+          to its organization arm because the key names come from the
+          organization-gated list. */}
+      <WorkspaceProviderKeys workspaceId={workspace.id} />
       <div className="flex gap-2">
         <Button
           variant="primary"

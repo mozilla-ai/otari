@@ -499,6 +499,18 @@ export type CreateWorkspaceBudgetDefaultRequest =
 export type UpdateWorkspaceBudgetDefaultRequest =
   Schemas["WorkspaceMemberBudgetPolicyUpdate"]
 
+// One workspace's departure from the organization key above: pinned as this
+// workspace's default, opted out of, or neither. `is_default`/`disabled` are the
+// stored flags and `is_effective_*` the resolution across the provider's keys,
+// so a row can be unpinned and still effective (it is the organization default,
+// or the only key that provider has).
+export type WorkspaceProviderKeyOverride =
+  Schemas["WorkspaceProviderKeyOverridePublic"]
+// Tri-state on the way in: an omitted flag is left unchanged, so the dashboard
+// sends one at a time and lets the gateway resolve the other.
+export type SetWorkspaceProviderKeyOverrideRequest =
+  Schemas["WorkspaceProviderKeyOverrideRequest"]
+
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see
 // `src/gateway/services/tenancy/workspace_activation_service.py`); the

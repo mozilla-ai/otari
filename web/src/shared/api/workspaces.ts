@@ -7,12 +7,14 @@ import {
 import type {
   CreateWorkspaceBudgetDefaultRequest,
   CreateWorkspaceRequest,
+  SetWorkspaceProviderKeyOverrideRequest,
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceRequest,
   Workspace,
   WorkspaceBudgetDefault,
   WorkspaceMember,
   WorkspaceMemberRole,
+  WorkspaceProviderKeyOverride,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
@@ -305,6 +307,169 @@ export function useDeleteWorkspaceBudgetDefault() {
         queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
       })
     },
+  })
+}
+
+/**
+ * One workspace's view of its organization's provider keys.
+ *
+ * Every non-archived organization key, each carrying this workspace's departure
+ * from it: `is_default`/`disabled` are the stored flags, `is_effective_*` the
+ * resolution once the provider's other keys are taken into account. The response
+ * names keys by id only, so the caller pairs it with `useOrgProviderKeys` for the
+ * provider and the name.
+ *
+ * Not paged: the route serves the whole set in one body, because it is bounded by
+ * the organization's key count rather than by anything a workspace accumulates.
+ */
+export function useWorkspaceProviderKeys(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "provider-keys"],
+    queryFn: async () =>
+      (
+        await apiFetch<{ data: WorkspaceProviderKeyOverride[] }>(
+          `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/provider-keys`,
+        )
+      ).data,
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * The model allow-list each of a workspace's keys carries, as one map.
+ *
+ * A fan-out for the reason the two above are: the allow-list is only served per
+ * key (`GET /v1/workspaces/{id}/provider-keys/{key}/models`), and an organization
+ * holds a handful of keys, so N small cached reads beat adding a route. An empty
+ * list is the common answer and a meaningful one: no rows means every model the
+ * key serves is allowed, not that none is.
+ */
+export function useWorkspaceProviderKeyModels(
+  workspaceId: string | null,
+  keyIds: string[],
+) {
+  return useQueries({
+    queries: (workspaceId === null ? [] : keyIds).map((keyId) => ({
+      queryKey: [WORKSPACES, workspaceId, "provider-keys", keyId, "models"],
+      queryFn: async () =>
+        (
+          await apiFetch<{ models: string[] }>(
+            `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/provider-keys/${encodeURIComponent(keyId)}/models`,
+          )
+        ).models,
+      staleTime: 60_000,
+    })),
+    combine: (results) => ({
+      data: new Map(
+        results.map((result, index) => [keyIds[index], result.data ?? []]),
+      ),
+      isLoading: results.some((result) => result.isLoading),
+      // The first failure rather than a swallowed one, as the fan-outs above do:
+      // a refused read contributes an empty list, which is exactly what "every
+      // model is allowed" looks like, so silence here would report the opposite
+      // of a narrowing that is still in force.
+      error: results.find((result) => result.error)?.error ?? null,
+    }),
+  })
+}
+
+// Pinning a key clears whichever of the provider's other keys this workspace had
+// pinned, and disabling one deletes its model allow-list server-side, so every
+// write here re-reads the workspace's whole provider-key subtree rather than
+// patching the row it acted on.
+function invalidateWorkspaceProviderKeys(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: [WORKSPACES, workspaceId, "provider-keys"],
+  })
+}
+
+export function useSetWorkspaceProviderKeyOverride() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      keyId,
+      body,
+    }: {
+      workspaceId: string
+      keyId: string
+      body: SetWorkspaceProviderKeyOverrideRequest
+    }) =>
+      apiFetch<WorkspaceProviderKeyOverride>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/provider-keys/${encodeURIComponent(keyId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) =>
+      invalidateWorkspaceProviderKeys(queryClient, workspaceId),
+  })
+}
+
+/** Drop the override entirely, so the workspace inherits the organization again. */
+export function useResetWorkspaceProviderKeyOverride() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      keyId,
+    }: {
+      workspaceId: string
+      keyId: string
+    }) =>
+      apiFetch<{ message: string }>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/provider-keys/${encodeURIComponent(keyId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) =>
+      invalidateWorkspaceProviderKeys(queryClient, workspaceId),
+  })
+}
+
+export function useAddWorkspaceProviderKeyModel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      keyId,
+      model,
+    }: {
+      workspaceId: string
+      keyId: string
+      model: string
+    }) =>
+      apiFetch<{ message: string }>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/provider-keys/${encodeURIComponent(keyId)}/models`,
+        { method: "POST", body: JSON.stringify({ model }) },
+      ),
+    onSuccess: (_data, { workspaceId }) =>
+      invalidateWorkspaceProviderKeys(queryClient, workspaceId),
+  })
+}
+
+export function useRemoveWorkspaceProviderKeyModel() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      keyId,
+      model,
+    }: {
+      workspaceId: string
+      keyId: string
+      model: string
+    }) =>
+      apiFetch<{ message: string }>(
+        // The model id is the last path segment and the route declares it
+        // `:path`, so a provider that spells one with a slash still addresses
+        // its own row: the escape survives the match and the gateway unquotes it.
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/provider-keys/${encodeURIComponent(keyId)}/models/${encodeURIComponent(model)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) =>
+      invalidateWorkspaceProviderKeys(queryClient, workspaceId),
   })
 }
 
