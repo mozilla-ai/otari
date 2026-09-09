@@ -21,6 +21,11 @@ name: Otari Lock Refresh
 # PAT or GitHub App token with contents:write and pull-requests:write on this
 # repo) to have the PR's own checks run automatically; without it, the PR body
 # tells the reviewer how to trigger them.
+#
+# A run whose checks fail opens no PR, which is the intended outcome (a broken
+# resolution should not land) but also a silent one: the signal is a red run in
+# the Actions tab plus GitHub's own scheduled-failure notification. A refresh
+# that has not opened a PR in a long while is worth checking rather than trusting.
 
 on:
   schedule:
@@ -45,11 +50,18 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # Same environment the integration job in otari-tests.yml runs under, so the
+    # suite here sees the secrets it does. The environment carries no protection
+    # rules, so it adds no approval gate to a scheduled run.
+    environment: integration-tests
     permissions:
       contents: write
       pull-requests: write
 
     steps:
+      # Credentials stay persisted here, unlike the sibling workflows that drop
+      # them: this job pushes a branch, and create-pull-request expects the
+      # standard checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -107,6 +119,8 @@ jobs:
         if: steps.relock.outputs.changed == 'true'
         # Testcontainers brings up postgres:17 on the runner's Docker daemon, the
         # same way it does locally when TEST_DATABASE_URL is unset.
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: uv run pytest tests/integration -q -n auto
 
       - name: OSS-edition smoke gate
