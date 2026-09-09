@@ -18,9 +18,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from fastapi import HTTPException, status
 
-from gateway.api.routes._pipeline import ToolContext
+from gateway.api.routes._pipeline import ToolContext, _read_web_search_max_uses
 from gateway.api.routes._tools import (
     _extract_code_execution_tool,
     _extract_web_search_tool,
@@ -404,11 +403,19 @@ def test_a_zero_max_uses_caps_the_searches_at_none_rather_than_at_no_limit() -> 
     assert ctx.web_search_budget.exhausted(), "the first search must already be over the cap"
 
 
-def test_a_nonsensical_max_uses_is_rejected_instead_of_becoming_uncapped() -> None:
-    """Malformed spend controls fail closed instead of allowing unlimited searches."""
-    for value in (-1, True, False, "2", 1.5):
+def test_a_nonsensical_max_uses_is_refused_by_the_reader() -> None:
+    """Malformed spend controls fail closed instead of allowing unlimited searches.
+
+    The reader is what refuses; turning that into a 400 belongs to
+    ``prepare_gateway_tools``, which holds the adapter that knows the caller's error
+    envelope. The envelope itself is covered per format in the integration tests
+    (``test_web_search_interception``, ``test_responses_route_dispatch``).
+
+    ``True`` and ``False`` are here because ``bool`` is an ``int`` subclass, so a JSON
+    ``true`` would otherwise read as a one-search cap. ``1.5`` and ``5.0`` are both
+    refused: the check is integral, not merely numeric.
+    """
+    for value in (-1, True, False, "2", 1.5, 5.0):
         entry = {"type": "web_search_20250305", "max_uses": value}
-        with pytest.raises(HTTPException) as exc_info:
-            _capped_context(entry)
-        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST, value
-        assert exc_info.value.detail == "web_search max_uses must be a non-negative integer"
+        with pytest.raises(ValueError, match="non-negative integer"):
+            _read_web_search_max_uses(entry)

@@ -2083,16 +2083,14 @@ class ToolContext:
         direction this must not fail; a caller who meant "do not search" is better
         served by every search being refused than by a bill.
 
-        Invalid values are rejected rather than treated as uncapped, matching the
-        provider contract and preventing malformed spend controls from failing open.
+        Invalid values are rejected rather than treated as uncapped, so a malformed
+        spend control cannot fail open. Rejection belongs to ``prepare_gateway_tools``,
+        which is the one place that builds a ``ToolContext`` and the only one holding
+        the ``adapter`` that knows the caller's error envelope. This property is a
+        plain read of a value already validated there; the ``ValueError`` it would
+        raise on an unvalidated entry is a programming error, not a request one.
         """
-        try:
-            return _read_web_search_max_uses(self.web_search_tool_entry)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=WEB_SEARCH_MAX_USES_INVALID_DETAIL,
-            ) from exc
+        return _read_web_search_max_uses(self.web_search_tool_entry)
 
     @property
     def intercepts_web_search(self) -> bool:
