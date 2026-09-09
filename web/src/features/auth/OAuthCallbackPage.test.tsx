@@ -88,9 +88,13 @@ describe("OAuthCallbackPage", () => {
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     const [url, init] = fetchMock.mock.calls[0] ?? []
     expect(url).toBe("/v1/auth/oauth/google/callback")
-    // The code alone: the redirect URI is the gateway's own, and the state was
-    // already checked here against the value this tab stored.
-    expect(JSON.parse(String(init?.body))).toEqual({ code: "the-code" })
+    // The code and the state, and no redirect URI: that one is the gateway's
+    // own. The state goes back so the gateway can check it against the pending
+    // authorization it recorded, which is the half this tab cannot do.
+    expect(JSON.parse(String(init?.body))).toEqual({
+      code: "the-code",
+      state: "the-state",
+    })
     await waitFor(() =>
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
         authentication_method: "google",

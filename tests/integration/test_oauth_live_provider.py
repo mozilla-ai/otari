@@ -9,8 +9,15 @@ This module is that check, and it is the gate for turning a provider on.
 
 Skipped unless ``OTARI_OAUTH_LIVE_TESTS=1`` and the provider's variables are
 set, because an authorization code is single-use and only a person completing a
-consent screen can produce one. Nothing here touches a database, so it needs no
-PostgreSQL either.
+consent screen can produce one.
+
+**It runs against the gateway's own database**, which the rest of this module's
+history did not. The exchange now sends a PKCE ``code_verifier``, and the only
+copy of it is the ``oauth_pending_state`` row the ``/authorize`` call wrote, so
+the test has to read the row the running gateway left rather than mint anything
+of its own. That is also what makes it a real check: a verifier this test
+invented would prove the provider accepts *a* verifier, not the one this
+deployment would have sent.
 
 To run it for Google::
 
@@ -20,15 +27,20 @@ To run it for Google::
     #      OTARI_PUBLIC_BASE_URL=http://localhost:8000
     #      OTARI_OAUTH_GOOGLE_CLIENT_ID=...
     #      OTARI_OAUTH_GOOGLE_CLIENT_SECRET=...
+    #      OTARI_DATABASE_URL=...   (the same one this test will read)
     # 2. Open the URL that GET /v1/auth/oauth/google/authorize returns and
     #    complete the consent screen. The browser lands on
-    #    /#/auth/google/callback?code=...; copy that code out of the address bar.
-    # 3. Run immediately, since the code expires in minutes and is single-use.
+    #    /#/auth/google/callback?code=...&state=...; copy both out of the
+    #    address bar. The state is what finds the verifier.
+    # 3. Run immediately, since the code expires in minutes and is single-use,
+    #    and the pending state expires in ten.
     OTARI_OAUTH_LIVE_TESTS=1 \\
     OTARI_PUBLIC_BASE_URL=http://localhost:8000 \\
+    OTARI_DATABASE_URL=... \\
     OTARI_OAUTH_GOOGLE_CLIENT_ID=... \\
     OTARI_OAUTH_GOOGLE_CLIENT_SECRET=... \\
     OTARI_OAUTH_LIVE_GOOGLE_CODE='4/0Ax...' \\
+    OTARI_OAUTH_LIVE_GOOGLE_STATE='...' \\
     uv run pytest tests/integration/test_oauth_live_provider.py -k google -v
 
 GitHub is the same with ``GITHUB`` in place of ``GOOGLE``. The redirect URI is
@@ -43,6 +55,7 @@ import os
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import create_session, init_db
 from gateway.services import oauth_service
 
 pytestmark = pytest.mark.skipif(
@@ -57,6 +70,18 @@ def _live_code(provider: str) -> str:
     if not code:
         pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_CODE is required")
     return code
+
+
+def _live_state(provider: str) -> str:
+    """The ``state`` the provider redirected back with, or skip.
+
+    It is the key to the pending row holding the PKCE verifier, so without it
+    there is nothing to exchange with even though the code itself is valid.
+    """
+    state = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_STATE", "")
+    if not state:
+        pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_STATE is required")
+    return state
 
 
 def _live_config(provider: str) -> GatewayConfig:
@@ -84,8 +109,16 @@ async def test_a_real_authorization_code_exchanges_for_an_identity(provider: str
     """
     config = _live_config(provider)
     code = _live_code(provider)
+    state = _live_state(provider)
 
-    identity = await oauth_service.exchange_code(config, provider, code=code)
+    init_db(config)
+    async with create_session() as db:
+        identity = await oauth_service.exchange_code(
+            config, provider, code=code, state=state, db=db
+        )
+        # Committed, because the state was consumed for real: leaving it
+        # spendable would contradict what this module is checking.
+        await db.commit()
 
     assert identity.provider == provider
     assert identity.email, "the provider returned no address, so nothing here could sign in"

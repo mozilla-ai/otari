@@ -392,9 +392,15 @@ export interface paths {
          * Authorize
          * @description Start an OAuth sign-in: where to send the browser, and the state to keep.
          *
-         *     A GET, and safe: it reads configuration and mints a random value, writing
-         *     nothing. Repeating it simply produces another state, and only the one the
-         *     browser kept is the one it will compare against.
+         *     A GET that writes, which is the one thing to know about it. It records the
+         *     authorization it is about to start (the state's hash, and the PKCE verifier
+         *     the exchange will need) so the callback has something to check against, and
+         *     that record is the whole reason the callback can refuse a code this
+         *     deployment never asked for.
+         *
+         *     Still safe to repeat: each call mints its own state, and only the one the
+         *     browser kept is the one it sends back. The rows the others leave expire on
+         *     their own and are swept by the next call.
          */
         get: operations["authorize_v1_auth_oauth__provider__authorize_get"];
         put?: never;
@@ -4989,7 +4995,7 @@ export interface components {
             authorization_url: string;
             /**
              * State
-             * @description An opaque CSRF value to keep for the length of the redirect and compare against the 'state' the provider returns. It is not stored on this deployment, so a callback whose state does not match the one held by the browser that started the flow must be abandoned by the client rather than sent here.
+             * @description An opaque CSRF value to keep for the length of the redirect, compare against the 'state' the provider returns, and send back with the authorization code. A callback whose state does not match the one held by the browser that started the flow should be abandoned by the client rather than sent here; one that does is checked again against this deployment's own record of it.
              */
             state: string;
         };
@@ -7045,10 +7051,10 @@ export interface components {
          *     exchange are the same string by construction, and a browser cannot choose
          *     what this server sends to a provider.
          *
-         *     No ``state`` either, and that is not an omission. The state is checked in the
-         *     browser, against the value that browser stored when it started the flow;
-         *     sending it here would let this deployment compare a value to itself, which
-         *     proves nothing without somewhere to have kept the original.
+         *     ``state`` is required, and is what binds this callback to an authorization
+         *     request this deployment actually made: it is claimed from
+         *     ``oauth_pending_state`` before the code is sent anywhere, and the row it
+         *     claims is what carries the PKCE verifier the exchange needs.
          */
         OAuthCallbackRequest: {
             /**
@@ -7056,6 +7062,11 @@ export interface components {
              * @description The authorization code from the provider's redirect.
              */
             code: string;
+            /**
+             * State
+             * @description The 'state' from the provider's redirect, as issued by /authorize.
+             */
+            state: string;
         };
         /**
          * OAuthSessionResponse

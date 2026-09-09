@@ -19,9 +19,10 @@ them to ``/auth/{provider}/callback``, an ordinary path (a redirect URI may not
 carry a fragment, so it cannot be the hash route directly) which
 ``gateway.main`` redirects into the dashboard's own callback page. That page
 compares the returned state against the stored one and, only then, posts the
-authorization code here. So the state round-trips through the browser that
-minted it and this deployment stores nothing between the two requests, which is
-the same reason PKCE stays off; see ``gateway.services.oauth_service``.
+code and the state here, where the state is checked again against the row
+``/authorize`` wrote. Two checks that fail in different directions: the
+browser's binds a callback to the tab that started the flow, and this one binds
+it to a flow this deployment started. See ``gateway.services.oauth_service``.
 
 **What this route decides, and what it does not.** It proves the person holds
 the provider account. Who that makes them *here* is behind
@@ -58,7 +59,6 @@ from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.oauth_service import (
     authorization_url,
     exchange_code,
-    new_state,
     provider_label,
     require_configured,
 )
@@ -71,6 +71,11 @@ router = APIRouter(prefix="/v1/auth/oauth", tags=["auth"])
 # this is a sanity ceiling on an unauthenticated request body rather than a
 # format, matching the bounds ``auth_session.CreateSessionRequest`` sets.
 _MAX_SUBMITTED_CODE = 2048
+# A state this deployment issued is 43 characters (``secrets.token_urlsafe(32)``).
+# The ceiling is loose rather than exact because the value is looked up by hash
+# and a wrong length is simply a state that matches nothing; what it bounds is
+# how much an unauthenticated caller can make this process hash.
+_MAX_SUBMITTED_STATE = 512
 
 # Only a provider this deployment could ever configure is a path this router
 # answers at all, so an unknown segment is the framework's own 422 rather than a
@@ -95,10 +100,11 @@ class AuthorizeResponse(BaseModel):
     authorization_url: str = Field(description="The provider consent screen to navigate to.")
     state: str = Field(
         description=(
-            "An opaque CSRF value to keep for the length of the redirect and compare against the "
-            "'state' the provider returns. It is not stored on this deployment, so a callback "
-            "whose state does not match the one held by the browser that started the flow must be "
-            "abandoned by the client rather than sent here."
+            "An opaque CSRF value to keep for the length of the redirect, compare against the "
+            "'state' the provider returns, and send back with the authorization code. A callback "
+            "whose state does not match the one held by the browser that started the flow should "
+            "be abandoned by the client rather than sent here; one that does is checked again "
+            "against this deployment's own record of it."
         )
     )
 
@@ -111,15 +117,19 @@ class OAuthCallbackRequest(BaseModel):
     exchange are the same string by construction, and a browser cannot choose
     what this server sends to a provider.
 
-    No ``state`` either, and that is not an omission. The state is checked in the
-    browser, against the value that browser stored when it started the flow;
-    sending it here would let this deployment compare a value to itself, which
-    proves nothing without somewhere to have kept the original.
+    ``state`` is required, and is what binds this callback to an authorization
+    request this deployment actually made: it is claimed from
+    ``oauth_pending_state`` before the code is sent anywhere, and the row it
+    claims is what carries the PKCE verifier the exchange needs.
     """
 
     code: str = Field(
         max_length=_MAX_SUBMITTED_CODE,
         description="The authorization code from the provider's redirect.",
+    )
+    state: str = Field(
+        max_length=_MAX_SUBMITTED_STATE,
+        description="The 'state' from the provider's redirect, as issued by /authorize.",
     )
 
 
@@ -171,18 +181,32 @@ async def authorize(
     provider: ProviderPath,
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AuthorizeResponse:
     """Start an OAuth sign-in: where to send the browser, and the state to keep.
 
-    A GET, and safe: it reads configuration and mints a random value, writing
-    nothing. Repeating it simply produces another state, and only the one the
-    browser kept is the one it will compare against.
+    A GET that writes, which is the one thing to know about it. It records the
+    authorization it is about to start (the state's hash, and the PKCE verifier
+    the exchange will need) so the callback has something to check against, and
+    that record is the whole reason the callback can refuse a code this
+    deployment never asked for.
+
+    Still safe to repeat: each call mints its own state, and only the one the
+    browser kept is the one it sends back. The rows the others leave expire on
+    their own and are swept by the next call.
     """
     throttle_public_auth(request)
-    state = new_state()
-    return AuthorizeResponse(
-        authorization_url=authorization_url(config, provider, state=state), state=state
-    )
+    try:
+        url, state = await authorization_url(config, provider, db=db)
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("Failed to record a pending %s sign-in", provider, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error",
+        ) from None
+    return AuthorizeResponse(authorization_url=url, state=state)
 
 
 @router.post(
@@ -227,7 +251,7 @@ async def callback(
             detail=MAINTENANCE_MODE_REFUSAL,
         )
     try:
-        external = await exchange_code(config, provider, code=body.code)
+        external = await exchange_code(config, provider, code=body.code, state=body.state, db=db)
         identity = await identity_provider.resolve(
             provider=external.provider,
             email=external.email,
@@ -254,9 +278,7 @@ async def callback(
         # racing, which the service settles on its own, and a database that
         # cannot stage this cannot stage the session row either.
         await OrganizationDomainService(db).auto_join_for_user(identity)
-        token, expires_at = await create_dashboard_session(
-            db, config.dashboard_session_ttl_hours, user_id=identity.id
-        )
+        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()

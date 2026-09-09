@@ -417,6 +417,22 @@ class OAuthExchangeError(TenancyValidationError):
         super().__init__(f"{provider} did not complete the sign-in. Try again.")
 
 
+class OAuthStateError(TenancyValidationError):
+    """The callback did not carry a ``state`` this deployment is still waiting on.
+
+    Covers every way that can be true (never minted here, already spent,
+    expired, or minted for a different provider), because they are one answer to
+    the caller: start the sign-in again. Which of them it was stays in the log.
+
+    Deliberately indistinguishable from the outside. Telling an attacker that a
+    state existed but had expired, as against never existing at all, tells them
+    their guess was in the right shape.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("That sign-in did not start here, or it expired. Start again.")
+
+
 class OAuthEmailNotVerifiedError(TenancyError):
     """The provider returned an address it will not vouch for.
 
@@ -794,6 +810,8 @@ class OrganizationPricingOverlapError(TenancyConflictError):
             f"An override for '{model_key}' already covers part of that period ({existing_period}). "
             "Change this period, or edit the existing override instead."
         )
+
+
 class InvitationNotFoundError(TenancyNotFoundError):
     """No invitation matches the token or id given.
 
@@ -1199,6 +1217,7 @@ __all__ = [
     "OAuthExchangeError",
     "OAuthIdentityUnknownError",
     "OAuthNotConfiguredError",
+    "OAuthStateError",
     "OrganizationNotFoundError",
     "OrganizationPricingNotFoundError",
     "OrganizationScopeNotFoundError",

@@ -11,10 +11,14 @@ the request shape apron-auth actually sends is one Google and GitHub accept, and
 nothing here can stand in for it.
 """
 
+from base64 import urlsafe_b64encode
+from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from apron_auth import OAuthClient
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -54,7 +58,7 @@ def stub_exchange(
     """
     spent: list[str] = []
 
-    async def _exchange(_config: GatewayConfig, provider: str, *, code: str) -> OAuthIdentity:
+    async def _exchange(_config: GatewayConfig, provider: str, *, code: str, state: str, db: Any) -> OAuthIdentity:
         spent.append(code)
         return OAuthIdentity(
             provider=provider,
@@ -97,9 +101,7 @@ def test_the_bootstrap_offers_no_provider_until_one_is_configured(client: TestCl
     assert bootstrap.json()["oauth_providers"] == []
 
 
-def test_the_bootstrap_names_the_providers_an_operator_configured(
-    client: TestClient, oauth_configured: None
-) -> None:
+def test_the_bootstrap_names_the_providers_an_operator_configured(client: TestClient, oauth_configured: None) -> None:
     assert client.get("/v1/bootstrap").json()["oauth_providers"] == ["github", "google"]
 
 
@@ -166,7 +168,7 @@ def test_a_rostered_member_signs_in_and_gets_the_same_session_a_password_would(
     user_id = add_member(client, master_key_header, email="ada@example.com")
     spent = stub_exchange(monkeypatch)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "the-code"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "the-code", "state": "s"})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -199,7 +201,7 @@ def test_the_provider_is_recorded_on_the_identity_it_signed_in(
     add_member(client, master_key_header, email="ada@example.com")
     stub_exchange(monkeypatch)
 
-    signed_in = client.post("/v1/auth/oauth/github/callback", json={"code": "c"})
+    signed_in = client.post("/v1/auth/oauth/github/callback", json={"code": "c", "state": "s"})
     assert signed_in.status_code == 200, signed_in.text
 
     identity = _identity(db_session, "ada@example.com")
@@ -221,7 +223,7 @@ def test_a_verified_provider_address_lifts_the_local_verification_gate(
     add_member(client, master_key_header, email="ada@example.com")
     stub_exchange(monkeypatch)
 
-    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c"}).status_code == 200
+    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
 
 
 def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
@@ -233,7 +235,7 @@ def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     # Google account into a self-hosted gateway.
     stub_exchange(monkeypatch, email="stranger@example.com")
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
     assert response.status_code == 401
     assert "not registered on this gateway" in response.json()["detail"]
@@ -249,7 +251,7 @@ def test_an_unverified_provider_address_is_refused_even_when_it_is_on_the_roster
     add_member(client, master_key_header, email="ada@example.com")
     stub_exchange(monkeypatch, email_verified=False)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
     assert response.status_code == 401
     assert "did not confirm that address is yours" in response.json()["detail"]
@@ -261,7 +263,7 @@ def test_a_provider_that_returns_no_address_at_all_is_refused(
 ) -> None:
     stub_exchange(monkeypatch, email=None)
 
-    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c"}).status_code == 401
+    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 401
 
 
 def test_a_deactivated_identity_cannot_sign_in_with_a_provider_either(
@@ -282,7 +284,7 @@ def test_a_deactivated_identity_cannot_sign_in_with_a_provider_either(
     db_session.commit()
     stub_exchange(monkeypatch)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
     assert response.status_code == 401
     # Collapsed into the unknown-identity refusal rather than saying "switched
@@ -300,7 +302,7 @@ def test_a_differently_cased_provider_address_still_finds_its_roster_row(
     add_member(client, master_key_header, email="ada@example.com")
     stub_exchange(monkeypatch, email="Ada@Example.COM")
 
-    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c"}).status_code == 200
+    assert client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
 
 
 def test_the_callback_refuses_an_unconfigured_provider_before_spending_anything(
@@ -312,7 +314,7 @@ def test_the_callback_refuses_an_unconfigured_provider_before_spending_anything(
     # provider this deployment never configured.
     spent = stub_exchange(monkeypatch)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
     assert response.status_code == 503
     assert "oauth_google_client_id" in response.json()["detail"]
@@ -330,13 +332,11 @@ def test_maintenance_mode_freezes_an_oauth_sign_in_before_the_exchange(
     # a Google account. Refused before the exchange, so a frozen deployment
     # spends nobody's single-use authorization code.
     add_member(client, master_key_header, email="ada@example.com")
-    frozen = client.patch(
-        "/v1/settings/maintenance-mode", json={"enabled": True}, headers=master_key_header
-    )
+    frozen = client.patch("/v1/settings/maintenance-mode", json={"enabled": True}, headers=master_key_header)
     assert frozen.status_code == 200, frozen.text
     spent = stub_exchange(monkeypatch)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
     assert response.status_code == 503
     assert spent == []
@@ -350,9 +350,9 @@ def test_the_callback_body_carries_the_code_and_nothing_else_the_server_trusts(
     oauth_configured: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # No redirect_uri and no state: the URI is derived from public_base_url so a
-    # browser cannot choose what this server sends to a provider, and the state
-    # is checked in the browser against the value it stored.
+    # No redirect_uri: it is derived from public_base_url, so a browser cannot
+    # choose what this server sends to a provider. (``state`` is a real field
+    # now and is honored; this asserts only that ``redirect_uri`` is not.)
     add_member(client, master_key_header, email="ada@example.com")
     stub_exchange(monkeypatch)
 
@@ -376,7 +376,7 @@ def test_an_oversized_code_is_refused_before_any_outbound_call(
 ) -> None:
     spent = stub_exchange(monkeypatch)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "x" * 4096})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "x" * 4096, "state": "s"})
 
     assert response.status_code == 422
     assert spent == []
@@ -403,7 +403,7 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
 
     monkeypatch.setattr("gateway.api.routes.auth_oauth.create_dashboard_session", _explode)
 
-    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
     assert response.status_code == 500
     # The generic wording, not the exception: the error-detail boundary holds on
@@ -413,32 +413,193 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
     assert SESSION_COOKIE_NAME not in response.cookies
 
 
+# ---------- the state check, with nothing stubbed but the token endpoint ----------
+
+
+def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
+    """Replace the outbound HTTP only, and return the form each exchange posted.
+
+    Patched at ``_token_request`` rather than at ``exchange_code``, which is the
+    point of these tests: consuming the pending state happens *inside*
+    ``exchange_code``, so stubbing that method removes the very check being
+    asserted on. ``stub_exchange`` above patches even higher, at the route's own
+    reference, so nothing using it can say anything about state at all.
+
+    The returned list holds the form fields sent to the token endpoint, which is
+    where ``code_verifier`` shows up.
+    """
+    posted: list[dict[str, str]] = []
+
+    async def _token_request(self: Any, data: dict[str, str]) -> dict[str, Any]:
+        posted.append(data)
+        return {"access_token": "an-access-token", "token_type": "Bearer"}
+
+    async def _fetch_identity(self: Any, _tokens: Any) -> Any:
+        return SimpleNamespace(email="ada@example.com", name="Ada Lovelace", email_verified=True)
+
+    monkeypatch.setattr(OAuthClient, "_token_request", _token_request)
+    monkeypatch.setattr(OAuthClient, "fetch_identity", _fetch_identity)
+    return posted
+
+
+def test_a_code_with_no_authorize_behind_it_is_refused(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The finding this table exists for: a leaked code, spent by whoever holds it.
+
+    Before the pending-state row, the callback exchanged any well-formed code it
+    was handed, so anybody who obtained a victim's unspent code could post it
+    here and be handed the victim's session. There is nothing to bind it to
+    unless the deployment kept a record of the flow it started.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch)
+
+    response = client.post(
+        "/v1/auth/oauth/google/callback",
+        json={"code": "a-leaked-code", "state": "never-minted-here"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+    # Refused before the code went anywhere: no token request, and a code that
+    # is still the victim's to spend.
+    assert posted == []
+
+
+def test_a_state_is_single_use(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    state = client.get("/v1/auth/oauth/google/authorize").json()["state"]
+
+    first = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    replayed = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+
+    assert first.status_code == 200, first.text
+    # The row was deleted as it was claimed, so the replay matches nothing.
+    assert replayed.status_code == 400
+
+
+def test_a_state_minted_for_one_provider_does_not_answer_the_other(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    state = client.get("/v1/auth/oauth/google/authorize").json()["state"]
+
+    response = client.post("/v1/auth/oauth/github/callback", json={"code": "c", "state": state})
+
+    assert response.status_code == 400
+
+
+def test_the_exchange_sends_the_verifier_the_authorize_call_minted(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PKCE end to end: the challenge on the consent URL answers to the verifier sent here."""
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch)
+    started = client.get("/v1/auth/oauth/google/authorize").json()
+    query = parse_qs(urlsplit(started["authorization_url"]).query)
+
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": started["state"]})
+
+    assert response.status_code == 200, response.text
+    (form,) = posted
+    verifier = form["code_verifier"]
+    assert verifier
+    # The challenge the provider was given is the SHA-256 of what the exchange
+    # sent, which is what makes a code useless to anyone who did not start this.
+    expected = urlsafe_b64encode(sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    assert query["code_challenge"] == [expected]
+    assert query["code_challenge_method"] == ["S256"]
+
+
+def test_a_refused_exchange_leaves_the_state_spendable_for_the_retry(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The claim is staged on the request's transaction, so a rollback restores it.
+
+    Same rule ``webauthn_service.consume_challenge`` documents: only a flow that
+    completes retires a nonce. The code is spent at the provider either way, so
+    what survives is a state the person's own retry can use, not a replayable
+    one.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    state = client.get("/v1/auth/oauth/google/authorize").json()["state"]
+
+    async def _boom(self: Any, _data: dict[str, str]) -> Any:
+        raise RuntimeError("the provider was unreachable")
+
+    monkeypatch.setattr(OAuthClient, "_token_request", _boom)
+    failed = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+
+    assert failed.status_code == 400
+    stub_token_endpoint(monkeypatch)
+    retried = client.post("/v1/auth/oauth/google/callback", json={"code": "c2", "state": state})
+
+    assert retried.status_code == 200, retried.text
+
+
+def test_the_refusal_does_not_say_which_way_the_state_was_wrong(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Never minted and already spent answer identically: telling them apart
+    # tells an attacker their guess was in the right shape.
+    #
+    # The sign-in that spends the state has to succeed, which is why this puts
+    # an address on the roster first: a refused identity rolls the whole
+    # transaction back, and the state it claimed with it.
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    state = client.get("/v1/auth/oauth/google/authorize").json()["state"]
+    signed_in = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    assert signed_in.status_code == 200, signed_in.text
+
+    spent = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": state})
+    unknown = client.post("/v1/auth/oauth/google/callback", json={"code": "c", "state": "nope"})
+
+    assert spent.status_code == unknown.status_code
+    assert spent.json()["detail"] == unknown.json()["detail"]
+
+
 # ---------- the redirect a provider actually lands on ----------
 
 
 @pytest.mark.parametrize("provider", ["google", "github"])
-def test_the_provider_redirect_path_bounces_into_the_dashboard_hash_route(
-    client: TestClient, provider: str
-) -> None:
+def test_the_provider_redirect_path_bounces_into_the_dashboard_hash_route(client: TestClient, provider: str) -> None:
     # A redirect URI may not carry a fragment, so the provider is pointed at an
     # ordinary path and this is what turns it into the hash route the dashboard
     # renders ahead of its auth gate.
-    response = client.get(
-        f"/auth/{provider}/callback?code=the-code&state=the-state", follow_redirects=False
-    )
+    response = client.get(f"/auth/{provider}/callback?code=the-code&state=the-state", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == (
-        f"/#/auth/{provider}/callback?code=the-code&state=the-state"
-    )
+    assert response.headers["location"] == (f"/#/auth/{provider}/callback?code=the-code&state=the-state")
 
 
 def test_the_provider_redirect_path_carries_an_error_query_through_too(
     client: TestClient,
 ) -> None:
-    response = client.get(
-        "/auth/google/callback?error=access_denied&state=s", follow_redirects=False
-    )
+    response = client.get("/auth/google/callback?error=access_denied&state=s", follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"] == "/#/auth/google/callback?error=access_denied&state=s"

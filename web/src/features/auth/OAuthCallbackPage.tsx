@@ -53,9 +53,12 @@ function takeOAuthState(): string | null {
  *
  * - The provider says the person declined, or it refused. Nothing was proven,
  *   so nothing is sent.
- * - The `state` does not match the one this tab stored. That is the CSRF check,
- *   and the whole reason the value made the round trip; a mismatch means this
- *   redirect did not come from a flow this tab started.
+ * - The `state` does not match the one this tab stored. That is the CSRF check
+ *   this tab can make, and the only one that can tell a callback apart by which
+ *   tab began it; a mismatch means this redirect did not come from a flow this
+ *   tab started. The gateway checks the same value against its own record, so a
+ *   state that never came from an `/authorize` here is refused there even when
+ *   no tab is involved.
  * - There is no code. A callback without one has nothing to spend.
  * - Otherwise the code is posted to the gateway, which exchanges it and sets
  *   the session cookie. On success this signs in exactly the way the password
@@ -138,7 +141,7 @@ export function OAuthCallbackPage({
 
     void (async () => {
       try {
-        const result = await completeOAuthSignIn(provider, code)
+        const result = await completeOAuthSignIn(provider, code, state)
         if (result.ok) {
           recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
             authentication_method: provider,

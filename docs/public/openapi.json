@@ -1284,7 +1284,7 @@
             "type": "string"
           },
           "state": {
-            "description": "An opaque CSRF value to keep for the length of the redirect and compare against the 'state' the provider returns. It is not stored on this deployment, so a callback whose state does not match the one held by the browser that started the flow must be abandoned by the client rather than sent here.",
+            "description": "An opaque CSRF value to keep for the length of the redirect, compare against the 'state' the provider returns, and send back with the authorization code. A callback whose state does not match the one held by the browser that started the flow should be abandoned by the client rather than sent here; one that does is checked again against this deployment's own record of it.",
             "title": "State",
             "type": "string"
           }
@@ -5870,17 +5870,24 @@
         "type": "object"
       },
       "OAuthCallbackRequest": {
-        "description": "The authorization code a provider handed the browser.\n\nNo ``redirect_uri``: this deployment derives its own from ``public_base_url``\nso the URI used to build the authorization request and the one sent with the\nexchange are the same string by construction, and a browser cannot choose\nwhat this server sends to a provider.\n\nNo ``state`` either, and that is not an omission. The state is checked in the\nbrowser, against the value that browser stored when it started the flow;\nsending it here would let this deployment compare a value to itself, which\nproves nothing without somewhere to have kept the original.",
+        "description": "The authorization code a provider handed the browser.\n\nNo ``redirect_uri``: this deployment derives its own from ``public_base_url``\nso the URI used to build the authorization request and the one sent with the\nexchange are the same string by construction, and a browser cannot choose\nwhat this server sends to a provider.\n\n``state`` is required, and is what binds this callback to an authorization\nrequest this deployment actually made: it is claimed from\n``oauth_pending_state`` before the code is sent anywhere, and the row it\nclaims is what carries the PKCE verifier the exchange needs.",
         "properties": {
           "code": {
             "description": "The authorization code from the provider's redirect.",
             "maxLength": 2048,
             "title": "Code",
             "type": "string"
+          },
+          "state": {
+            "description": "The 'state' from the provider's redirect, as issued by /authorize.",
+            "maxLength": 512,
+            "title": "State",
+            "type": "string"
           }
         },
         "required": [
-          "code"
+          "code",
+          "state"
         ],
         "title": "OAuthCallbackRequest",
         "type": "object"
@@ -15645,7 +15652,7 @@
     },
     "/v1/auth/oauth/{provider}/authorize": {
       "get": {
-        "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET, and safe: it reads configuration and mints a random value, writing\nnothing. Repeating it simply produces another state, and only the one the\nbrowser kept is the one it will compare against.",
+        "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET that writes, which is the one thing to know about it. It records the\nauthorization it is about to start (the state's hash, and the PKCE verifier\nthe exchange will need) so the callback has something to check against, and\nthat record is the whole reason the callback can refuse a code this\ndeployment never asked for.\n\nStill safe to repeat: each call mints its own state, and only the one the\nbrowser kept is the one it sends back. The rows the others leave expire on\ntheir own and are swept by the next call.",
         "operationId": "authorize_v1_auth_oauth__provider__authorize_get",
         "parameters": [
           {
