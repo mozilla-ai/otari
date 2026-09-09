@@ -14,3 +14,34 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Python dependencies resolved through uv. The ecosystem must be "uv", not
+  # "pip": the pip ecosystem does not understand uv.lock, so it would leave the
+  # lockfile (the thing CI and the Docker image actually install from, both via
+  # --frozen) untouched while editing pyproject.toml.
+  #
+  # Note this covers only what a constraint or an advisory forces. A dependency
+  # already satisfying its declared floor is not something Dependabot chases, so
+  # a floored package can sit many releases behind without a single PR being
+  # opened. otari-lock-refresh.yml covers that gap.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Dashboard dependencies. pnpm lives under the "npm" ecosystem, and the
+  # directory is where package.json and pnpm-lock.yaml sit, not the repo root.
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    groups:
+      dashboard-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
