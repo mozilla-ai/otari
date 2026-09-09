@@ -35,6 +35,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService
+from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.tenancy.errors import (
     InvitationAlreadyPendingError,
     MembershipUpdateError,
@@ -615,17 +616,24 @@ async def test_a_workspace_owner_cannot_delete_their_workspace(async_db: AsyncSe
         await WorkspaceService(async_db).delete_workspace(user=member, workspace_id=workspace.id)
 
 
-async def test_a_superuser_sees_every_workspace_without_membership(async_db: AsyncSession) -> None:
+async def test_a_superuser_with_only_a_member_role_sees_no_more_than_a_member(async_db: AsyncSession) -> None:
+    """``is_superuser`` is deployment-wide operator status, not an organization role.
+
+    A plain member who happens to also be a deployment operator sees exactly
+    what their membership grants: nothing here, since they belong to no
+    workspace. mozilla-ai/otari#1011.
+    """
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     operator = await _member(async_db, organization, role="member", full_name="Operator", is_superuser=True)
-    await _workspace(async_db, organization, name="Theirs", owner=owner)
+    workspace = await _workspace(async_db, organization, name="Theirs", owner=owner)
     service = WorkspaceService(async_db)
 
     listed = await service.list_workspaces(user=operator)
 
-    assert listed.count == 1
-    assert await service.get_workspace(user=operator, workspace_id=listed.data[0].id) is not None
+    assert listed.count == 0
+    with pytest.raises(WorkspaceNotFoundError):
+        await service.get_workspace(user=operator, workspace_id=workspace.id)
 
 
 async def test_a_workspace_id_from_another_organization_is_not_found(async_db: AsyncSession) -> None:
@@ -729,23 +737,77 @@ async def test_a_blank_organization_name_is_refused_rather_than_substituted(asyn
     assert refreshed.name == "Acme"
 
 
-async def test_a_superuser_manages_a_workspace_they_are_not_a_member_of(async_db: AsyncSession) -> None:
-    """The superuser arm of workspace management, matching the read and org-level checks.
-
-    A superuser already saw every workspace and could delete one through the
-    organization-level guard, so refusing them a rename was the odd one out.
+async def test_a_superuser_with_only_a_member_role_cannot_manage_a_workspace_they_are_not_in(
+    async_db: AsyncSession,
+) -> None:
+    """``is_superuser`` confers deployment-wide operator status, not organization- or
+    workspace-scoped management. A plain member cannot even see a workspace they
+    hold no membership in, whether or not they separately operate the
+    deployment: this is the same 404 an ordinary outsider gets, not the 403 a
+    genuine member without management rights would get. mozilla-ai/otari#1011.
     """
     organization = await _organization(async_db, slug="acme")
     outsider = await _member(async_db, organization, role="member", full_name="Root", is_superuser=True)
     workspace = await _workspace(async_db, organization, name="Research")
     await async_db.commit()
 
-    renamed = await WorkspaceService(async_db).update_workspace(
-        user=outsider,
+    with pytest.raises(WorkspaceNotFoundError):
+        await WorkspaceService(async_db).update_workspace(
+            user=outsider,
+            workspace_id=workspace.id,
+            workspace_update=WorkspaceUpdate(name="Renamed"),
+        )
+
+
+async def test_a_superuser_with_only_a_plain_workspace_role_cannot_manage_it(async_db: AsyncSession) -> None:
+    """Distinct from the case above: here the superuser *is* a workspace member,
+    so ``resolve_visible_workspace`` lets them see it, and it is
+    ``has_workspace_management_access``'s own superuser arm that used to wave
+    the rename through despite their plain ``member`` role. mozilla-ai/otari#1011.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    operator = await _member(async_db, organization, role="member", full_name="Operator", is_superuser=True)
+    workspace = await _workspace(async_db, organization, name="Shared", owner=owner)
+    await WorkspaceMemberRepository(async_db).create(
         workspace_id=workspace.id,
-        workspace_update=WorkspaceUpdate(name="Renamed"),
+        user_id=operator.id,
+        role="member",
     )
-    assert renamed.name == "Renamed"
+
+    with pytest.raises(NotAuthorizedError):
+        await WorkspaceService(async_db).update_workspace(
+            user=operator,
+            workspace_id=workspace.id,
+            workspace_update=WorkspaceUpdate(name="Renamed"),
+        )
+
+
+async def test_a_superuser_with_only_a_member_role_gets_the_members_workspace_scope(
+    async_db: AsyncSession,
+) -> None:
+    """``resolve_visible_workspace_scope`` backs the organization usage and routing
+    reads, and no longer widens a plain member's scope to the whole organization
+    just because they also operate the deployment. mozilla-ai/otari#1011.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    operator = await _member(async_db, organization, role="member", full_name="Operator", is_superuser=True)
+    workspace = await _workspace(async_db, organization, name="Theirs", owner=owner)
+    await WorkspaceMemberRepository(async_db).create(
+        workspace_id=workspace.id,
+        user_id=operator.id,
+        role="member",
+    )
+
+    scope = await resolve_visible_workspace_scope(
+        async_db,
+        user=operator,
+        organizations=OrganizationService(async_db),
+    )
+
+    assert not scope.sees_every_workspace
+    assert scope.workspace_ids == [workspace.id]
 
 
 # =============================================================================

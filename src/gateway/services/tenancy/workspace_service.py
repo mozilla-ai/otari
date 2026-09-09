@@ -132,7 +132,7 @@ class WorkspaceService:
         return trimmed
 
     async def _require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
-        """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace.
+        """Allow an organization owner/admin, or an owner/admin of this workspace.
 
         Delegates to ``services.tenancy.authorization``, shared with
         ``WorkspaceBudgetDefaultService`` so the management rule is defined
@@ -196,13 +196,18 @@ class WorkspaceService:
     async def list_workspaces(self, *, user: User, skip: int = 0, limit: int = 100) -> WorkspacesPublic:
         """List the workspaces the caller may see in their organization.
 
-        Organization owners, admins and superusers see all of them; everyone else
-        sees the ones they are a member of.
+        Organization owners and admins see all of them; everyone else sees the
+        ones they are a member of. The same breadth rule as
+        ``authorization.resolve_visible_workspace_scope``, re-derived here
+        rather than delegated to it: that resolver returns an unpaged
+        workspace-id list for the member case, while this method needs
+        ``skip``/``limit`` pushed into the repository query. Keep the two in
+        agreement.
         """
         organization = await self._active_organization(user)
 
         membership = await self.organizations.members.get_active_by_organization_and_user(organization.id, user.id)
-        sees_every_workspace = user.is_superuser or (membership is not None and membership.role in MANAGEMENT_ROLES)
+        sees_every_workspace = membership is not None and membership.role in MANAGEMENT_ROLES
 
         if sees_every_workspace:
             workspaces, count = await self.workspaces.get_by_organization(organization.id, skip=skip, limit=limit)

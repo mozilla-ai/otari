@@ -203,10 +203,10 @@ async def test_plain_member_cannot_list_keys(async_db: AsyncSession) -> None:
         await service.list_keys_for_user(user=member)
 
 
-async def test_superuser_member_may_still_list_keys(async_db: AsyncSession) -> None:
-    """The gate is `require_active_organization_management_access`, which admits
-    a superuser whatever their role, so the operator identity that reads this
-    surface on a standalone deployment is not locked out by the narrowing above."""
+async def test_a_superuser_with_only_a_member_role_cannot_list_keys(async_db: AsyncSession) -> None:
+    """The gate is `require_active_organization_management_access`, which no longer
+    admits a superuser whatever their role: deployment-operator status is not an
+    organization role, and does not stand in for one here. mozilla-ai/otari#1011."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     operator = await _member(async_db, organization, role="member", full_name="Operator")
@@ -216,7 +216,8 @@ async def test_superuser_member_may_still_list_keys(async_db: AsyncSession) -> N
     service = OrgProviderKeyService(async_db)
     await service.create_key_for_user(user=owner, request=_create_request())
 
-    assert len((await service.list_keys_for_user(user=operator)).data) == 1
+    with pytest.raises(NotAuthorizedError):
+        await service.list_keys_for_user(user=operator)
 
 
 async def test_credential_shaped_client_args_are_redacted_even_for_the_admin_who_set_them(
