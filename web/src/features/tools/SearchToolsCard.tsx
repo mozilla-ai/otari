@@ -300,8 +300,10 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
   const fromConfig = tools.data?.config ?? []
   const count = stored.length + fromConfig.length
   // Nothing is known until the read answers, and "0 tools · refuses every
-  // request" is a claim, not a placeholder.
-  const answered = !tools.isLoading
+  // request" is a claim, not a placeholder. A failed read is not an empty
+  // deployment either: `isLoading` goes false with no data behind it.
+  const failed = Boolean(tools.error)
+  const answered = !tools.isLoading && !failed
 
   return (
     <SettingsGroup
@@ -313,11 +315,13 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
       <DisclosureRow
         label="Configure search tools"
         help={
-          !answered
-            ? "Reading the tools this deployment serves."
-            : count === 0
-              ? "None configured, so POST /v1/search refuses every request."
-              : "Callers name one in search_tool_name, or in the /v1/search/{tool} path."
+          failed
+            ? "Could not read the tools this deployment serves."
+            : !answered
+              ? "Reading the tools this deployment serves."
+              : count === 0
+                ? "None configured, so POST /v1/search refuses every request."
+                : "Callers name one in search_tool_name, or in the /v1/search/{tool} path."
         }
         isOpen={isOpen}
         onToggle={() => setIsOpen((open) => !open)}

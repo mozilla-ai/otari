@@ -36,11 +36,19 @@ export function usePolicyWriter<Body, Stored>({
 }) {
   const carried = useRef<Stored | undefined>(undefined)
   const queue = useRef<Promise<unknown>>(Promise.resolve())
+  // Which row the carried base belongs to. A write that was already in flight
+  // when the row changed still resolves, and without this it would store its
+  // answer as the new row's base: the next commit would build a body out of the
+  // old row's values and PUT it to the new one.
+  const era = useRef(0)
   const [seenKey, setSeenKey] = useState(resetKey)
 
   if (resetKey !== seenKey) {
     setSeenKey(resetKey)
     carried.current = undefined
+    era.current += 1
+    // A commit for the new row must not queue behind the old row's write.
+    queue.current = Promise.resolve()
   }
 
   const commit = (patch: Partial<Body>) => {
@@ -50,12 +58,14 @@ export function usePolicyWriter<Body, Stored>({
         new Error("The policy has not been read yet, so nothing can be saved."),
       )
     }
+    const startedIn = era.current
     const run = queue.current.then(async () => {
       // Read inside the chained callback, not outside it: a commit queued
       // behind another must build on what that one stored, not on the base
       // that existed when it was queued.
       const from = carried.current ?? base
-      carried.current = await put({ ...toBody(from), ...patch })
+      const stored = await put({ ...toBody(from), ...patch })
+      if (startedIn === era.current) carried.current = stored
     })
     queue.current = run.catch(() => undefined)
     return run

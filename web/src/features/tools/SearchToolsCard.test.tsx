@@ -136,6 +136,31 @@ describe("SearchToolsCard", () => {
     expect(await screen.findByText("0 tools")).toBeInTheDocument()
   })
 
+  it("does not read a failed request as an empty deployment", async () => {
+    // `isLoading` goes false with no data behind it, so the fallback would
+    // otherwise claim no tools are configured and that POST /v1/search refuses
+    // every request, on a read that never answered.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("/v1/search-tools/providers")) {
+        return jsonResponse(PROVIDERS)
+      }
+      if (url.includes("/v1/search-tools")) {
+        return jsonResponse({ detail: "boom" }, 500)
+      }
+      return jsonResponse([])
+    })
+    renderWithClient(<SearchToolsCard docsHref="https://docs.example/tools" />)
+
+    expect(
+      await screen.findByText(
+        "Could not read the tools this deployment serves.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/refuses every request/)).toBeNull()
+    expect(screen.queryByText("0 tools")).toBeNull()
+  })
+
   it("adds a tool with the chosen provider", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
