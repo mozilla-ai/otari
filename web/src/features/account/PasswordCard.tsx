@@ -2,6 +2,7 @@ import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 
 import { useSetPassword } from "@/shared/api/auth"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 import { Section } from "@/shared/components/layout/Section"
@@ -89,6 +90,28 @@ function PasswordField({
  * the context on every render and keeps no mode of its own: the fact belongs to
  * the deployment, not to this component, and the account menu's session line
  * and the sign-in screen a later sign-out lands on read the same one.
+ *
+ * **The claim form's email field has a gap of its own.** An identity absorbed
+ * from an existing tenancy (`docs/access-control.md`) arrives with an address
+ * already, rather than provisioned bare at first boot, and every migrated
+ * deployment's operator is one. The claim endpoint refuses a *different*
+ * address for such an identity (`EmailChangeNotSupportedError`, otari#992),
+ * and nothing told this form which address that was, so it asked for one
+ * anyway and refused whatever didn't match. `GET /v1/organizations/me` already
+ * publishes the caller's own address, for the account menu's greeting, so this
+ * card reads that same query and, when it names one, prefills and locks the
+ * field to it instead of asking again.
+ *
+ * That query is asynchronous, and a `null` `existingEmail` is ambiguous
+ * between "resolved, no address" and "hasn't resolved yet" unless the pending
+ * case is held apart: submitting while it holds would recreate the very
+ * failure this card exists to close, for whichever migrated identity's
+ * response just hasn't landed. A failed query is deliberately *not* held the
+ * same way: refusing to submit on `isError` would mean an unreachable
+ * `/v1/organizations/me` makes an unclaimed deployment permanently
+ * unclaimable through its only UI, a worse failure than the one it would
+ * prevent, so that state instead falls open with a visible note rather than a
+ * silent one.
  */
 export function PasswordCard() {
   const { sign_in_methods } = useDeployment()
@@ -101,15 +124,23 @@ export function PasswordCard() {
   // later sign-out lands on all move at once, and navigating away and back does
   // not return to a claim form for a deployment already claimed.
   const isClaimed = !sign_in_methods.includes("master_key")
+  // The address this identity already holds, if any, off the same query the
+  // account menu already fetches (so this often costs no second request).
+  // Trimmed so a stray space on a backfilled row does not read as "has none".
+  const organization = useOrganizationContext()
+  const existingEmail = organization.data?.caller?.email?.trim() || null
+  // Distinct from "resolved, no address" (see the doc comment above): held
+  // only for the pending case, not the failed one.
+  const identityUnresolved = !isClaimed && organization.isPending
   const [email, setEmail] = useState("")
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   // What the last successful call did, kept because neither fact survives it
-  // otherwise: the address comes back in the response and is the only way this
-  // page ever learns one (the management API exposes no "who am I" route yet),
-  // and whether it was the claim cannot be read off `isClaimed` afterwards,
-  // since claiming is what sets that.
+  // otherwise: read from the response rather than `existingEmail`, which is
+  // null on the very claim that sets it (the query above hasn't refetched
+  // yet), and whether it was the claim cannot be read off `isClaimed`
+  // afterwards, since claiming is what sets that.
   const [outcome, setOutcome] = useState<{
     email: string
     claimed: boolean
@@ -120,7 +151,10 @@ export function PasswordCard() {
     isClaimed && newPassword !== "" && newPassword === currentPassword
   const complete = isClaimed
     ? currentPassword !== "" && newPassword !== "" && confirmPassword !== ""
-    : email.trim() !== "" && newPassword !== "" && confirmPassword !== ""
+    : !identityUnresolved &&
+      (existingEmail !== null || email.trim() !== "") &&
+      newPassword !== "" &&
+      confirmPassword !== ""
   // Deliberately not gated on `isPending`: that is the Button's own prop, which
   // keeps it focusable and announces it busy, where `isDisabled` would drop
   // focus out of the form mid-request. Double submission is stopped in
@@ -150,7 +184,12 @@ export function PasswordCard() {
     setPassword.mutate(
       isClaimed
         ? { current_password: currentPassword, new_password: newPassword }
-        : { email: email.trim(), new_password: newPassword },
+        : existingEmail
+          ? // Dropped rather than resent: the identity already has this
+            // address, and the server only needs one to claim an identity
+            // that has none yet (`set_password` in `user_service.py`).
+            { new_password: newPassword }
+          : { email: email.trim(), new_password: newPassword },
       {
         onSuccess: (result) => {
           setOutcome({ email: result.email, claimed: !isClaimed })
@@ -181,7 +220,11 @@ export function PasswordCard() {
       <p className="max-w-3xl text-sm text-muted">
         {isClaimed
           ? "The password you sign in to this dashboard with. Changing it ends every other session this identity holds; this one stays signed in."
-          : "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it. Claiming is the operator's to do: if your own account already has a password, this form will refuse it, and your password changes once they have claimed."}
+          : `This gateway still signs in with its master key. ${
+              existingEmail
+                ? `Set a password to sign in as ${existingEmail} from now on.`
+                : "Set an address and a password to sign in as yourself from now on."
+            } The master key stays the credential for the management API, and it can still reset this password if you forget it. Claiming is the operator's to do: if your own account already has a password, this form will refuse it, and your password changes once they have claimed.`}
       </p>
 
       {outcome ? (
@@ -215,13 +258,15 @@ export function PasswordCard() {
           />
         ) : (
           <TextField
-            value={email}
+            value={existingEmail ?? email}
             onChange={(next) => {
               setEmail(next)
               clearResult()
             }}
             type="email"
             isRequired
+            isReadOnly={existingEmail !== null}
+            isDisabled={identityUnresolved}
             className="flex max-w-md flex-col gap-1"
           >
             <Label className="text-body">Email</Label>
@@ -232,11 +277,24 @@ export function PasswordCard() {
                 a field on mount raises the soft keyboard over the
                 explanation above it before the operator has asked to
                 type. */}
-            <Input placeholder="you@example.com" autoComplete="username" />
+            {/* read-only:* rather than a token or a HeroUI prop: HeroUI
+                styles isReadOnly identically to an editable field, so
+                without it the one field on the page that ignores typing
+                looks exactly like the ones that do not (see AuthFields). */}
+            <Input
+              placeholder="you@example.com"
+              autoComplete="username"
+              className="read-only:bg-surface-alt read-only:text-muted"
+            />
             <FieldMessages>
               <Description className="text-muted">
-                Changing this address later is not supported yet, so pick the
-                one you will keep.
+                {existingEmail
+                  ? "This identity already has a sign-in address; claiming keeps it."
+                  : identityUnresolved
+                    ? "Checking whether this identity already has an address…"
+                    : organization.isError
+                      ? "Could not confirm whether this identity already has an address on file; if it does, enter that exact one."
+                      : "Changing this address later is not supported yet, so pick the one you will keep."}
               </Description>
             </FieldMessages>
           </TextField>
