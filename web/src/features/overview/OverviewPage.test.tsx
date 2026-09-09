@@ -89,6 +89,7 @@ interface Bodies {
   models?: string[]
 }
 
+/** The catalog shape `/v1/models` answers, which is the setup guide's gate. */
 function modelCatalog(ids: string[]) {
   return {
     object: "list",
@@ -151,6 +152,7 @@ function mockApi(b: Bodies) {
   })
 }
 
+/** Reports where a navigation landed, for the routes `renderPage` mounts. */
 function LocationProbe() {
   const loc = useLocation()
   return <div data-testid="loc">{loc.pathname}</div>

@@ -114,6 +114,25 @@ describe("budgetHealth", () => {
     })
   })
 
+  it("reads spend against a cap of zero as over, not as within budget", () => {
+    // `max_budget` is `ge=0` on the wire, so a budget that admits nothing is a
+    // real figure, and spend recorded before it was lowered to zero is a real
+    // state. Dividing was the trap: it left the row at 0% and the strip
+    // reporting "All within budget" over a cap that refuses every request.
+    const result = budgetHealth([
+      budget({ max_budget: 0, user_count: 2, total_spend: 5, name: "frozen" }),
+    ])
+    expect(result.status).toBe("alert")
+    expect(result.overCount).toBe(1)
+    expect(result.worst?.pct).toBe(1)
+
+    // An untouched zero cap has nothing to report and stays on track.
+    expect(
+      budgetHealth([budget({ max_budget: 0, user_count: 2, total_spend: 0 })])
+        .status,
+    ).toBe("ok")
+  })
+
   it("flags near-limit at 80% and picks the worst-off budget", () => {
     const result = budgetHealth([
       budget({
@@ -189,6 +208,24 @@ describe("spendCeilingHealth", () => {
     expect(result.status).toBe("alert")
     expect(result.overCount).toBe(1)
     expect(result.worst?.name).toBe("Deployment cap")
+  })
+
+  it("reads spend against a ceiling of zero as over", () => {
+    const result = spendCeilingHealth(
+      [
+        organizationSpendCeiling({
+          name: "Frozen",
+          max_budget: 0,
+          current_spend: 5,
+        }),
+      ],
+      named,
+    )
+    expect(result.status).toBe("alert")
+    expect(result.overCount).toBe(1)
+    // 100%, not Infinity: the share has no finite value, and the severity word
+    // beside it is what says the cap was exceeded rather than reached.
+    expect(result.worst?.pct).toBe(1)
   })
 
   it("picks the worst-off ceiling", () => {

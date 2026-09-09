@@ -778,9 +778,13 @@ export function OverviewPage({
   )
 }
 
-// `children` is the standfirst, which is the one part of the header that
-// differs between the two pages: an operator is told about the gateway, a
-// tenant about their organization.
+/**
+ * The page title, its window caption and its Refresh control.
+ *
+ * `children` is the standfirst, which is the one part of the header that
+ * differs between the two pages: an operator is told about the gateway, a
+ * tenant about their organization.
+ */
 function OverviewHeader({
   refresh,
   isRefreshing,

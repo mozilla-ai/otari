@@ -32,10 +32,13 @@ describe("spendState", () => {
     expect(spendState(40, 5000)).toBe("on-track")
   })
 
-  it("treats an allocation of zero as on track rather than dividing by it", () => {
-    // A budget with no limit reaches here through a caller that has already
-    // said so; what matters is that it cannot produce Infinity or NaN.
-    expect(spendState(10, 0)).toBe("on-track")
+  it("reads spend against a cap of zero as over, without dividing by it", () => {
+    // `max_budget` is `ge=0` on the wire, so a cap that admits nothing is a
+    // real figure, and spend recorded before it was lowered to zero is a real
+    // state. Answered from the spend, so it still cannot produce Infinity or
+    // NaN. An untouched zero cap has nothing to report and stays on track.
+    expect(spendState(10, 0)).toBe("over")
+    expect(spendState(0, 0)).toBe("on-track")
   })
 })
 

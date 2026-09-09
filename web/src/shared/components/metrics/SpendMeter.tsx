@@ -14,7 +14,10 @@ export function spendState(
   allocated: number,
   nearLimitAt = 0.8,
 ): SpendState {
-  if (allocated <= 0) return "on-track"
+  // A cap of zero admits nothing, so any spend against one is past it. Answered
+  // from the spend rather than by dividing, which is what keeps a zero
+  // allocation from producing Infinity or NaN here.
+  if (allocated <= 0) return spent > 0 ? "over" : "on-track"
   if (spent > allocated) return "over"
   return spent >= allocated * nearLimitAt ? "near-limit" : "on-track"
 }
@@ -55,7 +58,9 @@ export function SpendMeter({
   className?: string
 }) {
   const state = spendState(spent, allocated, nearLimitAt)
-  const share = allocated > 0 ? spent / allocated : 0
+  // Full for spend against a zero cap, matching the state above: a bar drawn
+  // empty beside a reading of "over budget" contradicts itself.
+  const share = allocated > 0 ? spent / allocated : spent > 0 ? 1 : 0
   const pct = Math.max(0, Math.min(1, share)) * 100
   const thresholdPct = nearLimitAt * 100
   return (

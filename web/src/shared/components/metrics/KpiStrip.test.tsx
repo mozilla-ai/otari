@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import { KpiStrip } from "@/shared/components/metrics/KpiStrip"
 
-// The grid's own element, which is the one inside `Section`'s band.
+/** The grid's own element, which is the one inside `Section`'s band. */
 function track(label: string): HTMLElement {
   return screen.getByText(label).parentElement as HTMLElement
 }
