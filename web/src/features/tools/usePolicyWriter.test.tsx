@@ -138,6 +138,82 @@ describe("usePolicyWriter", () => {
     expect(bodies[1]).not.toMatchObject({ a: "STALE" })
   })
 
+  it("does not send a commit that was superseded before its turn", async () => {
+    // The escape the store-side guard alone leaves open: A2 is queued behind
+    // an in-flight A1, the row switches, B writes and stores its values as the
+    // carried base, and only then does A1 settle and let A2 run. A2 would read
+    // B's values and PUT them through A's own `put`.
+    const putsByRow: { row: string; body: Body }[] = []
+    let releaseA1: (() => void) | undefined
+    let releaseB: (() => void) | undefined
+
+    function TwoRows() {
+      const [row, setRow] = useState("first")
+      const write = usePolicyWriter({
+        server: {
+          row,
+          a: row === "first" ? "a" : "B-a",
+          b: "b",
+          readOnly: "s",
+        },
+        resetKey: row,
+        toBody: (stored: Stored) => ({ a: stored.a, b: stored.b }),
+        put: async (body: Body) => {
+          const forRow = row
+          putsByRow.push({ row: forRow, body })
+          if (putsByRow.length === 1) {
+            await new Promise<void>((r) => {
+              releaseA1 = r
+            })
+          }
+          if (forRow === "second") {
+            await new Promise<void>((r) => {
+              releaseB = r
+            })
+            return { row: "second", readOnly: "s", a: "B!", b: "B!" }
+          }
+          return { row: forRow, readOnly: "s", ...body }
+        },
+      })
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => void write({ a: "A1" }).catch(noop)}
+          >
+            a1
+          </button>
+          <button
+            type="button"
+            onClick={() => void write({ b: "A2" }).catch(noop)}
+          >
+            a2
+          </button>
+          <button type="button" onClick={() => setRow("second")}>
+            switch
+          </button>
+        </>
+      )
+    }
+
+    const user = userEvent.setup()
+    render(<TwoRows />)
+
+    await press(user, "a1")
+    await press(user, "a2")
+    await press(user, "switch")
+    await press(user, "a1")
+    releaseB?.()
+    releaseA1?.()
+
+    await waitFor(() => expect(putsByRow.length).toBeGreaterThanOrEqual(2))
+    // A2 never went out at all, so nothing carrying the second row's values
+    // was ever sent through the first row's `put`.
+    expect(
+      putsByRow.filter((p) => p.row === "first" && p.body.b === "A2"),
+    ).toHaveLength(0)
+  })
+
   it("keeps writing after one is refused", async () => {
     const bodies: Body[] = []
     const put = async (body: Body) => {

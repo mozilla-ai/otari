@@ -1,11 +1,12 @@
 import { Button } from "@heroui/react"
-import { useEffect, useState } from "react"
-
+import { useState } from "react"
 import type {
   ConfigSearchTool,
   SearchProviderInfo,
   StoredSearchTool,
+  UpdateSearchToolRequest,
 } from "@/client"
+import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import {
   useCreateSearchTool,
   useDeleteSearchTool,
@@ -20,7 +21,7 @@ import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
 import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
 import { DisclosureRow } from "@/shared/components/navigation/DisclosureRow"
 import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
-import { useAutosave } from "@/shared/hooks/useAutosave"
+import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
 // Search tools are what POST /v1/search dispatches against. They used to be
 // declarable only in a config file, so a deployment configured entirely through
@@ -59,32 +60,45 @@ function StoredToolLine({
 }) {
   const update = useUpdateSearchTool()
   const remove = useDeleteSearchTool()
-  const save = useAutosave()
+  const urlSave = useAutosave()
+  const keySave = useAutosave()
+  const removal = useAutosave()
   const [apiBase, setApiBase] = useState(tool.api_base ?? "")
+  const [syncedBase, setSyncedBase] = useState(tool.api_base ?? "")
   // Blank means "keep the stored key". The field is write-only, so it never
-  // shows what is stored, only the last four of it beside the row.
+  // shows what is stored, only the last four of it in its own placeholder.
   const [apiKey, setApiKey] = useState("")
-  // Re-synced from the server's answer, so a change made elsewhere lands in the
-  // box rather than leaving a stale draft over it.
-  useEffect(() => setApiBase(tool.api_base ?? ""), [tool.api_base])
+
+  const committedBase = tool.api_base ?? ""
+  // Re-synced from the server's answer, in render rather than an effect, which
+  // is the idiom the other autosaving rows use. After one of this row's own
+  // writes the two already agree, so it moves nothing.
+  if (committedBase !== syncedBase) {
+    setSyncedBase(committedBase)
+    setApiBase(committedBase)
+  }
+
+  // The row is one stored tool, and every write carries `expected_updated_at`.
+  // Under a Save button that was one write per click; under autosave, leaving
+  // the URL and then the key fires two, and the second would still carry the
+  // `updated_at` from before the first. The writer takes the fresh one from the
+  // previous write's own response, which is the same job it does for the
+  // workspace policies.
+  const write = usePolicyWriter({
+    server: tool,
+    resetKey: tool.name,
+    // `api_key` is deliberately absent: omitted means "keep the stored key",
+    // so only the commit that changes it puts it on the wire.
+    toBody: (stored: StoredSearchTool): UpdateSearchToolRequest => ({
+      api_base: stored.api_base,
+      expected_updated_at: stored.updated_at,
+    }),
+    put: (body: UpdateSearchToolRequest) =>
+      update.mutateAsync({ name: tool.name, body }),
+  })
 
   const inherited = inheritedBase(providers, tool.provider)
-  const changed = apiBase.trim() !== (tool.api_base ?? "") || apiKey !== ""
-  const busy = update.isPending || remove.isPending
-
-  const commit = () =>
-    void save.run(async () => {
-      await update.mutateAsync({
-        name: tool.name,
-        body: {
-          api_base: apiBase.trim() === "" ? null : apiBase.trim(),
-          // Omitted entirely when blank, so saving a URL never clears the key.
-          ...(apiKey === "" ? {} : { api_key: apiKey }),
-          expected_updated_at: tool.updated_at,
-        },
-      })
-      setApiKey("")
-    })
+  const busy = remove.isPending
 
   return (
     <div className="flex flex-col gap-2 px-4 py-3">
@@ -95,34 +109,48 @@ function StoredToolLine({
           type="text"
           inputMode="url"
           aria-label={`Backend URL for ${tool.name}`}
+          aria-invalid={urlSave.error ? true : undefined}
           value={apiBase}
-          disabled={busy}
+          disabled={busy || urlSave.isSaving}
           placeholder={inherited ? `inherits ${inherited}` : "backend URL"}
           onChange={(event) => setApiBase(event.target.value)}
+          onKeyDown={commitOnEnter}
+          onBlur={() => {
+            const next = apiBase.trim()
+            if (next === committedBase) return
+            void urlSave.run(() =>
+              write({ api_base: next === "" ? null : next }),
+            )
+          }}
           className={`field-machine w-full md:w-[15rem] ${INPUT_CLASS}`}
         />
         <input
           type="password"
           autoComplete="new-password"
           aria-label={`New API key for ${tool.name}`}
+          aria-invalid={keySave.error ? true : undefined}
           value={apiKey}
-          disabled={busy}
+          disabled={busy || keySave.isSaving}
           placeholder={tool.last4 ? `replace key ····${tool.last4}` : "add key"}
           onChange={(event) => setApiKey(event.target.value)}
+          onKeyDown={commitOnEnter}
+          // Blank is not a value here, it is "leave the stored key alone", so
+          // an empty blur writes nothing and a focus-and-leave costs nothing.
+          onBlur={() => {
+            if (apiKey === "") return
+            void keySave.run(async () => {
+              await write({ api_key: apiKey })
+              setApiKey("")
+            })
+          }}
           className={`field-machine w-full md:w-[10rem] ${INPUT_CLASS}`}
         />
-        <Button
-          size="sm"
-          aria-label={`Save ${tool.name}`}
-          isDisabled={busy || !changed}
-          onPress={commit}
-        >
-          {update.isPending ? "Saving…" : "Save"}
-        </Button>
         <ConfirmButton
           confirmLabel="Remove permanently"
           isPending={busy}
-          onConfirm={() => void save.run(() => remove.mutateAsync(tool.name))}
+          onConfirm={() =>
+            void removal.run(() => remove.mutateAsync(tool.name))
+          }
         >
           Remove
         </ConfirmButton>
@@ -137,9 +165,9 @@ function StoredToolLine({
           Overrides the config-file tool of this name
         </p>
       ) : null}
-      {save.error ? (
+      {urlSave.error || keySave.error || removal.error ? (
         <p role="alert" className="break-words text-caption text-danger">
-          {save.error}
+          {urlSave.error || keySave.error || removal.error}
         </p>
       ) : null}
     </div>

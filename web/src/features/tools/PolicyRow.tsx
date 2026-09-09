@@ -86,7 +86,7 @@ export function PolicyRow<T>({
             numeric
               ? "text-right tabular-nums md:w-[5.5rem]"
               : "md:w-[13.75rem]"
-          } ${INPUT_CLASS} ${message ? "border-danger" : ""}`}
+          } ${INPUT_CLASS}`}
         />
       }
     />

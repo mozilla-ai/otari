@@ -125,9 +125,7 @@ function TextRow({
               if (next === committed) return
               void save.run(() => commit(field.key, next === "" ? null : next))
             }}
-            className={`${copy.machine ? MACHINE_INPUT : TEXT_INPUT} ${
-              save.error ? "border-danger" : ""
-            }`}
+            className={`${copy.machine ? MACHINE_INPUT : TEXT_INPUT}`}
           />
           {trailing}
         </div>
@@ -189,7 +187,7 @@ function NumberRow({
               commit(field.key, trimmed === "" ? null : parsed),
             )
           }}
-          className={`${NUMBER_INPUT} ${message ? "border-danger" : ""}`}
+          className={`${NUMBER_INPUT}`}
         />
       }
     />
@@ -468,9 +466,7 @@ export function ToolPriceRow({
               // 70000.00000000001 in binary floating point.
               void save.run(() => commit(Math.round(parsed * PER_MILLION)))
             }}
-            className={`field-machine w-full text-right tabular-nums md:w-[7rem] ${INPUT_CLASS} ${
-              message ? "border-danger" : ""
-            }`}
+            className={`field-machine w-full text-right tabular-nums md:w-[7rem] ${INPUT_CLASS}`}
           />
         </div>
       }

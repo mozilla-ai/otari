@@ -211,7 +211,7 @@ describe("SearchToolsCard", () => {
     const input = screen.getByLabelText("Backend URL for local")
     await user.clear(input)
     await user.type(input, "http://moved:8080")
-    await user.click(screen.getByRole("button", { name: "Save local" }))
+    await user.tab()
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -240,9 +240,88 @@ describe("SearchToolsCard", () => {
     const input = screen.getByLabelText("Backend URL for local")
     await user.clear(input)
     await user.type(input, "http://moved:8080")
-    await user.click(screen.getByRole("button", { name: "Save local" }))
+    await user.tab()
 
     expect(await screen.findByText(/api_key is required/)).toBeInTheDocument()
+  })
+
+  it("saves the row on blur, with no Save button of its own", async () => {
+    const fetchMock = mockApi()
+    const user = userEvent.setup()
+    await renderOpened(user)
+    await screen.findByText("local")
+
+    expect(screen.queryByRole("button", { name: "Save local" })).toBeNull()
+
+    const input = screen.getByLabelText("Backend URL for local")
+    await user.clear(input)
+    await user.type(input, "http://moved:8080{Enter}")
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([, init]) => (init?.method ?? "") === "PATCH",
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("leaves the stored key alone when the key field is left empty", async () => {
+    // Blank is not a value in that field, it is "keep what is stored", so a
+    // focus and a blur must not write anything at all.
+    const fetchMock = mockApi()
+    const user = userEvent.setup()
+    await renderOpened(user)
+    await screen.findByText("local")
+
+    await user.click(screen.getByLabelText("New API key for local"))
+    await user.tab()
+
+    expect(
+      fetchMock.mock.calls.some(([, init]) => (init?.method ?? "") === "PATCH"),
+    ).toBe(false)
+  })
+
+  it("carries the fresh expected_updated_at into a second write on one row", async () => {
+    // Under a Save button this was one write per click. Under autosave, leaving
+    // the URL and then the key fires two, and the second would otherwise still
+    // carry the `updated_at` captured before the first, which optimistic
+    // concurrency refuses.
+    const bodies: Record<string, unknown>[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (url.includes("/v1/search-tools/providers")) {
+        return jsonResponse(PROVIDERS)
+      }
+      if (url.includes("/v1/search-tools") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        bodies.push(body)
+        return jsonResponse({
+          ...TOOLS.stored[0],
+          ...body,
+          updated_at: `2026-08-14T00:00:0${bodies.length}+00:00`,
+        })
+      }
+      return jsonResponse(TOOLS)
+    })
+    const user = userEvent.setup()
+    await renderOpened(user)
+    await screen.findByText("local")
+
+    const url = screen.getByLabelText("Backend URL for local")
+    await user.clear(url)
+    await user.type(url, "http://moved:8080")
+    await user.tab()
+    await waitFor(() => expect(bodies).toHaveLength(1))
+
+    await user.type(screen.getByLabelText("New API key for local"), "sk-second")
+    await user.tab()
+
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[0].expected_updated_at).toBe("2026-08-14T00:00:00+00:00")
+    expect(bodies[1].expected_updated_at).toBe("2026-08-14T00:00:01+00:00")
+    expect(bodies[1].api_key).toBe("sk-second")
   })
 
   it("removes a tool after the confirm step", async () => {

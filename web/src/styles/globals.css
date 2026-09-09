@@ -1957,6 +1957,18 @@ main {
     font-size: var(--text-base);
   }
 }
+/* A refused value, marked on the field itself.
+   Keyed on `aria-invalid` rather than on a class, for two reasons: it is the
+   attribute assistive tech already reads, so the border cannot drift from what
+   is announced, and a `border-danger` utility at the call site does not work
+   here at all. `.input` sets `border-color` unlayered, which outranks a
+   utility, so the class was silently doing nothing on every field in the
+   product. The message beside it carries the meaning; this is not colour
+   alone. */
+.input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
 /* A field holding a machine value (a URL, an engine list, a domain list, a
    number) takes the mono family a step down, so a long value fits the lane and
    reads as data rather than as prose. The rule above hands it 16px back where

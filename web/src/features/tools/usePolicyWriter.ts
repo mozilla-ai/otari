@@ -47,7 +47,12 @@ export function usePolicyWriter<Body, Stored>({
     setSeenKey(resetKey)
     carried.current = undefined
     era.current += 1
-    // A commit for the new row must not queue behind the old row's write.
+    // A commit for the new row must not queue behind the old row's write. The
+    // cost is that the queue stops being a single serialization point across a
+    // reset: a callback already pending on the old promise still runs, beside
+    // the new row's chain. The `startedIn` bail-out in `commit` is what carries
+    // that weight, which is why it guards the read and the send, not just the
+    // store.
     queue.current = Promise.resolve()
   }
 
@@ -60,11 +65,21 @@ export function usePolicyWriter<Body, Stored>({
     }
     const startedIn = era.current
     const run = queue.current.then(async () => {
+      // Superseded before it got its turn, so it neither reads the shared base
+      // nor sends. Guarding only the store would be too late: this callback is
+      // orphaned on the previous queue and runs alongside the new row's chain,
+      // so by now `carried.current` can already hold the new row's values, and
+      // building a body out of them would PUT the new row's policy through the
+      // old row's `put`. Resolves rather than rejects: the operator navigated
+      // away, which is not a failed save.
+      if (startedIn !== era.current) return
       // Read inside the chained callback, not outside it: a commit queued
       // behind another must build on what that one stored, not on the base
       // that existed when it was queued.
       const from = carried.current ?? base
       const stored = await put({ ...toBody(from), ...patch })
+      // Checked again on the way out: the row can change while this is in
+      // flight, and the answer belongs to a row nothing is looking at.
       if (startedIn === era.current) carried.current = stored
     })
     queue.current = run.catch(() => undefined)
