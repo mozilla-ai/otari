@@ -1,4 +1,4 @@
-import { Description, Input, Label, TextField } from "@heroui/react"
+import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
 import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 
 // A masked, never-prefilled secret input. Native password masking protects
@@ -18,6 +18,8 @@ export function SecretField({
   label,
   placeholder,
   description,
+  isInvalid,
+  errorMessage,
   reserveMessage,
 }: {
   value: string
@@ -25,6 +27,10 @@ export function SecretField({
   label: string
   placeholder?: string
   description?: string
+  /** Marks the input invalid, which is what makes `errorMessage` render. */
+  isInvalid?: boolean
+  /** Shown under the field and announced with it. Needs `isInvalid` to appear. */
+  errorMessage?: string
   /** See `Field`: holds one caption line open so a message does not move the
       form. Off for a field in a table row or a toolbar. */
   reserveMessage?: boolean
@@ -33,6 +39,7 @@ export function SecretField({
     <TextField
       value={value}
       onChange={onChange}
+      isInvalid={isInvalid}
       className="flex max-w-md flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
@@ -49,6 +56,11 @@ export function SecretField({
       <FieldMessages reserve={reserveMessage}>
         {description ? (
           <Description className="text-muted">{description}</Description>
+        ) : null}
+        {/* Same slot wiring `Field` uses: the message is announced on the input
+            rather than left loose in the form. */}
+        {errorMessage ? (
+          <FieldError className="text-danger">{errorMessage}</FieldError>
         ) : null}
       </FieldMessages>
     </TextField>

@@ -402,6 +402,88 @@ describe("ProvidersPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("asks a known provider for its own fields and sends them in client_args", async () => {
+    const fetchMock = mockApi({
+      stored: [storedProvider("anthropic", "0000")],
+      catalog: [
+        {
+          id: "bedrock",
+          name: "Bedrock",
+          env_key: "AWS_BEARER_TOKEN_BEDROCK",
+          default_api_base: null,
+          requires_api_key: true,
+          env_key_present: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await screen.findByText("••••0000")
+    await user.click(screen.getByRole("button", { name: "Add provider" }))
+    await user.click(screen.getByPlaceholderText("Search providers…"))
+    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+
+    const add = screen.getByRole("button", { name: "Add provider" })
+    await user.type(screen.getByLabelText(/Bedrock API key/), "bearer-token")
+    // The region is required and outside Advanced, so nothing that blocks the
+    // submit is hidden behind a collapsed section.
+    expect(add).toBeDisabled()
+    await user.type(
+      screen.getByRole("textbox", { name: /AWS region/ }),
+      "eu-central-1",
+    )
+    await waitFor(() => expect(add).toBeEnabled())
+    await user.click(add)
+
+    const post = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([u, init]) =>
+          String(u).endsWith("/v1/provider-credentials") &&
+          (init?.method ?? "") === "POST",
+      )
+      expect(call).toBeDefined()
+      return call!
+    })
+    expect(JSON.parse(String(post[1]?.body))).toMatchObject({
+      instance: "bedrock",
+      api_key: "bearer-token",
+      client_args: { region_name: "eu-central-1" },
+    })
+  })
+
+  it("splits a stored provider's registered options out of the JSON box on edit", async () => {
+    mockApi({
+      stored: [
+        storedProvider("bedrock", "0000", true, {
+          region_name: "us-east-1",
+          timeout: 1800,
+        }),
+      ],
+      catalog: [
+        {
+          id: "bedrock",
+          name: "Bedrock",
+          env_key: "AWS_BEARER_TOKEN_BEDROCK",
+          default_api_base: null,
+          requires_api_key: true,
+          env_key_present: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+
+    expect(
+      await screen.findByRole("textbox", { name: /AWS region/ }),
+    ).toHaveValue("us-east-1")
+    expect(
+      screen.getByRole("textbox", { name: "Client options (JSON)" }),
+    ).toHaveValue('{\n  "timeout": 1800\n}')
+  })
+
   it("fetches provider autofill hints lazily, only after one is selected", async () => {
     const fetchMock = mockApi({
       stored: [storedProvider("anthropic", "0000")],

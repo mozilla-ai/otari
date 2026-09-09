@@ -7,9 +7,19 @@ import type {
   UpdateOrgProviderKeyRequest,
 } from "@/client"
 import {
+  BYO_UNSUPPORTED_PROVIDERS,
+  type CredentialFieldValues,
+  credentialFieldsFor,
+  credentialSpecFor,
+  mergeCredentialFields,
+  splitClientArgs,
+  validateCredentialFields,
+} from "@/features/providers/providerCredentialFields"
+import {
   ClientArgsField,
   formatClientArgs,
   ProviderComboBox,
+  ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
 import {
@@ -65,7 +75,12 @@ interface KeyDraft {
   name: string
   apiKey: string
   apiBase: string
+  /** The JSON escape hatch: whatever the provider's typed fields do not own. */
   clientArgs: string
+  /** The typed `client_args` entries, keyed by SDK keyword argument. */
+  credentials: CredentialFieldValues
+  /** Typed secrets already stored, so blank means "keep it" rather than "clear it". */
+  redacted: string[]
 }
 
 const EMPTY_DRAFT: KeyDraft = {
@@ -74,9 +89,17 @@ const EMPTY_DRAFT: KeyDraft = {
   apiKey: "",
   apiBase: "",
   clientArgs: "",
+  credentials: {},
+  redacted: [],
 }
 
 function draftFrom(key: OrgProviderKey): KeyDraft {
+  // The registry's fields come out of the stored JSON and into their own
+  // controls; everything else stays in the textarea it was entered in.
+  const { typed, rest, redacted } = splitClientArgs(
+    credentialFieldsFor(key.provider),
+    key.client_args,
+  )
   return {
     provider: key.provider,
     name: key.name,
@@ -84,7 +107,9 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
     // so there is nothing to prefill with. Blank on save means "leave it".
     apiKey: "",
     apiBase: key.api_base ?? "",
-    clientArgs: formatClientArgs(key.client_args),
+    clientArgs: formatClientArgs(rest),
+    credentials: typed,
+    redacted,
   }
 }
 
@@ -104,20 +129,36 @@ function KeyForm({
 
   const parsedClientArgs = parseClientArgs(draft.clientArgs)
   const clientArgsError = parsedClientArgs.ok ? null : parsedClientArgs.error
+  const credentialFields = credentialFieldsFor(draft.provider)
+  const credentialErrors = validateCredentialFields(
+    credentialFields,
+    draft.credentials,
+    draft.redacted,
+  )
+  const spec = credentialSpecFor(draft.provider)
   const pending = create.isPending || update.isPending
   const canSubmit =
     parsedClientArgs.ok &&
+    Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
     (editing !== null || draft.provider !== "")
 
   const submit = () => {
     if (!parsedClientArgs.ok) return
     const apiBase = draft.apiBase.trim()
+    // The typed fields and the textarea are two views of one `client_args`
+    // object, so they are recombined before it goes out.
+    const clientArgs = mergeCredentialFields(
+      credentialFields,
+      draft.credentials,
+      parsedClientArgs.value,
+      draft.redacted,
+    )
     if (editing) {
       const body: UpdateOrgProviderKeyRequest = {
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
-        client_args: parsedClientArgs.value,
+        client_args: clientArgs,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
       // null clears the stored credential, and "I did not retype the secret" is
@@ -131,7 +172,7 @@ function KeyForm({
       name: draft.name.trim(),
       api_key: draft.apiKey === "" ? null : draft.apiKey,
       api_base: apiBase === "" ? null : apiBase,
-      client_args: parsedClientArgs.value,
+      client_args: clientArgs,
     }
     create.mutate(body, { onSuccess: onClose })
   }
@@ -160,7 +201,12 @@ function KeyForm({
         <ProviderComboBox
           label="Provider"
           value={draft.provider}
-          onChange={(provider) => setDraft({ ...draft, provider })}
+          // The typed fields belong to the provider, so a change to it drops
+          // values that no longer have a field to sit in.
+          onChange={(provider) =>
+            setDraft({ ...draft, provider, credentials: {}, redacted: [] })
+          }
+          excludeIds={BYO_UNSUPPORTED_PROVIDERS}
           description="Which upstream this credential is for. The gateway matches it against the provider half of a model name."
         />
       )}
@@ -175,14 +221,19 @@ function KeyForm({
       />
 
       <SecretField
-        label="API key"
+        // Named for what the provider actually calls its credential, where that
+        // is not an opaque API key (Bedrock's is a bearer token).
+        label={spec?.apiKeyLabel ?? "API key"}
         value={draft.apiKey}
         onChange={(apiKey) => setDraft({ ...draft, apiKey })}
-        description={
+        description={[
           editing
             ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-            : "Encrypted at rest and never shown again; only the last 4 characters come back."
-        }
+            : "Encrypted at rest and never shown again; only the last 4 characters come back.",
+          spec?.apiKeyHelpText,
+        ]
+          .filter(Boolean)
+          .join(" ")}
       />
 
       <Field
@@ -191,6 +242,16 @@ function KeyForm({
         onChange={(apiBase) => setDraft({ ...draft, apiBase })}
         placeholder="https://api.example.com/v1"
         description="Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+      />
+
+      {/* What this provider needs beyond a key, asked for by name rather than
+          left to the JSON below. */}
+      <ProviderCredentialFields
+        provider={draft.provider}
+        values={draft.credentials}
+        onChange={(credentials) => setDraft({ ...draft, credentials })}
+        errors={credentialErrors}
+        redacted={draft.redacted}
       />
 
       <ClientArgsField

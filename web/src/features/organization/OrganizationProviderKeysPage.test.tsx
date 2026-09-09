@@ -24,6 +24,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 interface MockOpts {
   keys?: OrgProviderKey[]
   context?: OrganizationContext
+  catalog?: { id: string; name: string }[]
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -54,7 +55,9 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse({ detail: "Not authorized" }, 403)
     }
     if (url.includes("/v1/providers/catalog")) {
-      return jsonResponse([{ id: "anthropic", name: "Anthropic" }])
+      return jsonResponse(
+        opts.catalog ?? [{ id: "anthropic", name: "Anthropic" }],
+      )
     }
     return jsonResponse(opts.context ?? organizationContext())
   })
@@ -151,6 +154,168 @@ describe("OrganizationProviderKeysPage", () => {
       provider: "anthropic",
       name: "Production",
       api_key: "sk-secret",
+    })
+  })
+
+  it("asks Bedrock for its region by name and sends it in client_args", async () => {
+    const requests = mockApi({ catalog: [{ id: "bedrock", name: "Bedrock" }] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
+    // Not called an API key here: Bedrock's credential is a bearer token or an
+    // IAM secret, depending on which shape the organization uses.
+    await user.type(screen.getByLabelText(/Bedrock API key/), "bearer-token")
+    await user.type(
+      screen.getByRole("textbox", { name: /AWS region/ }),
+      "us-east-1",
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "POST")).toBe(true)
+    })
+    expect(
+      requests.find((request) => request.method === "POST")?.body,
+    ).toMatchObject({
+      provider: "bedrock",
+      api_key: "bearer-token",
+      client_args: { region_name: "us-east-1" },
+    })
+  })
+
+  it("will not add a Bedrock key until the region is there and looks like one", async () => {
+    const requests = mockApi({ catalog: [{ id: "bedrock", name: "Bedrock" }] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
+
+    const submit = screen.getByRole("button", {
+      name: "Add provider key",
+      hidden: false,
+    })
+    expect(submit).toBeDisabled()
+    expect(
+      screen.getByText("AWS region is required for this provider."),
+    ).toBeInTheDocument()
+
+    const region = screen.getByRole("textbox", { name: /AWS region/ })
+    await user.type(region, "US East 1")
+    expect(
+      screen.getByText(
+        "A region is lowercase letters, digits and hyphens, like us-east-1.",
+      ),
+    ).toBeInTheDocument()
+    expect(submit).toBeDisabled()
+
+    await user.clear(region)
+    await user.type(region, "us-east-1")
+    await waitFor(() => expect(submit).toBeEnabled())
+    expect(requests.some((request) => request.method === "POST")).toBe(false)
+  })
+
+  it("does not advise against the credential Bedrock's IAM shape requires", async () => {
+    // The old copy said to keep secrets out of client_args, which is the only
+    // supported place for Bedrock's aws_secret_access_key.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+
+    expect(screen.queryByText(/keep secrets out/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /masked when read back, but nothing here is encrypted at rest/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("does not offer a provider whose stored credential can never authenticate", async () => {
+    mockApi({
+      catalog: [
+        { id: "anthropic", name: "Anthropic" },
+        { id: "sagemaker", name: "SageMaker" },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+
+    expect(
+      await screen.findByRole("option", { name: "Anthropic" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: "SageMaker" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps a stored client_args secret the form was never shown", async () => {
+    // The gateway masks a credential-shaped option on read, so there is nothing
+    // to prefill the box with. Sending the mask back is what tells the gateway
+    // to keep what it holds.
+    const requests = mockApi({
+      catalog: [{ id: "bedrock", name: "Bedrock" }],
+      keys: [
+        orgProviderKey({
+          provider: "bedrock",
+          client_args: {
+            region_name: "us-east-1",
+            aws_access_key_id: "AKIAIOSFODNN7EXAMPLE",
+            aws_secret_access_key: "***",
+            timeout: 1800,
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    expect(
+      await screen.findByRole("textbox", { name: /AWS region/ }),
+    ).toHaveValue("us-east-1")
+    // Never prefilled with the mask: three characters in a password box read as
+    // a real value.
+    expect(screen.getByLabelText(/AWS secret access key/)).toHaveValue("")
+    // Only what has no typed field of its own is left in the JSON escape hatch.
+    expect(
+      screen.getByRole("textbox", { name: "Client options (JSON)" }),
+    ).toHaveValue('{\n  "timeout": 1800\n}')
+
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true)
+    })
+    expect(
+      requests.find((request) => request.method === "PATCH")?.body,
+    ).toMatchObject({
+      client_args: {
+        region_name: "us-east-1",
+        aws_access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        aws_secret_access_key: "***",
+        timeout: 1800,
+      },
     })
   })
 

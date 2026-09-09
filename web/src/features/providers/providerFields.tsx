@@ -11,17 +11,24 @@ import {
 import { type ReactNode, useMemo, useState } from "react"
 
 import { useProviderCatalog } from "@/shared/api/providers"
+import { Field } from "@/shared/components/forms/Field"
 import { FieldMessages } from "@/shared/components/forms/FieldMessages"
+import { SecretField } from "@/shared/components/forms/SecretField"
 
-// The two form controls a provider credential needs wherever it is edited, and
-// the parsing that goes with one of them.
+import {
+  type CredentialFieldValues,
+  credentialFieldsFor,
+} from "./providerCredentialFields"
+
+// The form controls a provider credential needs wherever it is edited, and the
+// parsing that goes with them.
 //
 // Shared because the same credential is entered on two pages that are otherwise
 // unrelated: `/providers`, where it belongs to the process, and
 // `/organization/provider-keys`, where it belongs to the tenant. Both take a
 // provider name any-llm has to recognize and both take `client_args`, so a
-// second copy of either control would be a second place for the JSON guard and
-// the catalog lookup to drift.
+// second copy of any of these controls would be a second place for the JSON
+// guard, the catalog lookup and the per-provider field list to drift.
 
 // client_args is whatever the provider's SDK client constructor takes (timeouts,
 // custom headers), so it has no fixed schema and the form edits it as JSON. Blank
@@ -58,8 +65,71 @@ export function formatClientArgs(
     : ""
 }
 
-// The client_args editor. Options are passed straight to the provider client, so
-// a bad value is rejected here rather than sent (issue #517).
+// The typed fields a provider expects inside `client_args`, from the registry.
+// Renders nothing for the providers that need none, which is nearly all of them.
+export function ProviderCredentialFields({
+  provider,
+  values,
+  onChange,
+  errors,
+  redacted = [],
+}: {
+  provider: string
+  values: CredentialFieldValues
+  onChange: (next: CredentialFieldValues) => void
+  /** Per-field messages from `validateCredentialFields`, keyed by field key. */
+  errors: Record<string, string>
+  /** Fields whose stored secret came back masked, so blank means "keep it". */
+  redacted?: readonly string[]
+}) {
+  const fields = credentialFieldsFor(provider)
+  if (fields.length === 0) return null
+
+  return (
+    <>
+      {fields.map((field) => {
+        const value = values[field.key] ?? ""
+        const error = errors[field.key]
+        const set = (next: string) => onChange({ ...values, [field.key]: next })
+        if (field.isSecret) {
+          return (
+            <SecretField
+              key={field.key}
+              label={field.label}
+              value={value}
+              onChange={set}
+              placeholder={field.placeholder ?? "••••••••"}
+              description={
+                redacted.includes(field.key)
+                  ? `Set already, and never shown again. Leave blank to keep it. ${field.helpText}`
+                  : field.helpText
+              }
+              isInvalid={error !== undefined}
+              errorMessage={error}
+            />
+          )
+        }
+        return (
+          <Field
+            key={field.key}
+            label={field.label}
+            value={value}
+            onChange={set}
+            isRequired={field.isRequired}
+            placeholder={field.placeholder}
+            description={field.helpText}
+            isInvalid={error !== undefined}
+            errorMessage={error}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+// The client_args editor: the escape hatch for whatever the typed fields above
+// do not describe. Options are passed straight to the provider client, so a bad
+// value is rejected here rather than sent (issue #517).
 export function ClientArgsField({
   value,
   onChange,
@@ -88,9 +158,12 @@ export function ClientArgsField({
           className={error ? "text-caption text-danger" : "text-caption"}
         >
           {error ??
-            // Unlike the API key, these are stored and returned unencrypted, so say
-            // so before someone puts a token in a custom header here.
-            "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Stored in plain text, so keep secrets out."}
+            // Both halves of that sentence are load-bearing, and blanket "keep
+            // secrets out" advice would be wrong: Bedrock's classic IAM shape
+            // genuinely needs a secret in here (`gateway/models/provider_keys.py`),
+            // `redact_secret_like_values` is why it does not come back, and
+            // `encrypted_api_key` is the protection it does not get.
+            "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. An option named like a credential is masked when read back, but nothing here is encrypted at rest."}
         </Description>
       </FieldMessages>
     </TextField>
@@ -108,6 +181,7 @@ export function ProviderComboBox({
   placeholder,
   extra = [],
   includeCatalog = true,
+  excludeIds,
 }: {
   label: string
   value: string
@@ -118,18 +192,21 @@ export function ProviderComboBox({
   // When false, offer only `extra` (e.g. the two API dialects), not the full
   // provider catalog.
   includeCatalog?: boolean
+  // Catalog entries to leave out, for a form that cannot honor them. Per call
+  // site rather than a rule of the picker: which providers are offerable
+  // depends on what the form collects, not on the catalog. See
+  // `BYO_UNSUPPORTED_PROVIDERS`.
+  excludeIds?: readonly string[]
 }) {
   const catalog = useProviderCatalog()
-  const options = useMemo(
-    () =>
-      includeCatalog
-        ? [
-            ...extra,
-            ...(catalog.data ?? []).map((p) => ({ id: p.id, name: p.name })),
-          ]
-        : extra,
-    [catalog.data, extra, includeCatalog],
-  )
+  const options = useMemo(() => {
+    const catalogOptions = includeCatalog
+      ? (catalog.data ?? [])
+          .filter((p) => !excludeIds?.includes(p.id))
+          .map((p) => ({ id: p.id, name: p.name }))
+      : []
+    return [...extra, ...catalogOptions]
+  }, [catalog.data, extra, includeCatalog, excludeIds])
 
   // Seed the input with the selected option's display name. The field owns its
   // text after mount (updated on typing and on selection); syncing it back from

@@ -44,9 +44,18 @@ import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import { formatRelative } from "@/shared/helpers/format"
 
 import {
+  type CredentialFieldValues,
+  credentialFieldsFor,
+  credentialSpecFor,
+  mergeCredentialFields,
+  splitClientArgs,
+  validateCredentialFields,
+} from "./providerCredentialFields"
+import {
   ClientArgsField,
   formatClientArgs,
   ProviderComboBox,
+  ProviderCredentialFields,
   parseClientArgs,
 } from "./providerFields"
 
@@ -121,7 +130,14 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   const [apiBase, setApiBase] = useState("")
   const [name, setName] = useState("")
   const [clientArgsText, setClientArgsText] = useState("")
+  const [credentials, setCredentials] = useState<CredentialFieldValues>({})
   const clientArgs = parseClientArgs(clientArgsText)
+  const credentialFields = credentialFieldsFor(providerId)
+  const credentialErrors = validateCredentialFields(
+    credentialFields,
+    credentials,
+  )
+  const credentialSpec = credentialSpecFor(providerId)
 
   // Autofill hints are fetched lazily for just the selected provider, so the
   // picker itself never imports every provider SDK (issue #365).
@@ -146,28 +162,37 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
     !nameHasDelimiter &&
     (!needsKey || apiKey.trim() !== "") &&
     clientArgs.ok &&
+    Object.keys(credentialErrors).length === 0 &&
     !create.isPending
   // Hold the section open while something inside it is what's blocking submit,
   // so collapsing it can't leave a disabled button with its reason off screen.
   // A hide requested meanwhile is remembered and applies once the field is fixed.
   const advancedOpen = showAdvanced || !clientArgs.ok || nameHasDelimiter
 
+  // The typed fields and the JSON textarea are two views of one `client_args`
+  // object, so the request body is built in one place for both the save and the
+  // connection test.
+  const buildPayload = (): CreateStoredProviderRequest | null =>
+    providerId === "" || !clientArgs.ok
+      ? null
+      : {
+          instance: renamed ? name.trim() : providerId,
+          // A renamed instance is no longer named after its provider, so record
+          // the provider it is so routing still resolves.
+          provider_type: renamed ? providerId : null,
+          api_base: apiBase.trim() || null,
+          api_key: apiKey.trim() || null,
+          client_args: mergeCredentialFields(
+            credentialFields,
+            credentials,
+            clientArgs.value,
+          ),
+        }
+
   const submit = () => {
-    // The clientArgs.ok half is already covered by canSubmit; it is repeated to
-    // narrow the union so `.value` is reachable.
-    if (!canSubmit || !clientArgs.ok) return
-    create.mutate(
-      {
-        instance: renamed ? name.trim() : providerId,
-        // A renamed instance is no longer named after its provider, so record the
-        // provider it is so routing still resolves.
-        provider_type: renamed ? providerId : null,
-        api_base: apiBase.trim() || null,
-        api_key: apiKey.trim() || null,
-        client_args: clientArgs.value,
-      },
-      { onSuccess: onClose },
-    )
+    const payload = buildPayload()
+    if (!canSubmit || payload === null) return
+    create.mutate(payload, { onSuccess: onClose })
   }
 
   return (
@@ -182,22 +207,43 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
           // Clear the API base; the effect above refills it from the provider's
           // built-in default once this provider's detail loads.
           setApiBase("")
+          // The typed fields belong to the provider, so a change to it drops
+          // values that no longer have a field to sit in.
+          setCredentials({})
         }}
         description="Its endpoint is built in."
       />
       <SecretField
         value={apiKey}
         onChange={setApiKey}
-        label={selected && !needsKey ? "API key (optional)" : "API key"}
-        description={
+        // The registry names the credential where the provider does not call it
+        // an API key; the optional suffix still tracks whether one is needed.
+        label={
+          selected && !needsKey
+            ? `${credentialSpec?.apiKeyLabel ?? "API key"} (optional)`
+            : (credentialSpec?.apiKeyLabel ?? "API key")
+        }
+        description={[
           selected
             ? needsKey
               ? `${selected.name}'s endpoint is built in — just add your key.`
               : envKeyPresent
                 ? `${selected.env_key} is set on the server, so a key is optional here. Paste one to override it.`
                 : `${selected.name} needs no API key.`
-            : "Stored encrypted. Requires OTARI_SECRET_KEY on the server."
-        }
+            : "Stored encrypted. Requires OTARI_SECRET_KEY on the server.",
+          credentialSpec?.apiKeyHelpText,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      />
+      {/* Outside the Advanced disclosure below: a required field hidden behind
+          a collapsed section is a submit button disabled for a reason off
+          screen. */}
+      <ProviderCredentialFields
+        provider={providerId}
+        values={credentials}
+        onChange={setCredentials}
+        errors={credentialErrors}
       />
       <button
         type="button"
@@ -248,19 +294,7 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         <Button variant="ghost" onPress={onClose}>
           Cancel
         </Button>
-        <ConnectionTest
-          getPayload={() =>
-            providerId === "" || !clientArgs.ok
-              ? null
-              : {
-                  instance: renamed ? name.trim() : providerId,
-                  provider_type: renamed ? providerId : null,
-                  api_base: apiBase.trim() || null,
-                  api_key: apiKey.trim() || null,
-                  client_args: clientArgs.value,
-                }
-          }
-        />
+        <ConnectionTest getPayload={buildPayload} />
       </div>
     </div>
   )
@@ -427,18 +461,48 @@ function EditProviderForm({
   const [apiBase, setApiBase] = useState(provider.api_base ?? "")
   const [replacingKey, setReplacingKey] = useState(false)
   const [apiKey, setApiKey] = useState("")
+  // An instance keeps its provider's name unless it was renamed, so the
+  // instance is what says which provider this is when provider_type is unset.
+  // Read the same way below, so the fields rendered are the ones the stored
+  // options were split against.
+  const providerId = providerType.trim() || provider.instance
+  const [stored] = useState(() =>
+    splitClientArgs(
+      credentialFieldsFor(provider.provider_type?.trim() || provider.instance),
+      provider.client_args,
+    ),
+  )
   const [clientArgsText, setClientArgsText] = useState(() =>
-    formatClientArgs(provider.client_args),
+    formatClientArgs(stored.rest),
+  )
+  const [credentials, setCredentials] = useState<CredentialFieldValues>(
+    () => stored.typed,
   )
   const clientArgs = parseClientArgs(clientArgsText)
+  const credentialFields = credentialFieldsFor(providerId)
+  const credentialErrors = validateCredentialFields(
+    credentialFields,
+    credentials,
+    stored.redacted,
+  )
 
   const submit = () => {
-    if (update.isPending || !clientArgs.ok) return
+    if (
+      update.isPending ||
+      !clientArgs.ok ||
+      Object.keys(credentialErrors).length > 0
+    )
+      return
     const body: UpdateStoredProviderRequest = {
       provider_type: providerType.trim() || null,
       api_base: apiBase.trim() || null,
       // Sent on every save, so emptying the field clears the stored options.
-      client_args: clientArgs.value,
+      client_args: mergeCredentialFields(
+        credentialFields,
+        credentials,
+        clientArgs.value,
+        stored.redacted,
+      ),
       // Guard against clobbering a concurrent edit; a 412 tells the operator to reload.
       expected_updated_at: provider.updated_at,
     }
@@ -517,6 +581,13 @@ function EditProviderForm({
           </div>
         )}
       </div>
+      <ProviderCredentialFields
+        provider={providerId}
+        values={credentials}
+        onChange={setCredentials}
+        errors={credentialErrors}
+        redacted={stored.redacted}
+      />
       <ClientArgsField
         value={clientArgsText}
         onChange={setClientArgsText}
@@ -525,7 +596,11 @@ function EditProviderForm({
       <div className="flex gap-2">
         <Button
           variant="primary"
-          isDisabled={update.isPending || !clientArgs.ok}
+          isDisabled={
+            update.isPending ||
+            !clientArgs.ok ||
+            Object.keys(credentialErrors).length > 0
+          }
           onPress={submit}
         >
           {update.isPending ? "Saving…" : "Save changes"}
