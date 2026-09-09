@@ -457,10 +457,12 @@ function GuardrailRow({
 
 function AddGuardrailForm({
   catalog,
+  catalogPending,
   workspaces,
   onSaved,
 }: {
   catalog: GuardrailCatalog | undefined
+  catalogPending: boolean
   workspaces: readonly Workspace[]
   onSaved: (message: string) => void
 }) {
@@ -509,6 +511,7 @@ function AddGuardrailForm({
       <span className="text-body">Mandate a guardrail</span>
       <GuardrailProfileField
         catalog={catalog}
+        pending={catalogPending}
         value={profile}
         disabled={create.isPending}
         onChange={setProfile}
@@ -645,6 +648,10 @@ export function OrganizationGuardrailsCard({
           ) : null}
           <AddGuardrailForm
             catalog={catalog.data}
+            // `isFetched` rather than `isPending`: an errored query returns to
+            // pending when its observers remount, which would leave the picker
+            // stuck reading a service that already answered.
+            catalogPending={!catalog.isFetched}
             workspaces={known}
             onSaved={onSaved}
           />

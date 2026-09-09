@@ -62,10 +62,13 @@ function mockApi({
   guardrails = [] as OrganizationGuardrail[],
   role = "owner",
   catalog = CATALOG,
+  catalogGate,
 }: {
   guardrails?: OrganizationGuardrail[]
   role?: string
   catalog?: GuardrailCatalog
+  /** Held open to keep the catalog read in flight while the card is asserted. */
+  catalogGate?: Promise<void>
 } = {}) {
   const calls: { url: string; method: string; body: unknown }[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -85,6 +88,7 @@ function mockApi({
     }
     if (url.includes(`${API_ROOT}/tool-settings/guardrails/profiles`)) {
       calls.push({ url, method, body: undefined })
+      if (catalogGate) await catalogGate
       return Response.json(catalog)
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
@@ -99,6 +103,11 @@ function mockApi({
     return Response.json(organizationContext({ role }))
   })
   return calls
+}
+
+/** Wait for the profile picker to settle, so a press is not sent to the disabled one. */
+async function settledPicker() {
+  return await screen.findByRole("button", { name: /Choose a profile/ })
 }
 
 function renderCard() {
@@ -403,10 +412,36 @@ describe("OrganizationGuardrailsCard", () => {
     })
   })
 
+  it("offers no profile to pick until the guardrails service has answered", async () => {
+    let answer = () => {}
+    mockApi({
+      catalogGate: new Promise<void>((resolve) => {
+        answer = resolve
+      }),
+    })
+    renderCard()
+
+    // The control does not start as a free-text box and turn into a picker
+    // under the operator's cursor: it is the picker throughout, and says so
+    // while it waits.
+    expect(
+      await screen.findByRole("button", {
+        name: /Reading the guardrails service/,
+      }),
+    ).toBeDisabled()
+    expect(
+      screen.queryByRole("button", { name: "Name a profile by hand" }),
+    ).toBeNull()
+
+    answer()
+    expect(await settledPicker()).toBeEnabled()
+  })
+
   it("picks a profile from what the guardrails service has built", async () => {
     const calls = mockApi()
     renderCard()
 
+    await settledPicker()
     await pickOption(userEvent.setup(), "Guardrail profile", "prompt-injection")
     await userEvent.click(screen.getByRole("button", { name: "Add" }))
 
@@ -423,6 +458,7 @@ describe("OrganizationGuardrailsCard", () => {
     renderCard()
     const user = userEvent.setup()
 
+    await settledPicker()
     await pickOption(user, "Guardrail profile", "house-policy")
     await user.type(await screen.findByLabelText("Policy"), "No personal data.")
     await user.type(screen.getByLabelText("Threshold"), "0.8")
@@ -447,6 +483,7 @@ describe("OrganizationGuardrailsCard", () => {
     const calls = mockApi()
     renderCard()
 
+    await settledPicker()
     await pickOption(userEvent.setup(), "Guardrail profile", "house-policy")
     await userEvent.click(screen.getByRole("button", { name: "Add" }))
 
@@ -461,6 +498,7 @@ describe("OrganizationGuardrailsCard", () => {
     renderCard()
     const user = userEvent.setup()
 
+    await settledPicker()
     await pickOption(user, "Guardrail profile", "house-policy")
     await user.type(await screen.findByLabelText("Policy"), "No personal data.")
     await user.click(screen.getByRole("button", { name: "Add" }))

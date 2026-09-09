@@ -39,6 +39,7 @@ from any_guardrail.parameter_registry import get_parameter_schema
 from pydantic import BaseModel, Field
 
 from gateway.log_config import logger
+from gateway.services.url_safety import redact_url_secrets
 
 # Short, because this runs while an operator watches a settings page load. The
 # sidecar answers `/profiles` out of memory (it holds its built guardrails), so a
@@ -177,26 +178,32 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
     url = (base_url or "").strip().rstrip("/")
     if not url:
         return GuardrailCatalog(available=False, reason=_NOT_CONFIGURED)
+    # `guardrails_url` may carry userinfo, so the address is masked before it
+    # reaches a log line, the way the settings endpoints mask it before it
+    # reaches a response. The exception messages below can carry the URL too,
+    # which is why each one names the redacted host rather than being logged
+    # whole.
+    shown = redact_url_secrets(url)
 
     try:
         async with httpx.AsyncClient(timeout=_CATALOG_TIMEOUT_S) as client:
             response = await client.get(f"{url}/profiles")
         if response.status_code == httpx.codes.NOT_FOUND:
-            logger.info("Guardrails service at %s serves no /profiles endpoint", url)
+            logger.info("Guardrails service at %s serves no /profiles endpoint", shown)
             return GuardrailCatalog(available=False, reason=_UNSUPPORTED)
         response.raise_for_status()
         body = response.json()
     except httpx.HTTPError as exc:
         # The address goes to the log and not to the response, for the reason
         # `services/guardrails.py` keeps it out of a 502 body.
-        logger.warning("Guardrail catalog unavailable from %s: %s", url, exc)
+        logger.warning("Guardrail catalog unavailable from %s: %s", shown, exc.__class__.__name__)
         return GuardrailCatalog(available=False, reason=_UNREACHABLE)
-    except ValueError as exc:
-        logger.warning("Guardrail catalog from %s was not JSON: %s", url, exc)
+    except ValueError:
+        logger.warning("Guardrail catalog from %s was not JSON", shown)
         return GuardrailCatalog(available=False, reason=_MALFORMED)
 
     if not isinstance(body, list):
-        logger.warning("Guardrail catalog from %s was not a list", url)
+        logger.warning("Guardrail catalog from %s was not a list", shown)
         return GuardrailCatalog(available=False, reason=_MALFORMED)
 
     # A row this gateway cannot read is dropped rather than failing the whole
@@ -204,6 +211,6 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
     profiles = [spec for spec in (_profile_spec(entry) for entry in body) if spec is not None]
     if len(profiles) != len(body):
         logger.warning(
-            "Guardrail catalog from %s held %d rows this gateway could not read", url, len(body) - len(profiles)
+            "Guardrail catalog from %s held %d rows this gateway could not read", shown, len(body) - len(profiles)
         )
     return GuardrailCatalog(available=True, profiles=sorted(profiles, key=lambda spec: spec.profile))

@@ -20,11 +20,18 @@ import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 export function GuardrailProfileField({
   catalog,
+  pending,
   value,
   disabled,
   onChange,
 }: {
   catalog: GuardrailCatalog | undefined
+  /**
+   * The catalog read has not settled yet. Kept distinct from an empty catalog
+   * so the control does not start as a text box and turn into a picker under
+   * the operator's cursor a moment later.
+   */
+  pending: boolean
   value: string
   disabled: boolean
   onChange: (next: string) => void
@@ -33,6 +40,26 @@ export function GuardrailProfileField({
   const listed = catalog?.available === true && profiles.length > 0
   const [byHand, setByHand] = useState(false)
   const chosen = findProfile(catalog, value)
+
+  if (pending) {
+    return (
+      <div className="flex flex-col gap-1">
+        <FilterSelect
+          label="Guardrail profile"
+          value=""
+          disabled
+          onChange={onChange}
+          options={[{ value: "", label: "Reading the guardrails service…" }]}
+        />
+        <FieldMessages reserve>
+          <span className="text-caption">
+            Built by this deployment's guardrails service from the operator's
+            own configuration.
+          </span>
+        </FieldMessages>
+      </div>
+    )
+  }
 
   if (!listed || byHand) {
     return (

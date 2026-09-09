@@ -183,6 +183,8 @@ def test_tool_settings_not_mounted_in_hybrid_mode(tmp_path: Path, _hybrid_env: N
     with TestClient(create_app(config)) as client:
         # Standalone-only: the management route is not registered in hybrid mode.
         assert client.get(f"{API_ROOT}/tool-settings", headers=AUTH).status_code == 404
+        # And the catalog read with it, since it is mounted on the same router.
+        assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH).status_code == 404
 
 
 def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
@@ -230,7 +232,7 @@ def test_guardrail_profiles_lists_what_the_service_built(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     with _client(tmp_path, guardrails_url="http://anyguardrails:8000") as client:
-        resp = client.get("/v1/tool-settings/guardrails/profiles", headers=AUTH)
+        resp = client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH)
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -246,7 +248,7 @@ def test_guardrail_profiles_reports_an_unconfigured_service(tmp_path: Path) -> N
     render before the service they are configuring exists.
     """
     with _client(tmp_path) as client:
-        resp = client.get("/v1/tool-settings/guardrails/profiles", headers=AUTH)
+        resp = client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -263,7 +265,7 @@ def test_guardrail_profiles_never_returns_the_endpoint(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     with _client(tmp_path, guardrails_url="https://guardrails.internal.example") as client:
-        resp = client.get("/v1/tool-settings/guardrails/profiles", headers=AUTH)
+        resp = client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH)
 
     assert resp.status_code == 200
     assert "guardrails.internal.example" not in resp.text
@@ -271,4 +273,4 @@ def test_guardrail_profiles_never_returns_the_endpoint(tmp_path: Path, monkeypat
 
 def test_guardrail_profiles_requires_master_key(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.get("/v1/tool-settings/guardrails/profiles").status_code == 401
+        assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles").status_code == 401

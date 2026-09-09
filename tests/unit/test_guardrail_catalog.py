@@ -9,11 +9,13 @@ with a schema nobody ships.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 import httpx
 import pytest
 
+from gateway.log_config import logger as gateway_logger
 from gateway.services.guardrail_catalog import fetch_guardrail_catalog
 
 _URL = "http://anyguardrails:8000"
@@ -175,3 +177,26 @@ async def test_trailing_slash_does_not_double_up(monkeypatch: pytest.MonkeyPatch
     await fetch_guardrail_catalog(f"{_URL}/")
 
     assert seen == ["/profiles"]
+
+
+@pytest.mark.asyncio
+async def test_the_log_line_masks_a_url_password(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``guardrails_url`` may carry userinfo, which the settings endpoints already mask."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("nope")
+
+    _patch_transport(monkeypatch, handler)
+    # The gateway logger does not propagate, so caplog has to be attached to it.
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        catalog = await fetch_guardrail_catalog("https://otari:hunter2@guardrails.example")
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert catalog.available is False
+    assert "hunter2" not in caplog.text
+    assert "guardrails.example" in caplog.text
