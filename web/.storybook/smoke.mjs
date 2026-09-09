@@ -100,7 +100,20 @@ async function drain() {
       // thing worth repeating here: a card gated on two sequential queries
       // (context, then a per-workspace one) legitimately renders nothing until
       // the second resolves, which is why this waits rather than sampling once.
-      await page.waitForFunction(RENDERED, undefined, { timeout: 20000 })
+      // `polling: 100` and not the default, which is `raf`.
+      //
+      // A backgrounded page does not get animation frames, and this drains the
+      // work list from a pool, so all but one page is backgrounded at any
+      // moment: on the default the predicate is evaluated a handful of times a
+      // second or not at all, and a story that renders instantly still burns
+      // seconds waiting to be asked. web/AGENTS.md records the same mechanism
+      // under "Measuring the running dashboard", where a probe that awaits a
+      // frame in a background tab hangs rather than returning. A fixed interval
+      // does not care whether the page is visible.
+      await page.waitForFunction(RENDERED, undefined, {
+        timeout: 20000,
+        polling: 100,
+      })
       const shown = await page.evaluate(() => ({
         errored: document.body.classList.contains("sb-show-errordisplay"),
         errorText: document.querySelector("#error-message")?.textContent?.slice(0, 300) || null,

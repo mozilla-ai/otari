@@ -68,11 +68,16 @@ export function Select({
   // answers an unmatched key with its own "Select an item", which would put
   // library boilerplate where the current value belongs, so the value is
   // carried as its own option instead. Same fallback FilterSelect makes.
-  const items: readonly SelectOption[] = options.some(
-    (option) => option.value === value,
-  )
-    ? options
-    : [{ value, label: value }, ...options]
+  //
+  // The empty string is excluded, and that is the whole reason this is not one
+  // condition. Here "" means nothing is selected, not a value to preserve, so
+  // synthesizing an option for it put a blank row at the top of the list that an
+  // operator could pick. `FilterSelect` needs no such guard because "" is a real
+  // choice there ("All", "Any price") and its callers always carry that option.
+  const items: readonly SelectOption[] =
+    value === "" || options.some((option) => option.value === value)
+      ? options
+      : [{ value, label: value }, ...options]
 
   return (
     <HeroSelect.Root

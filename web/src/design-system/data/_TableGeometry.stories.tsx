@@ -4,15 +4,27 @@ import { TableScrollFrame } from "../layout/TableScrollFrame"
 import { DataTable, type DataTableColumn } from "./DataTable"
 
 /**
- * TEMPORARY measurement harness. Not a catalog entry: delete with the change
- * that adds it.
+ * A measurement harness, not a catalog entry.
  *
- * Renders `DataTable` inside every per-feature wrapper class the stylesheet
- * targets, with exactly the column ids that stylesheet names, so a Playwright
- * pass can read the computed geometry of each lane before and after the
- * component swaps off HeroUI's Table. The contexts and their keys were derived
- * from globals.css rather than transcribed from the feature files, so the
- * harness measures what the CSS actually reaches.
+ * The `_` prefix is what keeps it out of the published catalog: `main.ts`'s
+ * story glob excludes `_*.stories.tsx`. Its reader is
+ * `.storybook/__tableGeometry.mjs`, which renders this one story and reports the
+ * computed geometry of every lane; run it before and after a change to table
+ * CSS and diff the two, which is the check the screenshot suite would give if it
+ * were a gate.
+ *
+ * It renders `DataTable` inside every per-feature wrapper class the stylesheet
+ * targets, with exactly the column ids that stylesheet names. Both were derived
+ * from globals.css rather than transcribed from the feature files, so it
+ * measures what the CSS actually reaches rather than what a feature is believed
+ * to pass.
+ *
+ * **It is the one file in `src/design-system/` that names application classes**,
+ * and it does so as strings rather than imports, so the layer's boundary rule
+ * (which is about imports) does not catch it. That is deliberate and it is the
+ * honest exception: extraction leaves this file behind, because a design system
+ * has no business knowing that a keys page exists. If the layer is ever lifted
+ * into a package, this belongs with the application.
  */
 const CONTEXTS: { place: string; keys: string[] }[] = [
   // No wrapper class, which is a real case rather than a control: three feature

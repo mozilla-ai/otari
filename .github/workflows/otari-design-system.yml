@@ -21,11 +21,17 @@ on:
       - '.github/workflows/otari-design-system.yml'
   workflow_dispatch:
 
-# A superseded run has nothing to publish, and two publishes racing to the same
-# Pages deployment is the one way this workflow can leave the site half-updated.
+# Superseded PR runs are cancelled; a run on main never is.
+#
+# The distinction is the whole point and the first spelling of this got it
+# backwards. A pull request run has nothing to publish, so cancelling it when a
+# newer commit arrives only saves runner time. A run on main is holding a Pages
+# deployment, and cancelling that mid-flight is precisely what leaves the site
+# half-updated, which is the outcome this key exists to prevent. GitHub's own
+# Pages guidance says the same.
 concurrency:
   group: design-system-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   catalog:
