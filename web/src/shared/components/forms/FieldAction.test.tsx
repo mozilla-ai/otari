@@ -17,8 +17,11 @@ import { FieldAction } from "./FieldAction"
  * caption role rather than from a pixel.
  */
 describe("FieldAction", () => {
+  // Structural rather than by class: a token gets renamed, and a test that
+  // breaks on a restyle teaches everyone to stop trusting the suite.
   const reserve = (container: HTMLElement) =>
-    container.querySelector(".text-caption") as HTMLElement | null
+    (container.firstElementChild as HTMLElement)
+      .lastElementChild as HTMLElement | null
 
   it("holds a caption line under its child, so the action meets the input line", () => {
     const { container } = render(

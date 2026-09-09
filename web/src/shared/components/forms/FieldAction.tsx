@@ -2,7 +2,8 @@ import type { ReactNode } from "react"
 import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 
 /**
- * A trailing action in a control row, aligned to the input line.
+ * A child of a control row that has no caption of its own, aligned to the
+ * input line: a trailing action, or any mid-row control without one.
  *
  * A row of controls is laid out `items-end`, which bottom-aligns each child's
  * whole box. A field's box includes the caption line it reserves under its
@@ -16,9 +17,10 @@ import { FieldMessages } from "@/shared/components/forms/FieldMessages"
  *
  * Two limits, both real. Every field in these rows must reserve exactly one
  * caption line: a message long enough to wrap makes that one field taller and
- * drops it back out of line, and no reserve here can answer that. None of these
- * messages wraps at the widths they are used, so this is sound now rather than
- * permanently.
+ * drops it back out of line, and no reserve here can answer that. This is known
+ * to break on the guardrails row, whose two `ModeToggle` hints were measured at
+ * 430px and 509px against roughly 1500px needed for a wrap-free line, so at
+ * 1280px both wrap and that row misaligns again.
  *
  * And these rows are `flex-wrap`, where `items-end` aligns each flex LINE to its
  * own cross-end rather than the row as a whole. So this aligns the action within

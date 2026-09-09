@@ -45,9 +45,11 @@ function renderWithClient(ui: ReactElement) {
 }
 
 // The reserve lives on the wrapper `FieldMessages` renders, which is the last
-// child of the combo box root whatever the hint says.
-const captionLine = (container: HTMLElement) =>
-  container.querySelector(".text-caption") as HTMLElement | null
+// child of the combo box root whatever the hint says. Anchored on the label
+// rather than on the container, whose first child is a react-aria `<template>`,
+// and structurally rather than by class, which pins a token that gets renamed.
+const captionLine = (label: HTMLElement) =>
+  label.parentElement?.lastElementChild as HTMLElement | null
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -56,7 +58,7 @@ afterEach(() => {
 describe("ModelComboBox", () => {
   it("holds the caption line open while it has nothing to say", async () => {
     mockApi()
-    const { container } = renderWithClient(
+    renderWithClient(
       <ModelComboBox label="Use instead" value="" onChange={() => {}} />,
     )
     // Past the loading hint, so the line is genuinely empty rather than holding
@@ -68,7 +70,7 @@ describe("ModelComboBox", () => {
       ).toBeNull()
     })
 
-    const line = captionLine(container)
+    const line = captionLine(screen.getByText("Use instead"))
     expect(line).not.toBeNull()
     expect(line).toHaveTextContent("")
     // The variable rather than a pixel, so a retune of the caption carries the
@@ -76,9 +78,33 @@ describe("ModelComboBox", () => {
     expect(line).toHaveClass("min-h-[var(--text-caption-step--line-height)]")
   })
 
+  it("announces the hint on the input, not just beside it", async () => {
+    mockApi()
+    renderWithClient(
+      <ModelComboBox
+        label="Use instead"
+        value=""
+        onChange={() => {}}
+        description="Pick a model or type one."
+      />,
+    )
+    const input = await screen.findByRole("combobox", { name: "Use instead" })
+    await screen.findByText("Pick a model or type one.")
+
+    // HeroUI's `Description` is what wires the caption to the input. A bare
+    // node in its place renders the same text and leaves `aria-describedby`
+    // null, which is silent to a screen reader: this line is where "Could not
+    // list models for openai" is said.
+    const describedBy = input.getAttribute("aria-describedby")
+    expect(describedBy).not.toBeNull()
+    expect(document.getElementById(describedBy!)).toHaveTextContent(
+      "Pick a model or type one.",
+    )
+  })
+
   it("puts a hint it does have on that same line", async () => {
     mockApi()
-    const { container } = renderWithClient(
+    renderWithClient(
       <ModelComboBox
         label="Use instead"
         value=""
@@ -88,7 +114,7 @@ describe("ModelComboBox", () => {
     )
     await screen.findByText("Pick a model or type one.")
 
-    const line = captionLine(container)
+    const line = captionLine(screen.getByText("Use instead"))
     expect(line).toHaveTextContent("Pick a model or type one.")
     expect(line).toHaveClass("min-h-[var(--text-caption-step--line-height)]")
   })

@@ -1,4 +1,11 @@
-import { ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react"
+import {
+  ComboBox,
+  Description,
+  Input,
+  Label,
+  ListBox,
+  ListBoxItem,
+} from "@heroui/react"
 import { type ReactNode, useMemo } from "react"
 import type { DiscoverableModel } from "@/client"
 import { useDiscoverableModels } from "@/shared/api/models"
@@ -128,9 +135,13 @@ export function ModelComboBox({
         </ListBox>
       </ComboBox.Popover>
       {/* Reserved even when silent, so this control matches a `Field` beside it
-          in a row: `Field` always renders its own reserve, and a bare hint here
-          left the two roots a caption line apart under `items-end`. */}
-      <FieldMessages>{hint}</FieldMessages>
+          in a row. The hint goes through HeroUI's `Description`, which is what
+          wires it to the input via aria-describedby; a bare node here leaves
+          the combo box reporting `aria-describedby: null`. Same reasoning as
+          `Field`. */}
+      <FieldMessages>
+        {hint ? <Description>{hint}</Description> : null}
+      </FieldMessages>
     </ComboBox.Root>
   )
 }
