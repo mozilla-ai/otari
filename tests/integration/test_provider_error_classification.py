@@ -47,15 +47,16 @@ class _ParamError(Exception):
 
 # (upstream status, mapped HTTP status, mapped detail). 500 and the bare case
 # fall through to the generic provider error each format already returned.
-# 400/422/404 are the caller's request to fix, so they carry the upstream
-# message; the rest are the gateway's own fault and keep a fixed string.
+# 400/422/404 are the caller's request to fix and 429 is theirs to act on, so
+# those carry the upstream message; the rest are the gateway's own fault and
+# keep a fixed string.
 _CASES = [
     (400, 400, _RAW),
     (422, 400, _RAW),
     (404, 404, _RAW),
+    (429, 429, _RAW),
     (401, 502, PROVIDER_CREDENTIALS_DETAIL),
     (403, 502, PROVIDER_CREDENTIALS_DETAIL),
-    (429, 429, PROVIDER_RATE_LIMITED_DETAIL),
 ]
 
 
@@ -83,6 +84,33 @@ def test_chat_classifies_provider_error(
     assert response.json()["detail"] == expected_detail
     if expected_detail != _RAW:
         assert "SECRET" not in response.text
+
+
+def test_chat_rate_limit_falls_back_when_the_provider_said_nothing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """A 429 whose body carried no explanation still gets a usable detail."""
+
+    class _Silent(Exception):
+        def __init__(self) -> None:
+            super().__init__("")
+            self.status_code = 429
+
+    with patch(
+        "gateway.api.routes.chat.acompletion",
+        new_callable=AsyncMock,
+        side_effect=_Silent(),
+    ):
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == PROVIDER_RATE_LIMITED_DETAIL
 
 
 def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(
@@ -228,8 +256,8 @@ def test_responses_classifies_provider_error(
 _MESSAGES_CASES = [
     (400, 400, _RAW, "invalid_request_error"),
     (404, 404, _RAW, "not_found_error"),
+    (429, 429, _RAW, "rate_limit_error"),
     (401, 502, PROVIDER_CREDENTIALS_DETAIL, "api_error"),
-    (429, 429, PROVIDER_RATE_LIMITED_DETAIL, "rate_limit_error"),
 ]
 
 

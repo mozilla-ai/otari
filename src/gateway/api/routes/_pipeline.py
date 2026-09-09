@@ -235,8 +235,8 @@ PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
 # than the caller's. These never embed the upstream message: a rejected
 # credential or an exhausted account is where provider internals concentrate,
 # and it is not the caller's problem to debug (see classify_provider_error and
-# test_error_detail_leakage). The two caller-fault details below are fallbacks,
-# used only when the provider gave us no message to pass on.
+# test_error_detail_leakage). The bad-request, model-not-found, and rate-limited
+# details below are fallbacks, used only when the provider gave us no message.
 PROVIDER_BAD_REQUEST_DETAIL = "The provider rejected the request as invalid (check the model name and parameters)"
 PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
 PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
@@ -247,6 +247,7 @@ PROVIDER_BILLING_DETAIL = (
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
+ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
 SANDBOX_NOT_CONFIGURED_DETAIL = (
     "otari_code_execution tool requested but no sandbox is configured on this gateway. "
     "Set OTARI_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
@@ -318,6 +319,7 @@ class ErrorKind(Enum):
     INVALID_REQUEST = auto()
     API = auto()
     PERMISSION = auto()
+    RATE_LIMIT = auto()
 
 
 class ProviderErrorMapping(NamedTuple):
@@ -353,11 +355,11 @@ def _unsupported_feature_detail(exc: BaseException) -> str:
         if isinstance(candidate, UnsupportedParameterError):
             # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
             # both through upstream_error_message would repeat the same reason.
-            return _redacted_caller_fault_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
-    return _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+            return _redacted_upstream_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
+    return _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
 
 
-def _redacted_caller_fault_detail(message: str, fallback: str) -> str:
+def _redacted_upstream_detail(message: str, fallback: str) -> str:
     """Return redacted explanatory text, or a fixed detail when none remains."""
     redacted = redact_upstream_message(message)
     explanatory = redacted.replace("[redacted]", "")
@@ -440,11 +442,17 @@ def _rejected_param(exc: BaseException) -> str | None:
     return None
 
 
-def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
-    """The detail for a rejection that is the caller's request to fix.
+def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
+    """The detail for a failure the caller can act on.
 
     Returns the provider's own message, redacted and length-capped, because the
     provider is the only party that knows what it objected to.
+
+    A ``message`` attribute wins over the joined chain for the same reason
+    :func:`_unsupported_feature_detail` prefers one: an SDK that stringifies a
+    failure usually re-embeds its own message, and google-genai appends the
+    whole response body, so the joined text reads as a stutter followed by
+    JSON. Only the joined chain sees an exception that carries no ``message``.
 
     Falls back to ``fallback`` when what is left says nothing. Some SDKs
     stringify a failure as bare punctuation or the status code itself, and
@@ -454,7 +462,11 @@ def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     A message made entirely of redaction placeholders is empty for this
     purpose, too.
     """
-    return _redacted_caller_fault_detail(upstream_error_message(exc), fallback)
+    for candidate in upstream_exception_chain(exc):
+        message = getattr(candidate, "message", None)
+        if isinstance(message, str) and (detail := _redacted_upstream_detail(message, "")):
+            return detail
+    return _redacted_upstream_detail(upstream_error_message(exc), fallback)
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
@@ -466,14 +478,14 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     can act on and leaving everything else (including provider 5xx and
     connection errors) to the generic 502.
 
-    Detail text splits on whose fault the failure is. When the provider rejected
-    the caller's request (400/422/404), the provider's own message is passed
-    through, redacted and length-capped, because it is the only description of
-    what was actually wrong and no fixed string we write can substitute for it.
-    When the failure is the gateway's own (a rejected credential, an exhausted
-    provider account, a 5xx), the detail stays a fixed string: those carry no
-    remedy the caller could apply, and are where a raw message is most likely to
-    name the operator's credentials or topology.
+    Detail text splits on whether the caller can act on the failure. A rejection
+    of the caller's request (400/422/404) and a rate limit (429) pass the
+    provider's own message through, redacted and length-capped, because it is
+    the only description of what was actually wrong. When the failure is the
+    gateway's own (a rejected credential, an exhausted provider account, a 5xx),
+    the detail stays a fixed string: those carry no remedy the caller could
+    apply, and are where a raw message is most likely to name the operator's
+    credentials or topology.
 
     Timeout detection (including the OpenAI/Anthropic SDKs' own
     ``APITimeoutError``, and a duck-typed fallback for other provider SDKs) is
@@ -508,22 +520,25 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     if is_provider_billing_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
     if status_code in (400, 422):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
+        return ProviderErrorMapping(
+            status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+        )
     if status_code == 404:
         return ProviderErrorMapping(
-            status.HTTP_404_NOT_FOUND, _caller_fault_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+            status.HTTP_404_NOT_FOUND, _upstream_message_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
         )
     # A provider rejecting the gateway's credentials is a gateway-config fault,
     # not the caller's: surface it as a 502, never as a client-facing 401/403.
     if status_code in (401, 403):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_CREDENTIALS_DETAIL)
-    # A provider 429 is surfaced as a client 429. Note this drops the upstream
-    # Retry-After: the (status, detail) pair cannot carry it, so the caller
-    # can't honor the provider's exact backoff window. Acceptable because the
-    # gateway has no single correct value to forward (BYO vs shared keys differ)
-    # and a bare 429 still tells the caller to back off.
+    # A 429 is not the caller's request to fix but is theirs to act on, and only
+    # the provider's text names the exhausted quota and the retry window. Still
+    # drops the upstream Retry-After: the (status, detail) pair cannot carry it,
+    # and on a streaming failure the headers are already flushed.
     if status_code == 429:
-        return ProviderErrorMapping(status.HTTP_429_TOO_MANY_REQUESTS, PROVIDER_RATE_LIMITED_DETAIL)
+        return ProviderErrorMapping(
+            status.HTTP_429_TOO_MANY_REQUESTS, _upstream_message_detail(exc, PROVIDER_RATE_LIMITED_DETAIL)
+        )
     return None
 
 
@@ -4116,8 +4131,10 @@ def raise_all_streaming_attempts_failed(
     Gateway-side backend failures (sandbox / web_search eager-open) get a 502
     with a backend-specific detail so operators don't chase a fake provider
     outage. A single attempt preserves its classified provider error. Once a
-    multi-attempt route is exhausted, it surfaces the aggregate result: 504
-    when the last failure was a timeout, otherwise 502.
+    multi-attempt route is exhausted, it surfaces the aggregate result: 504 when
+    the last failure was a timeout, 429 when it was a rate limit, and 502
+    otherwise. A 502 for an exhausted-by-rate-limit route would tell a client
+    that was just asked to back off that it may retry now.
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
@@ -4128,9 +4145,11 @@ def raise_all_streaming_attempts_failed(
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
     if len(route.attempts) <= 1:
         raise adapter.provider_error(exc) from exc
-    kind, _ = upstream_exception_shape(exc)
+    kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
+    if status_code == 429:
+        raise adapter.error(429, ALL_PROVIDERS_RATE_LIMITED_DETAIL, ErrorKind.RATE_LIMIT) from exc
     raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
 
 

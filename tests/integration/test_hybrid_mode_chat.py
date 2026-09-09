@@ -1193,6 +1193,76 @@ def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
     assert response.json() == {"detail": "All upstream providers timed out"}
 
 
+def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A route exhausted by rate limits keeps the 429. Flattening it into the
+    generic 502 would tell a client that has just been asked to back off that it
+    hit an outage and may retry now, which is the opposite instruction. Covers
+    ``raise_all_streaming_attempts_failed``'s rate-limit branch."""
+
+    class _RateLimited(Exception):
+        def __init__(self) -> None:
+            super().__init__("Quota exceeded. Please retry in 34.6s.")
+            self.status_code = 429
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-429",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "gemini",
+                            "model": "gemini-2.5-pro",
+                            "api_key": "gemini-key",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "att-b",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-busy",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        raise _RateLimited()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 429
+    assert response.json() == {"detail": "All upstream providers rate-limited this request"}
+
+
 def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

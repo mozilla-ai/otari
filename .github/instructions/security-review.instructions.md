@@ -84,10 +84,12 @@ resources.
 Never log or return provider keys, API keys, master keys, bearer tokens, raw
 provider bodies, prompts, responses, or tool payloads.
 
-Caller-fixable upstream 400, 404, and 422 errors may pass through only after
-`redact_upstream_message` and length limiting. Credential failures, provider
-billing failures, 5xx responses, and unknown failures use fixed public text.
-Expanding the pass-through set is a security change.
+Upstream errors the caller can act on may pass through only after
+`redact_upstream_message` and length limiting: the caller-fixable 400, 404, and
+422, plus the 429 whose text names the exhausted quota and the retry window.
+Credential failures, provider billing failures, 5xx responses, and unknown
+failures use fixed public text. Expanding the pass-through set is a security
+change.
 
 API keys are stored as one-way SHA-256 hashes, never as plaintext. Recoverable
 provider and tool credentials are encrypted, and responses expose only safe
