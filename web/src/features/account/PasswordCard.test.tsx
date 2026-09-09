@@ -2,10 +2,11 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import type { OrganizationContext } from "@/client"
 import { PasswordCard } from "@/features/account/PasswordCard"
 import { useOrganizationMembers } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 
 // Which of the two forms this card renders comes from the bootstrap, so every
@@ -29,15 +30,43 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function mockPut(body: unknown, status = 200) {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValue(jsonResponse(body, status))
-}
-
 const CLAIMED = {
   email: "operator@example.com",
   master_key_sign_in_retired: true,
+}
+
+// The card reads GET /v1/organizations/me unconditionally, the way the account
+// menu already does, so every test stubs it rather than leaving it failing in
+// the background of a test that is not about it. `caller: null` (the default
+// below, matching `organizationContext`'s own default) models the identity a
+// first boot leaves behind, with no address of its own; a test about the
+// migrated-identity gap overrides `caller.email`.
+function mockRequests({
+  caller = organizationContext().caller,
+  put = CLAIMED,
+  putStatus = 200,
+}: {
+  caller?: OrganizationContext["caller"]
+  put?: unknown
+  putStatus?: number
+} = {}) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input)
+    if (url === "/v1/organizations/me") {
+      return jsonResponse(organizationContext({ caller }))
+    }
+    if (url === "/v1/auth/password") {
+      return jsonResponse(put, putStatus)
+    }
+    return jsonResponse({ count: 0, data: [] })
+  })
+}
+
+/** The call this card made to `PUT /v1/auth/password`, if any. */
+function putCall(fetchMock: ReturnType<typeof vi.spyOn>) {
+  return fetchMock.mock.calls.find(
+    ([url]: [unknown]) => String(url) === "/v1/auth/password",
+  )
 }
 
 describe("PasswordCard on an unclaimed deployment", () => {
@@ -46,6 +75,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
   })
 
   it("asks for an address and a password, and for no current one", () => {
+    mockRequests()
     renderCard(["master_key"])
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument()
@@ -54,7 +84,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
   })
 
   it("claims the deployment and says the master key no longer signs in", async () => {
-    const fetchMock = mockPut(CLAIMED)
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
 
@@ -66,8 +96,8 @@ describe("PasswordCard on an unclaimed deployment", () => {
     )
     await user.click(screen.getByRole("button", { name: "Set password" }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    const [url, init] = fetchMock.mock.calls[0]
+    await waitFor(() => expect(putCall(fetchMock)).toBeDefined())
+    const [url, init] = putCall(fetchMock) ?? []
     expect(url).toBe("/v1/auth/password")
     expect(init?.method).toBe("PUT")
     // No `current_password`: there is none to prove, and sending null would be
@@ -84,7 +114,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
   })
 
   it("becomes the change form once the claim succeeds, without a reload", async () => {
-    mockPut(CLAIMED)
+    mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
 
@@ -103,16 +133,70 @@ describe("PasswordCard on an unclaimed deployment", () => {
   })
 })
 
+describe("PasswordCard on a migrated deployment (otari#992)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const MIGRATED_OPERATOR = {
+    user_id: "44444444-4444-4444-4444-444444444444",
+    email: "operator@example.com",
+    full_name: null,
+  }
+
+  it("prefills and locks the field to the address the identity already holds", async () => {
+    mockRequests({ caller: MIGRATED_OPERATOR })
+    renderCard(["master_key"])
+
+    const emailField = await screen.findByDisplayValue("operator@example.com")
+    expect(emailField).toHaveAttribute("readonly")
+    expect(
+      screen.getByText(/already has a sign-in address/i),
+    ).toBeInTheDocument()
+  })
+
+  it("claims without resending the address, and the gateway does not refuse it", async () => {
+    const fetchMock = mockRequests({ caller: MIGRATED_OPERATOR })
+    const user = userEvent.setup()
+    renderCard(["master_key"])
+
+    // The field is locked, so there is nothing to type into it; only the new
+    // password is this operator's to choose.
+    await screen.findByLabelText("Email")
+    await user.type(screen.getByLabelText("New password"), "a-real-password")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "a-real-password",
+    )
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+
+    await waitFor(() => expect(putCall(fetchMock)).toBeDefined())
+    const [, init] = putCall(fetchMock) ?? []
+    // No `email` at all: resending it risks a normalization mismatch the
+    // gateway would read as a change (EmailChangeNotSupportedError), and the
+    // identity already has this address, so nothing here needs to claim one.
+    expect(init?.body).toBe(JSON.stringify({ new_password: "a-real-password" }))
+  })
+
+  it("names the address in the claim copy instead of asking for one", async () => {
+    mockRequests({ caller: MIGRATED_OPERATOR })
+    renderCard(["master_key"])
+
+    expect(
+      await screen.findByText(
+        /Set a password to sign in as operator@example\.com/i,
+      ),
+    ).toBeInTheDocument()
+  })
+})
+
 describe("PasswordCard on a claimed deployment", () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
   it("requires the current password and sends it", async () => {
-    const fetchMock = mockPut({
-      email: "operator@example.com",
-      master_key_sign_in_retired: true,
-    })
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["password"])
 
@@ -126,8 +210,9 @@ describe("PasswordCard on a claimed deployment", () => {
     )
     await user.click(screen.getByRole("button", { name: "Change password" }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+    await waitFor(() => expect(putCall(fetchMock)).toBeDefined())
+    const [, init] = putCall(fetchMock) ?? []
+    expect(init?.body).toBe(
       JSON.stringify({
         current_password: "old-password",
         new_password: "new-password",
@@ -136,7 +221,7 @@ describe("PasswordCard on a claimed deployment", () => {
   })
 
   it("refuses a new password that is the current one, before asking the gateway", async () => {
-    const fetchMock = mockPut(CLAIMED)
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["password"])
 
@@ -153,11 +238,14 @@ describe("PasswordCard on a claimed deployment", () => {
     expect(
       screen.getByRole("button", { name: "Change password" }),
     ).toBeDisabled()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(putCall(fetchMock)).toBeUndefined()
   })
 
   it("renders the gateway's own refusal rather than a guess", async () => {
-    mockPut({ detail: "Current password is incorrect" }, 400)
+    mockRequests({
+      put: { detail: "Current password is incorrect" },
+      putStatus: 400,
+    })
     const user = userEvent.setup()
     renderCard(["password"])
 
@@ -178,10 +266,7 @@ describe("PasswordCard on a claimed deployment", () => {
   })
 
   it("drops the saved line as soon as any field is retyped", async () => {
-    mockPut({
-      email: "operator@example.com",
-      master_key_sign_in_retired: true,
-    })
+    mockRequests()
     const user = userEvent.setup()
     renderCard(["password"])
 
@@ -209,7 +294,7 @@ describe("PasswordCard policy checks", () => {
   })
 
   it("holds back a password under the minimum length", async () => {
-    const fetchMock = mockPut(CLAIMED)
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
 
@@ -219,11 +304,11 @@ describe("PasswordCard policy checks", () => {
 
     expect(screen.getByText("At least 8 characters.")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(putCall(fetchMock)).toBeUndefined()
   })
 
   it("counts the ceiling in bytes, not characters", async () => {
-    const fetchMock = mockPut(CLAIMED)
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
 
@@ -240,11 +325,11 @@ describe("PasswordCard policy checks", () => {
       "At most 72 bytes; accented characters count for more than one.",
     )
     expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(putCall(fetchMock)).toBeUndefined()
   })
 
   it("counts the minimum in code points, as the gateway does", async () => {
-    const fetchMock = mockPut(CLAIMED)
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
 
@@ -260,11 +345,11 @@ describe("PasswordCard policy checks", () => {
       "At least 8 characters.",
     )
     expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(putCall(fetchMock)).toBeUndefined()
   })
 
   it("holds back a confirmation that does not match", async () => {
-    const fetchMock = mockPut(CLAIMED)
+    const fetchMock = mockRequests()
     const user = userEvent.setup()
     renderCard(["master_key"])
 
@@ -279,7 +364,7 @@ describe("PasswordCard policy checks", () => {
       screen.getByText("The two passwords do not match."),
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(putCall(fetchMock)).toBeUndefined()
   })
 })
 
@@ -299,6 +384,9 @@ describe("PasswordCard and the member roster", () => {
       if (url.includes("/v1/organizations/me/members")) {
         memberFetches += 1
         return jsonResponse({ count: 0, data: [] })
+      }
+      if (url === "/v1/organizations/me") {
+        return jsonResponse(organizationContext())
       }
       return jsonResponse(CLAIMED)
     })
