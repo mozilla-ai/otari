@@ -24,7 +24,7 @@ Is it loading?
  ├── The whole route -> PageLoading
  └── One section    -> the section's own isLoading, which keeps the heading
 Did the page fail to render at all?
- └── PageError             (a catch boundary's panel; no page reaches for it)
+ └── PageError             (the catch boundaries' panel; see below)
 Is the action destructive and does it need more than a second click?
  └── ConfirmDialog          (otherwise ConfirmButton; see actions.md)
 ```

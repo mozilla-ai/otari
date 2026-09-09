@@ -15,10 +15,18 @@
  * where the crash was seen leaves the same field unguarded three lines up.
  *
  * `deployment_type` and `session_type` take no default, because they say what
- * this deployment *is* and `web/AGENTS.md` is explicit that the app must not
- * guess that. Both have been on this route since it was added, so no gateway
- * that answers it at all omits one; a payload missing them is passed through as
- * it arrived, and `DeploymentRoot` falls through to the sign-in screen.
+ * this deployment *is*, and `web/AGENTS.md` refuses to guess that for a
+ * bootstrap that never arrived. The same refusal is the right one for a
+ * bootstrap that arrived without them, though that file states only the first
+ * case. Both have been on this route since it was added (`88c24ac13`), so no
+ * gateway that answers it at all omits one; a payload missing them is passed
+ * through as it came, and `DeploymentRoot` falls through to the sign-in screen,
+ * where `Login` says the gateway published no way in.
+ *
+ * That last part is a claim about this gateway only. `bootstrap.py` says the
+ * contract is shared with otari.ai, which serves the same shape from its own
+ * codebase, so the cast in `normalizeBootstrap`'s return type is guarded by
+ * history rather than by the compiler.
  */
 
 import type { Defaulted, DeploymentBootstrap } from "@/client"

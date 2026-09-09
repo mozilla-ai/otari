@@ -23,6 +23,12 @@ foundations, components with their states, and the page archetypes as artboards.
 `src/main.tsx` fetches unauthenticated `GET /v1/bootstrap` before mounting
 React. Do not guess a deployment when that request fails.
 
+A gateway older than a bootstrap field does not send it, whatever the generated
+type promises, so `App` completes the payload once through
+`shared/helpers/bootstrap.ts` before anything below reads a field. Add a field
+to the bootstrap and that module stops compiling until it is given a default.
+The two fields naming the deployment take none, for the reason above.
+
 The bootstrap selects standalone, hosted, or hybrid presentation and publishes:
 
 - sign-in methods and configured OAuth providers

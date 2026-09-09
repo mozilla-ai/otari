@@ -225,10 +225,12 @@ export function Login() {
     useDeployment()
   const usesPassword = sign_in_methods.includes("password")
   // An empty list is the gateway saying it cannot mint a session at all right
-  // now, which is what `/v1/bootstrap` answers when it cannot reach its
-  // database. Falling through to a credential form would offer the operator a
-  // box whose only possible outcome is a refusal, and on a claimed deployment
-  // it would be the *master-key* box, whose refusal reads as "wrong key".
+  // now. Two ways to get there: `/v1/bootstrap` answers [] when it cannot reach
+  // its database, and `normalizeBootstrap` fills the same [] in for a gateway
+  // too old to publish the field (otari#806). Falling through to a credential
+  // form would offer the operator a box whose only possible outcome is a
+  // refusal, and on a claimed deployment it would be the *master-key* box,
+  // whose refusal reads as "wrong key".
   const signInUnavailable = sign_in_methods.length === 0
   // Every flow below the form begins with an email, so none of them can work
   // on a gateway that cannot send one. The two recovery links need one thing
