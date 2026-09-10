@@ -396,6 +396,36 @@ describe("OrganizationBudgetsPage", () => {
     ])
   })
 
+  it("seeds each opener's dialog fresh, whichever one was used last", async () => {
+    // Keying a dialog on an open counter is only right if every opener bumps
+    // it. Both cards have two, Add and a row's Edit, and one that skipped the
+    // bump would leave the previous open's values in the fields.
+    const requests = mockApi({ ceilings: [spendCeiling({ name: "Prod cap" })] })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await screen.findByRole("grid", {
+      name: "Organization spend ceilings",
+    })
+
+    // Edit first, so the add that follows has something to inherit.
+    await user.click(await within(table).findByRole("button", { name: "Edit" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("Prod cap")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("")
+
+    // And the other way round: a typed add must not reach the next edit.
+    await user.type(screen.getByLabelText("Name"), "Abandoned")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(within(table).getByRole("button", { name: "Edit" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("Prod cap")
+    expect(requests.some((request) => request.method === "PATCH")).toBe(false)
+  })
+
   it("names a failed workspace roster instead of just offering no workspaces", async () => {
     // Without this the owner sees the consequence (no workspace to pick, rows
     // reading "A workspace") and never the cause.

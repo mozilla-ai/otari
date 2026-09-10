@@ -292,6 +292,30 @@ describe("RateOverridesCard", () => {
     expect(requests.some((request) => request.method === "PUT")).toBe(false)
   })
 
+  it("seeds each opener's dialog fresh, whichever one was used last", async () => {
+    // Keying a dialog on an open counter is only right if every opener bumps
+    // it. This card has two, Add and a row's Edit, and one that skipped the
+    // bump would leave the previous open's rates in the fields. Rates are the
+    // expensive case: an inherited figure is what a model is billed at.
+    mockApi({ overrides: [pricingOverride()] })
+    const user = userEvent.setup()
+
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: /edit/i }))
+    const edited = await screen.findByLabelText(/input, per 1m tokens/i)
+    expect(edited).not.toHaveValue("")
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }))
+
+    await user.click(
+      await screen.findByRole("button", { name: /add override/i }),
+    )
+    expect(await screen.findByLabelText(/input, per 1m tokens/i)).toHaveValue(
+      "",
+    )
+    expect(await screen.findByLabelText(/model key/i)).toHaveValue("")
+  })
+
   it("deletes an override after a confirmation", async () => {
     const requests = mockApi({
       overrides: [pricingOverride()],
