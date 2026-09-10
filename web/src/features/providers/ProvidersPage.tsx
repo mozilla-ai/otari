@@ -9,9 +9,9 @@ import type {
   TestProviderResult,
   UpdateStoredProviderRequest,
 } from "@/client"
-import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { Field } from "@/design-system/forms/Field"
@@ -911,6 +911,7 @@ export function ProvidersPage() {
 
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string>()
   const [tests, setTests] = useState<Record<string, TestState>>({})
 
   const rows = buildRows(meta.data?.providers, stored.data)
@@ -1090,19 +1091,9 @@ export function ProvidersPage() {
               >
                 Edit
               </RowAction>
-              <ConfirmRowAction
-                confirmLabel="Delete"
-                isPending={deleteProvider.isPending}
-                // Clear the verdict too: a provider re-added under the same name
-                // is a different provider, and would otherwise inherit it.
-                onConfirm={() =>
-                  deleteProvider.mutate(row.instance, {
-                    onSuccess: () => clearTest(row.instance),
-                  })
-                }
-              >
+              <RowAction onPress={() => setPendingDelete(row.instance)}>
                 Delete
-              </ConfirmRowAction>
+              </RowAction>
             </RowActionRow>
             <TestOutcome state={tests[row.instance]} />
           </div>
@@ -1163,8 +1154,7 @@ export function ProvidersPage() {
           stored.error ??
           context.error ??
           health.error ??
-          updateSettings.error ??
-          deleteProvider.error
+          updateSettings.error
         }
       />
 
@@ -1255,6 +1245,39 @@ export function ProvidersPage() {
           />
         </TableScrollFrame>
       )}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          deleteProvider.reset()
+        }}
+        heading="Delete provider"
+        body={
+          pendingDelete
+            ? `${pendingDelete} and the credential stored with it are removed. A request routed to it fails until another provider serves its models.`
+            : null
+        }
+        confirmLabel="Delete provider"
+        isPending={deleteProvider.isPending}
+        error={deleteProvider.error}
+        onConfirm={() => {
+          if (pendingDelete === undefined) return
+          deleteProvider.mutate(pendingDelete, {
+            // Clear the verdict too: a provider re-added under the same name is
+            // a different provider, and would otherwise inherit it.
+            onSuccess: () => {
+              clearTest(pendingDelete)
+              setPendingDelete(undefined)
+            },
+          })
+        }}
+      />
     </div>
   )
 }

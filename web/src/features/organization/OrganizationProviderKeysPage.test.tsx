@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -428,6 +428,43 @@ describe("OrganizationProviderKeysPage", () => {
     expect(await screen.findByText("Retired")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+  })
+
+  it("deletes an archived key only through the confirm dialog", async () => {
+    // otari-ai#2110. Archive keeps its two-click row confirm, because it is the
+    // reversible step; the delete that follows it is the one behind a modal.
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          id: "88888888-8888-8888-8888-888888888888",
+          name: "Retired",
+          archived_at: "2026-08-20T00:00:00+00:00",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(await screen.findByText("Show archived (1)"))
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/Retired and its stored/)).toBeVisible()
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" &&
+            request.url.includes("88888888-8888-8888-8888-888888888888"),
+        ),
+      ).toBe(true),
+    )
   })
 
   it("withholds the keys and their read from a member who cannot manage the organization", async () => {

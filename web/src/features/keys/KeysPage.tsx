@@ -888,33 +888,25 @@ export function KeysPage() {
     }
   }
 
-  // Memoized on the values the cells actually read (mutation pending flags and
-  // Which row is armed, and for what. Page state rather than per-button state,
-  // because the confirmation is a strip under the row now and only one may be
-  // open at a time.
-  const [armed, setArmed] = useState<{
-    id: string
-    kind: "regenerate" | "delete"
-  } | null>(null)
+  // Which row is armed to regenerate. Page state rather than per-button state,
+  // because the confirmation is a strip under the row and only one may be open
+  // at a time.
+  const [armed, setArmed] = useState<string | null>(null)
   // Which row was armed last, kept after `armed` clears. Cancelling unmounts the
   // strip that had focus, so the caret has to go back to the action that armed
   // it, and `useConfirmationFocus` reads its `triggerRef` in an effect that runs
-  // *after* the commit that cleared `armed`. A ref attached on `armed?.id === k.id`
+  // *after* the commit that cleared `armed`. A ref attached on `armed === k.id`
   // would already have been detached by then and the restore would find null, so
   // the trigger is identified by a value that outlives the transition.
-  const [lastArmed, setLastArmed] = useState<{
-    id: string
-    kind: "regenerate" | "delete"
-  } | null>(null)
-  const arm = useCallback(
-    (next: { id: string; kind: "regenerate" | "delete" }) => {
-      setLastArmed(next)
-      setArmed(next)
-    },
-    [],
-  )
+  const [lastArmed, setLastArmed] = useState<string | null>(null)
+  const arm = useCallback((id: string) => {
+    setLastArmed(id)
+    setArmed(id)
+  }, [])
   const { triggerRef, confirmRef } = useConfirmationFocus(armed !== null)
+  const [pendingDelete, setPendingDelete] = useState<ApiKey>()
 
+  // Memoized on the values the cells actually read (mutation pending flags and
   // the stable handlers) so DataTable's per-row cache holds across selection
   // clicks; see the DataTable docstring.
   const columns = useMemo<DataTableColumn<ApiKey>[]>(
@@ -1045,30 +1037,16 @@ export function KeysPage() {
               Edit
             </RowAction>
             <RowAction
-              ref={
-                lastArmed?.id === k.id && lastArmed.kind === "regenerate"
-                  ? triggerRef
-                  : undefined
-              }
-              isDanger={armed?.id === k.id && armed.kind === "regenerate"}
-              onPress={() => arm({ id: k.id, kind: "regenerate" })}
+              ref={lastArmed === k.id ? triggerRef : undefined}
+              isDanger={armed === k.id}
+              onPress={() => arm(k.id)}
             >
               Regenerate
             </RowAction>
             {/* Permanent delete is only offered once a key is disabled, so a live
               caller can't be broken (and its audit trail erased) in one click. */}
             {k.is_active ? null : (
-              <RowAction
-                ref={
-                  lastArmed?.id === k.id && lastArmed.kind === "delete"
-                    ? triggerRef
-                    : undefined
-                }
-                isDanger={armed?.id === k.id && armed.kind === "delete"}
-                onPress={() => arm({ id: k.id, kind: "delete" })}
-              >
-                Delete
-              </RowAction>
+              <RowAction onPress={() => setPendingDelete(k)}>Delete</RowAction>
             )}
           </RowActionRow>
         ),
@@ -1096,41 +1074,21 @@ export function KeysPage() {
   // inside the actions cell. Referentially stable per the DataTable docstring.
   const renderArmed = useCallback(
     (k: ApiKey) => {
-      if (!armed || armed.id !== k.id) return null
-      if (armed.kind === "regenerate") {
-        return (
-          <ArmedStrip
-            confirmRef={confirmRef}
-            confirmLabel="Regenerate"
-            isPending={rotateKey.isPending}
-            message={
-              <>
-                Regenerate the secret for <strong>{label(k)}</strong>? The
-                current secret stops working immediately, with no grace period.
-              </>
-            }
-            onConfirm={() => {
-              setArmed(null)
-              regenerate(k)
-            }}
-            onCancel={() => setArmed(null)}
-          />
-        )
-      }
+      if (armed !== k.id) return null
       return (
         <ArmedStrip
           confirmRef={confirmRef}
-          confirmLabel="Delete permanently"
-          isPending={deleteKey.isPending}
+          confirmLabel="Regenerate"
+          isPending={rotateKey.isPending}
           message={
             <>
-              Permanently delete <strong>{label(k)}</strong>? This removes the
-              key and unlinks its usage history. Cannot be undone.
+              Regenerate the secret for <strong>{label(k)}</strong>? The current
+              secret stops working immediately, with no grace period.
             </>
           }
           onConfirm={() => {
             setArmed(null)
-            deleteKey.mutate(k.id)
+            regenerate(k)
           }}
           onCancel={() => setArmed(null)}
         />
@@ -1138,14 +1096,7 @@ export function KeysPage() {
     },
     // Neither memberLabels nor isDeploymentWide is read here any more: the
     // strip's copy names the key, not its owner.
-    [
-      armed,
-      rotateKey.isPending,
-      deleteKey.isPending,
-      deleteKey.mutate,
-      regenerate,
-      confirmRef,
-    ],
+    [armed, rotateKey.isPending, regenerate, confirmRef],
   )
 
   // Bulk delete targets only already-disabled keys, mirroring the per-row rule
@@ -1178,11 +1129,8 @@ export function KeysPage() {
           : "Create and manage your own keys for calling this gateway. Secrets are shown once at creation."}
       </PageIntro>
 
-      <ErrorBanner
-        error={
-          keys.error ?? updateKey.error ?? rotateKey.error ?? deleteKey.error
-        }
-      />
+      {/* Not the deletes: each reports inside its own confirm dialog. */}
+      <ErrorBanner error={keys.error ?? updateKey.error ?? rotateKey.error} />
 
       {/* A key's owner and its spending limit are both set elsewhere now, on the
           organization rail. This page is where an operator arrives looking for
@@ -1329,11 +1277,42 @@ export function KeysPage() {
             selectionMode="multiple"
             selectedKeys={selection.selectedKeys}
             onSelectionChange={selection.onSelectionChange}
-            detailKey={armed?.id ?? null}
+            detailKey={armed}
             renderDetail={renderArmed}
           />
         </TableScrollFrame>
       )}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          deleteKey.reset()
+        }}
+        heading="Delete API key"
+        body={
+          pendingDelete ? (
+            <>
+              Permanently delete <strong>{label(pendingDelete)}</strong>? This
+              removes the key and unlinks its usage history. Cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete permanently"
+        isPending={deleteKey.isPending}
+        error={deleteKey.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          deleteKey.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
 
       <ConfirmDialog
         isOpen={bulkDeleteOpen}

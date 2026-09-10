@@ -35,7 +35,9 @@ band" rule wants the friction to point: the accent has to be asked for.
 Is it the single thing this band is for?
  ├── Yes -> variant="primary"          (two in one band means the band has no hierarchy)
  └── No
-      ├── Is it destructive or hard to undo?
+      ├── Does it delete a record?
+      │    └── Yes -> a neutral trigger that opens a ConfirmDialog (see below)
+      ├── Is it destructive or hard to undo, but deletes nothing?
       │    └── Yes -> variant="danger", and reach for ConfirmButton
       └── Default -> variant="ghost"
 ```
@@ -89,10 +91,50 @@ written the same way.
 control *is*, not where it sits: `CopyButton` renders in tables, panels, banners and
 bare pages, so no container can reach it.
 
+## Deleting a record: a dialog, never an in-place confirm
+
+**Every delete of a record goes through `ConfirmDialog`** (otari-ai#2110), whether
+it deletes one row or a selection of them. The trigger is a plain `RowAction` or a
+ghost `Button` that only opens the dialog, and the dialog carries the danger
+confirm. A confirmation that armed inside the row read as part of the table rather
+than as a decision, and it had nowhere to put the consequence: the sentence that
+says what the deletion costs does not fit on a row action.
+
+```tsx
+// Correct: a neutral trigger, and the decision in the dialog
+<RowAction onPress={() => setPendingDelete(row)}>Delete</RowAction>
+…
+<ConfirmDialog
+  isOpen={pendingDelete !== undefined}
+  onOpenChange={(open) => {
+    if (!open) setPendingDelete(undefined)
+  }}
+  heading="Delete rate override"
+  body={pendingDelete ? `${pendingDelete.model_key} returns to the catalog rate…` : null}
+  confirmLabel="Delete override"
+  isPending={remove.isPending}
+  error={remove.error}
+  onConfirm={…}
+/>
+
+// Incorrect: the confirmation arms in the row, so the decision reads as a cell
+<ConfirmRowAction confirmLabel="Delete" onConfirm={remove}>Delete</ConfirmRowAction>
+```
+
+`pendingDelete` holding the target row (`undefined` when closed) is the idiom, and
+the mutation's `onSuccess` clears it. The dialog owns `isPending` and `error`, so
+the page's own `ErrorBanner` drops the delete: a message behind the backdrop is a
+message the operator does not read. See [feedback.md](feedback.md).
+
+The dialog names the object and the consequence, and its confirm names the
+consequence rather than repeating the trigger's word: "Delete permanently", not
+"Delete" under a "Delete".
+
 ## The two-step destructive confirm
 
-`ConfirmButton` for a page-level destructive action, `ConfirmRowAction` for one in
-a table row. Both arm on the first click and destroy on the second.
+For a destructive action that **deletes nothing**: a regenerate, an archive, a
+reset to a default. `ConfirmButton` at page level, `ConfirmRowAction` in a table
+row. Both arm on the first click and destroy on the second.
 
 The resting trigger is **neutral** and the armed confirm is danger. The first click
 is safe, so spending the loudest signal in the product on it wastes it; the danger
@@ -103,12 +145,12 @@ names the consequence.
 
 ```tsx
 // Correct
-<ConfirmButton confirmLabel="Remove permanently" onConfirm={remove}>
-  Remove tool
+<ConfirmButton confirmLabel="Reset to default" onConfirm={reset}>
+  Reset price
 </ConfirmButton>
 
 // Incorrect: the same word twice tells the operator nothing about what changed
-<ConfirmButton confirmLabel="Remove" onConfirm={remove}>Remove</ConfirmButton>
+<ConfirmButton confirmLabel="Reset" onConfirm={reset}>Reset</ConfirmButton>
 ```
 
 **The Cancel that appears when armed is load-bearing. Do not simplify it away.**
@@ -125,8 +167,8 @@ hides.
 | `RowAction` | `onPress`, `isDanger?`, `isDisabled?`, `ariaLabel?`, children | An action in a table row. Caption-sized, not a `Button` |
 | `RowActionRow` | children | The trailing lane those sit in. **Use this one** |
 | `RowActions` | children | A near-duplicate with a tighter gap, on 2 call sites. Do not reach for it in new code |
-| `ConfirmButton` | `confirmLabel`, `onConfirm`, `isPending?`, children | The page-level two-step confirm |
-| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, children | The same two-step inside a row. It supplies its own `isDanger` and its own Cancel |
+| `ConfirmButton` | `confirmLabel`, `onConfirm`, `isPending?`, children | The page-level two-step confirm, for a destructive action that deletes nothing |
+| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, children | The same two-step inside a row. It supplies its own `isDanger` and its own Cancel. Not for a delete |
 | `RefreshButton` | `onRefresh`, `isFetching?`, `updatedAt?`, `label?` | A refetch, with its own freshness caption. Pass `updatedAt` or the caption reads nothing |
 | `CopyButton` | `value`, `label` | Copy one value. Icon-only, 44x44 hit area |
 | `CopyField` | `label`, `value`, `multiline?`, `concealed?`, `action?` | A readonly field of a value to paste elsewhere. `concealed` is what it shows until the operator asks for the value, for a credential: Copy copies the real one either way, so a key is handed over without being read off the screen |

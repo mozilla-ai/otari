@@ -1081,10 +1081,6 @@ describe("content text wears a type role", () => {
       "a table head row, an empty state, and fieldset prose",
     ],
     [
-      "features/budgets/BudgetsPage.tsx",
-      "the delete confirmation's consequence text",
-    ],
-    [
       "features/activity/ActivityTimeline.tsx",
       "the brush's drag hint beside the chart",
     ],

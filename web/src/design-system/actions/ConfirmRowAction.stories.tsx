@@ -6,8 +6,10 @@ import { RowAction, RowActionRow } from "./RowAction"
 /**
  * The two-step destructive confirm, inside a table row.
  *
- * `ConfirmButton`'s sibling for a row. It supplies its own danger styling and
- * its own Cancel, so a call site cannot paint the hue at rest.
+ * `ConfirmButton`'s sibling for a row, for a destructive action that deletes
+ * nothing: archiving a provider key is the one left. A delete goes through
+ * `ConfirmDialog` (otari-ai#2110). It supplies its own danger styling and its
+ * own Cancel, so a call site cannot paint the hue at rest.
  *
  * **The Cancel that appears when armed is load-bearing. Do not simplify it
  * away.** The escalation is hue-only, and hue is the one channel a red-green
@@ -20,9 +22,9 @@ const meta = {
   title: "Design system/Actions/ConfirmRowAction",
   component: ConfirmRowAction,
   args: {
-    confirmLabel: "Revoke permanently",
+    confirmLabel: "Archive",
     onConfirm: () => {},
-    children: "Revoke",
+    children: "Archive",
   },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof ConfirmRowAction>

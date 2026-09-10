@@ -176,7 +176,7 @@ and [web/AGENTS.md](../AGENTS.md).
 | [colors.md](colors.md) | Surfaces, text ramp, borders, the accent's five jobs, status, chart slots |
 | [typography.md](typography.md) | The 12 type roles, the ladder rule, the three families |
 | [layout.md](layout.md) | Bands, the bleed rule, `Section`, `PageIntro`, `SettingsGroup`, `SettingRow`, page recipes |
-| [actions.md](actions.md) | The three button variants, sizes, places, icon-only, the two-step confirm, and the other action shapes (`RowAction`, `RefreshButton`, `CopyButton`) |
+| [actions.md](actions.md) | The three button variants, sizes, places, icon-only, the delete confirm dialog and the two-step confirm that is left beside it, and the other action shapes (`RowAction`, `RefreshButton`, `CopyButton`) |
 | [forms.md](forms.md) | `Field`, `SecretField`, `Toggle`, `Checkbox`, selects, validation timing |
 | [data.md](data.md) | `DataTable`, pagination, bulk actions |
 | [metrics.md](metrics.md) | KPI strip, trends, meters, status marks, charts |

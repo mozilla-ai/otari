@@ -5,9 +5,9 @@ import type {
   CreateOrganizationDomainRequest,
   OrganizationDomain,
 } from "@/client"
-import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
 import { CopyField } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
@@ -191,6 +191,7 @@ export function OrganizationDomainsPage() {
   const update = useUpdateOrganizationDomain()
   const remove = useDeleteOrganizationDomain()
   const [adding, setAdding] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<OrganizationDomain>()
 
   const rows = domains.data?.data ?? []
   // Both states need the same card: one has never had a proof, the other's has
@@ -268,13 +269,13 @@ export function OrganizationDomainsPage() {
               {row.enabled ? "Pause" : "Resume"}
             </Button>
           ) : null}
-          <ConfirmButton
-            confirmLabel="Remove claim"
-            isPending={remove.isPending}
-            onConfirm={() => remove.mutate(row.id)}
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => setPendingDelete(row)}
           >
             Remove domain
-          </ConfirmButton>
+          </Button>
         </div>
       ),
     })
@@ -298,9 +299,7 @@ export function OrganizationDomainsPage() {
         record is verified.
       </PageIntro>
 
-      <ErrorBanner
-        error={context.error ?? domains.error ?? update.error ?? remove.error}
-      />
+      <ErrorBanner error={context.error ?? domains.error ?? update.error} />
 
       {/* Held back until the context has answered, so an admin is not told for
           one paint that they may not be here. */}
@@ -328,6 +327,34 @@ export function OrganizationDomainsPage() {
           />
         </TableScrollFrame>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
+        heading="Remove email domain"
+        body={
+          pendingDelete
+            ? `${pendingDelete.domain} stops admitting anyone to this organization. Members who already joined through it keep their membership, and claiming it again means proving the DNS record over.`
+            : null
+        }
+        confirmLabel="Remove claim"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
     </div>
   )
 }

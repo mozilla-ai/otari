@@ -1,6 +1,5 @@
 import { Button } from "@heroui/react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { ConfirmButton } from "../actions/ConfirmButton"
 import { BulkActionBar } from "./BulkActionBar"
 
 const meta = {
@@ -13,14 +12,16 @@ const meta = {
     canSelectAllMatching: true,
     onSelectAllMatching: () => {},
     onClear: () => {},
+    // The delete opens a `ConfirmDialog`, as every delete does; the bar holds
+    // the trigger, not the confirmation.
     children: (
       <>
         <Button size="sm" variant="ghost">
           Export
         </Button>
-        <ConfirmButton confirmLabel="Delete 3 rows" onConfirm={() => {}}>
+        <Button size="sm" variant="danger">
           Delete
-        </ConfirmButton>
+        </Button>
       </>
     ),
   },
@@ -43,9 +44,9 @@ export const SingleSelection: Story = {
   args: {
     selectedCount: 1,
     children: (
-      <ConfirmButton confirmLabel="Delete 1 row" onConfirm={() => {}}>
+      <Button size="sm" variant="danger">
         Delete
-      </ConfirmButton>
+      </Button>
     ),
   },
 }

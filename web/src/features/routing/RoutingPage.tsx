@@ -8,10 +8,10 @@ import type {
   PolicySpec,
   RoutingPolicyResponse,
 } from "@/client"
-import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Field } from "@/design-system/forms/Field"
@@ -1333,13 +1333,12 @@ export function RoutingPage() {
   // selected one, so a write to an existing row goes back to the workspace that
   // row lives in (`rowWorkspace` below, and the Edit form's `workspaceId`).
   // Using the selection would create a second policy of the same name in the
-  // selected workspace and leave the edited one untouched. Written inline at
-  // both sites rather than as a helper, so the columns memo keeps depending on
-  // two stable values instead of a function rebuilt every render.
+  // selected workspace and leave the edited one untouched.
   // A deep link may pre-fill the add form with ?target=provider:model.
   const initialTarget = useUrlValue("target")
   const [adding, setAdding] = useState(initialTarget !== "")
   const [editing, setEditing] = useState<RoutingRow | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
   // Readiness opens inline under its own row (DataTable's accordion), because it
   // describes one policy and the operator clicked that policy. A card above the
   // table would put the panel nowhere near the control that opened it.
@@ -1533,54 +1532,35 @@ export function RoutingPage() {
                 so nothing is lost.
               </span>
             )}
-            <ConfirmRowAction
-              confirmLabel="Confirm"
-              isPending={
-                deletePolicy.isPending ||
-                deleteAlias.isPending ||
-                deleteOrgPolicy.isPending ||
-                deleteOrgAlias.isPending
-              }
-              onConfirm={() => {
-                // The tenant surface names the workspace and has no user scope;
-                // the deployment-wide one defaults the workspace and keeps it.
-                const rowWorkspace = isOperator
-                  ? null
-                  : (policy.workspace_id ?? writeWorkspaceId)
-                if (rowWorkspace !== null) {
-                  const scoped = {
-                    name: policy.name,
-                    workspaceId: rowWorkspace,
-                  }
-                  if (policy.kind === "alias") deleteOrgAlias.mutate(scoped)
-                  else deleteOrgPolicy.mutate(scoped)
-                  return
-                }
-                const deployment = {
-                  name: policy.name,
-                  userId: policy.user_id,
-                }
-                if (policy.kind === "alias") deleteAlias.mutate(deployment)
-                else deletePolicy.mutate(deployment)
-              }}
-            >
+            <RowAction onPress={() => setPendingDelete(policy)}>
               Delete
-            </ConfirmRowAction>
+            </RowAction>
           </RowActionRow>
         )
       },
     })
     return base
-  }, [
-    canEdit,
-    deleteAlias,
-    deleteOrgAlias,
-    deleteOrgPolicy,
-    deletePolicy,
-    expanded,
-    isOperator,
-    writeWorkspaceId,
-  ])
+  }, [canEdit, expanded, isOperator])
+
+  // Which of the four delete surfaces a row goes to. The tenant one names the
+  // workspace and has no user scope; the deployment-wide one defaults the
+  // workspace and keeps it.
+  const deleteWorkspaceFor = (row: RoutingRow) =>
+    isOperator ? null : (row.workspace_id ?? writeWorkspaceId)
+  const deleteMutationFor = (row: RoutingRow) =>
+    deleteWorkspaceFor(row) !== null
+      ? row.kind === "alias"
+        ? deleteOrgAlias
+        : deleteOrgPolicy
+      : row.kind === "alias"
+        ? deleteAlias
+        : deletePolicy
+  // Resolved for the pending row alone, not as a chain over all four: a refusal
+  // stays on its mutation until the next call, so reading every one of them
+  // would report the last row's failure over this row's confirm.
+  const pendingDeleteMutation = pendingDelete
+    ? deleteMutationFor(pendingDelete)
+    : undefined
 
   return (
     <div className="flex flex-col gap-6">
@@ -1612,16 +1592,14 @@ export function RoutingPage() {
             : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."}
       </PageIntro>
 
+      {/* The reads only. Every delete on this page reports inside its own
+          confirm dialog, which is where the operator is looking. */}
       <ErrorBanner
         error={
           policies.error ??
           memberPolicies.error ??
           aliases.error ??
-          memberAliases.error ??
-          deletePolicy.error ??
-          deleteAlias.error ??
-          deleteOrgPolicy.error ??
-          deleteOrgAlias.error
+          memberAliases.error
         }
       />
 
@@ -1688,6 +1666,57 @@ export function RoutingPage() {
           />
         </TableScrollFrame>
       )}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          deletePolicy.reset()
+          deleteAlias.reset()
+          deleteOrgPolicy.reset()
+          deleteOrgAlias.reset()
+        }}
+        heading={
+          pendingDelete?.kind === "alias" ? "Delete alias" : "Delete policy"
+        }
+        body={
+          pendingDelete
+            ? `${pendingDelete.name} stops resolving. A request that still sends it as its model is refused, so update the callers that name it.`
+            : null
+        }
+        confirmLabel={
+          pendingDelete?.kind === "alias" ? "Delete alias" : "Delete policy"
+        }
+        isPending={pendingDeleteMutation?.isPending ?? false}
+        error={pendingDeleteMutation?.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          const onSuccess = () => setPendingDelete(undefined)
+          const rowWorkspace = deleteWorkspaceFor(pendingDelete)
+          if (rowWorkspace !== null) {
+            const scoped = {
+              name: pendingDelete.name,
+              workspaceId: rowWorkspace,
+            }
+            if (pendingDelete.kind === "alias")
+              deleteOrgAlias.mutate(scoped, { onSuccess })
+            else deleteOrgPolicy.mutate(scoped, { onSuccess })
+            return
+          }
+          const deployment = {
+            name: pendingDelete.name,
+            userId: pendingDelete.user_id,
+          }
+          if (pendingDelete.kind === "alias")
+            deleteAlias.mutate(deployment, { onSuccess })
+          else deletePolicy.mutate(deployment, { onSuccess })
+        }}
+      />
     </div>
   )
 }

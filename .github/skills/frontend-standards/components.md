@@ -167,7 +167,8 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 | Error alert from an unknown thrown value | `ErrorBanner` (`feedback/`; pairs with `errorMessage(error)` from `feedback/errorMessage`) |
 | Info/warning callout | `InfoBanner` (`feedback/`; `tone="info" \| "warning"`) |
 | Page title + description + action | `PageIntro` (`layout/`). **Not** `PageHeader`, which is in `deprecated/` |
-| Destructive action without a modal | `ConfirmButton` (`actions/`; two-click arm/confirm), or `ConfirmRowAction` inside a table row |
+| Deleting a record | `ConfirmDialog` (`feedback/`), always, one row or a selection. A neutral `RowAction` or ghost `Button` opens it and the dialog carries the danger confirm; the delete's `isPending` and `error` go to the dialog, not to the page's `ErrorBanner`. See [actions.md](../../../web/design/actions.md) |
+| Destructive action that deletes nothing (regenerate, archive, reset) | `ConfirmButton` (`actions/`; two-click arm/confirm), or `ConfirmRowAction` inside a table row |
 | Filter over a small fixed option set | `FilterSelect` (`navigation/`; a HeroUI `Select`, so the list is a popover anchored under the trigger) |
 | Filter over a large or open option set | `FilterMultiComboBox` (`navigation/`; type-to-filter, holds a set of values; `allowsCustom` when the value space is not enumerable) |
 | Applied filters, each removable | `FilterChips` (`navigation/`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |

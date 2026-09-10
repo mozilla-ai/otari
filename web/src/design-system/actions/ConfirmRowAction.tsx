@@ -9,6 +9,11 @@ import { RowAction } from "./RowAction"
  * beside it. It replaces `ConfirmButton` on a table row for the same reason the
  * other actions lost their boxes; `ConfirmButton` stays for the forms and cards
  * where a destructive control is the only control and a button is right.
+ *
+ * Neither is for a delete: a record's deletion goes through `ConfirmDialog`,
+ * because a confirmation armed inside the row reads as part of the table rather
+ * than as a decision, and has nowhere to say what the deletion costs
+ * (otari-ai#2110).
  */
 export function ConfirmRowAction({
   confirmLabel,

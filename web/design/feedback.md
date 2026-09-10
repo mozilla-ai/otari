@@ -25,8 +25,10 @@ Is it loading?
  └── One section    -> the section's own isLoading, which keeps the heading
 Did the page fail to render at all?
  └── PageError             (the catch boundaries' panel; see below)
-Is the action destructive and does it need more than a second click?
- └── ConfirmDialog          (otherwise ConfirmButton; see actions.md)
+Does the action delete a record?
+ └── ConfirmDialog          (always, one row or many; see actions.md)
+Is it destructive but deletes nothing (regenerate, archive, reset)?
+ └── ConfirmButton          (the two-step confirm; see actions.md)
 ```
 
 ## Signatures
@@ -105,12 +107,15 @@ hidden is carrying that meaning on its own, at `opacity: 0.4`.
 
 ## ConfirmDialog
 
-For a destructive action that needs a sentence of context, or that has to report an
-error in place. `confirmVariant` defaults to `danger`. It owns `isPending` and
-`error` so the caller does not build a second error surface inside a modal.
+**Every delete of a record**, and any other destructive action that needs a
+sentence of context or has to report an error in place. `confirmVariant` defaults
+to `danger`. It owns `isPending` and `error` so the caller does not build a second
+error surface inside a modal, which is also why the page's own `ErrorBanner` stops
+carrying that mutation: reporting it in both puts the message the operator needs
+behind the backdrop they are looking at.
 
-Prefer `ConfirmButton` when the label alone is enough: a modal for a revoke that
-takes one click to undo is a wall.
+`ConfirmButton`'s two-step is what is left, for a destructive action that deletes
+nothing. See [actions.md](actions.md) for both.
 
 ## Copy
 

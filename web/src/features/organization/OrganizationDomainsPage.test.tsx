@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -94,6 +94,33 @@ describe("OrganizationDomainsPage", () => {
     expect(
       screen.getByRole("button", { name: "Remove domain" }),
     ).toBeInTheDocument()
+  })
+
+  it("removes a claim only through the confirm dialog", async () => {
+    // otari-ai#2110. The dialog names the domain and says what survives the
+    // removal, which the two-click button had no room to.
+    const requests = mockApi({ domains: [organizationDomain()] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Remove domain" }),
+    )
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/acme.example stops admitting anyone/),
+    ).toBeVisible()
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove claim" }),
+    )
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "DELETE")).toBe(
+        true,
+      ),
+    )
   })
 
   it("shows a verified, enabled claim as active and pausable", async () => {

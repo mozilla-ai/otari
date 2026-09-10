@@ -455,45 +455,6 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
 
 // ---------- onboarding ----------
 
-// ---------- inline confirm (names the target, no modal) ----------
-
-function InlineDelete({
-  label,
-  isPending,
-  onConfirm,
-}: {
-  label: string
-  isPending: boolean
-  onConfirm: () => void
-}) {
-  const [armed, setArmed] = useState(false)
-
-  if (!armed) {
-    return <RowAction onPress={() => setArmed(true)}>Delete</RowAction>
-  }
-  // Armed, this one keeps its sentence: a budget's deletion has a consequence
-  // the label cannot carry, and a row action that only said "Delete permanently"
-  // would be asking for a decision without the fact behind it. The tinted box is
-  // gone with every other box on the row; the words and the danger ink are what
-  // is left, and they were doing the work anyway.
-  return (
-    <span className="flex flex-col items-end gap-1 text-right">
-      <span className="max-w-xs text-xs text-muted">
-        Delete <strong className="font-medium">{label}</strong>? Users keep
-        their spend but lose this limit. Cannot be undone.
-      </span>
-      <span className="flex items-center gap-4">
-        <RowAction isDanger isDisabled={isPending} onPress={onConfirm}>
-          Delete permanently
-        </RowAction>
-        <RowAction isDisabled={isPending} onPress={() => setArmed(false)}>
-          Cancel
-        </RowAction>
-      </span>
-    </span>
-  )
-}
-
 // ---------- page ----------
 
 // A short, stable fingerprint for a budget id (its leading segment), shown when a
@@ -543,6 +504,7 @@ function DeploymentBudgetsPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Budget>()
   const [assignmentError, setAssignmentError] = useState<Error | null>(null)
   const [pendingAssignments, setPendingAssignments] = useState<{
     budgetId: string
@@ -720,16 +682,12 @@ function DeploymentBudgetsPage() {
             >
               Edit
             </RowAction>
-            <InlineDelete
-              label={budgetLabel(b)}
-              isPending={deleteBudget.isPending}
-              onConfirm={() => deleteBudget.mutate(b.budget_id)}
-            />
+            <RowAction onPress={() => setPendingDelete(b)}>Delete</RowAction>
           </RowActionRow>
         ),
       },
     ],
-    [historyOpen, deleteBudget.isPending, deleteBudget.mutate, defaultFor],
+    [historyOpen, defaultFor],
   )
 
   /**
@@ -838,7 +796,6 @@ function DeploymentBudgetsPage() {
           budgets.error ??
           createBudget.error ??
           updateBudget.error ??
-          deleteBudget.error ??
           updateUser.error ??
           // Without this a failed roster silently withholds the assignment
           // control and the "Default for" column, with nothing saying why.
@@ -989,6 +946,34 @@ function DeploymentBudgetsPage() {
           <ResetHistory budgetId={historyBudget.budget_id} />
         </Section>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          deleteBudget.reset()
+        }}
+        heading="Delete budget"
+        body={
+          pendingDelete
+            ? `${budgetLabel(pendingDelete)} stops existing. Users on it keep the spend they have already recorded but lose this limit, so nothing caps them until another budget does.`
+            : null
+        }
+        confirmLabel="Delete permanently"
+        isPending={deleteBudget.isPending}
+        error={deleteBudget.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          deleteBudget.mutate(pendingDelete.budget_id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
 
       <ConfirmDialog
         isOpen={bulkDeleteOpen}

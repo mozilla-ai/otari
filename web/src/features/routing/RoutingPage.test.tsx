@@ -101,6 +101,8 @@ function mockApi(
       user_id: string | null
       workspace_id?: string
     }[]
+    // What a delete of a deployment-wide policy answers, for the error path.
+    deleteBody?: { status: number; detail: string }
   } = {},
 ) {
   let list = [...policies]
@@ -238,6 +240,16 @@ function mockApi(
           return jsonResponse(row)
         }
         if (method === "DELETE") {
+          if (opts.deleteBody) {
+            // Not `jsonResponse`, which is a 200 by construction.
+            return new Response(
+              JSON.stringify({ detail: opts.deleteBody.detail }),
+              {
+                status: opts.deleteBody.status,
+                headers: { "Content-Type": "application/json" },
+              },
+            )
+          }
           const name = decodeURIComponent(
             url.split("?")[0].split("/").pop() ?? "",
           )
@@ -640,6 +652,98 @@ describe("RoutingPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("names the policy in a confirm dialog before deleting it", async () => {
+    // otari-ai#2110: the confirmation used to arm inside the row, where it read
+    // as part of the table rather than as a decision. It is a modal now, and
+    // the policy it is about has to be named in it: the row is behind the
+    // backdrop, so the name on the row is no longer the operator's reference.
+    const { calls } = mockApi([policy("fast", CHAIN)])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Delete" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/^fast stops resolving/)).toBeVisible()
+    // Nothing is sent by opening it.
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete policy" }),
+    )
+
+    const deletes = calls.filter((call) => call.method === "DELETE")
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].url).toContain("/v1/routing/policies/fast")
+  })
+
+  it("deletes nothing when the confirm dialog is cancelled", async () => {
+    const { calls } = mockApi([policy("fast", CHAIN)])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    expect(screen.getByText("fast")).toBeInTheDocument()
+  })
+
+  it("reports a refused delete inside the dialog, leaving the row", async () => {
+    // The page banner no longer carries this: the operator is looking at the
+    // modal, and a message behind the backdrop is a message they do not read.
+    mockApi([policy("fast", CHAIN)], "http://guardrails:8000", [], {
+      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete policy" }),
+    )
+
+    expect(
+      await within(dialog).findByText(/referenced by an alias/),
+    ).toBeVisible()
+    // Still open, so the operator can retry or back out rather than being
+    // returned to a table that looks unchanged for no stated reason.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(screen.getByText("fast")).toBeInTheDocument()
+  })
+
+  it("does not greet the next row's confirm with the last row's refusal", async () => {
+    // The mutation holds its error until the next call, and the dialog reads it,
+    // so without clearing it on close the second row opens already reporting a
+    // failure that was about the first.
+    mockApi([policy("fast", CHAIN), policy("smart", LEARNED)], undefined, [], {
+      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const fast = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(fast).getByRole("button", { name: "Delete" }))
+    const first = await screen.findByRole("alertdialog")
+    await user.click(
+      within(first).getByRole("button", { name: "Delete policy" }),
+    )
+    await within(first).findByText(/referenced by an alias/)
+    await user.click(within(first).getByRole("button", { name: "Cancel" }))
+
+    const smart = screen.getByText("smart").closest("tr")!
+    await user.click(within(smart).getByRole("button", { name: "Delete" }))
+
+    const second = await screen.findByRole("alertdialog")
+    expect(within(second).getByText(/^smart stops resolving/)).toBeVisible()
+    expect(within(second).queryByText(/referenced by an alias/)).toBeNull()
+  })
+
   it("deletes an alias through the alias endpoint, not the policy one", async () => {
     const { calls } = mockApi([], "http://guardrails:8000", [
       {
@@ -654,7 +758,11 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    await user.click(within(row).getByRole("button", { name: "Confirm" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete alias",
+      }),
+    )
 
     const deletes = calls.filter((call) => call.method === "DELETE")
     expect(deletes).toHaveLength(1)
@@ -1495,7 +1603,11 @@ describe("RoutingPage for an organization admin", () => {
 
     await screen.findByText("doomed")
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete policy",
+      }),
+    )
 
     const deleted = calls.find((call) => call.method === "DELETE")
     expect(deleted?.url).toContain("/v1/organizations/me/routing-policies/")
@@ -1600,7 +1712,11 @@ describe("RoutingPage for an organization admin", () => {
 
     await screen.findByText("doomed-alias")
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete alias",
+      }),
+    )
 
     const deleted = calls.find((call) => call.method === "DELETE")
     expect(deleted?.url).toContain("/v1/organizations/me/aliases/")

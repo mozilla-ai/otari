@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -324,16 +324,28 @@ describe("SearchToolsCard", () => {
     expect(bodies[1].api_key).toBe("sk-second")
   })
 
-  it("removes a tool after the confirm step", async () => {
+  it("removes a tool only through the confirm dialog", async () => {
+    // otari-ai#2110. The trigger names the object and the dialog names the
+    // consequence, which the armed button had no room to say.
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderOpened(user)
     await screen.findByText("local")
 
-    // The two steps read differently now: the trigger names the object and the
-    // armed confirm names the consequence, which is what the second click does.
     await user.click(screen.getByRole("button", { name: "Remove" }))
-    await user.click(screen.getByRole("button", { name: "Remove permanently" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/local and the key stored with it/),
+    ).toBeVisible()
+    expect(
+      fetchMock.mock.calls.some(
+        ([, init]) => (init?.method ?? "") === "DELETE",
+      ),
+    ).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove permanently" }),
+    )
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(

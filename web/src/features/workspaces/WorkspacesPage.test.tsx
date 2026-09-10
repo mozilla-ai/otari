@@ -380,6 +380,70 @@ describe("WorkspacesPage", () => {
     ).toBe(false)
   })
 
+  it("confirms before removing a per-provider budget default", async () => {
+    // otari-ai#2110: this Remove used to delete on the click, with no
+    // confirmation of any kind. It was the only delete in the dashboard that
+    // asked nothing.
+    const requests = mockApi({
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+      budgetDefaults: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceBudgetDefault({
+            id: "default-openai",
+            budget_id: "bud-team",
+            provider_key_id: "openai",
+          }),
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await screen.findByText("Per-provider defaults")
+    await user.click(screen.getByRole("button", { name: "Remove" }))
+
+    // The click opens the dialog and sends nothing.
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/openai fall back to/)).toBeVisible()
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove default" }),
+    )
+
+    const removed = requests.find((request) => request.method === "DELETE")
+    expect(removed?.url).toContain("default-openai")
+  })
+
+  it("keeps a per-provider default when the confirm is cancelled", async () => {
+    const requests = mockApi({
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+      budgetDefaults: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceBudgetDefault({
+            id: "default-openai",
+            budget_id: "bud-team",
+            provider_key_id: "openai",
+          }),
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await screen.findByText("Per-provider defaults")
+    await user.click(screen.getByRole("button", { name: "Remove" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    )
+
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+  })
+
   it("withholds the default-budget controls from a non-operator's edit form", async () => {
     const requests = mockApi({
       context: organizationContext({ deployment_operator: false }),

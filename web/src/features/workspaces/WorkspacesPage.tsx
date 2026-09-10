@@ -117,6 +117,7 @@ function NarrowedDefaults({
   const deleteDefault = useDeleteWorkspaceBudgetDefault()
   const [provider, setProvider] = useState("")
   const [budgetId, setBudgetId] = useState("")
+  const [pendingDelete, setPendingDelete] = useState<WorkspaceBudgetDefault>()
 
   const taken = new Set(narrowed.map((row) => row.provider_key_id))
   const available = providers.filter((instance) => !taken.has(instance))
@@ -128,11 +129,7 @@ function NarrowedDefaults({
   return (
     <div className="flex flex-col gap-2">
       <span className="text-body">Per-provider defaults</span>
-      <ErrorBanner
-        error={
-          createDefault.error ?? updateDefault.error ?? deleteDefault.error
-        }
-      />
+      <ErrorBanner error={createDefault.error ?? updateDefault.error} />
       {narrowed.length === 0 ? (
         <span className="text-caption">
           None. The budget above applies on every provider.
@@ -159,11 +156,9 @@ function NarrowedDefaults({
               />
               <Button
                 size="sm"
-                variant="danger"
+                variant="ghost"
                 isDisabled={pending}
-                onPress={() =>
-                  deleteDefault.mutate({ workspaceId, defaultId: row.id })
-                }
+                onPress={() => setPendingDelete(row)}
               >
                 Remove
               </Button>
@@ -217,6 +212,35 @@ function NarrowedDefaults({
           </Button>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          deleteDefault.reset()
+        }}
+        heading="Remove per-provider default"
+        body={
+          pendingDelete
+            ? `Requests to ${pendingDelete.provider_key_id} fall back to the workspace default above. Nothing caps them separately on that provider any more.`
+            : null
+        }
+        confirmLabel="Remove default"
+        isPending={deleteDefault.isPending}
+        error={deleteDefault.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          deleteDefault.mutate(
+            { workspaceId, defaultId: pendingDelete.id },
+            { onSuccess: () => setPendingDelete(undefined) },
+          )
+        }}
+      />
     </div>
   )
 }

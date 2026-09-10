@@ -23,9 +23,9 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * Controlled and open. This is the dialog for a *bulk* destructive action; a
- * single row's revoke uses `ConfirmButton`'s two-click arming instead, so a table
- * row does not pull a modal in with it.
+ * Controlled and open. This is the dialog for every delete of a record, one row
+ * or a selection of them (otari-ai#2110). `ConfirmButton`'s two-click arming is
+ * what is left, for a destructive action that deletes nothing.
  */
 export const Danger: Story = {}
 

@@ -1257,7 +1257,11 @@ describe("ProvidersPage", () => {
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete provider",
+      }),
+    )
     await screen.findByText("Welcome to Otari")
 
     await user.click(
@@ -1305,7 +1309,11 @@ describe("ProvidersPage", () => {
     expect(await screen.findByText("Testing…")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete provider",
+      }),
+    )
     await screen.findByText("Welcome to Otari")
 
     await user.click(

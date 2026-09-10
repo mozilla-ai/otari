@@ -4,8 +4,9 @@ import { useState } from "react"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
 
 /**
- * A destructive button that requires a second click to confirm, avoiding a
- * modal dependency for revoke/delete actions.
+ * A destructive button that requires a second click to confirm, for an action
+ * that deletes nothing: a regenerate, an archive, a reset to a default. A
+ * record's deletion goes through `ConfirmDialog` instead (otari-ai#2110).
  *
  * Neutral, then danger. The first click is SAFE: it arms this control and
  * destroys nothing, so spending the danger hue on it would spend the loudest

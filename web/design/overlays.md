@@ -79,8 +79,8 @@ Modal and centered. `Dialog` is the shell; `ConfirmDialog` is its
 specialization for a destructive action, with the two buttons and the error line
 built in.
 
-Reach for `ConfirmDialog` when the dialog's whole job is "are you sure", and for
-`Dialog` when it holds a form.
+Reach for `ConfirmDialog` when the dialog's whole job is "are you sure", which
+includes every delete of a record, and for `Dialog` when it holds a form.
 
 Both are controlled only, because a dialog opens from something elsewhere on the
 page (a row's Edit, a toolbar's Add) rather than from a trigger inside itself.

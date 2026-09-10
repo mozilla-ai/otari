@@ -601,13 +601,15 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    const armed = screen
-      .getByText(/unlinks its usage history/)
-      .closest("tr") as HTMLTableRowElement
-    expect(row.nextElementSibling).toBe(armed)
-    expect(within(armed).getByText("legacy")).toBeInTheDocument()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/unlinks its usage history/),
+    ).toBeInTheDocument()
+    // The key is named in the dialog, so the operator is not confirming against
+    // a row they can no longer see.
+    expect(within(dialog).getByText("legacy")).toBeInTheDocument()
     await user.click(
-      within(armed).getByRole("button", { name: "Delete permanently" }),
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
     )
 
     const del = fetchMock.mock.calls.find(

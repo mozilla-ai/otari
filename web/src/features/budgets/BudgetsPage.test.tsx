@@ -591,9 +591,10 @@ describe("BudgetsPage", () => {
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    expect(within(row).getByText(/lose this limit/)).toBeInTheDocument()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/lose this limit/)).toBeInTheDocument()
     await user.click(
-      within(row).getByRole("button", { name: "Delete permanently" }),
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
     )
 
     const del = fetchMock.mock.calls.find(

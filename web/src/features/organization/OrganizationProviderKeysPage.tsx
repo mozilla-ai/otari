@@ -9,6 +9,7 @@ import type {
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
@@ -304,6 +305,7 @@ export function OrganizationProviderKeysPage() {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<OrgProviderKey>()
 
   const editing = keys.data?.find((key) => key.id === editingId) ?? null
   const archivedCount = (keys.data ?? []).filter((key) =>
@@ -389,13 +391,9 @@ export function OrganizationProviderKeysPage() {
               </RowAction>
               {/* Permanent, and the only place it is offered: the API
                     accepts a delete for an archived key alone. */}
-              <ConfirmRowAction
-                confirmLabel="Delete"
-                isPending={remove.isPending}
-                onConfirm={() => remove.mutate(row.id)}
-              >
+              <RowAction onPress={() => setPendingDelete(row)}>
                 Delete
-              </ConfirmRowAction>
+              </RowAction>
             </>
           ) : (
             <>
@@ -467,7 +465,6 @@ export function OrganizationProviderKeysPage() {
           keys.error ??
           archive.error ??
           restore.error ??
-          remove.error ??
           setDefault.error
         }
       />
@@ -536,6 +533,34 @@ export function OrganizationProviderKeysPage() {
           />
         </TableScrollFrame>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out rather than on the way in, so the trigger in
+        // the row stays a bare `setPendingDelete` and the column memo keeps its
+        // per-row cache: a refusal otherwise sits on the mutation and greets
+        // the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
+        heading="Delete provider key"
+        body={
+          pendingDelete
+            ? `${pendingDelete.name} and its stored ${pendingDelete.provider} credential are removed for good. Archiving is the reversible step; this one cannot be undone.`
+            : null
+        }
+        confirmLabel="Delete permanently"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
     </div>
   )
 }
