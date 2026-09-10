@@ -64,6 +64,7 @@ from gateway.services.dashboard_session_service import (
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.oauth_service import (
     FLOW_COOKIE_NAME,
+    OAUTH_ROUTE_PREFIX,
     apply_flow_cookie,
     authorization_url,
     exchange_code,
@@ -74,7 +75,7 @@ from gateway.services.oauth_service import (
 from gateway.services.tenancy.errors import OAuthNotConfiguredError, TenancyError
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
-router = APIRouter(prefix="/v1/auth/oauth", tags=["auth"])
+router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
 # A code is a provider-issued opaque string, a few hundred characters at most;
 # this is a sanity ceiling on an unauthenticated request body rather than a

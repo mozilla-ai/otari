@@ -58,7 +58,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
 from gateway.services.tenancy.errors import (
@@ -86,10 +86,14 @@ class _Provider:
     scopes: tuple[str, ...]
 
 
+# The resource the OAuth routes are mounted at. The router takes its prefix from
+# here and the flow cookie its path, so the cookie cannot end up scoped to
+# somewhere the routes are not.
+OAUTH_ROUTE_PREFIX = "/auth/oauth"
 # The cookie that binds a pending authorization to the browser that started it.
 # Scoped to the OAuth routes, which are the only ones that read it.
 FLOW_COOKIE_NAME = "otari_oauth_flow"
-_FLOW_COOKIE_PATH = "/v1/auth/oauth"
+FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
 # What ``secrets.token_urlsafe(32)`` produces; anything else in the cookie is
 # not ours and is replaced rather than reused.
 _FLOW_SECRET_LENGTH = 43
@@ -317,7 +321,7 @@ def apply_flow_cookie(response: Response, secret: str, *, secure: bool) -> None:
         httponly=True,
         secure=secure,
         samesite="lax",
-        path=_FLOW_COOKIE_PATH,
+        path=FLOW_COOKIE_PATH,
     )
 
 
@@ -482,6 +486,8 @@ def _as_configured_here(provider_config: ProviderConfig, provider: str) -> Provi
 
 __all__ = [
     "FLOW_COOKIE_NAME",
+    "FLOW_COOKIE_PATH",
+    "OAUTH_ROUTE_PREFIX",
     "OAuthIdentity",
     "apply_flow_cookie",
     "authorization_url",
