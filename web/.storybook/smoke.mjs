@@ -92,7 +92,7 @@ async function drain() {
       // whole "Failed to load resource" family, which is why it reported the
       // catalog clean while every story 404d on `/v1/organizations/me`: the
       // decorators mount a provider that queries the organization, and nothing
-      // answered it. Now that `apiMock` owns every `/v1/` path, a load failure
+      // answered it. Now that `apiMock` owns every path under the API root, a load failure
       // is a real finding. The abort is still this probe's own fault, since it
       // reuses one page across hundreds of rapid navigations.
       if (/net::ERR_ABORTED/.test(text)) return

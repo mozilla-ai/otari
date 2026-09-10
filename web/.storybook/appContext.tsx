@@ -33,7 +33,7 @@ export const withAppContext: Decorator = (Story, context) => {
     <DeploymentProvider value={bootstrap(overrides)}>
       {/* Inside the deployment, and inside the query client `apiMock` provides:
           it seeds itself from `useOrganizationContext()`, so a story that cares
-          which workspace is selected mocks /v1/organization/context. */}
+          which workspace is selected mocks `${API_ROOT}/organization/context`. */}
       <SelectedWorkspaceProvider>
         <Story />
       </SelectedWorkspaceProvider>

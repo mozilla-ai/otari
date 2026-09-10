@@ -27,14 +27,14 @@ import { type ApiMocks, pathOf, route } from "./apiRouting"
  *
  *   parameters: {
  *     api: {
- *       "/v1/settings/mail": { configured: true, from_address: "otari@example.com" },
- *       "/v1/organizations/me": organizationContext(),
+ *       [`${API_ROOT}/settings/mail`]: { configured: true, from_address: "otari@example.com" },
+ *       [`${API_ROOT}/organizations/me`]: organizationContext(),
  *     },
  *   }
  *
  * To exercise a failure, give the path a `$status` envelope instead of a body:
  *
- *   api: { "/v1/settings/mail": { $status: 503, $body: { detail: "No transport." } } }
+ *   api: { [`${API_ROOT}/settings/mail`]: { $status: 503, $body: { detail: "No transport." } } }
  *
  * The `$` prefix is what makes that unambiguous, and it is worth the ugliness. An
  * earlier version guessed instead -- "has a `status` or `body` key, therefore it is

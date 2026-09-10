@@ -1,3 +1,4 @@
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 
 /**
@@ -10,8 +11,17 @@ import { organizationContext } from "@/tests/fixtures"
  * path. Nothing here has a side effect.
  */
 
-/** The gateway's prefix. Everything else belongs to Storybook itself. */
-const GATEWAY_PREFIX = "/v1/"
+/**
+ * The gateway's prefix. Everything else belongs to Storybook itself.
+ *
+ * Derived from `API_ROOT` rather than spelled again: a second literal is how
+ * this broke. The API moved to `/api/v1` and the mock kept matching `/v1/`, so
+ * every story's request missed the mock and went to the network, where the
+ * static catalog answers 404. The constant's own comment promises that moving
+ * the API is "a change here and nowhere else", which only holds if nothing
+ * else writes the path down.
+ */
+const GATEWAY_PREFIX = `${API_ROOT}/`
 
 export interface MockFailure {
   $status: number
@@ -44,7 +54,7 @@ function isMockFailure(value: unknown): value is MockFailure {
  * needs belongs in that component's story, where a reader can see it.
  */
 export const BASELINE: ApiMocks = {
-  "/v1/organizations/me": organizationContext(),
+  [`${API_ROOT}/organizations/me`]: organizationContext(),
 }
 
 /**
@@ -52,8 +62,8 @@ export const BASELINE: ApiMocks = {
  *
  * `apiFetch` passes a relative string, which is why this used to return the
  * three cases as they came. It normalizes now because `route` keys on the
- * leading `/v1/`, and a `Request` carries an absolute URL: left alone, the same
- * path would be mocked as a string and reach the network as a `Request`.
+ * leading `API_ROOT`, and a `Request` carries an absolute URL: left alone, the
+ * same path would be mocked as a string and reach the network as a `Request`.
  */
 export function pathOf(input: RequestInfo | URL): string {
   const raw =
