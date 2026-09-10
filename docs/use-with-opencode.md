@@ -2,7 +2,7 @@
 
 [opencode](https://opencode.ai) lets you register any OpenAI-compatible backend
 as a provider. Otari exposes an OpenAI-compatible endpoint
-(`POST /v1/chat/completions`) in both standalone and hybrid modes, so you can
+(`POST /api/v1/chat/completions`) in both standalone and hybrid modes, so you can
 route opencode through Otari to get budgets, usage tracking, and traces without
 changing how you code.
 
@@ -16,7 +16,7 @@ Add Otari as a provider in your `opencode.jsonc`:
     "otari": {
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://localhost:8000/v1",
+        "baseURL": "http://localhost:8000/api/v1",
         "apiKey": "{env:OTARI_API_KEY}"
       }
     }
@@ -24,10 +24,10 @@ Add Otari as a provider in your `opencode.jsonc`:
 }
 ```
 
-`baseURL` is the Otari root plus `/v1` (opencode appends `/chat/completions`
-itself). Point it at the gateway you are actually using: `http://localhost:8000/v1`
-for local standalone development, your self-hosted gateway URL plus `/v1` when
-connected to otari.ai, or `https://api.otari.ai/v1` when using otari.ai's
+`baseURL` is the Otari API root, `/api/v1` (opencode appends `/chat/completions`
+itself). Point it at the gateway you are actually using: `http://localhost:8000/api/v1`
+for local standalone development, your self-hosted gateway URL plus `/api/v1` when
+connected to otari.ai, or `https://api.otari.ai/api/v1` when using otari.ai's
 hosted gateway.
 
 Export your key so opencode reads it from the environment instead of the config
