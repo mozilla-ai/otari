@@ -69,7 +69,7 @@ live on 4 pages; see [DESIGN.md](DESIGN.md).
 
 A table page, in order:
 
-```
+```text
 PageIntro          title, sentence, one primary action
 KpiStrip           optional, ruled above and below
 Toolbar            search, filters, refresh. FilterChips goes INSIDE it, and
@@ -82,7 +82,7 @@ TablePagination    range, page size, two bare arrows. No rule under it
 
 A form page, in order:
 
-```
+```text
 PageIntro
 TabRow             only if the page has sibling surfaces
 InfoBanner         only if there is a standing condition to state
@@ -91,7 +91,7 @@ SettingsGroup      one per topic, each with its own Save at its own foot
 
 An autosaving settings page, which is the other shape:
 
-```
+```text
 PageIntro          title, sentence, a trailing docsHref
 SettingsGroup      bounded, one per topic
   SettingRow       label + key left, control right
@@ -106,7 +106,7 @@ so no single button could say what it is about to write.
 A list-and-detail page, which is the shape for a set of records where reading
 one is most of the work:
 
-```
+```text
 PageIntro          title, sentence. No action: the create control goes in the
                    list column, because that is the column it lengthens
 ErrorBanner        only if a read failed

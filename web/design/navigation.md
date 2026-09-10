@@ -2,7 +2,7 @@
 
 Three ways to switch, and they are not interchangeable.
 
-```
+```text
 Does the choice change what the page shows, as a sibling surface?
  └── TabRow            (Overview / Members / Domains)
 Is it a closed set of alternatives to one value?

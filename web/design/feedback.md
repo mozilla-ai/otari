@@ -5,7 +5,7 @@ what happened, what the system did about it, and the one control that fixes it.
 
 ## Which one?
 
-```
+```text
 Did a request fail?
  └── ErrorBanner            (it sanitizes the error; see below)
 Is there a standing condition the operator should know about?

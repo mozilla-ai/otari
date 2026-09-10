@@ -7,7 +7,7 @@ border is what makes it an object. HeroUI defaults `--field-border-width` to 0;
 
 ## Which control?
 
-```
+```text
 Is it free text, a number, or a date?
  ├── Is the value a secret (a provider key, a password)?
  │    ├── Collecting one -> SecretField   (masked, never prefilled, autofill off)

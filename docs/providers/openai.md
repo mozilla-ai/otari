@@ -56,7 +56,7 @@ providers:
 
 Models are addressed as `openai:<model>`:
 
-```
+```text
 openai:gpt-4o
 openai:gpt-4o-mini
 openai:o4-mini
@@ -83,7 +83,7 @@ print(resp.choices[0].message.content)
 
 Expected (sample) output:
 
-```
+```text
 Hello, nice to meet you!
 ```
 

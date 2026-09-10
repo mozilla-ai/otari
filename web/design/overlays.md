@@ -3,7 +3,7 @@
 Three components put something on top of the page, and picking the wrong one is
 the most common mistake here, so start with the question rather than the list.
 
-```
+```text
 Does the operator need to interact with what appears?
  ├── No, it is a label for the thing they are pointing at
  │    └── Tooltip                  (hover/focus, no focus of its own)

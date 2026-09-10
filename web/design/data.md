@@ -2,7 +2,7 @@
 
 ## Which shape?
 
-```
+```text
 Is it a list of records with more than one attribute each?
  └── DataTable, inside a TableScrollFrame if it is wide
 Anything else on this list is a metric, and lives in [metrics.md](metrics.md):

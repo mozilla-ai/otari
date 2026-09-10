@@ -31,7 +31,7 @@ band" rule wants the friction to point: the accent has to be asked for.
   destructive button read as a second primary, which is the whole reason it is not
   one.
 
-```
+```text
 Is it the single thing this band is for?
  ├── Yes -> variant="primary"          (two in one band means the band has no hierarchy)
  └── No

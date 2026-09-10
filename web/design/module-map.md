@@ -67,7 +67,7 @@ they are called out below so nobody mistakes them for the system's own vocabular
 
 ## Target tree
 
-```
+```text
 shared/components/
 ├── layout/       ← design/layout.md
 ├── metrics/      ← design/metrics.md
@@ -254,7 +254,7 @@ nested under `MODELS`; `ORGANIZATION_BUDGETS` keyed apart from `BUDGETS`).
 One module per domain, and `hooks` dropped from the path: under `api/` every export
 is already a hook, so the segment names nothing.
 
-```
+```text
 shared/api/
   client.ts        unchanged
   queryKeys.ts     all 60 constants. MUST stay one module
