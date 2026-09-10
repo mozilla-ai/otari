@@ -136,7 +136,7 @@ interface ServiceSpec {
   docsAnchor: string
   /** The pricing key for a tool Otari runs itself. Guardrails is a check, not billable work. */
   pricingKey?: string
-  /** The `/v1/tools` id whose status heads the page. Guardrails declares none. */
+  /** The `/tools` id whose status heads the page. Guardrails declares none. */
   toolId?: string
   groups: GroupSpec[]
 }

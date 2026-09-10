@@ -380,7 +380,7 @@ export function scopedBudget(
 
 /**
  * One of the caller's organization's spend ceilings, as
- * `/v1/organizations/me/spend-ceilings` reports it.
+ * `/organizations/me/spend-ceilings` reports it.
  *
  * The tenant-scoped view of `scopedBudget`: the same row joined onto its
  * budget, plus `manageable`, which says whether the figure is this

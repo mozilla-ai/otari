@@ -436,7 +436,7 @@ function CreateKeyForm({
   onCreated: (result: CreateKeyResponse) => void
 }) {
   const create = useCreateKey()
-  // `/v1/users` is operator-only; a member's form has no owner picker to feed.
+  // `/users` is operator-only; a member's form has no owner picker to feed.
   const users = useUsers(isDeploymentWide)
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()

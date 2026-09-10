@@ -61,7 +61,7 @@ import { canManage } from "./roles"
 // (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
 // `src/gateway/api/routes/bootstrap.py`).
 //
-// The per-workspace half of the same API (`/v1/workspaces/{id}/provider-keys`:
+// The per-workspace half of the same API (`/workspaces/{id}/provider-keys`:
 // pin, disable, restrict to models) is deliberately not here. Those are one
 // workspace's departure from what this page sets, so they belong beside that
 // workspace: `WorkspaceProviderKeys`, on the Workspaces page, which has already

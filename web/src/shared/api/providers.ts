@@ -23,7 +23,7 @@ import {
 export function useProviders(enabled = true) {
   return useQuery({
     queryKey: [PROVIDERS],
-    queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
+    queryFn: () => apiFetch<ProvidersResponse>("/providers"),
     staleTime: 5 * 60_000,
     enabled,
   })
@@ -36,7 +36,7 @@ export function useProviders(enabled = true) {
 export function useProviderCatalog() {
   return useQuery({
     queryKey: ["provider-catalog"],
-    queryFn: () => apiFetch<KnownProviderSummary[]>("/v1/providers/catalog"),
+    queryFn: () => apiFetch<KnownProviderSummary[]>("/providers/catalog"),
     staleTime: Infinity,
   })
 }
@@ -51,7 +51,7 @@ export function useProviderDetail(providerId: string) {
     queryKey: ["provider-catalog", providerId],
     queryFn: () =>
       apiFetch<KnownProvider>(
-        `/v1/providers/catalog/${encodeURIComponent(providerId)}`,
+        `/providers/catalog/${encodeURIComponent(providerId)}`,
       ),
     enabled: providerId !== "",
     staleTime: Infinity,
@@ -72,7 +72,7 @@ export function useProviderHealth() {
   return useQuery({
     ...NO_RETRY,
     queryKey: [PROVIDER_HEALTH],
-    queryFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health"),
+    queryFn: () => apiFetch<ProviderHealthResponse>("/providers/health"),
     staleTime: PROVIDER_HEALTH_REFRESH_MS,
     refetchInterval: PROVIDER_HEALTH_REFRESH_MS,
   })
@@ -85,7 +85,7 @@ export function useRecheckProviderHealth() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () =>
-      apiFetch<ProviderHealthResponse>("/v1/providers/health?refresh=true"),
+      apiFetch<ProviderHealthResponse>("/providers/health?refresh=true"),
     onSuccess: (data) => queryClient.setQueryData([PROVIDER_HEALTH], data),
   })
 }
@@ -96,7 +96,7 @@ export function useRecheckProviderHealth() {
 export function useStoredProviders() {
   return useQuery({
     queryKey: [STORED_PROVIDERS],
-    queryFn: () => apiFetch<StoredProvider[]>("/v1/provider-credentials"),
+    queryFn: () => apiFetch<StoredProvider[]>("/provider-credentials"),
     staleTime: 60_000,
   })
 }
@@ -119,7 +119,7 @@ export function useCreateStoredProvider() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateStoredProviderRequest) =>
-      apiFetch<StoredProvider>("/v1/provider-credentials", {
+      apiFetch<StoredProvider>("/provider-credentials", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -138,7 +138,7 @@ export function useUpdateStoredProvider() {
       body: UpdateStoredProviderRequest
     }) =>
       apiFetch<StoredProvider>(
-        `/v1/provider-credentials/${encodeURIComponent(instance)}`,
+        `/provider-credentials/${encodeURIComponent(instance)}`,
         {
           method: "PATCH",
           body: JSON.stringify(body),
@@ -153,7 +153,7 @@ export function useDeleteStoredProvider() {
   return useMutation({
     mutationFn: (instance: string) =>
       apiFetch<void>(
-        `/v1/provider-credentials/${encodeURIComponent(instance)}`,
+        `/provider-credentials/${encodeURIComponent(instance)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateProviderViews(queryClient),
@@ -165,7 +165,7 @@ export function useReencryptProviderCredentials() {
   return useMutation({
     mutationFn: () =>
       apiFetch<ReencryptProviderCredentialsResult>(
-        "/v1/provider-credentials/reencrypt",
+        "/provider-credentials/reencrypt",
         {
           method: "POST",
           signal: longRequestSignal(),
@@ -181,7 +181,7 @@ export function useTestStoredProvider() {
   return useMutation({
     mutationFn: (instance: string) =>
       apiFetch<TestProviderResult>(
-        `/v1/provider-credentials/${encodeURIComponent(instance)}/test`,
+        `/provider-credentials/${encodeURIComponent(instance)}/test`,
         {
           method: "POST",
         },
@@ -194,7 +194,7 @@ export function useTestStoredProvider() {
 export function useTestProviderCredentials() {
   return useMutation({
     mutationFn: (body: CreateStoredProviderRequest) =>
-      apiFetch<TestProviderResult>("/v1/provider-credentials/test", {
+      apiFetch<TestProviderResult>("/provider-credentials/test", {
         method: "POST",
         body: JSON.stringify(body),
       }),

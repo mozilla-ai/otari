@@ -889,7 +889,7 @@ function ModelDetailPanel({
   metadata: ModelMetadata | undefined
   metadataAvailable: boolean
   canEditPricing: boolean
-  // False when `/v1/models/discoverable` was never read, which is the
+  // False when `/models/discoverable` was never read, which is the
   // non-operator case: `isDiscovered` is then absent rather than negative, so
   // the row says nothing about discovery instead of claiming it failed.
   discoveryKnown: boolean
@@ -2236,8 +2236,8 @@ export function ModelsPage() {
             options={PRICING_OPTIONS}
           />
           {/* Source, capability and release date all read a
-                deployment-operator-only endpoint (`/v1/models/discoverable`
-                for the first, `/v1/models/metadata` for the other two). For a
+                deployment-operator-only endpoint (`/models/discoverable`
+                for the first, `/models/metadata` for the other two). For a
                 caller those reads were withheld from, every value but "all"
                 would empty the table, so the control is absent rather than
                 offered as one that can only fail. */}

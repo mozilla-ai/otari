@@ -1,5 +1,5 @@
 // Thin fetch wrapper for the gateway's management API. The dashboard is served
-// from the same origin as the API, so paths are relative ("/v1/models") and the
+// from the same origin as the API, so paths are relative ("/models") and the
 // HttpOnly session cookie minted at sign-in rides along automatically (fetch
 // defaults to credentials: "same-origin"). A credential is sent exactly once, to
 // POST /v1/auth/session, and is never written to browser storage: it lives in
@@ -21,6 +21,15 @@ export class ApiError extends Error {
 // AuthProvider registers a callback so a 401 anywhere can drop the session
 // and bounce the operator back to the login screen.
 let unauthorizedHandler: (() => void) | null = null
+
+// The root every API path in this app is built from, matching the constant the
+// gateway mounts its API at. Callers name their resource; this prepends the root
+// once, so moving the API again is a change here and nowhere else.
+export const API_ROOT = "/api/v1"
+
+function apiUrl(path: string): string {
+  return `${API_ROOT}${path}`
+}
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler
@@ -102,7 +111,7 @@ export async function createSession(
       : { email: credential.email, password: credential.password }
   let response: Response
   try {
-    response = await fetch("/v1/auth/session", {
+    response = await fetch(apiUrl("/auth/session"), {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -160,14 +169,14 @@ export async function createSession(
 // A dismissed prompt is not a refusal and is not reported as one: the ceremony
 // throws `PasskeyCancelledError`, which the caller distinguishes.
 export async function signInWithPasskey(): Promise<SignInResult> {
-  const options = await publicPost("/v1/auth/webauthn/authenticate/options")
+  const options = await publicPost("/auth/webauthn/authenticate/options")
   if (!options.ok) {
     return { ok: false, message: options.message, status: options.status }
   }
   const assertion = await getPasskeyAssertion(
     options.body as Parameters<typeof getPasskeyAssertion>[0],
   )
-  const verified = await publicPost("/v1/auth/webauthn/authenticate", {
+  const verified = await publicPost("/auth/webauthn/authenticate", {
     credential: assertion,
   })
   return verified.ok
@@ -201,7 +210,7 @@ export async function startOAuthSignIn(
   provider: string,
 ): Promise<OAuthStartResult> {
   const started = await publicGet(
-    `/v1/auth/oauth/${encodeURIComponent(provider)}/authorize`,
+    `/auth/oauth/${encodeURIComponent(provider)}/authorize`,
   )
   if (!started.ok) {
     return { ok: false, message: started.message, status: started.status }
@@ -237,7 +246,7 @@ export async function completeOAuthSignIn(
 ): Promise<SignInResult> {
   const payload: OAuthCallbackRequest = { code, state }
   const finished = await publicPost(
-    `/v1/auth/oauth/${encodeURIComponent(provider)}/callback`,
+    `/auth/oauth/${encodeURIComponent(provider)}/callback`,
     payload,
   )
   return finished.ok
@@ -255,7 +264,7 @@ async function publicGet(path: string): Promise<{
 }> {
   let response: Response
   try {
-    response = await fetch(path, {
+    response = await fetch(apiUrl(path), {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -300,7 +309,7 @@ async function publicPost(
 }> {
   let response: Response
   try {
-    response = await fetch(path, {
+    response = await fetch(apiUrl(path), {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -339,7 +348,7 @@ async function publicPost(
 // cookie with this call's expiring one (see #557).
 export async function deleteSession(): Promise<void> {
   try {
-    await fetch("/v1/auth/session", {
+    await fetch(apiUrl("/auth/session"), {
       method: "DELETE",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
@@ -401,7 +410,7 @@ export async function apiFetch<T>(
 
   let response: Response
   try {
-    response = await fetch(path, { ...init, headers, signal })
+    response = await fetch(apiUrl(path), { ...init, headers, signal })
   } catch (error) {
     if (isTimeout(error)) {
       throw new ApiError(0, timeoutMessage)

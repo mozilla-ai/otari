@@ -966,7 +966,7 @@ function RequestDetail({
   entry: UsageEntry
   /**
    * Null for a caller who does not operate the deployment. Pricing a model is a
-   * deployment-wide write (`/v1/pricing`), so offering the button to a tenant
+   * deployment-wide write (`/pricing`), so offering the button to a tenant
    * would be offering a refusal; the sentence beside it is still theirs to read,
    * because "this row cost nothing" is a fact about their own request.
    */

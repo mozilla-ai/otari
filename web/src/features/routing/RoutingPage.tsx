@@ -1252,7 +1252,7 @@ function PolicyForm({
             <span className="text-xs text-muted">
               A new router serves the model above until it has scored examples.
               Recording them is an API job for now (
-              <code>POST /v1/routing/preferences/rank</code>); open{" "}
+              <code>POST /api/v1/routing/preferences/rank</code>); open{" "}
               <b>Examples</b> on the row afterwards to watch it warm up.
             </span>
           ) : null}
@@ -1301,7 +1301,7 @@ export function RoutingPage() {
   //
   // Which list is asked depends on who is signed in (otari-ai#1942): an
   // operator reads the deployment-wide management view, and anyone else reads
-  // the tenant-scoped `/v1/organizations/me/*` pair. Both reads wait for the
+  // the tenant-scoped `/organizations/me/*` pair. Both reads wait for the
   // context to settle rather than taking "not yet an operator" as "member", so
   // an operator's page does not fire a read it is about to drop.
   const organization = useOrganizationContext()
@@ -1485,7 +1485,7 @@ export function RoutingPage() {
         // of scored examples is the one number in there that changes.
         //
         // Three outcomes, not two. Operator-only within an actions column an
-        // admin now also gets, because the panel reads `/v1/routing/status`,
+        // admin now also gets, because the panel reads `/routing/status`,
         // which is deployment-wide: an admin sees no readiness at all. Then an
         // em dash where a policy has no readiness to report, rather than an
         // empty cell, since a fallback chain has nothing to learn and that

@@ -16,8 +16,8 @@ const KEYS_MAX_PAGES = 100
 
 // Which of the two key surfaces this caller may act on.
 //
-// `/v1/keys` is deployment-wide and refuses anyone who does not operate the
-// deployment; `/v1/organizations/me/keys` serves the caller's own keys, in
+// `/keys` is deployment-wide and refuses anyone who does not operate the
+// deployment; `/organizations/me/keys` serves the caller's own keys, in
 // workspaces they belong to (otari-ai#1941). Both answer identical shapes, so
 // the key hooks below differ only in the prefix they ask. Same construction as
 // `useUsageScope` above, for the same reasons: the organization context is what
@@ -31,7 +31,7 @@ export function useKeysScope(): {
   const context = useOrganizationContext()
   const isDeploymentWide = context.data?.deployment_operator === true
   return {
-    base: isDeploymentWide ? "/v1/keys" : "/v1/organizations/me/keys",
+    base: isDeploymentWide ? "/keys" : "/organizations/me/keys",
     isReady: context.isSuccess || context.isError,
     isDeploymentWide,
   }

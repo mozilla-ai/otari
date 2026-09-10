@@ -453,7 +453,7 @@ export function ToolPriceRow({
             onKeyDown={commitOnEnter}
             onBlur={() => {
               if (invalid || trimmed === committed) return
-              // Blank cannot be sent: `/v1/pricing` only writes a rate, so
+              // Blank cannot be sent: `/pricing` only writes a rate, so
               // there is no way to make a priced tool unpriced again from
               // here. Putting the stored value back says that without a
               // message that would nag on every pass through the field.

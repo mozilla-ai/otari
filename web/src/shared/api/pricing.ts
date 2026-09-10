@@ -27,7 +27,7 @@ async function fetchAllPricing(): Promise<PricingResponse[]> {
   const all: PricingResponse[] = []
   for (let page = 0; page < PRICING_MAX_PAGES; page += 1) {
     const rows = await apiFetch<PricingResponse[]>(
-      `/v1/pricing?skip=${page * PRICING_PAGE_SIZE}&limit=${PRICING_PAGE_SIZE}`,
+      `/pricing?skip=${page * PRICING_PAGE_SIZE}&limit=${PRICING_PAGE_SIZE}`,
     )
     all.push(...rows)
     if (rows.length < PRICING_PAGE_SIZE) {
@@ -49,7 +49,7 @@ export function useSetPricing() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetPricingRequest) =>
-      apiFetch<PricingResponse>("/v1/pricing", {
+      apiFetch<PricingResponse>("/pricing", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -64,7 +64,7 @@ export function useDeletePricing() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (modelKey: string) =>
-      apiFetch<void>(`/v1/pricing/${encodeURIComponent(modelKey)}`, {
+      apiFetch<void>(`/pricing/${encodeURIComponent(modelKey)}`, {
         method: "DELETE",
       }),
     onSuccess: () => {
@@ -79,7 +79,7 @@ export function useDeletePricing() {
 export function usePreviewPricingRefresh() {
   return useMutation({
     mutationFn: () =>
-      apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", {
+      apiFetch<PricingRefreshPreview>("/pricing/refresh", {
         method: "POST",
         signal: longRequestSignal(),
       }),
@@ -90,7 +90,7 @@ export function useConfirmPricingRefresh() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () =>
-      apiFetch("/v1/pricing/refresh/confirm", { method: "POST" }),
+      apiFetch("/pricing/refresh/confirm", { method: "POST" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
@@ -102,7 +102,7 @@ export function useConfirmPricingRefresh() {
 export function useRejectPricingRefresh() {
   return useMutation({
     mutationFn: () =>
-      apiFetch<void>("/v1/pricing/refresh/reject", { method: "POST" }),
+      apiFetch<void>("/pricing/refresh/reject", { method: "POST" }),
   })
 }
 
@@ -133,7 +133,7 @@ export function useOrganizationPricing(enabled = true) {
     // surface uses, so a backend that ignored `skip` cannot spin this.
     queryFn: () =>
       fetchAllPaged<OrganizationPricingOverride>(
-        "/v1/organizations/me/pricing",
+        "/organizations/me/pricing",
       ),
     staleTime: 60_000,
     enabled,
@@ -154,7 +154,7 @@ export function useCreateOrganizationPricing() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationPricingOverride) =>
-      apiFetch<OrganizationPricingOverride>("/v1/organizations/me/pricing", {
+      apiFetch<OrganizationPricingOverride>("/organizations/me/pricing", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -175,7 +175,7 @@ export function useReplaceOrganizationPricing() {
       body: UpdateOrganizationPricingOverride
     }) =>
       apiFetch<OrganizationPricingOverride>(
-        `/v1/organizations/me/pricing/${encodeURIComponent(id)}`,
+        `/organizations/me/pricing/${encodeURIComponent(id)}`,
         { method: "PUT", body: JSON.stringify(body) },
       ),
     onSuccess: () => invalidateOrganizationPricing(queryClient),
@@ -186,7 +186,7 @@ export function useDeleteOrganizationPricing() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/organizations/me/pricing/${encodeURIComponent(id)}`, {
+      apiFetch<void>(`/organizations/me/pricing/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     onSuccess: () => invalidateOrganizationPricing(queryClient),

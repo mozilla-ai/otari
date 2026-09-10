@@ -6,8 +6,8 @@ import { FcGoogle } from "react-icons/fc"
  * The OAuth providers this dashboard can sign in with, and what to call them.
  *
  * The names are the gateway's (`core/config.py`'s `OAUTH_PROVIDERS`): they are
- * the path segment `/v1/auth/oauth/{provider}/…` takes and the values
- * `/v1/bootstrap`'s `oauth_providers` carries. This table adds only what a
+ * the path segment `/auth/oauth/{provider}/…` takes and the values
+ * `/bootstrap`'s `oauth_providers` carries. This table adds only what a
  * server has no business deciding, which is how the provider's name is written
  * on a button.
  *

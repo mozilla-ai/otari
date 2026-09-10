@@ -187,7 +187,7 @@ export function RouterReadiness({
           <span className="text-caption">Adding examples</span>
           <span className="text-caption">
             Examples are recorded over the API, with{" "}
-            <code>POST /v1/routing/preferences/rank</code>. Score a batch of
+            <code>POST /api/v1/routing/preferences/rank</code>. Score a batch of
             prompts from 0 (bad) to 1 (great) per candidate; two good answers is
             the case that lets the cheaper model win. See{" "}
             <a

@@ -925,7 +925,7 @@ export function ProvidersPage() {
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
   // Gate adding providers on the server having OTARI_SECRET_KEY, which the
-  // membership context reports and `/v1/settings` no longer answers for every
+  // membership context reports and `/settings` no longer answers for every
   // caller who reaches this page (#839).
   const secretKeyConfigured = useProviderKeyEncryption()
   const showOnboarding = !loading && rows.length === 0 && !addOpen

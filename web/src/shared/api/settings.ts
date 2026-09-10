@@ -20,7 +20,7 @@ import {
 export function useSettings(enabled = true) {
   return useQuery({
     queryKey: [SETTINGS],
-    queryFn: () => apiFetch<GatewaySettings>("/v1/settings"),
+    queryFn: () => apiFetch<GatewaySettings>("/settings"),
     staleTime: 60_000,
     enabled,
   })
@@ -30,7 +30,7 @@ export function useUpdateSettings() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UpdateSettingsRequest) =>
-      apiFetch<GatewaySettings>("/v1/settings", {
+      apiFetch<GatewaySettings>("/settings", {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
@@ -54,7 +54,7 @@ export function useUpdateSettings() {
 export function useMaintenanceMode() {
   return useQuery({
     queryKey: [MAINTENANCE_MODE],
-    queryFn: () => apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode"),
+    queryFn: () => apiFetch<MaintenanceMode>("/settings/maintenance-mode"),
     // Polled and refreshed on focus, unlike every other settings read here.
     // A `staleTime` alone schedules nothing, and this app turns
     // `refetchOnWindowFocus` off globally, so a card left open would keep
@@ -80,7 +80,7 @@ export function useSetMaintenanceMode() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (enabled: boolean) =>
-      apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode", {
+      apiFetch<MaintenanceMode>("/settings/maintenance-mode", {
         method: "PATCH",
         body: JSON.stringify({ enabled }),
       }),
@@ -93,7 +93,7 @@ export function useSetMaintenanceMode() {
 export function useMailSettings() {
   return useQuery({
     queryKey: [MAIL_SETTINGS],
-    queryFn: () => apiFetch<MailSettings>("/v1/settings/mail"),
+    queryFn: () => apiFetch<MailSettings>("/settings/mail"),
     staleTime: 60_000,
   })
 }
@@ -109,7 +109,7 @@ export function useMailSettings() {
 export function useSendTestMail() {
   return useMutation({
     mutationFn: (body: SendTestMailRequest) =>
-      apiFetch<SendTestMailResponse>("/v1/settings/mail/test", {
+      apiFetch<SendTestMailResponse>("/settings/mail/test", {
         method: "POST",
         body: JSON.stringify(body),
       }),

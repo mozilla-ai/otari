@@ -15,7 +15,7 @@
 // an organization key, so there is no server-side call built from these specs
 // for the form to drift away from; the authority for the names below is
 // any-llm and boto3, which a server-side copy would be paraphrasing just as
-// this one does. The endpoint that would carry it, `/v1/providers/catalog`, is
+// this one does. The endpoint that would carry it, `/providers/catalog`, is
 // `require_deployment_operator`-gated, and the page that most needs these
 // fields (`/organization/provider-keys`) is used by organization owners and
 // admins who hold no deployment authority. Publishing it there would mean

@@ -484,7 +484,7 @@ interface BreakdownDimensionDef {
 // One page, two scopes. `"caller"` is the workspace rail's Usage destination:
 // whatever the caller may read, narrowed to the sidebar's selected workspace.
 // `"organization"` is the organization rail's (otari-ai#1963): the same
-// analytics pinned to `/v1/organizations/me/usage` and unnarrowed by default,
+// analytics pinned to `/organizations/me/usage` and unnarrowed by default,
 // so an admin can finally ask about the organization as a whole; an explicit
 // workspace filter replaces the sidebar switcher, because the server lets an
 // admin narrow to any workspace in the organization, member of it or not.

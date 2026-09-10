@@ -37,7 +37,7 @@ export function useNavVisibility(): (item: NavItem) => boolean {
   const isRouteVisible = useRouteVisibility()
   // The caller axis, and it rides on the organization context rather than on a
   // query of its own: `GET /v1/organizations/me` carries `deployment_operator`,
-  // the same answer `/v1/admin/access` gives from the same server-side
+  // the same answer `/admin/access` gives from the same server-side
   // predicate, and the shell reads that context anyway to decide whether to
   // offer the way into the organization rail. So the answer is here when the
   // chrome is, and no row is drawn on the strength of a question still in flight
@@ -46,7 +46,7 @@ export function useNavVisibility(): (item: NavItem) => boolean {
   // read the rest of them ignore.
   //
   // It also needs no deployment gate of its own any more. The request this used
-  // to make had to be withheld from a gateway that does not host `/v1/admin`, so
+  // to make had to be withheld from a gateway that does not host `/admin`, so
   // its 404 could not become a second reading of `surfaces`; this read is not
   // that request, and each operator-only row still declares the surface it
   // needs, which `isRouteVisible` composes below.

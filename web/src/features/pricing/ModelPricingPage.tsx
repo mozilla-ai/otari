@@ -49,10 +49,10 @@ import { formatCost, formatRelative } from "@/shared/helpers/format"
 //
 // - The **catalog policy** and the **refresh flow** are the deployment's. Both
 //   are `require_deployment_operator` server-side (`GET /v1/settings`, and the
-//   three `/v1/pricing/refresh` routes), so they are withheld from anyone else
+//   three `/pricing/refresh` routes), so they are withheld from anyone else
 //   rather than fired into a 403 banner, the way `ModelsPage` withholds its own
 //   operator-only reads.
-// - The **price table** reads `/v1/pricing`, which `verify_catalog_reader`
+// - The **price table** reads `/pricing`, which `verify_catalog_reader`
 //   already serves to any session.
 // - The **rate overrides** are the organization's own, and
 //   `organization_pricing_service` gates the writes on the same owner-or-admin
@@ -243,7 +243,7 @@ interface PriceRow {
 /**
  * One row per priced model, from the price that is in force today.
  *
- * `/v1/pricing` returns the history, not the current state: a model repriced
+ * `/pricing` returns the history, not the current state: a model repriced
  * three times has three rows, and only the newest one whose `effective_at` has
  * passed is what a request is metered at. `currentPricing` is the reduction
  * Models already uses, sorting included, so the two pages cannot disagree about
@@ -389,7 +389,7 @@ export function ModelPricingPage() {
         workspace and every key in the organization; a rate override below
         applies to this organization ahead of it.
       </PageIntro>
-      {/* Operator-only: both read `/v1/pricing`'s catalog controls, which an
+      {/* Operator-only: both read `/pricing`'s catalog controls, which an
           organization admin may see prices through but not administer. */}
       {isOperator ? (
         <>

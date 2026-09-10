@@ -600,7 +600,7 @@ function MemberEditor({
       // query function even when `enabled` is false, which is what makes it the
       // way to drive a disabled query on purpose. So without this, a tenant
       // saving nothing but a workspace placement would still ask
-      // `/v1/scoped-budgets`, be refused, and land back on the very banner
+      // `/scoped-budgets`, be refused, and land back on the very banner
       // otari#838 exists to remove. There is nothing to write here either: the
       // Budget column is not rendered for them, so every `row.budgetId` is the
       // empty string it was seeded with.
@@ -776,8 +776,8 @@ export function OrganizationMembersPage() {
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
 
-  // Three of this page's reads are deployment-wide (`/v1/users`, `/v1/budgets`,
-  // `/v1/scoped-budgets`) and have answered 403 to a tenant since #821. They are
+  // Three of this page's reads are deployment-wide (`/users`, `/budgets`,
+  // `/scoped-budgets`) and have answered 403 to a tenant since #821. They are
   // not asked for unless the caller may read them: an owner of this organization
   // is not an operator of the deployment, and rendering their refusal put "this
   // endpoint requires deployment operator access" across a page that is theirs

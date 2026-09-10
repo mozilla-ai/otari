@@ -61,7 +61,7 @@ export function SetupGuideCard({
   /**
    * Whether a request from this caller could succeed, which is the page's
    * answer to give rather than this card's to fetch. Each Overview reads it off
-   * what it may see: the operator's from `/v1/providers`, which refuses a
+   * what it may see: the operator's from `/providers`, which refuses a
    * tenant, and the organization's from the model catalog, which lists the
    * selectors that caller may name.
    *

@@ -398,7 +398,7 @@ export function CreateWorkspaceForm({
         onChange={setDescription}
       />
       {/* Withheld from a caller who does not operate the deployment: the
-          picker's options come from the operator-gated `/v1/budgets` read, so
+          picker's options come from the operator-gated `/budgets` read, so
           offering it would be offering a control whose list is empty and whose
           save cannot succeed. */}
       {operates ? (
@@ -599,7 +599,7 @@ function EditWorkspaceForm({
         onChange={setDescription}
       />
       {/* Withheld from a caller who does not operate the deployment: the
-          picker's options come from the operator-gated `/v1/budgets` read, so
+          picker's options come from the operator-gated `/budgets` read, so
           offering it would be offering a control whose list is empty and whose
           save cannot succeed. */}
       {operates ? (

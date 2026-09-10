@@ -31,7 +31,7 @@ if (!container) {
 const BOOTSTRAP_TIMEOUT_MS = 8_000
 
 function loadBootstrap(): Promise<WireBootstrap | null> {
-  return apiFetch<WireBootstrap>("/v1/bootstrap", {
+  return apiFetch<WireBootstrap>("/bootstrap", {
     signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
   }).catch(() => null)
 }

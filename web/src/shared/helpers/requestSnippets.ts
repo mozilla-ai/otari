@@ -8,13 +8,13 @@
  *
  * The base URL is usually the browser's own origin, because the gateway serving
  * this dashboard is also the gateway serving the API: whatever address reached
- * this page is an address that reaches `/v1/chat/completions`, which is more
+ * this page is an address that reaches `/chat/completions`, which is more
  * reliable than anything a server behind a proxy could report about itself.
  *
  * A hosted control plane breaks that, which is what `resolveSnippetBaseUrl`
  * below exists for: it serves the dashboard and is deliberately not where
  * inference belongs (otari#823, otari#822), so it publishes the data-plane
- * gateway's address on `/v1/bootstrap` and the snippets are built from that.
+ * gateway's address on `/bootstrap` and the snippets are built from that.
  */
 
 import type { DeploymentBootstrap } from "@/client"
@@ -110,7 +110,7 @@ export function buildPythonSnippet({
  * say about itself from behind a proxy. A hosted control plane is the exception
  * the whole function exists for: it serves this dashboard, and customer
  * inference belongs on the data-plane gateway rather than on it, so it has to
- * name that address itself (`data_plane_url` on `/v1/bootstrap`).
+ * name that address itself (`data_plane_url` on `/bootstrap`).
  *
  * Undefined when a hosted deployment names none. Falling back to the origin
  * there is the bug this replaces: it hands somebody a runnable command aimed at

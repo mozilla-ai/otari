@@ -469,7 +469,7 @@ function budgetLabel(budget: Budget): string {
 }
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
-// carries none. `/v1/users` refuses to cap a gateway user at a tenant's
+// carries none. `/users` refuses to cap a gateway user at a tenant's
 // (otari#881), so the page marks the row and withholds the assignment control
 // rather than offering a save the API answers 404.
 function isOrganizationOwned(budget: Budget): boolean {
@@ -479,7 +479,7 @@ function isOrganizationOwned(budget: Budget): boolean {
 /**
  * The deployment's own budgets page, which is what an operator sees.
  *
- * Deployment-wide end to end: `/v1/budgets`, the gateway's `users` table, and
+ * Deployment-wide end to end: `/budgets`, the gateway's `users` table, and
  * every workspace's member default, all behind `require_deployment_operator`.
  * Unchanged by otari-ai#1943, which added the tenant-scoped page beside it
  * rather than reshaping this one, because the two surfaces answer to different
