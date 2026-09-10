@@ -550,6 +550,8 @@ async def _iter_bounded_decoded_chunks(
                 pending = raw_chunk
                 continue
             can_retry_raw_deflate = False
+            if decompressor.unused_data:
+                raise ContentDecodingError("response content encoding has trailing data")
             pending = decompressor.unconsumed_tail
             if decoded:
                 yield decoded

@@ -741,6 +741,33 @@ async def test_capped_body_completes_supported_compressed_streams(encoding: str,
 
 
 @pytest.mark.asyncio
+async def test_capped_body_rejects_trailing_compressed_data_without_reading_the_full_trailer() -> None:
+    class TrailingDataStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.trailer_chunks_read = 0
+            self.closed = False
+
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield gzip.compress(b"decoded body")
+            trailer_chunk = b"x" * (64 * 1024)
+            for _ in range(256):
+                self.trailer_chunks_read += 1
+                yield trailer_chunk
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    stream = TrailingDataStream()
+    response = httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=stream)
+
+    with pytest.raises(ContentDecodingError, match="trailing data"):
+        await read_capped_decoded_body(response, deadline=NetworkDeadline(1))
+
+    assert stream.trailer_chunks_read == 1
+    assert stream.closed
+
+
+@pytest.mark.asyncio
 async def test_capped_body_rejects_unsupported_content_encoding() -> None:
     response = httpx.Response(
         200,
