@@ -26,6 +26,8 @@ interface MockOpts {
   keys?: OrgProviderKey[]
   context?: OrganizationContext
   catalog?: { id: string; name: string }[]
+  // Refuse the create, so a test can read what a refusal leaves behind.
+  createFails?: boolean
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -43,6 +45,9 @@ function mockApi(opts: MockOpts = {}) {
     if (url.includes("/provider-keys")) {
       if (method === "GET") {
         return jsonResponse({ count: keys.length, data: keys })
+      }
+      if (method === "POST" && opts.createFails) {
+        return jsonResponse({ detail: "Provider key already exists" }, 409)
       }
       // Every write answers with a key-shaped body the page only re-reads
       // through the invalidated list, so one row is enough for all of them.
@@ -90,6 +95,84 @@ describe("OrganizationProviderKeysPage", () => {
     await user.click(trigger)
     await screen.findByRole("dialog", { name: "New provider key" })
     expect(trigger).toBeInTheDocument()
+  })
+
+  it("opens on a blank draft after a create", async () => {
+    // Nothing unmounts this form, so the remount on the way in is the only
+    // thing that clears it, and what it holds includes the plaintext secret.
+    // A surviving draft also reports itself dirty against the empty snapshot
+    // `seeded` still holds, so the guard arms before anything is typed.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.type(screen.getByLabelText("API key"), "sk-secret")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add provider key",
+      }),
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New provider key" }),
+      ).toBeNull(),
+    )
+
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+    const reopened = await screen.findByRole("dialog", {
+      name: "New provider key",
+    })
+    expect(within(reopened).getByRole("textbox", { name: /Name/ })).toHaveValue(
+      "",
+    )
+    expect(within(reopened).getByLabelText("API key")).toHaveValue("")
+    expect(
+      within(reopened).getByRole("combobox", { name: "Provider" }),
+    ).toHaveValue("")
+    // And not dirty on arrival: Escape closes it rather than arming the guard.
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New provider key" }),
+      ).toBeNull(),
+    )
+  })
+
+  it("does not carry a refused create's banner into the next open", async () => {
+    mockApi({ createFails: true })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add provider key",
+      }),
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Provider key already exists",
+    )
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+
+    const reopened = await screen.findByRole("dialog", {
+      name: "New provider key",
+    })
+    expect(within(reopened).queryByRole("alert")).toBeNull()
   })
 
   it("lists the organization's keys with the default marked", async () => {

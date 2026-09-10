@@ -300,9 +300,23 @@ export function OrganizationProviderKeysPage() {
   const setDefault = useSetOrgProviderKeyDefault()
 
   const [adding, setAdding] = useState(false)
+  const [addOpenCount, setAddOpenCount] = useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<OrgProviderKey>()
+
+  // Bumped on each open, and the create form is keyed on it, so the draft (the
+  // plaintext secret included) is fresh every time and untouched through the
+  // exit: the dialog keeps its content while it animates out, so clearing on
+  // the way out would blank the body in front of the operator. The mutation is
+  // inside `KeyForm`, below the key, so a previous refusal's banner goes with
+  // it. See feedback.md, "A draft is fresh on every open and untouched through
+  // the exit".
+  const openAdd = () => {
+    setEditingId(null)
+    setAddOpenCount((n) => n + 1)
+    setAdding(true)
+  }
 
   const editing = keys.data?.find((key) => key.id === editingId) ?? null
   const archivedCount = (keys.data ?? []).filter((key) =>
@@ -443,10 +457,7 @@ export function OrganizationProviderKeysPage() {
               // that carries its own reason nearby.
               variant="primary"
               isDisabled={!secretKeyConfigured}
-              onPress={() => {
-                setEditingId(null)
-                setAdding(true)
-              }}
+              onPress={openAdd}
             >
               Add provider key
             </Button>
@@ -492,6 +503,7 @@ export function OrganizationProviderKeysPage() {
       ) : null}
 
       <KeyForm
+        key={addOpenCount}
         isOpen={adding && secretKeyConfigured}
         editing={null}
         onClose={() => setAdding(false)}
