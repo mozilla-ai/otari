@@ -97,7 +97,7 @@
         {
           "name": "List Deployment Users",
           "request": {
-            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
+            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
             "header": [],
             "method": "GET",
             "url": {
@@ -245,7 +245,7 @@
         {
           "name": "Agent Telemetry Series",
           "request": {
-            "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
+            "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -308,7 +308,7 @@
         {
           "name": "Agent Telemetry Summary",
           "request": {
-            "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
+            "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -346,7 +346,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single agent session. Matches agent_telemetry.session_label and, on the usage side of the join, the usage_logs.source_label that /v1/usage/summary filters on",
+                  "description": "Filter to a single agent session. Matches agent_telemetry.session_label and, on the usage side of the join, the usage_logs.source_label that /api/v1/usage/summary filters on",
                   "disabled": true,
                   "key": "session_label",
                   "value": ""
@@ -842,7 +842,7 @@
               },
               "raw": "{\n  \"email\": \"operator@example.com\",\n  \"password\": \"a-real-password\"\n}"
             },
-            "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.\n\nThe maintenance-mode check runs before either credential is verified, and\nrefuses both. Before, because a frozen deployment should not spend a bcrypt\nverification per attempt and the refusal is not about the credential\nanyway; both, because the way back out is the master key against\n``PATCH /v1/settings/maintenance-mode`` through the header, which never\npasses through this door. That is what keeps the way back out off the frozen\npath, and it is why no identity needs an exemption here; an operator who no\nlonger holds the master key recovers by setting ``OTARI_MASTER_KEY`` and\nrestarting, which is a restart rather than a click. It leaks nothing\neither: ``GET /v1/bootstrap`` already publishes the same flag\nunauthenticated, so the sign-in screen can render the right page.",
+            "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.\n\nThe maintenance-mode check runs before either credential is verified, and\nrefuses both. Before, because a frozen deployment should not spend a bcrypt\nverification per attempt and the refusal is not about the credential\nanyway; both, because the way back out is the master key against\n``PATCH /api/v1/settings/maintenance-mode`` through the header, which never\npasses through this door. That is what keeps the way back out off the frozen\npath, and it is why no identity needs an exemption here; an operator who no\nlonger holds the master key recovers by setting ``OTARI_MASTER_KEY`` and\nrestarting, which is a restart rather than a click. It leaks nothing\neither: ``GET /api/v1/bootstrap`` already publishes the same flag\nunauthenticated, so the sign-in screen can render the right page.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2323,7 +2323,7 @@
         {
           "name": "List Discoverable Models",
           "request": {
-            "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
+            "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /api/v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2691,7 +2691,7 @@
               },
               "raw": "{\n  \"email\": \"string\"\n}"
             },
-            "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
+            "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2916,7 +2916,7 @@
         {
           "name": "List Caller Pending Memberships",
           "request": {
-            "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
+            "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/api/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2950,7 +2950,7 @@
         {
           "name": "Accept Caller Pending Membership",
           "request": {
-            "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
+            "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
             "header": [],
             "method": "POST",
             "url": {
@@ -3520,7 +3520,7 @@
               },
               "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
-            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin/superuser, who see every workspace). The secret is returned once.",
+            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin/superuser, who see every workspace). The secret is returned once.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3692,7 +3692,7 @@
               },
               "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0,\n  \"model_key\": \"string\"\n}"
             },
-            "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
+            "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
             "header": [
               {
                 "key": "Content-Type",
@@ -4257,7 +4257,7 @@
         {
           "name": "List Visible Routing Policies",
           "request": {
-            "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /v1/routing/policies`` answers, narrowed to the\ncaller's own organization.",
+            "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the\ncaller's own organization.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4562,7 +4562,7 @@
         {
           "name": "List Organization Usage",
           "request": {
-            "description": "List the caller's organization's usage logs, most recent first.\n\nThe tenant-scoped counterpart of ``GET /v1/usage``: same filters, same bare\nJSON array, same separate ``/count`` for a paginator's total, confined to\nwhat the caller's membership lets them see. Scope is never a parameter here.",
+            "description": "List the caller's organization's usage logs, most recent first.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage``: same filters, same bare\nJSON array, same separate ``/count`` for a paginator's total, confined to\nwhat the caller's membership lets them see. Scope is never a parameter here.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4692,7 +4692,7 @@
         {
           "name": "Count Organization Usage",
           "request": {
-            "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
+            "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4811,7 +4811,7 @@
         {
           "name": "Organization Usage Series",
           "request": {
-            "description": "Time series split by one dimension, for the caller's organization.\n\nThe tenant-scoped counterpart of ``GET /v1/usage/series``, and kept in\nlockstep with the summary above for the reason that endpoint gives: the\ndashboard serializes one filter object for both, so a filter one of them\nignored would make the stacked chart disagree with the tiles beside it.",
+            "description": "Time series split by one dimension, for the caller's organization.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage/series``, and kept in\nlockstep with the summary above for the reason that endpoint gives: the\ndashboard serializes one filter object for both, so a filter one of them\nignored would make the stacked chart disagree with the tiles beside it.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4936,7 +4936,7 @@
         {
           "name": "Organization Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens and request volume for the caller's organization.\n\nThe tenant-scoped counterpart of ``GET /v1/usage/summary``, running the same\naggregation over a narrower row set: the same bounded window, the same\nbreakdowns, the same ``dimensions`` selector for paying only for the passes a\ncaller reads. The breakdown by user names the people inside the caller's own\nscope, which is the roster they can already read.",
+            "description": "Aggregate spend, tokens and request volume for the caller's organization.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage/summary``, running the same\naggregation over a narrower row set: the same bounded window, the same\nbreakdowns, the same ``dimensions`` selector for paying only for the passes a\ncaller reads. The breakdown by user names the people inside the caller's own\nscope, which is the roster they can already read.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5502,7 +5502,7 @@
         {
           "name": "Provider Catalog",
           "request": {
-            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /v1/providers/catalog/{provider_id}, which imports only that one SDK.",
+            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5868,7 +5868,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
             "header": [
               {
                 "key": "Content-Type",
@@ -5904,7 +5904,7 @@
         {
           "name": "List All Search Tools",
           "request": {
-            "description": "List every search tool ``POST /v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
+            "description": "List every search tool ``POST /api/v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5973,7 +5973,7 @@
         {
           "name": "Reencrypt Stored Search Tool Keys",
           "request": {
-            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
             "header": [],
             "method": "POST",
             "url": {
@@ -6362,7 +6362,7 @@
         {
           "name": "List Usage",
           "request": {
-            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /api/v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
             "header": [],
             "method": "GET",
             "url": {
@@ -6508,7 +6508,7 @@
         {
           "name": "Count Usage",
           "request": {
-            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.\n\nThat value is the one place this count is narrower than ``GET /v1/usage``: it\nalso excludes rows this deployment served itself, so the number an operator\nconfirms is the number the mutation can reach. The list still pages the\nbudget-exempt gateway rows it omits.",
+            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /api/v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.\n\nThat value is the one place this count is narrower than ``GET /api/v1/usage``: it\nalso excludes rows this deployment served itself, so the number an operator\nconfirms is the number the mutation can reach. The list still pages the\nbudget-exempt gateway rows it omits.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6600,7 +6600,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /v1/usage so the total matches what bulk delete and set-price can reach",
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach",
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
@@ -6833,7 +6833,7 @@
         {
           "name": "Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.\n\n``model``, ``user_id``, and ``api_key_id`` are repeatable: several values match\nany of them, so one chart can compare a handful of models, users, or keys.",
+            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/api/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.\n\n``model``, ``user_id``, and ``api_key_id`` are repeatable: several values match\nany of them, so one chart can compare a handful of models, users, or keys.",
             "header": [],
             "method": "GET",
             "url": {
