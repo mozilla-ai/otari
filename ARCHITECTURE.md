@@ -158,6 +158,8 @@ def register(container: Container) -> None:
 
 With nothing configured nothing is imported, the defaults stand, and Otari boots standalone. A selector that is set but cannot be loaded fails startup rather than quietly falling back, because a build nobody chose is worse than a gateway that will not start.
 
+Several independent extensions (say, a budget-alerts plugin and a custom identity adapter from different authors) coexist without one wrapping the other: `OTARI_BOOTSTRAP` accepts a comma-separated list of selectors, applied in that order after the core defaults, and a later bind wins. This stays inside the no-auto-discovery rule above, because the list is explicit and ordered: the whole wiring is still readable from one config value, and a blank entry in it fails startup the way a blank selector does.
+
 A contributed router is the additive half of the seam, and it is gated rather than swapped: Otari mounts it behind `require_capability(...)`, which resolves `EntitlementPort` and answers a request for an unentitled capability with the same 404 a path nothing serves gets. That gate is the server-side half of the entitlement axis; hiding a nav item in the dashboard is not authorization.
 
 Entitlement is not authentication either, and the mount point adds none. A capability names no caller, so on an entitled deployment a contributed route is reachable by anyone unless the router says otherwise. A contribution declares the credential each of its routes needs on the route, the way Otari's own routers do; there is no router-level default to mount, because the right answer differs per route, a contributed route may be deliberately public, and the header check resolves a database session a hybrid gateway does not have.

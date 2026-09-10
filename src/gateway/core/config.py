@@ -779,10 +779,11 @@ class GatewayConfig(BaseSettings):
     bootstrap: str | None = Field(
         default=None,
         description=(
-            "Composition-root bootstrap, as a 'module:callable' selector (OTARI_BOOTSTRAP). "
-            "Imported once at startup after the core adapters are bound, and called with the "
-            "container so an overlay can rebind ports and contribute routers. Unset means "
-            "nothing is imported. Unrelated to bootstrap_api_key."
+            "Composition-root bootstrap, as a 'module:callable' selector (OTARI_BOOTSTRAP), or a "
+            "comma-separated list of them applied in order. Each is imported once at startup after "
+            "the core adapters are bound, and called with the container so an overlay can rebind "
+            "ports and contribute routers; a later bind wins. Unset means nothing is imported. "
+            "Unrelated to bootstrap_api_key."
         ),
     )
     log_writer_strategy: str = Field(

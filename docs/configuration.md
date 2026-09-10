@@ -309,6 +309,21 @@ usage-report timeout and retries, and first-chunk fallback timeout. See
 inside the gateway process. The callable can rebind extension ports and
 contribute capability-gated routers. Most deployments should leave it unset.
 
+Several independent extensions coexist by listing their selectors in that one
+value, comma-separated, in the order they should apply:
+
+```bash
+OTARI_BOOTSTRAP="budget_alerts.bootstrap:register,acme_sso.bootstrap:register"
+```
+
+Each is loaded and called in turn after the core adapters are bound, and a
+later bind of the same port replaces an earlier one, so the whole wiring stays
+explicit and readable from this one value; nothing is discovered from installed
+packages. A blank entry, a trailing comma included, refuses to start rather
+than silently dropping an extension, and so does any selector that cannot be
+loaded. The startup log names each selector with what it rebound and
+contributed.
+
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension

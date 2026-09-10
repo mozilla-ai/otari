@@ -18,6 +18,10 @@ An overlay rebinds ports without editing any Otari source file, by pointing
 ``OTARI_BOOTSTRAP`` at a ``module:callable`` selector. The callable receives
 this container after the core defaults are bound, and may rebind any port and
 contribute routers of its own. Unset, the defaults stand.
+
+Several independent extensions coexist by listing their selectors in that one
+value, comma-separated, in the order they are applied; a later bind wins, and
+the whole wiring stays readable from a single config value.
 """
 
 import importlib
@@ -249,12 +253,13 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
     Binds the core adapters, then, if a selector is given, lets the bootstrap it
-    names rebind ports and contribute routers. With no selector the core
-    defaults stand and Otari boots standalone.
+    names rebind ports and contribute routers. A comma-separated list of
+    selectors is applied in order, each seeing the bindings the previous ones
+    left. With no selector the core defaults stand and Otari boots standalone.
 
     Raises:
-        BootstrapError: If the selector is present but blank, or names a
-            bootstrap that cannot be loaded.
+        BootstrapError: If the selector is present but blank, has a blank entry,
+            or names a bootstrap that cannot be loaded.
 
     """
     container = Container()
@@ -300,28 +305,66 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
         msg = "OTARI_BOOTSTRAP is set but blank; unset it to run without a bootstrap"
         raise BootstrapError(msg)
 
-    defaults = dict(container.bindings())
-    outcome = _load_register(bootstrap_selector)(container)
+    # Applied in order, each seeing what the previous ones bound; any failure
+    # along the way fails startup rather than serving the selectors before it.
+    container.summary = "; ".join(
+        _apply_bootstrap(container, selector) for selector in _split_selectors(bootstrap_selector)
+    )
+    logger.info("Composition root: %s", container.summary)
+    return container
+
+
+def _split_selectors(bootstrap_selector: str) -> list[str]:
+    """Split a comma-separated ``OTARI_BOOTSTRAP`` value into stripped selectors.
+
+    Raises:
+        BootstrapError: If an entry is blank, a trailing comma included. A
+            dropped entry is a build nobody chose, the same as a blank value.
+
+    """
+    selectors = [selector.strip() for selector in bootstrap_selector.split(",")]
+    for position, selector in enumerate(selectors, start=1):
+        if not selector:
+            msg = f"OTARI_BOOTSTRAP entry {position} of {len(selectors)} is blank; remove the extra comma"
+            raise BootstrapError(msg)
+    return selectors
+
+
+def _apply_bootstrap(container: Container, selector: str) -> str:
+    """Load and call one bootstrap against ``container`` and return what it changed.
+
+    The summary fragment names the ports the call rebound, against a snapshot of
+    the bindings taken just before it, and the routers it contributed.
+
+    Raises:
+        BootstrapError: If the bootstrap cannot be loaded or returned an awaitable.
+
+    """
+    register = _load_register(selector)
+    before = dict(container.bindings())
+    contributed_before = len(container.router_contributions())
+    outcome = register(container)
     if inspect.isawaitable(outcome):
         # The same silent drop the ``iscoroutinefunction`` guard refuses, by the
         # route that guard cannot see: a callable *object* whose ``__call__`` is
-        # ``async def`` is not a coroutine function, so it passes every check
-        # above and its body never runs until awaited. Closing the coroutine
-        # keeps the refusal from also emitting "was never awaited" at whatever
-        # point the garbage collector gets to it.
+        # ``async def`` is not a coroutine function, so it passes every check in
+        # ``_load_register`` and its body never runs until awaited. Closing the
+        # coroutine keeps the refusal from also emitting "was never awaited" at
+        # whatever point the garbage collector gets to it.
         outcome.close()
         msg = (
-            f"Bootstrap {bootstrap_selector!r} returned an awaitable; the container is built "
+            f"Bootstrap {selector!r} returned an awaitable; the container is built "
             "synchronously, so register must run to completion when called"
         )
         raise BootstrapError(msg)
-    rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
-    container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
-    contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
+    rebound = sorted(_port_name(port) for port, factory in container.bindings() if before.get(port) is not factory)
+    summary = f"{selector} rebound {', '.join(rebound) or 'no ports'}"
+    contributed = ", ".join(
+        contribution.capability for contribution in container.router_contributions()[contributed_before:]
+    )
     if contributed:
-        container.summary += f", contributed routers for {contributed}"
-    logger.info("Composition root: %s", container.summary)
-    return container
+        summary += f", contributed routers for {contributed}"
+    return summary
 
 
 def _port_name(port: PortKey[Any]) -> str:

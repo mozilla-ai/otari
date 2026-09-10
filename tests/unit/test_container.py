@@ -200,6 +200,108 @@ def test_a_selector_with_surrounding_whitespace_still_loads(tmp_path: Path, monk
     assert "rebound no ports" in container.summary
 
 
+def test_two_selectors_are_applied_in_order_and_a_later_bind_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "first_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import RouterContribution
+from gateway.ports.billing_port import BillingPort
+from gateway.ports.entitlement_port import EntitlementPort
+
+
+class FirstBilling:
+    def __init__(self, session):
+        self.session = session
+
+
+class FirstEntitlements:
+    def __init__(self, session):
+        self.session = session
+
+
+def register(container):
+    container.bind(BillingPort, FirstBilling)
+    container.bind(EntitlementPort, FirstEntitlements)
+    container.contribute_router(RouterContribution(capability="first", router=APIRouter()))
+""",
+    )
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "second_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import RouterContribution
+from gateway.ports.billing_port import BillingPort
+
+
+class SecondBilling:
+    def __init__(self, session):
+        self.session = session
+
+
+def register(container):
+    container.bind(BillingPort, SecondBilling)
+    container.contribute_router(RouterContribution(capability="second", router=APIRouter()))
+""",
+    )
+
+    container = build_container("first_bootstrap:register, second_bootstrap:register")
+
+    # Both ran: the port only the first touched holds its adapter, the port both
+    # touched holds the later one, and the routers arrived in selector order.
+    assert type(container.resolve(BillingPort, NO_SESSION)).__name__ == "SecondBilling"
+    assert type(container.resolve(EntitlementPort, NO_SESSION)).__name__ == "FirstEntitlements"
+    assert [contribution.capability for contribution in container.router_contributions()] == ["first", "second"]
+    assert container.summary == (
+        "first_bootstrap:register rebound BillingPort, EntitlementPort, contributed routers for first; "
+        "second_bootstrap:register rebound BillingPort, contributed routers for second"
+    )
+
+
+@pytest.mark.parametrize(
+    ("selector", "message"),
+    [
+        ("guarded_bootstrap:register, ,guarded_bootstrap:register", "entry 2 of 3 is blank"),
+        ("guarded_bootstrap:register,", "entry 2 of 2 is blank"),
+        (",guarded_bootstrap:register", "entry 1 of 2 is blank"),
+    ],
+)
+def test_a_blank_entry_in_a_selector_list_refuses_to_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str, message: str
+) -> None:
+    # A dropped entry is refused before any selector runs, so a list with a
+    # stray comma never boots a build missing one of its extensions.
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "guarded_bootstrap",
+        "def register(container):\n    raise AssertionError('no selector may run')\n",
+    )
+
+    with pytest.raises(BootstrapError, match=message):
+        build_container(selector)
+
+
+def test_a_failing_later_selector_fails_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "inert_bootstrap",
+        "def register(container):\n    return None\n",
+    )
+
+    with pytest.raises(BootstrapError, match="was not found"):
+        build_container("inert_bootstrap:register,gateway_bootstrap_that_does_not_exist:register")
+
+
 @pytest.mark.parametrize(
     ("selector", "message"),
     [
