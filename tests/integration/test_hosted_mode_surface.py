@@ -140,8 +140,8 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.
         f"{API_ROOT}/models",
-        # The catalog POST /api/v1/search dispatches against. Management, and the
-        # one prefix a careless /api/v1/search stub could shadow.
+        # The catalog that POST /api/v1/search dispatches against: management,
+        # and the one prefix a careless /api/v1/search stub could shadow.
         f"{API_ROOT}/search-tools",
     ):
         response = hosted_client.get(path)
