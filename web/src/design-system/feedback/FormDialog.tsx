@@ -193,7 +193,11 @@ export function FormDialog({
                 if (event.key !== "Enter") return
                 if (!event.metaKey && !event.ctrlKey) return
                 event.preventDefault()
-                if (!isPending) onSubmit()
+                // `requestSubmit`, not `onSubmit` directly: it runs the form's
+                // constraint validation first, so the shortcut and the button
+                // are one path rather than two, and a required field left empty
+                // cannot reach the mutation through the keyboard alone.
+                if (!isPending) event.currentTarget.requestSubmit()
               }}
               aria-busy={isPending}
               className="flex min-h-0 flex-col"

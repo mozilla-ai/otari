@@ -107,6 +107,28 @@ describe("FormDialog", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
+  it("runs the form's validation on Cmd/Ctrl+Enter rather than going around it", async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <FormDialog {...base} isOpen onSubmit={onSubmit}>
+        <label>
+          Instructions
+          <textarea name="instructions" required />
+        </label>
+      </FormDialog>,
+    )
+    await user.click(screen.getByLabelText("Instructions"))
+    // Required and empty. The shortcut goes through requestSubmit, so the
+    // browser refuses it exactly as it refuses the button; calling onSubmit
+    // directly would hand an invalid form to the mutation.
+    await user.keyboard("{Meta>}{Enter}{/Meta}")
+    expect(onSubmit).not.toHaveBeenCalled()
+    await user.keyboard("a")
+    await user.keyboard("{Meta>}{Enter}{/Meta}")
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
   it("submits on Enter from a single-line field, the way every form does", async () => {
     const onSubmit = vi.fn()
     const user = userEvent.setup()

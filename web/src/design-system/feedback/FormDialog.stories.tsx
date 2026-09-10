@@ -53,6 +53,7 @@ function KeyFields() {
           { value: "workspace", label: "This workspace" },
           { value: "organization", label: "Whole organization" },
         ]}
+        reserveMessage={false}
       />
     </>
   )
@@ -250,9 +251,16 @@ function ManyFields() {
               prev.map((item, at) => (at === index ? next : item)),
             )
           }
-          // No description, so no reserved line: the line exists for an error to
-          // replace a description in, and eight of them reserved against nothing
-          // added 8 empty rungs to a body that already scrolls.
+          // No description, so no reserved line: the line exists for an error
+          // to replace a description in, and eight of them reserved against
+          // nothing added eight empty rungs to a body that already scrolls.
+          //
+          // Spelled `={false}` rather than omitted, which reads as redundant
+          // and is not: `FieldMessages` defaults `reserve` to true and `Field`
+          // forwards the prop undefined, so a field that says nothing reserves
+          // a line anyway. Measured, omitting it leaves the row at 83px where
+          // this brings it to 60.
+          reserveMessage={false}
         />
       ))}
     </>

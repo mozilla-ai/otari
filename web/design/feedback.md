@@ -168,7 +168,12 @@ geometry is settled beside the rule it has to beat.
 **A field reserves its message line only where it has a description**, which is
 [forms.md](forms.md)'s rule and not a dialog rule: the reserved line exists so an
 error can replace a description rather than push the footer down, so a field with
-nothing to say under it holds nothing. The first field takes `autoFocus`.
+nothing to say under it holds nothing. Spell that as `reserveMessage={false}`
+rather than by leaving the prop off, which currently reserves anyway: forms.md
+says the prop defaults to off and it does not, because `FieldMessages` defaults
+its own `reserve` to true and the four controls forward an undefined prop into
+it. Measured, a bare field in a dialog is 83px against the 60px it should be.
+The first field takes `autoFocus`.
 
 **Fields fill the dialog.** `Field` and `SecretField` cap themselves at 448px,
 which is right on a page and wrong in a 640px dialog; `globals.css` lifts the cap
