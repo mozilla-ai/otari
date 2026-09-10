@@ -117,6 +117,12 @@ what the set should be. Check the names rather than only the buckets: on a dashb
 substantive ones are `build`, `dashboard`, `e2e`, `catalog` and `serving`, and a run without
 them has covered nothing.
 
+A small set is not always one of the two faults above, though. Every one of these workflows also
+carries a `paths` filter, so a change that touches nothing they watch correctly runs almost
+nothing: a PR editing only `.github/skills/` or a file under `docs/` gets the template and title
+checks and no more, and that is the right answer rather than a symptom. The question to ask is
+whether the set matches the change, not whether the set is large.
+
 ## Generated artifacts a PR can owe
 
 - A route, a schema, **or a route docstring**: run `uv run python scripts/generate_openapi.py`,
