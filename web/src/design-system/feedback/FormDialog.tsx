@@ -30,6 +30,25 @@ export interface FormDialogProps {
    * so Escape and a click outside ask before discarding.
    */
   isDirty?: boolean
+  /**
+   * Whether Escape, a backdrop click and the close control can dismiss it.
+   *
+   * On by default, and `isDirty` is the answer for a form holding unsaved
+   * input: the guard asks rather than refusing. The one case for turning it off
+   * is content that cannot be recovered once the frame closes, which is a
+   * different thing from unsaved: a key's plaintext secret is shown once and is
+   * gone forever, so the acknowledgement is the only way out.
+   */
+  isDismissable?: boolean
+  /**
+   * Whether the form is not yet in a state that can be submitted.
+   *
+   * The submit is shown disabled rather than allowed to fail: a press that does
+   * nothing teaches nothing, and the reason belongs beside the control that is
+   * missing. Reserve it for what the browser cannot check itself; `required` on
+   * a field is better than a boolean here, because it also says which field.
+   */
+  isSubmitDisabled?: boolean
   /** The footer's left slot: a "Create another" `Checkbox`, or a caption. */
   footerStart?: ReactNode
   /** A `TabRow` under the header. `lg` only, where a form has two shapes. */
@@ -64,6 +83,8 @@ export function FormDialog({
   isPending,
   error,
   isDirty = false,
+  isDismissable = true,
+  isSubmitDisabled = false,
   footerStart,
   tabs,
   children,
@@ -93,7 +114,7 @@ export function FormDialog({
   }, [error])
 
   const requestClose = () => {
-    if (isPending) return
+    if (isPending || !isDismissable) return
     if (isDirty) {
       setIsGuarding(true)
       return
@@ -114,12 +135,19 @@ export function FormDialog({
     >
       {/* HeroUI renders a press responder for the trigger slot and warns when
           nothing fills it. These dialogs are driven from state, so the slot is
-          hidden rather than absent; `WorkspaceSwitcher` does the same. */}
-      <Modal.Trigger className="hidden">{submitLabel}</Modal.Trigger>
+          filled and hidden rather than absent; `WorkspaceSwitcher` does the
+          same. `aria-hidden` as well as the class, because the label rule puts
+          the same string on the real trigger and on the submit, and a third
+          copy of it in the accessibility tree makes all three ambiguous to a
+          screen reader and to a test. `display: none` would do it in a browser;
+          this also does it in jsdom, which loads no stylesheet. */}
+      <Modal.Trigger aria-hidden className="hidden">
+        {submitLabel}
+      </Modal.Trigger>
       {/* No `bg-backdrop/50`: globals.css dims `.modal__backdrop--opaque` in
           an unlayered rule that outranks the utility, so the class changes
           nothing (#1033). */}
-      <Modal.Backdrop isDismissable={!isPending}>
+      <Modal.Backdrop isDismissable={isDismissable && !isPending}>
         <Modal.Container
           placement="top"
           // 120px from the top on a desktop viewport: a dialog optically
@@ -154,16 +182,21 @@ export function FormDialog({
                   Lifted 4px to center on the title's own line rather than on
                   the header block, with the 44px target bled outward so
                   raising it moves no layout. */}
-              <Button
-                aria-label="Close"
-                isIconOnly
-                size="sm"
-                className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
-                isDisabled={isPending}
-                onPress={requestClose}
-              >
-                <FiX aria-hidden className="text-muted size-3.5" />
-              </Button>
+              {/* Absent rather than dead when the dialog cannot be dismissed:
+                  a close control that refuses is worse than none, and the
+                  footer's one action is the way out in that case. */}
+              {isDismissable ? (
+                <Button
+                  aria-label="Close"
+                  isIconOnly
+                  size="sm"
+                  className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
+                  isDisabled={isPending}
+                  onPress={requestClose}
+                >
+                  <FiX aria-hidden className="text-muted size-3.5" />
+                </Button>
+              ) : null}
             </header>
             {tabs ? (
               <div className="border-border shrink-0 border-b px-6 pt-4 pb-3">
@@ -237,9 +270,14 @@ export function FormDialog({
                   <>
                     <div className="min-w-0">{footerStart}</div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <Button isDisabled={isPending} onPress={requestClose}>
-                        Cancel
-                      </Button>
+                      {/* Cancel IS the dismiss, so it goes with it: a dialog
+                          that cannot be dismissed has one way out and the
+                          primary is it. */}
+                      {isDismissable ? (
+                        <Button isDisabled={isPending} onPress={requestClose}>
+                          Cancel
+                        </Button>
+                      ) : null}
                       {/* Not `isPending`, and not `isDisabled`. Both land on
                           the product's one disabled treatment, which is 0.4
                           opacity and has to read as *denied*; a submit in
@@ -262,6 +300,7 @@ export function FormDialog({
                       <Button
                         type="submit"
                         variant="primary"
+                        isDisabled={isSubmitDisabled}
                         className={`relative ${isPending ? "pointer-events-none" : ""}`}
                       >
                         <span className={isPending ? "opacity-0" : undefined}>
