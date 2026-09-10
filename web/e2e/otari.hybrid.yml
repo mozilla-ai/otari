@@ -19,6 +19,6 @@ platform:
   # Named explicitly rather than left to the default (otari.ai's
   # /utils/health-check/), which this stand-in does not serve and would answer
   # 404 to, reporting unreachable.
-  health_path: "/health"
-  # The link the landing page offers, and the value /v1/bootstrap publishes.
+  health_path: "/api/v1/health"
+  # The link the landing page offers, and the value /api/v1/bootstrap publishes.
   management_url: "https://otari.ai"
