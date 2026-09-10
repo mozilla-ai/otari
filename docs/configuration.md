@@ -321,6 +321,8 @@ it at shutdown under the same bounded wait, so a task that never yields cannot
 hold the process open:
 
 ```python
+import asyncio
+
 from gateway.container import BackgroundTaskContribution, Container
 
 
