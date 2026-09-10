@@ -8,6 +8,13 @@ import { INPUT_CLASS } from "./inputClass"
 export interface MultiSelectOption {
   id: string
   label: string
+  /**
+   * A second, muted line inside the row, for text that identifies the label
+   * rather than repeating it, such as the id a person is billed under. It joins
+   * the row's accessible name, since it is what tells two rows with one label
+   * apart. Same shape and same treatment as `ComboBoxField`'s.
+   */
+  hint?: string
 }
 
 /** How many matches are rendered at once, however many the query reaches. */
@@ -93,7 +100,8 @@ export function MultiSelect({
     (option) =>
       needle === "" ||
       option.id.toLowerCase().includes(needle) ||
-      option.label.toLowerCase().includes(needle),
+      option.label.toLowerCase().includes(needle) ||
+      (option.hint?.toLowerCase().includes(needle) ?? false),
   )
   // Capped after the filter, never before: the query has to see every option,
   // and only the rendering is bounded.
@@ -285,6 +293,11 @@ export function MultiSelect({
                       id={optionId(index)}
                       role="option"
                       aria-selected={isSelected}
+                      aria-label={
+                        option.hint
+                          ? `${option.label} (${option.hint})`
+                          : undefined
+                      }
                       // Not tabbable, and deliberately not focused either: the
                       // input keeps focus and `aria-activedescendant` points at
                       // the active row. -1 is what the option needs to be a
@@ -320,7 +333,20 @@ export function MultiSelect({
                           <FiCheck aria-hidden className="text-accent size-3" />
                         ) : null}
                       </span>
-                      {option.label}
+                      {/* Spelled out when there is a hint, because the row has
+                          two text nodes and the name computed from them runs
+                          the hint onto the end of the label with no separator.
+                          The hint belongs in the name rather than being dropped
+                          from it: it is what tells two rows with one label
+                          apart. `ComboBoxField` does this the same way. */}
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate">{option.label}</span>
+                        {option.hint ? (
+                          <span className="text-caption text-subtle truncate">
+                            {option.hint}
+                          </span>
+                        ) : null}
+                      </span>
                     </div>
                   )
                 })

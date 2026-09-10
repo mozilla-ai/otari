@@ -89,10 +89,10 @@ describe("UserMultiSelect", () => {
       />,
     )
 
-    // `menuTrigger="input"`, so the list opens on typing or on ArrowDown rather
-    // than on a click.
-    await userEvent.click(screen.getByLabelText("Add a person"))
-    await userEvent.keyboard("{ArrowDown}")
+    // The field carries the form's own label and the list opens on focus, which
+    // is `forms/MultiSelect`'s shape rather than the combo box's. What the rows
+    // say is the part that has to match the owner picker, and it does.
+    await userEvent.click(screen.getByLabelText("Applies to"))
 
     // The same shape the owner picker uses, so a person reads the same way in
     // both: name first, billing id under it and in the row's name.
@@ -101,7 +101,7 @@ describe("UserMultiSelect", () => {
     })
     expect(within(row).getByText("Alice Example")).toBeInTheDocument()
     expect(within(row).getByText(UUID)).toBeInTheDocument()
-    // An id an operator named over the API is already its own name.
+    // An id an operator chose is already its own name, so it carries no hint.
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
@@ -116,7 +116,7 @@ describe("UserMultiSelect", () => {
       />,
     )
 
-    await userEvent.type(screen.getByLabelText("Add a person"), UUID)
+    await userEvent.type(screen.getByLabelText("Applies to"), UUID)
 
     expect(
       await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
@@ -128,10 +128,7 @@ describe("UserMultiSelect", () => {
     mockRoster([member(UUID, "Alice Example")])
     renderPicker(<Controlled users={[user(UUID)]} />)
 
-    // `menuTrigger="input"`, so the list opens on typing or on ArrowDown rather
-    // than on a click.
-    await userEvent.click(screen.getByLabelText("Add a person"))
-    await userEvent.keyboard("{ArrowDown}")
+    await userEvent.click(screen.getByLabelText("Applies to"))
     await userEvent.click(
       await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
     )
@@ -139,10 +136,10 @@ describe("UserMultiSelect", () => {
     // The id is what a budget assignment PATCHes; the chip is what the operator
     // reads back, and it is their name rather than that id.
     expect(await screen.findByText(`selected: ${UUID}`)).toBeInTheDocument()
-    // The open popover aria-hides the rest of the form, chips included.
-    await userEvent.keyboard("{Escape}")
     expect(
-      screen.getByRole("button", { name: "Remove Alice Example" }),
+      within(
+        screen.getByRole("list", { name: "Applies to, selected" }),
+      ).getByText("Alice Example"),
     ).toBeInTheDocument()
   })
 })

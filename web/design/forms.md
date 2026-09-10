@@ -63,9 +63,9 @@ ComboBoxField: { label, value, onChange, onQueryChange?, options: ComboBoxOption
   reserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
   shouldSelectOnFocus?, isSourceEmpty?, emptyMessage?, noMatchesMessage? }
 MultiSelect: { label, value: readonly string[], onChange: (next: string[]) => void,
-  options: MultiSelectOption[], description?, isInvalid?, errorMessage?,
-  reserveMessage?, searchPlaceholder?, emptyMessage?, noMatchesMessage?,
-  countNoun?: { one, other }, maxVisible = 50, autoFocus? }
+  options: MultiSelectOption[] ({ id, label, hint? }), description?, isInvalid?,
+  errorMessage?, reserveMessage?, searchPlaceholder?, emptyMessage?,
+  noMatchesMessage?, countNoun?: { one, other }, maxVisible = 50, autoFocus? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
   className? }
@@ -173,6 +173,11 @@ never re-sorts on a pick.
 counts is how "1 people assigned" ships. `maxVisible` caps what is rendered,
 never what is searched: the filter runs over every option and the footer says
 when it is showing fewer.
+
+An option's `hint` is the same thing it is on `ComboBoxField`: a second, muted
+line inside the row, folded into the row's accessible name because it is what
+tells two rows with one label apart. The query matches it too, so an operator
+who knows an id reaches the row named for a person.
 
 ## Field height is a property of the place, not of the field
 
