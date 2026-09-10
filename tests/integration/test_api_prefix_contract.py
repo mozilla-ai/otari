@@ -1,10 +1,12 @@
 """The published API lives under one prefix, and the security stamps say so.
 
-Two things ``make openapi-check`` cannot catch. First, that every path in the
+Three things ``make openapi-check`` cannot catch. First, that every path in the
 generated document sits under ``API_ROOT`` or ``OTLP_ROOT``. Second, that the
 allowlists in ``gateway.main`` name routes that exist: the generator reads
 those same lists, so the committed document and the generator agree even when
 both are stale. The routing table is the independent source of truth here.
+Third, that the operation ids hold in every mode, not only in the standalone
+mode the committed document is generated from.
 
 The stamp checks are weaker on purpose. ``custom_openapi`` reads the same
 lists, so a mounted path wrongly added to ``_UNAUTHENTICATED_PATHS`` stamps
@@ -23,6 +25,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 
+from gateway.api.routes import hosted_mode, hybrid_mode
 from gateway.core.config import API_ROOT, OTLP_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 from gateway.main import (
     _COOKIE_AUTH_PREFIXES,
@@ -186,6 +189,25 @@ def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI
     for mode, app in (("standalone", standalone), ("hosted", hosted), ("hybrid", hybrid)):
         stray = sorted(op for op in _operation_ids(app) if any(root in op for root in roots))
         assert not stray, f"{mode}: operation ids carry a mount root: {stray}"
+
+
+def test_operation_ids_are_tag_and_handler(standalone: FastAPI) -> None:
+    """One anchor, so a scheme change cannot pass as long as it avoids the root."""
+    assert "keys-create_key" in _operation_ids(standalone)
+
+
+def test_the_mode_stubs_are_not_published(hosted: FastAPI, hybrid: FastAPI) -> None:
+    """A refusal is a deployment posture, not an operation a client can call.
+
+    Pinned by name rather than left to the duplicate check, which the stubs
+    would also pass if they were split into one route per method.
+    """
+    hosted_prefixes = [f"{API_ROOT}{prefix}" for prefix, _ in hosted_mode.DATA_PLANE_PREFIXES]
+    hybrid_prefixes = [f"{API_ROOT}{route.path}" for route in hybrid_mode.router.routes if hasattr(route, "path")]
+    for mode, app, prefixes in (("hosted", hosted, hosted_prefixes), ("hybrid", hybrid, hybrid_prefixes)):
+        assert prefixes, f"{mode}: no stub prefixes to check"
+        published = {p for p in app.openapi()["paths"] if any(_under(p, prefix) for prefix in prefixes)}
+        assert not published, f"{mode}: refused paths reached the document: {sorted(published)}"
 
 
 def test_operation_ids_are_unique_in_every_mode(standalone: FastAPI, hosted: FastAPI, hybrid: FastAPI) -> None:
