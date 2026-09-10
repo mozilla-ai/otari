@@ -139,45 +139,52 @@ export function CopyField({
   const ref = fieldRef ?? internalRef
   const fieldId = useId()
   const [copied, setCopied] = useState(false)
-  const [selectHint, setSelectHint] = useState(false)
-  const [revealed, setRevealed] = useState(false)
-  // A second credential rendered into the same field arrives concealed rather
-  // than inheriting the reveal the operator asked for on the last one: a
-  // rotation with the previous key still on screen would otherwise publish the
-  // replacement without being asked. Reset in render rather than in an effect,
-  // which is React's own answer to a prop change that invalidates state, so the
-  // new value is never painted revealed.
-  const [concealedFor, setConcealedFor] = useState(value)
-  if (value !== concealedFor) {
-    setConcealedFor(value)
-    setRevealed(false)
-  }
+  // Which value each of these is about, rather than a bare flag, because both
+  // outlive the value they were asked for. A second credential rendered into
+  // this field is concealed with nothing having to reset it, and a copy that
+  // fails after the swap cannot reveal or advertise a credential it was not
+  // copying: a rotation with the previous key still on screen would otherwise
+  // publish the replacement without anyone asking to see it.
+  const [revealedValue, setRevealedValue] = useState<string | undefined>(
+    undefined,
+  )
+  const [selectHintFor, setSelectHintFor] = useState<string | undefined>(
+    undefined,
+  )
+  const revealed = revealedValue === value
+  const selectHint = selectHintFor === value
   // Same shape as CopyButton's below: the acknowledgement clears itself on a
   // timer, so the timer has to die with the component (and be replaced rather
   // than stacked when a second copy lands inside the window).
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   )
-  // Set when a failed copy has to reveal the value before it can select it:
-  // `select()` in that same tick would span the stand-in, and the value React
-  // writes on the revealing render discards the selection anyway.
-  const selectOnReveal = useRef(false)
+  // The value a failed copy asked to have selected, once revealing it has put
+  // it on the field: `select()` in the failure's own tick would span the
+  // stand-in, and the value React writes on the revealing render discards a
+  // selection made before it anyway.
+  const selectOnReveal = useRef<string | undefined>(undefined)
 
   useEffect(() => () => clearTimeout(resetTimer.current), [])
 
   useEffect(() => {
-    if (!revealed || !selectOnReveal.current) return
-    selectOnReveal.current = false
+    const wanted = selectOnReveal.current
+    if (wanted === undefined) return
+    selectOnReveal.current = undefined
+    // Only once the reveal has landed on the value the copy was for. Another
+    // credential arriving in the meantime is concealed, and selecting its
+    // stand-in is exactly what this is here to avoid.
+    if (revealedValue !== wanted || value !== wanted) return
     ref.current?.focus()
     ref.current?.select()
-  }, [revealed, ref])
+  }, [revealedValue, value, ref])
 
   const isConcealed = concealed !== undefined && !revealed
   const shown = isConcealed ? concealed : value
 
   const acknowledgeCopy = () => {
     setCopied(true)
-    setSelectHint(false)
+    setSelectHintFor(undefined)
     clearTimeout(resetTimer.current)
     resetTimer.current = setTimeout(() => setCopied(false), 2_000)
   }
@@ -190,18 +197,22 @@ export function CopyField({
     // nothing of the value on screen. Only when that refuses too does it reveal
     // and select, which is the first moment Ctrl/Cmd-C could reach the key.
     if (concealed !== undefined) {
-      if (await copyToClipboard(value)) {
+      // The credential this attempt is for. Another can arrive while the copy
+      // is in flight, and everything below is keyed on this one so a failure
+      // cannot land on its successor.
+      const copying = value
+      if (await copyToClipboard(copying)) {
         acknowledgeCopy()
         return
       }
-      if (revealed) {
-        ref.current?.focus()
-        ref.current?.select()
+      if (ref.current?.value === copying) {
+        ref.current.focus()
+        ref.current.select()
       } else {
-        selectOnReveal.current = true
-        setRevealed(true)
+        selectOnReveal.current = copying
+        setRevealedValue(copying)
       }
-      setSelectHint(true)
+      setSelectHintFor(copying)
       return
     }
     ref.current?.focus()
@@ -217,7 +228,7 @@ export function CopyField({
     }
     // No Clipboard API (or it threw): the text is selected, so the operator can
     // press Ctrl/Cmd-C. Never claim it was copied.
-    setSelectHint(true)
+    setSelectHintFor(value)
   }
 
   const shared =
@@ -292,7 +303,7 @@ export function CopyField({
       variant="ghost"
       isIconOnly
       aria-label={`${revealed ? "Hide" : "Show"} ${label}`}
-      onPress={() => setRevealed(!revealed)}
+      onPress={() => setRevealedValue(revealed ? undefined : value)}
     >
       {revealed ? (
         <FiEyeOff aria-hidden="true" className="h-3.5 w-3.5" />

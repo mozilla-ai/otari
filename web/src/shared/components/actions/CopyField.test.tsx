@@ -353,6 +353,45 @@ describe("CopyField, concealed", () => {
     expect(document.body.textContent).not.toContain("gw-second-secret")
   })
 
+  it("does not reveal a credential that arrived while a copy was failing", async () => {
+    const user = userEvent.setup()
+    // A copy left in flight, so the swap lands between the attempt and its
+    // failure. Both clipboard paths refuse, which is the branch that reveals.
+    let refuse: (reason: Error) => void = () => {}
+    vi.spyOn(navigator.clipboard, "writeText").mockReturnValue(
+      new Promise((_resolve, reject) => {
+        refuse = reject
+      }),
+    )
+    const { rerender } = render(
+      <CopyField
+        label="Secret key"
+        value="gw-first-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Copy" }))
+    rerender(
+      <CopyField
+        label="Secret key"
+        value="gw-second-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+    refuse(new Error("not a secure context"))
+
+    // The failure belongs to the key that is gone, so it reveals nothing and
+    // claims nothing: the replacement is a credential nobody has asked to see.
+    await waitFor(() => {
+      expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+    })
+    expect(document.body.textContent).not.toContain("gw-second-secret")
+    expect(
+      screen.queryByText("Revealed and selected. Press Ctrl/Cmd-C to copy."),
+    ).not.toBeInTheDocument()
+  })
+
   it("rejects concealing a field that carries an action, at the type level", () => {
     render(
       // @ts-expect-error nothing hands out a credential beside a
