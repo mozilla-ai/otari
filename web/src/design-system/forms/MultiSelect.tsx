@@ -224,11 +224,6 @@ export function MultiSelect({
       <label htmlFor={inputId} className="text-body">
         {label}
       </label>
-      {description ? (
-        <p id={descriptionId} className="text-caption">
-          {description}
-        </p>
-      ) : null}
       {/* `relative` so the popover hangs off the field rather than off the
           dialog, and the chips below it stay in flow. */}
       <div ref={wrapperRef} className="relative flex flex-col gap-1.5">
@@ -246,13 +241,14 @@ export function MultiSelect({
             // Wired by hand, because this does not go through HeroUI's
             // Description and FieldError slots: without it a screen reader
             // says "invalid" and never says why.
+            // Whichever line is actually rendered, since the error replaces
+            // the description rather than joining it.
             aria-describedby={
-              [
-                description ? descriptionId : null,
-                isInvalid && errorMessage ? errorId : null,
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined
+              isInvalid && errorMessage
+                ? errorId
+                : description
+                  ? descriptionId
+                  : undefined
             }
             className={`${INPUT_CLASS} w-full pr-9`}
             // The closed field says how many are in rather than staying blank,
@@ -420,10 +416,19 @@ export function MultiSelect({
       <span aria-live="polite" className="sr-only">
         {counted(value.length)}
       </span>
+      {/* One rung, below the control, the way `Field` does it: the error
+          replaces the description rather than adding a row. Below the chips
+          rather than above the field, because that is where a `Field` puts it
+          and a dialog full of `Field`s should not have one control speaking
+          from somewhere else. */}
       <FieldMessages reserve={reserveMessage}>
         {isInvalid && errorMessage ? (
           <span id={errorId} className="text-danger">
             {errorMessage}
+          </span>
+        ) : description ? (
+          <span id={descriptionId} className="text-muted">
+            {description}
           </span>
         ) : null}
       </FieldMessages>

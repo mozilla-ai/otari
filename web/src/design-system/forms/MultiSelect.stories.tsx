@@ -114,7 +114,11 @@ export const Open: Story = {
   ),
 }
 
-/** A refusal, on the same rung a `Field`'s sits on. */
+/**
+ * A refusal, on the same rung a `Field`'s sits on, and in the description's
+ * place rather than under it: the error replaces that line, so going invalid
+ * moves nothing.
+ */
 export const Invalid: Story = {
   render: (args) => (
     <Live

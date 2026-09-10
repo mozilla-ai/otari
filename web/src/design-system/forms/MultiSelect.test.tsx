@@ -174,8 +174,26 @@ describe("MultiSelect", () => {
     expect(screen.getByText(/0 of 3 selected here/)).toBeInTheDocument()
   })
 
-  it("names its description and its error on the control", async () => {
-    render(
+  it("names its description on the control, and its error in that line's place", async () => {
+    // One rung, the way `Field` does it: the error replaces the description
+    // rather than adding a row, so going invalid moves nothing.
+    const { rerender } = render(
+      <MultiSelect
+        label={LABEL}
+        description="Everyone selected is held to this budget."
+        options={PEOPLE}
+        value={[]}
+        onChange={() => {}}
+      />,
+    )
+
+    const described = () => field().getAttribute("aria-describedby") ?? ""
+    expect(described().split(" ").filter(Boolean)).toHaveLength(1)
+    expect(document.getElementById(described())?.textContent).toContain(
+      "held to this budget",
+    )
+
+    rerender(
       <MultiSelect
         label={LABEL}
         description="Everyone selected is held to this budget."
@@ -187,14 +205,12 @@ describe("MultiSelect", () => {
       />,
     )
 
-    const described = field().getAttribute("aria-describedby") ?? ""
-    const ids = described.split(" ").filter(Boolean)
-    expect(ids).toHaveLength(2)
-    const text = ids
-      .map((id) => document.getElementById(id)?.textContent ?? "")
-      .join(" ")
-    expect(text).toContain("held to this budget")
-    expect(text).toContain("Pick at least one person")
+    expect(described().split(" ").filter(Boolean)).toHaveLength(1)
+    expect(document.getElementById(described())?.textContent).toContain(
+      "Pick at least one person",
+    )
+    // Replaced, not joined: the description is gone from the DOM.
+    expect(screen.queryByText(/held to this budget/)).toBeNull()
   })
 
   it("keeps a live region mounted so a change is announced", () => {
