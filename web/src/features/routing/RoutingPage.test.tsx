@@ -342,14 +342,25 @@ afterEach(() => {
 })
 
 /**
- * The page's own create action, resolved while the dialog is shut.
+ * The page's own create action, scoped to the heading's own header.
  *
- * That is the only time it is unambiguous: the dialog's submit says "Create
- * policy" too, and both are on screen together once it is open, which is why
- * every reference to the submit below is scoped to the dialog.
+ * Scoped rather than resolved by name, because "Create policy" is on screen up
+ * to three times: this one, the dialog's submit, and the empty state's action,
+ * which repeats the trigger's words where every sibling page deliberately does
+ * not ("Create your first key", "Create a workspace").
+ *
+ * Unscoped, these calls passed by racing the list. They ran while it was still
+ * loading, so the empty state had not rendered and the name was momentarily
+ * unique; awaiting the empty state before any one of them turned it red with
+ * "Found multiple elements". The inner query awaits too, because the action is
+ * gated on a query and so arrives after the heading.
  */
-const createTrigger = () =>
-  screen.findByRole("button", { name: "Create policy" })
+const createTrigger = async () => {
+  const heading = await screen.findByRole("heading", { name: "Routing" })
+  const header = heading.closest("header")
+  if (!header) throw new Error("PageIntro's header is gone")
+  return within(header).findByRole("button", { name: "Create policy" })
+}
 
 describe("RoutingPage", () => {
   it("lists policies with what they serve and where they come from", async () => {
