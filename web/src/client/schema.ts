@@ -5441,6 +5441,11 @@ export interface components {
             deprecated: boolean;
             /** Description */
             description?: string | null;
+            /**
+             * Discovered
+             * @description Whether any offering was discovered from its provider.
+             */
+            discovered: boolean;
             /** Family */
             family?: string | null;
             /**
@@ -5459,7 +5464,7 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Min Input Price Per Million
-             * @description The cheapest offering's.
+             * @description The cheapest offering's, at the comparison context where one was asked for.
              */
             min_input_price_per_million?: number | null;
             /** Min Output Price Per Million */
@@ -5477,6 +5482,11 @@ export interface components {
             open_weights: boolean;
             /** Output Modalities */
             output_modalities: string[];
+            /**
+             * Price Sources
+             * @description Which price lists the priced offerings came from, distinct and sorted.
+             */
+            price_sources: ("organization" | "deployment" | "defaults")[];
             /** Provider Count */
             provider_count: number;
             /**
@@ -5486,6 +5496,16 @@ export interface components {
             providers: string[];
             /** Release Date */
             release_date?: string | null;
+            /**
+             * Selectors
+             * @description Every offering's selector, so the list can be searched by one.
+             */
+            selectors: string[];
+            /**
+             * Unpriced Count
+             * @description How many offerings carry no price for this caller.
+             */
+            unpriced_count: number;
             /** Vendor */
             vendor: string | null;
         };
@@ -5506,6 +5526,11 @@ export interface components {
              * @default false
              */
             deprecated: boolean;
+            /**
+             * Discovered
+             * @description Whether any offering was discovered from its provider.
+             */
+            discovered: boolean;
             /** Family */
             family?: string | null;
             /**
@@ -5524,7 +5549,7 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Min Input Price Per Million
-             * @description The cheapest offering's.
+             * @description The cheapest offering's, at the comparison context where one was asked for.
              */
             min_input_price_per_million?: number | null;
             /** Min Output Price Per Million */
@@ -5540,6 +5565,11 @@ export interface components {
             open_weights: boolean;
             /** Output Modalities */
             output_modalities: string[];
+            /**
+             * Price Sources
+             * @description Which price lists the priced offerings came from, distinct and sorted.
+             */
+            price_sources: ("organization" | "deployment" | "defaults")[];
             /** Provider Count */
             provider_count: number;
             /**
@@ -5549,6 +5579,16 @@ export interface components {
             providers: string[];
             /** Release Date */
             release_date?: string | null;
+            /**
+             * Selectors
+             * @description Every offering's selector, so the list can be searched by one.
+             */
+            selectors: string[];
+            /**
+             * Unpriced Count
+             * @description How many offerings carry no price for this caller.
+             */
+            unpriced_count: number;
             /** Vendor */
             vendor: string | null;
         };
@@ -12603,7 +12643,10 @@ export interface operations {
     };
     list_catalog_v1_catalog_models_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare. */
+                at_context?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12617,6 +12660,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -34,6 +34,10 @@ function model(
     offering_count: 1,
     provider_count: 1,
     providers: ["openai"],
+    selectors: ["openai:model"],
+    price_sources: [],
+    unpriced_count: 0,
+    discovered: true,
     min_input_price_per_million: null,
     min_output_price_per_million: null,
     ...overrides,
@@ -56,6 +60,11 @@ const GLM = model({
   providers: ["fireworks", "nebius"],
   provider_count: 2,
   offering_count: 2,
+  selectors: [
+    "fireworks:accounts/fireworks/models/glm-5p3",
+    "nebius:zai-org/GLM-5.3",
+  ],
+  price_sources: ["defaults", "deployment"],
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 })
@@ -67,6 +76,10 @@ const KIMI = model({
   context_window: 262_144,
   release_date: "2026-05-01",
   providers: ["nebius"],
+  selectors: ["nebius:moonshotai/Kimi-K2.6"],
+  price_sources: ["defaults"],
+  unpriced_count: 0,
+  discovered: true,
   min_input_price_per_million: 0.6,
   min_output_price_per_million: 2.4,
 })
@@ -78,6 +91,10 @@ const ANY = {
   provider: "all",
   capability: "all",
   minContext: 0,
+  pricing: "all",
+  source: "all",
+  maxInput: 0,
+  releasedWithinDays: 0,
 }
 
 describe("filterModels", () => {
@@ -114,6 +131,72 @@ describe("filterModels", () => {
     expect(
       filterModels([GLM, KIMI, LOCAL], { ...ANY, minContext: 250_000 }),
     ).toEqual([KIMI])
+  })
+})
+
+describe("filterModels, the price and release filters", () => {
+  const priced = [
+    GLM,
+    KIMI,
+    model({
+      id: "old-and-free",
+      release_date: "2022-01-01",
+      price_sources: [],
+      unpriced_count: 1,
+      discovered: false,
+    }),
+  ]
+  const now = new Date("2026-09-10T00:00:00Z")
+
+  it("searches selectors and provider instances too", () => {
+    expect(
+      filterModels(priced, { ...ANY, query: "accounts/fireworks" }).map(
+        (m) => m.id,
+      ),
+    ).toEqual(["glm-5-3"])
+    expect(
+      filterModels(priced, { ...ANY, query: "nebius" }).map((m) => m.id),
+    ).toEqual(["glm-5-3", "kimi-k2-6"])
+  })
+
+  it("narrows by where a price came from", () => {
+    const ids = (pricing: string) =>
+      filterModels(priced, { ...ANY, pricing }).map((m) => m.id)
+    expect(ids("custom")).toEqual(["glm-5-3"])
+    expect(ids("default")).toEqual(["glm-5-3", "kimi-k2-6"])
+    expect(ids("priced")).toEqual(["glm-5-3", "kimi-k2-6"])
+    expect(ids("unpriced")).toEqual(["old-and-free"])
+  })
+
+  it("narrows by whether a provider discovered the model", () => {
+    expect(
+      filterModels(priced, { ...ANY, source: "custom" }).map((m) => m.id),
+    ).toEqual(["old-and-free"])
+    expect(filterModels(priced, { ...ANY, source: "discovered" })).toHaveLength(
+      2,
+    )
+  })
+
+  it("caps the cheapest input rate, dropping the unpriced", () => {
+    expect(
+      filterModels(priced, { ...ANY, maxInput: 0.55 }).map((m) => m.id),
+    ).toEqual(["glm-5-3"])
+  })
+
+  it("keeps only a release inside the window, and none with no date", () => {
+    expect(
+      filterModels(priced, { ...ANY, releasedWithinDays: 365 }, now).map(
+        (m) => m.id,
+      ),
+    ).toEqual(["glm-5-3", "kimi-k2-6"])
+    expect(
+      filterModels(priced, { ...ANY, releasedWithinDays: 3 * 365 }, now).map(
+        (m) => m.id,
+      ),
+    ).toEqual(["glm-5-3", "kimi-k2-6"])
+    expect(
+      filterModels(priced, { ...ANY, releasedWithinDays: 5 * 365 }, now),
+    ).toHaveLength(3)
   })
 })
 

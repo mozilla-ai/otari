@@ -1886,6 +1886,11 @@
             ],
             "title": "Description"
           },
+          "discovered": {
+            "description": "Whether any offering was discovered from its provider.",
+            "title": "Discovered",
+            "type": "boolean"
+          },
           "family": {
             "anyOf": [
               {
@@ -1941,7 +1946,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cheapest offering's.",
+            "description": "The cheapest offering's, at the comparison context where one was asked for.",
             "title": "Min Input Price Per Million"
           },
           "min_output_price_per_million": {
@@ -1982,6 +1987,19 @@
             "title": "Output Modalities",
             "type": "array"
           },
+          "price_sources": {
+            "description": "Which price lists the priced offerings came from, distinct and sorted.",
+            "items": {
+              "enum": [
+                "organization",
+                "deployment",
+                "defaults"
+              ],
+              "type": "string"
+            },
+            "title": "Price Sources",
+            "type": "array"
+          },
           "provider_count": {
             "title": "Provider Count",
             "type": "integer"
@@ -2005,6 +2023,19 @@
             ],
             "title": "Release Date"
           },
+          "selectors": {
+            "description": "Every offering's selector, so the list can be searched by one.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Selectors",
+            "type": "array"
+          },
+          "unpriced_count": {
+            "description": "How many offerings carry no price for this caller.",
+            "title": "Unpriced Count",
+            "type": "integer"
+          },
           "vendor": {
             "anyOf": [
               {
@@ -2027,6 +2058,10 @@
           "offering_count",
           "provider_count",
           "providers",
+          "selectors",
+          "price_sources",
+          "unpriced_count",
+          "discovered",
           "offerings",
           "also_available_from"
         ],
@@ -2055,6 +2090,11 @@
             "default": false,
             "description": "True only when every offering with metadata says so.",
             "title": "Deprecated",
+            "type": "boolean"
+          },
+          "discovered": {
+            "description": "Whether any offering was discovered from its provider.",
+            "title": "Discovered",
             "type": "boolean"
           },
           "family": {
@@ -2112,7 +2152,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cheapest offering's.",
+            "description": "The cheapest offering's, at the comparison context where one was asked for.",
             "title": "Min Input Price Per Million"
           },
           "min_output_price_per_million": {
@@ -2146,6 +2186,19 @@
             "title": "Output Modalities",
             "type": "array"
           },
+          "price_sources": {
+            "description": "Which price lists the priced offerings came from, distinct and sorted.",
+            "items": {
+              "enum": [
+                "organization",
+                "deployment",
+                "defaults"
+              ],
+              "type": "string"
+            },
+            "title": "Price Sources",
+            "type": "array"
+          },
           "provider_count": {
             "title": "Provider Count",
             "type": "integer"
@@ -2169,6 +2222,19 @@
             ],
             "title": "Release Date"
           },
+          "selectors": {
+            "description": "Every offering's selector, so the list can be searched by one.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Selectors",
+            "type": "array"
+          },
+          "unpriced_count": {
+            "description": "How many offerings carry no price for this caller.",
+            "title": "Unpriced Count",
+            "type": "integer"
+          },
           "vendor": {
             "anyOf": [
               {
@@ -2190,7 +2256,11 @@
           "output_modalities",
           "offering_count",
           "provider_count",
-          "providers"
+          "providers",
+          "selectors",
+          "price_sources",
+          "unpriced_count",
+          "discovered"
         ],
         "title": "CatalogModelSummary",
         "type": "object"
@@ -17904,6 +17974,27 @@
       "get": {
         "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
         "operationId": "list_catalog_v1_catalog_models_get",
+        "parameters": [
+          {
+            "description": "Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare.",
+            "in": "query",
+            "name": "at_context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare.",
+              "title": "At Context"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -17914,6 +18005,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

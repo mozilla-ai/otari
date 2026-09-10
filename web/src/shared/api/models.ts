@@ -18,11 +18,16 @@ import {
 // The catalog folded by model, priced for the caller. Any session may read it,
 // like `/v1/models`; the detail is keyed under the list so a pricing write that
 // invalidates CATALOG takes every open detail with it.
-export function useCatalog() {
+// `atContext` re-reads the list with each model's minimum taken from the
+// pricing tier a request of that size settles at; null compares base rates.
+// Keyed beside the model id so a detail read and a list read never share a
+// cache entry, while both still fall under the CATALOG prefix invalidations use.
+export function useCatalog(atContext: number | null = null) {
+  const query = atContext ? `?at_context=${atContext}` : ""
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG],
-    queryFn: () => apiFetch<CatalogResponse>("/v1/catalog/models"),
+    queryKey: [CATALOG, "list", atContext ?? 0],
+    queryFn: () => apiFetch<CatalogResponse>(`/v1/catalog/models${query}`),
     staleTime: 60_000,
   })
 }

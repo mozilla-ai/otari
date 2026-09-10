@@ -180,6 +180,9 @@ models from the catalog.
 `GET /v1/catalog/models` reads the same merged catalog as `GET /v1/models` and
 folds it by model, so `nebius:zai-org/GLM-5.3` and
 `fireworks:accounts/fireworks/models/glm-5p3` are two offerings of one entry.
+`?at_context=<tokens>` on the list takes each model's minimum from the pricing
+tier a request of that size would settle at, so tiered offerings compare at
+the size that matters rather than at their base rate.
 `GET /v1/catalog/models/{id}` lists every offering of one model the caller may
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list

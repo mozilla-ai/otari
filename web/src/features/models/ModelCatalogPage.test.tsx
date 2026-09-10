@@ -41,6 +41,13 @@ const GLM: CatalogModelSummary = {
   offering_count: 2,
   provider_count: 2,
   providers: ["fireworks", "nebius"],
+  selectors: [
+    "fireworks:accounts/fireworks/models/glm-5p3",
+    "nebius:zai-org/GLM-5.3",
+  ],
+  price_sources: ["defaults", "deployment"],
+  unpriced_count: 0,
+  discovered: true,
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 }
@@ -57,6 +64,10 @@ const KIMI: CatalogModelSummary = {
   offering_count: 1,
   provider_count: 1,
   providers: ["nebius"],
+  selectors: ["nebius:moonshotai/Kimi-K2.6"],
+  price_sources: ["defaults"],
+  unpriced_count: 0,
+  discovered: true,
   min_input_price_per_million: 0.6,
   min_output_price_per_million: 2.4,
 }

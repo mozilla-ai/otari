@@ -6,10 +6,15 @@ import type { CatalogModelSummary } from "@/client"
 import {
   CAPABILITY_FILTERS,
   type CatalogSortColumn,
+  COMPARE_AT_OPTIONS,
   CONTEXT_OPTIONS,
   compareModels,
   filterModels,
+  PRICE_OPTIONS,
+  PRICING_OPTIONS,
   providerOptions,
+  RELEASE_OPTIONS,
+  SOURCE_OPTIONS,
   vendorOptions,
 } from "@/features/models/catalog"
 import { ModelDetailPanel } from "@/features/models/ModelDetailPanel"
@@ -85,50 +90,55 @@ function fromRate(value: number | null | undefined): string {
   return value == null ? "—" : `from ${formatRate(value)}`
 }
 
-const COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
-  {
-    id: "name",
-    header: "Model",
-    isRowHeader: true,
-    allowsSorting: true,
-    cell: (row) => (
-      <div className="flex min-w-0 flex-col">
-        <span className="text-body break-words">{row.name}</span>
-        <span className="text-caption">
-          {row.vendor ?? "Unknown vendor"} ·{" "}
-          {row.provider_count === 1
-            ? "1 provider"
-            : `${row.provider_count} providers`}
-          {row.context_window != null
-            ? ` · up to ${formatContext(row.context_window)}`
-            : ""}
+function columns(atContext: number): DataTableColumn<CatalogModelSummary>[] {
+  // The rate lanes say what size they compare at, since the same offering is a
+  // different price at 8K and at 500K once it is tiered.
+  const at = atContext ? ` at ${formatContext(atContext)}` : ""
+  return [
+    {
+      id: "name",
+      header: "Model",
+      isRowHeader: true,
+      allowsSorting: true,
+      cell: (row) => (
+        <div className="flex min-w-0 flex-col">
+          <span className="text-body break-words">{row.name}</span>
+          <span className="text-caption">
+            {row.vendor ?? "Unknown vendor"} ·{" "}
+            {row.provider_count === 1
+              ? "1 provider"
+              : `${row.provider_count} providers`}
+            {row.context_window != null
+              ? ` · up to ${formatContext(row.context_window)}`
+              : ""}
+          </span>
+        </div>
+      ),
+    },
+    {
+      id: "input",
+      header: `Input / 1M${at}`,
+      align: "end",
+      allowsSorting: true,
+      cell: (row) => (
+        <span className="text-mono-caption">
+          {fromRate(row.min_input_price_per_million)}
         </span>
-      </div>
-    ),
-  },
-  {
-    id: "input",
-    header: "Input / 1M",
-    align: "end",
-    allowsSorting: true,
-    cell: (row) => (
-      <span className="text-mono-caption">
-        {fromRate(row.min_input_price_per_million)}
-      </span>
-    ),
-  },
-  {
-    id: "output",
-    header: "Output / 1M",
-    align: "end",
-    allowsSorting: true,
-    cell: (row) => (
-      <span className="text-mono-caption">
-        {fromRate(row.min_output_price_per_million)}
-      </span>
-    ),
-  },
-]
+      ),
+    },
+    {
+      id: "output",
+      header: `Output / 1M${at}`,
+      align: "end",
+      allowsSorting: true,
+      cell: (row) => (
+        <span className="text-mono-caption">
+          {fromRate(row.min_output_price_per_million)}
+        </span>
+      ),
+    },
+  ]
+}
 
 export function ModelCatalogView({
   modelId,
@@ -150,7 +160,9 @@ export function ModelCatalogView({
   const organization = useOrganizationContext(!publicView)
   const isOperator = !publicView && isDeploymentOperator(organization.data)
   const canOverride = !publicView && canManage(organization.data)
-  const catalog = useCatalog()
+  const [compareAt, setCompareAt] = useState("0")
+  const atContext = Number(compareAt) || 0
+  const catalog = useCatalog(atContext || null)
   const selected = useCatalogModel(modelId)
 
   const [search, setSearch] = useState("")
@@ -158,6 +170,10 @@ export function ModelCatalogView({
   const [provider, setProvider] = useState(initialProvider || "all")
   const [capability, setCapability] = useState("all")
   const [minContext, setMinContext] = useState("0")
+  const [pricing, setPricing] = useState("all")
+  const [source, setSource] = useState("all")
+  const [maxInput, setMaxInput] = useState("0")
+  const [release, setRelease] = useState("0")
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [sort, setSort] = useState<{
@@ -172,6 +188,10 @@ export function ModelCatalogView({
     provider,
     capability,
     minContext: Number(minContext) || 0,
+    pricing,
+    source,
+    maxInput: Number(maxInput) || 0,
+    releasedWithinDays: Number(release) || 0,
   }).sort(compareModels(sort.column, sort.direction))
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const clampedPage = Math.min(page, pageCount - 1)
@@ -262,11 +282,41 @@ export function ModelCatalogView({
               onChange={resetPage(setMinContext)}
               options={CONTEXT_OPTIONS}
             />
+            <FilterSelect
+              ariaLabel="Filter by pricing"
+              value={pricing}
+              onChange={resetPage(setPricing)}
+              options={PRICING_OPTIONS}
+            />
+            <FilterSelect
+              ariaLabel="Filter by source"
+              value={source}
+              onChange={resetPage(setSource)}
+              options={SOURCE_OPTIONS}
+            />
+            <FilterSelect
+              ariaLabel="Maximum input price"
+              value={maxInput}
+              onChange={resetPage(setMaxInput)}
+              options={PRICE_OPTIONS}
+            />
+            <FilterSelect
+              ariaLabel="Release date"
+              value={release}
+              onChange={resetPage(setRelease)}
+              options={RELEASE_OPTIONS}
+            />
+            <FilterSelect
+              ariaLabel="Compare prices at"
+              value={compareAt}
+              onChange={resetPage(setCompareAt)}
+              options={COMPARE_AT_OPTIONS}
+            />
           </Toolbar>
           <TableScrollFrame className="otari-models-table">
             <DataTable
               ariaLabel="Models"
-              columns={COLUMNS}
+              columns={columns(atContext)}
               rows={pageRows}
               getRowKey={(row) => row.id}
               isLoading={catalog.isPending && !catalog.data}

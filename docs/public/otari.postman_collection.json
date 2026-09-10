@@ -1572,7 +1572,15 @@
                 "catalog",
                 "models"
               ],
-              "raw": "{{baseUrl}}/v1/catalog/models"
+              "query": [
+                {
+                  "description": "Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare.",
+                  "disabled": true,
+                  "key": "at_context",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/catalog/models?at_context="
             }
           }
         },

@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -183,7 +183,16 @@ class CatalogModelSummary(BaseModel):
     offering_count: int
     provider_count: int
     providers: list[str] = Field(description="The provider instances offering it, sorted.")
-    min_input_price_per_million: float | None = Field(default=None, description="The cheapest offering's.")
+    selectors: list[str] = Field(description="Every offering's selector, so the list can be searched by one.")
+    price_sources: list[PriceSource] = Field(
+        description="Which price lists the priced offerings came from, distinct and sorted."
+    )
+    unpriced_count: int = Field(description="How many offerings carry no price for this caller.")
+    discovered: bool = Field(description="Whether any offering was discovered from its provider.")
+    min_input_price_per_million: float | None = Field(
+        default=None,
+        description="The cheapest offering's, at the comparison context where one was asked for.",
+    )
     min_output_price_per_million: float | None = None
 
 
@@ -463,7 +472,38 @@ def _first(values: Iterable[str | None]) -> str | None:
     return next((value for value in values if value), None)
 
 
-def _summary(identity: ModelIdentity, members: list[_Offering]) -> CatalogModelSummary:
+def _rates_at_context(pricing: ModelPricingInfo, at_context: int | None) -> tuple[float, float]:
+    """The input and output rate a request of ``at_context`` tokens is metered at.
+
+    The tier is the one settlement would pick: the highest cliff at or below
+    the request's input tokens, each of its rates falling back to the base
+    where the tier leaves one unset. No context asked for means the base rates.
+    """
+    rates = (pricing.input_price_per_million, pricing.output_price_per_million)
+    if at_context is None:
+        return rates
+    # A tier arrives as the model or, off a stored row, as the dict it was kept as.
+    tiers = [
+        tier if isinstance(tier, dict) else tier.model_dump()
+        for tier in pricing.pricing_tiers
+    ]
+    eligible = [
+        tier
+        for tier in tiers
+        if isinstance(tier.get("min_input_tokens"), int | float) and tier["min_input_tokens"] <= at_context
+    ]
+    if not eligible:
+        return rates
+    tier = max(eligible, key=lambda t: float(t["min_input_tokens"]))
+    input_rate = tier.get("input_price_per_million")
+    output_rate = tier.get("output_price_per_million")
+    return (
+        float(input_rate) if isinstance(input_rate, int | float) else rates[0],
+        float(output_rate) if isinstance(output_rate, int | float) else rates[1],
+    )
+
+
+def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int | None = None) -> CatalogModelSummary:
     """Fold a group's offerings into the model they are offerings of.
 
     A limit is the largest any offering serves, because the model can do that
@@ -473,6 +513,7 @@ def _summary(identity: ModelIdentity, members: list[_Offering]) -> CatalogModelS
     """
     described = [member.metadata for member in members if member.metadata is not None]
     priced = [member.wire.pricing for member in members if member.wire.pricing is not None]
+    rates = [_rates_at_context(pricing, at_context) for pricing in priced]
     contexts = [member.wire.context_window for member in members if member.wire.context_window is not None]
     outputs = [member.wire.max_output_tokens for member in members if member.wire.max_output_tokens is not None]
     return CatalogModelSummary(
@@ -498,8 +539,12 @@ def _summary(identity: ModelIdentity, members: list[_Offering]) -> CatalogModelS
         offering_count=len(members),
         provider_count=len({member.wire.provider for member in members}),
         providers=sorted({member.wire.provider for member in members}),
-        min_input_price_per_million=min((p.input_price_per_million for p in priced), default=None),
-        min_output_price_per_million=min((p.output_price_per_million for p in priced), default=None),
+        selectors=sorted(member.wire.selector for member in members),
+        price_sources=sorted({member.wire.price_source for member in members if member.wire.price_source}),
+        unpriced_count=sum(1 for member in members if member.wire.pricing is None),
+        discovered=any(member.wire.discovered for member in members),
+        min_input_price_per_million=min((rate[0] for rate in rates), default=None),
+        min_output_price_per_million=min((rate[1] for rate in rates), default=None),
     )
 
 
@@ -549,6 +594,16 @@ async def list_catalog(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    at_context: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            description=(
+                "Compare prices for a request of this many input tokens: each model's minimum is taken "
+                "from the pricing tier that request would settle at. Omitted, the base rates compare."
+            ),
+        ),
+    ] = None,
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
 
@@ -561,7 +616,7 @@ async def list_catalog(
     merged = await _merged_for(db, config, caller, session_identity)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     models = [
-        _summary(identity, [grouped.offerings[selector] for selector in identity.selectors])
+        _summary(identity, [grouped.offerings[selector] for selector in identity.selectors], at_context)
         for identity in grouped.identities.values()
     ]
     return CatalogResponse(

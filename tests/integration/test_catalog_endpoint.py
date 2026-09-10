@@ -315,6 +315,45 @@ def public_client(postgres_url: str, clean_database: None) -> Generator[TestClie
         mcs.clear_catalog_cache()
 
 
+def test_the_list_carries_what_the_filters_and_the_search_need(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    body = _get(priced, "/v1/catalog/models", headers=master_header)
+    glm = next(model for model in body["models"] if model["id"] == "glm-5-3")
+    assert glm["selectors"] == sorted([_FIREWORKS_GLM, _NEBIUS_GLM])
+    assert glm["price_sources"] == ["deployment"]
+    assert glm["unpriced_count"] == 0
+    assert isinstance(glm["discovered"], bool)
+
+
+def test_prices_compare_at_the_tier_a_request_size_settles_at(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    # Nebius is the cheaper base rate; past 100K tokens its tier makes it the dearer one.
+    response = priced.post(
+        "/v1/pricing",
+        json={
+            "model_key": _NEBIUS_GLM,
+            "input_price_per_million": 0.5,
+            "output_price_per_million": 2.0,
+            "pricing_tiers": [{"min_input_tokens": 100_000, "input_price_per_million": 1.0}],
+        },
+        headers=master_header,
+    )
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+    base = next(m for m in _get(priced, "/v1/catalog/models", headers=master_header)["models"] if m["id"] == "glm-5-3")
+    assert base["min_input_price_per_million"] == 0.5
+    at_8k = _get(priced, "/v1/catalog/models?at_context=8000", headers=master_header)["models"]
+    assert next(m for m in at_8k if m["id"] == "glm-5-3")["min_input_price_per_million"] == 0.5
+    listed = _get(priced, "/v1/catalog/models?at_context=200000", headers=master_header)["models"]
+    at_200k = next(m for m in listed if m["id"] == "glm-5-3")
+    # Fireworks' 0.7 is now the floor; the tier's unset output rate falls back to the base.
+    assert at_200k["min_input_price_per_million"] == 0.7
+    assert at_200k["min_output_price_per_million"] == 2.0
+    assert priced.get("/v1/catalog/models?at_context=0", headers=master_header).status_code == 422
+
+
 def test_a_visitor_reads_the_catalog_only_while_it_is_public(
     catalog_client: TestClient, public_client: TestClient, master_header: dict[str, str]
 ) -> None:

@@ -69,6 +69,54 @@ export const CONTEXT_OPTIONS = [
   { value: "1000000", label: "≥ 1M" },
 ]
 
+// Which price list a model's offerings draw on. "custom" is a rate somebody
+// here set, the deployment's or the organization's; "default" is genai-prices.
+export const PRICING_OPTIONS = [
+  { value: "all", label: "Any pricing" },
+  { value: "custom", label: "Custom price" },
+  { value: "default", label: "Default price" },
+  { value: "priced", label: "Priced" },
+  { value: "unpriced", label: "Unpriced" },
+]
+
+export const SOURCE_OPTIONS = [
+  { value: "all", label: "Any source" },
+  { value: "discovered", label: "Discovered" },
+  { value: "custom", label: "Custom (not discovered)" },
+]
+
+/** A ceiling on the cheapest offering's input rate, in $ per million. */
+export const PRICE_OPTIONS = [
+  { value: "0", label: "Any price" },
+  { value: "1", label: "≤ $1 / 1M in" },
+  { value: "3", label: "≤ $3 / 1M in" },
+  { value: "10", label: "≤ $10 / 1M in" },
+  { value: "30", label: "≤ $30 / 1M in" },
+]
+
+// Newness windows in days back from today. A model with no known release
+// date is excluded once a window is active.
+export const RELEASE_OPTIONS = [
+  { value: "0", label: "Any release date" },
+  { value: "365", label: "Past year" },
+  { value: "730", label: "Past 2 years" },
+  { value: "1095", label: "Past 3 years" },
+]
+
+// The request size a price is compared at. Not a filter on the rows but on
+// the numbers: a tiered offering is cheap at 8K and not at 500K, and the list
+// is re-read from the gateway at the chosen size.
+export const COMPARE_AT_OPTIONS = [
+  { value: "0", label: "Base prices" },
+  { value: "8000", label: "Compare at 8K" },
+  { value: "128000", label: "Compare at 128K" },
+  { value: "200000", label: "Compare at 200K" },
+  { value: "500000", label: "Compare at 500K" },
+  { value: "1000000", label: "Compare at 1M" },
+]
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
 export interface CatalogFilters {
   query: string
   vendor: string
@@ -76,22 +124,82 @@ export interface CatalogFilters {
   provider: string
   capability: string
   minContext: number
+  pricing: string
+  source: string
+  /** A ceiling on the cheapest input rate; 0 for none. */
+  maxInput: number
+  /** Days back from `now` a release must fall within; 0 for any. */
+  releasedWithinDays: number
+}
+
+function pricingMatches(model: CatalogModelSummary, pricing: string): boolean {
+  switch (pricing) {
+    case "custom":
+      return model.price_sources.some(
+        (source) => source === "deployment" || source === "organization",
+      )
+    case "default":
+      return model.price_sources.includes("defaults")
+    case "priced":
+      return model.min_input_price_per_million != null
+    case "unpriced":
+      return model.unpriced_count > 0
+    default:
+      return true
+  }
 }
 
 export function filterModels(
   models: CatalogModelSummary[],
   filters: CatalogFilters,
+  now: Date = new Date(),
 ): CatalogModelSummary[] {
   const query = filters.query.trim().toLowerCase()
   const capability = CAPABILITY_FILTERS.find(
     (entry) => entry.value === filters.capability,
   )
+  const releasedAfter =
+    filters.releasedWithinDays > 0
+      ? new Date(now.getTime() - filters.releasedWithinDays * DAY_MS)
+          .toISOString()
+          .slice(0, 10)
+      : null
   return models.filter((model) => {
+    // The selectors and instances are searched too: an operator's query is as
+    // often `accounts/fireworks/models/glm-5p3` or `nebius` as it is a name.
     if (
       query &&
       !model.name.toLowerCase().includes(query) &&
       !(model.vendor ?? "").toLowerCase().includes(query) &&
-      !model.id.includes(query)
+      !model.id.includes(query) &&
+      !model.selectors.some((selector) =>
+        selector.toLowerCase().includes(query),
+      ) &&
+      !model.providers.some((provider) =>
+        provider.toLowerCase().includes(query),
+      )
+    ) {
+      return false
+    }
+    if (!pricingMatches(model, filters.pricing)) {
+      return false
+    }
+    if (filters.source === "discovered" && !model.discovered) {
+      return false
+    }
+    if (filters.source === "custom" && model.discovered) {
+      return false
+    }
+    if (
+      filters.maxInput > 0 &&
+      (model.min_input_price_per_million == null ||
+        model.min_input_price_per_million > filters.maxInput)
+    ) {
+      return false
+    }
+    if (
+      releasedAfter !== null &&
+      (model.release_date == null || model.release_date < releasedAfter)
     ) {
       return false
     }
