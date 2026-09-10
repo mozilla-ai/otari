@@ -61,7 +61,7 @@ name. `provider_type: openai-compatible` and `openai_compatible` are accepted
 aliases for the OpenAI implementation.
 
 The optional `models` list supplies discovery for a backend that has no
-`/api/v1/models` endpoint. It does not restrict direct dispatch.
+model-listing endpoint. It does not restrict direct dispatch.
 
 Named instances are local configuration and do not apply in hybrid mode, where
 the control plane resolves each attempt.

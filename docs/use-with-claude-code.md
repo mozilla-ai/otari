@@ -6,8 +6,8 @@ hybrid modes.
 
 ## Route Claude Code through Otari
 
-Claude Code appends the Messages paths itself (`/v1/messages`), so
-`ANTHROPIC_BASE_URL` is the Otari API root without the trailing `/v1`.
+Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
+`/api`, not `/api/v1`.
 
 ### Connected to otari.ai
 

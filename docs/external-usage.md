@@ -100,9 +100,12 @@ For a standard OTLP exporter:
 
 ```bash
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer $OTARI_IMPORT_KEY"
 ```
+
+The endpoint is the Otari origin plus `/otlp`; the exporter appends the signal
+path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
 output-token, and cache-token attributes. It ignores non-LLM spans and never
