@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import type { PolicySpec } from "@/client/local"
+import { API_ROOT } from "@/shared/api/client"
 import { PolicyForm } from "./RoutingPage"
 
 /**
@@ -47,8 +48,8 @@ const meta = {
   parameters: {
     layout: "fullscreen",
     api: {
-      "/v1/models/discoverable": CATALOG,
-      "/v1/tool-settings": GUARDRAILS_ON,
+      [`${API_ROOT}/models/discoverable`]: CATALOG,
+      [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
     },
   },
   args: {
@@ -119,8 +120,8 @@ export const LongestPolicy: Story = {
 export const WithoutGuardrailsService: Story = {
   parameters: {
     api: {
-      "/v1/models/discoverable": CATALOG,
-      "/v1/tool-settings": { fields: [] },
+      [`${API_ROOT}/models/discoverable`]: CATALOG,
+      [`${API_ROOT}/tool-settings`]: { fields: [] },
     },
   },
 }
