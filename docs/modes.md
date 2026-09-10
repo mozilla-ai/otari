@@ -15,7 +15,7 @@ plane connected to an external control plane such as otari.ai.
 | Usage | Stored locally | Received and stored by the control plane | Reported to the platform |
 | Dashboard | Full local dashboard | Organization-scoped control plane | Health and control-plane link |
 
-`GET /v1/bootstrap` publishes the effective mode, sign-in methods, available
+`GET /api/v1/bootstrap` publishes the effective mode, sign-in methods, available
 management surfaces, and the management or data-plane URL the dashboard needs.
 
 ## Standalone
@@ -35,7 +35,7 @@ fallback is therefore available without otari.ai when you configure a policy.
 Set `OTARI_MODE=hosted` when one process is the control plane for multiple
 organizations.
 
-Hosted mode serves the management API and `GET /v1/models`, but does not serve
+Hosted mode serves the management API and `GET /api/v1/models`, but does not serve
 inference, files, batches, or other data-plane operations. Those paths return a
 descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.

@@ -17,7 +17,7 @@ target model actually needs.
 ## Uploading a file
 
 ```bash
-curl -X POST http://localhost:8000/v1/files \
+curl -X POST http://localhost:8000/api/v1/files \
   -H "Otari-Key: <your-api-key>" \
   -F purpose=user_data \
   -F file=@report.pdf
@@ -29,7 +29,7 @@ format; uploaded files also work with Anthropic `document` blocks and Responses
 `input_file` items:
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:8000/api/v1/chat/completions \
   -H "Otari-Key: <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -70,7 +70,7 @@ from a missing one.
 The workspace comes off the key rather than a header, because a caller controls
 its headers and not which key it holds. The master key is the exception: it is the
 operator acting deployment-wide and sees every workspace, narrowable with
-`GET /v1/files?workspace_id=<id>`. A master-key upload lands in the deployment's
+`GET /api/v1/files?workspace_id=<id>`. A master-key upload lands in the deployment's
 default workspace.
 
 ## What Otari does per attachment

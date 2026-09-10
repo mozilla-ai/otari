@@ -1,13 +1,17 @@
 # API reference
 
-Otari serves an OpenAPI document at `/openapi.json` and interactive API docs at
-`/docs` by default. The repository also commits the generated
+Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
+docs at `/api/v1/docs` by default. The repository also commits the generated
 [OpenAPI specification](public/openapi.json) and
 [Postman collection](public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
-The default server address is `http://localhost:8000`. OpenAI-compatible clients
-normally use `http://localhost:8000/v1` as their base URL.
+The default server address is `http://localhost:8000`. The API is mounted at
+`/api/v1`. OpenAI-compatible clients use `http://localhost:8000/api/v1` as their
+base URL; Anthropic-compatible clients use `http://localhost:8000/api`, because
+their SDK appends `/v1/messages` itself. OTLP ingest is a sibling at `/otlp`:
+point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://localhost:8000/otlp` and the
+exporter appends `/v1/traces`, `/v1/logs` and `/v1/metrics`.
 
 ## Authentication
 
@@ -25,10 +29,10 @@ Use API keys for inference. The master key is a deployment-wide administrative
 credential. Dashboard sessions authenticate browser requests, but deployment-wide
 operations also require operator authority. Where a tenant needs one of those
 operations, a separately scoped endpoint serves it to the caller's own
-organization: `/v1/organizations/me/usage` for usage, and
-`/v1/organizations/me/keys` for a member's own API keys.
+organization: `/api/v1/organizations/me/usage` for usage, and
+`/api/v1/organizations/me/keys` for a member's own API keys.
 
-In hybrid mode, the generation APIs and the `/v1/mcp` endpoints accept an
+In hybrid mode, the generation APIs and the `/api/v1/mcp` endpoints accept an
 otari.ai user token through `Authorization: Bearer <token>`. Local API keys and
 management APIs are not used.
 
@@ -36,11 +40,11 @@ management APIs are not used.
 
 | Surface | Standalone | Hosted | Hybrid |
 | --- | --- | --- | --- |
-| Health and `/v1/bootstrap` | Yes | Yes | Yes |
+| Health and `/api/v1/bootstrap` | Yes | Yes | Yes |
 | Chat, Messages, and Responses | Yes | No | Yes |
 | Caller-orchestrated MCP | Yes | No | Yes |
 | Other inference APIs | Yes | No | No |
-| `/v1/models` | Yes | Yes | No |
+| `/api/v1/models` | Yes | Yes | No |
 | Management APIs | Yes | Yes | No |
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
@@ -50,28 +54,28 @@ and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
 
 Otari implements three completion surfaces:
 
-- `POST /v1/chat/completions`, OpenAI Chat Completions
-- `POST /v1/messages` and `/v1/messages/count_tokens`, Anthropic Messages
-- `POST /v1/responses`, OpenAI Responses
+- `POST /api/v1/chat/completions`, OpenAI Chat Completions
+- `POST /api/v1/messages` and `/api/v1/messages/count_tokens`, Anthropic Messages
+- `POST /api/v1/responses`, OpenAI Responses
 
 Standalone mode also serves embeddings, images, audio, files, batches,
 moderations, rerank, and search. Provider support differs by endpoint, so use
-`GET /v1/models` and the OpenAPI document for the deployment you are calling.
+`GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
 ## Search
 
-`POST /v1/search` and `POST /v1/search/{search_tool_name}` run a configured
+`POST /api/v1/search` and `POST /api/v1/search/{search_tool_name}` run a configured
 search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
 [Built-in tools](tools.md).
 
-Search-tool management lives under `/v1/search-tools`. The generated OpenAPI
+Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
 
 ## Routing policies
 
-Routing-policy management lives under `/v1/routing/policies`; learned-routing
-examples and status live under `/v1/routing/preferences` and `/v1/routing/status`.
+Routing-policy management lives under `/api/v1/routing/policies`; learned-routing
+examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
 See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
 
@@ -90,8 +94,8 @@ log provider keys, prompts, responses, or raw upstream bodies.
 
 Two stored-server endpoints let an application own its own MCP tool loop, as an
 alternative to sending `mcp_servers` with a completion and letting Otari own it.
-`GET /v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a stored
-MCP server exposes to the authenticated workspace, and `POST /v1/mcp/execute`
+`GET /api/v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a stored
+MCP server exposes to the authenticated workspace, and `POST /api/v1/mcp/execute`
 runs one exact caller-authorized call and returns the remote server's native MCP
 result.
 
@@ -101,7 +105,7 @@ any human approval, argument editing, cancellation, and action history. Otari
 enforces authentication, stored-server access, the stored tool allowlist, URL
 safety, and its own execution bounds.
 
-`POST /v1/mcp/execute` must never be retried automatically, including by a
+`POST /api/v1/mcp/execute` must never be retried automatically, including by a
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
 already have run. See [MCP](mcp.md#caller-orchestrated-mcp) for the request
 shapes, the error and execution-state contract, and the limits.

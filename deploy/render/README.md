@@ -89,7 +89,7 @@ curl "$OTARI_URL/api/v1/chat/completions" \
   }'
 ```
 
-Use a `provider:model` value that matches a credential you supplied. Clients should use `$OTARI_URL/v1` as their OpenAI-compatible base URL.
+Use a `provider:model` value that matches a credential you supplied. Clients should use `$OTARI_URL/api/v1` as their OpenAI-compatible base URL.
 
 For a longer-lived deployment, use `OTARI_MASTER_KEY` to create a named API key, then revoke the bootstrap key through the key-management API.
 

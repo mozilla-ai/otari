@@ -1,6 +1,6 @@
 # MCP
 
-Otari lets `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` use
+Otari lets `/api/v1/chat/completions`, `/api/v1/messages`, and `/api/v1/responses` use
 tools exposed by MCP servers.
 
 Add MCP as a top-level request field, not a `tools` entry.
@@ -36,13 +36,13 @@ with a completion, and Otari owns the model/tool loop.
 provides two stored-server endpoints, and your application decides whether a
 proposed call may run:
 
-1. `GET /v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a
+1. `GET /api/v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a
    stored MCP server exposes to the authenticated workspace.
 2. Your application exposes those tools to its model or workflow, and applies
    its own authorization policy to whatever gets proposed. That may be a user
    approval prompt, an administrator rule, or trusted read-only
    auto-authorization.
-3. `POST /v1/mcp/execute` runs one exact authorized call and returns the remote
+3. `POST /api/v1/mcp/execute` runs one exact authorized call and returns the remote
    server's native MCP result.
 
 **Otari executes a caller-authorized call. It does not verify a user approval
@@ -66,7 +66,7 @@ deployment cannot reach a machine-local process.
 ### Discovery
 
 ```http
-GET /v1/mcp/servers/2c948a61-dc96-4cd8-96bb-8e1434bf424e/tools
+GET /api/v1/mcp/servers/2c948a61-dc96-4cd8-96bb-8e1434bf424e/tools
 Authorization: Bearer <token>
 ```
 
@@ -127,7 +127,7 @@ the round trip unchanged.
 ### Execution
 
 ```http
-POST /v1/mcp/execute
+POST /api/v1/mcp/execute
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
@@ -188,7 +188,7 @@ Repeating a request with the same `client_execution_id` may execute the tool
 again. Otari implements no deduplication, because a worker-local one would not
 survive a second process or a restart.
 
-Send exactly one HTTP attempt for `POST /v1/mcp/execute`, and make sure nothing
+Send exactly one HTTP attempt for `POST /api/v1/mcp/execute`, and make sure nothing
 on the path adds attempts of its own: your SDK, your own retry policy, and the
 reverse proxies, service meshes and ingress controllers in front of Otari, on
 connection resets and 5xx responses alike.
@@ -300,7 +300,7 @@ naming the configured data-plane URL.
 
 ## Messages streaming activity
 
-For streaming `/v1/messages` requests with the standard Anthropic header
+For streaming `/api/v1/messages` requests with the standard Anthropic header
 `anthropic-beta: mcp-client-2025-11-20`, Otari emits server-owned activity
 around each gateway-run MCP call. The body form
 `betas: ["mcp-client-2025-11-20"]` is also accepted. An `mcp_tool_use` block
@@ -372,10 +372,10 @@ workspace the switcher has selected. Everything below is the same thing over the
 API.
 
 Manage a workspace's servers with the master key, under
-`/v1/workspaces/{workspace_id}/mcp-servers`:
+`/api/v1/workspaces/{workspace_id}/mcp-servers`:
 
 ```bash
-curl -X POST http://localhost:8000/v1/workspaces/$WORKSPACE_ID/mcp-servers \
+curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/mcp-servers \
   -H "Otari-Key: $OTARI_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{

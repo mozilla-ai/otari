@@ -111,9 +111,9 @@ quality against configured model cost. Every candidate therefore needs pricing.
 Until a user's pool is warm, or when the router cannot decide confidently, the
 default target serves.
 
-Teach the router through `POST /v1/routing/preferences/rank`. Each example
+Teach the router through `POST /api/v1/routing/preferences/rank`. Each example
 contains a prompt and a score from 0 to 1 for each candidate. Read pool status
-through `GET /v1/routing/status`. `scripts/seed_routing_demo.py` provides a
+through `GET /api/v1/routing/status`. `scripts/seed_routing_demo.py` provides a
 runnable example.
 
 Learned memory is scoped by user and workspace. Optional task IDs create separate
@@ -172,18 +172,18 @@ otari routing explain balanced --allowed-model "anthropic:*"
 
 The command shows ordered candidates, filtered candidates and their reasons,
 effective weighted shares, and mandatory guardrails. The API equivalent is
-`POST /v1/routing/policies/explain`; it can also validate an unsaved draft.
+`POST /api/v1/routing/policies/explain`; it can also validate an unsaved draft.
 
 ## Managing policies at runtime
 
 Config-file policies apply to every workspace. Standalone operators can also
-manage stored policies through the Routing page or `/v1/routing/policies`.
+manage stored policies through the Routing page or `/api/v1/routing/policies`.
 Stored policies belong to one workspace and can optionally be scoped to one
 user.
 
 An organization's owners and admins manage their own workspaces' policies and
-aliases through `/v1/organizations/me/routing-policies` and
-`/v1/organizations/me/aliases`, which the Routing page uses for a caller who
+aliases through `/api/v1/organizations/me/routing-policies` and
+`/api/v1/organizations/me/aliases`, which the Routing page uses for a caller who
 does not operate the deployment. Those routes require the workspace named, must
 name a workspace of the caller's own organization, accept no user scope, and
 refuse a target the organization holds no provider access for. Both reads take a

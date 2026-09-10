@@ -14,7 +14,7 @@ A durable standalone deployment should:
 - configure explicit pricing or deliberately enable default pricing
 - terminate TLS in front of the gateway
 - restrict database and management access
-- monitor `/health/readiness` and, when enabled, `/metrics`
+- monitor `/api/v1/health/readiness` and, when enabled, `/metrics`
 - pin an image version and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
@@ -63,7 +63,7 @@ Hybrid mode does not initialize a local management database or use local
 provider credentials. Clients send an otari.ai user token to the gateway:
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:8000/api/v1/chat/completions \
   -H "Authorization: Bearer tk_your_user_token" \
   -H "Content-Type: application/json" \
   -d '{
@@ -75,8 +75,8 @@ curl http://localhost:8000/v1/chat/completions \
 Verify both liveness and control-plane reachability:
 
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/health/readiness
+curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/api/v1/health/readiness
 ```
 
 See [Runtime modes](modes.md) for the trust and credential model.

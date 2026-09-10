@@ -11,7 +11,7 @@ combine these tools with each other or with MCP servers.
 Inspect the tools available on a running deployment:
 
 ```bash
-curl http://localhost:8000/v1/tools \
+curl http://localhost:8000/api/v1/tools \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
 
@@ -39,8 +39,8 @@ for providers that already support a native search tool. It requires
 
 A declaration may carry `max_uses` to cap how many searches Otari runs for that
 request. Because a gateway-run search is billed per successful call, the cap is
-honored on every endpoint (`/v1/messages`, `/v1/chat/completions`,
-`/v1/responses`) and on every declaration shape, including `otari_web_search`.
+honored on every endpoint (`/api/v1/messages`, `/api/v1/chat/completions`,
+`/api/v1/responses`) and on every declaration shape, including `otari_web_search`.
 A failed search does not count against it, matching what is billed.
 
 `max_uses: 0` is a cap of zero searches, not the absence of a cap, so every
@@ -56,7 +56,7 @@ without `max_uses` is bounded only by `max_tool_iterations`.
 
 ### Who may read the settings
 
-`GET /v1/tool-settings` answers any signed-in identity, so a member is told how
+`GET /api/v1/tool-settings` answers any signed-in identity, so a member is told how
 the built-in tools behave on their requests. A caller who does not operate the
 deployment is answered without `web_search_url`, `sandbox_url` and
 `guardrails_url`: those name this deployment's own infrastructure, which is what
@@ -79,7 +79,7 @@ With `require_pricing: true`, an unpriced gateway-run tool is refused before the
 model call. A failed tool invocation is recorded but not charged. Charges settle
 on the final usage row alongside model tokens.
 
-Direct `POST /v1/search` uses a different price key,
+Direct `POST /api/v1/search` uses a different price key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
 without a model tool loop.
 
@@ -128,7 +128,7 @@ A workspace policy can disable code execution or narrow the deployment limits:
 - an allowed sandbox image
 
 Manage it under
-`/v1/workspaces/{workspace_id}/code-execution-policy` or from Tools. A policy
+`/api/v1/workspaces/{workspace_id}/code-execution-policy` or from Tools. A policy
 cannot enable a missing deployment backend or exceed the deployment limits.
 Workspace-selected images must come from
 `sandbox_allowed_session_images` or the deployment's own session image.
@@ -164,10 +164,10 @@ a SearXNG-compatible `/search?format=json` endpoint, and a configured provider
 wins over it.
 
 Where the search key must not sit on the machine serving traffic, a deployment
-can also serve the search itself at `GET /v1/web-search/search`. This is the
+can also serve the search itself at `GET /api/v1/web-search/search`. This is the
 hosted shape: the control plane holds the key and runs the query, and its
 **hybrid** data plane calls it by setting `web_search_url` to
-`{control-plane}/v1/web-search`. That address has to be under the gateway's
+`{control-plane}/api/v1/web-search`. That address has to be under the gateway's
 `PLATFORM_BASE_URL`, because a gateway forwards its platform token only to its
 own control plane, and that token is what the route recognizes.
 
@@ -185,7 +185,7 @@ below still governs it.
 Migrating from the Brave or Tavily adapter container: on the process that holds
 the key, set `web_search_provider` and `web_search_provider_api_key` and unset
 `web_search_url`. A hybrid data plane holds no key, so it keeps a
-`web_search_url` and points it at its control plane's `/v1/web-search` instead.
+`web_search_url` and points it at its control plane's `/api/v1/web-search` instead.
 The adapters, and the `web-search-brave` and `web-search-tavily` compose
 profiles that ran them, were removed. A `web_search_url` still pointing at one
 keeps the deployment looking configured while every search fails, so change both
@@ -203,7 +203,7 @@ A workspace search policy can:
 - provide a default purpose hint
 - supply provider options
 
-Manage it under `/v1/workspaces/{workspace_id}/web-search` or from Tools.
+Manage it under `/api/v1/workspaces/{workspace_id}/web-search` or from Tools.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend or relax an operator limit.
 
@@ -212,7 +212,7 @@ connected control plane supplies workspace search configuration.
 
 ## Direct search
 
-In standalone mode, `POST /v1/search` lets the caller submit a query directly
+In standalone mode, `POST /api/v1/search` lets the caller submit a query directly
 instead of waiting for a model to request one. Configure its named providers
 through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 

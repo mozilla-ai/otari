@@ -2,7 +2,7 @@
 
 Otari routes provider calls through
 [any-llm](https://github.com/mozilla-ai/any-llm). Provider support changes with
-that dependency, so the running gateway's `GET /v1/models` response is more
+that dependency, so the running gateway's `GET /api/v1/models` response is more
 reliable than a copied provider table.
 
 ## Model format
@@ -61,7 +61,7 @@ name. `provider_type: openai-compatible` and `openai_compatible` are accepted
 aliases for the OpenAI implementation.
 
 The optional `models` list supplies discovery for a backend that has no
-`/v1/models` endpoint. It does not restrict direct dispatch.
+`/api/v1/models` endpoint. It does not restrict direct dispatch.
 
 Named instances are local configuration and do not apply in hybrid mode, where
 the control plane resolves each attempt.
@@ -83,7 +83,7 @@ because their provider exists in any-llm.
 
 ## Model discovery
 
-`GET /v1/models` combines discoverable provider models, configured prices,
+`GET /api/v1/models` combines discoverable provider models, configured prices,
 aliases, and routing-policy names. Discovery is cached and bounded; an
 unreachable provider does not block the catalog indefinitely.
 
@@ -91,7 +91,7 @@ Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
 
-Hosted mode keeps `GET /v1/models` for control-plane discovery. Hybrid mode
+Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
 does not serve the local catalog.
 
 ### Who is shown which models
@@ -153,7 +153,7 @@ point to another alias.
 
 ### Runtime aliases
 
-Standalone operators can manage aliases from Routing or `/v1/aliases` without
+Standalone operators can manage aliases from Routing or `/api/v1/aliases` without
 restarting. A stored alias belongs to a workspace and can optionally be narrowed
 to one user. Resolution prefers the most specific applicable alias.
 
@@ -178,7 +178,7 @@ models from the catalog.
 ## Listing available models
 
 ```bash
-curl http://localhost:8000/v1/models \
+curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
 

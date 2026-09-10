@@ -65,7 +65,7 @@ gw-...
 Send a request with that key:
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:8000/api/v1/chat/completions \
   -H "Authorization: Bearer gw-..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -75,7 +75,7 @@ curl http://localhost:8000/v1/chat/completions \
 ```
 
 OpenAI clients work by setting `base_url` to
-`http://localhost:8000/v1`.
+`http://localhost:8000/api/v1`.
 
 This container uses SQLite inside the container and is deleted when it stops.
 Use the Compose setup below for persistent data.
@@ -120,13 +120,13 @@ Otari defaults to standalone. See [Runtime modes](docs/modes.md).
 
 The core completion routes are:
 
-- `POST /v1/chat/completions`
-- `POST /v1/messages`
-- `POST /v1/responses`
+- `POST /api/v1/chat/completions`
+- `POST /api/v1/messages`
+- `POST /api/v1/responses`
 
 Standalone also serves the broader OpenAI-compatible and management APIs. The
-running server publishes Swagger UI at `/docs` and OpenAPI at
-`/openapi.json`. See [API reference](docs/api-reference.md).
+running server publishes Swagger UI at `/api/v1/docs` and OpenAPI at
+`/api/v1/openapi.json`. See [API reference](docs/api-reference.md).
 
 The dashboard manages providers, models, routing, tools, keys, members, budgets,
 settings, activity, and usage. Its navigation adapts to the deployment mode and

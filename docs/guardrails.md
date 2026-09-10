@@ -2,7 +2,7 @@
 
 A guardrail is a request-level check Otari runs on the input before the provider is ever called. The caller opts in per request via a top-level `guardrails` field (a sibling of `tools`, not an entry inside it), and the model can't see or decline it.
 
-Guardrails work on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`.
+Guardrails work on `/api/v1/chat/completions`, `/api/v1/messages`, and `/api/v1/responses`.
 
 ## Bring up the guardrails service
 
@@ -17,7 +17,7 @@ This starts the `anyguardrails` container (which wraps [any-guardrail](https://g
 Add a `guardrails` field to your request:
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:8000/api/v1/chat/completions \
   -H "Authorization: Bearer <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -70,7 +70,7 @@ chooses whether the caller asked for it or not. The two layers compose; they do
 not replace each other, and an organization that configures nothing leaves every
 request checked exactly as it was.
 
-Entries are managed over `/v1/organizations/me/guardrails` (master key, and an
+Entries are managed over `/api/v1/organizations/me/guardrails` (master key, and an
 organization owner or admin), and each one carries:
 
 | Field | Meaning |
@@ -85,7 +85,7 @@ organization owner or admin), and each one carries:
 | `workspace_ids` | The workspaces it runs in, when it does not apply to all of them. |
 
 ```bash
-curl -X POST http://localhost:8000/v1/organizations/me/guardrails \
+curl -X POST http://localhost:8000/api/v1/organizations/me/guardrails \
   -H "Authorization: Bearer <master-key>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -97,7 +97,7 @@ curl -X POST http://localhost:8000/v1/organizations/me/guardrails \
 
 ### Which profiles exist, and what they take
 
-`GET /v1/tool-settings/guardrails/profiles` lists the profiles the deployment's
+`GET /api/v1/tool-settings/guardrails/profiles` lists the profiles the deployment's
 guardrails service has actually built, with the `validate_kwargs` each one
 accepts. It is what the dashboard's guardrail form is driven by, so an entry is
 configured by picking a profile and filling in typed fields rather than by

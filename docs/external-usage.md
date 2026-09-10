@@ -23,7 +23,7 @@ analytics would count the session twice.
 
 ## Authentication and attribution
 
-`POST /v1/usage/external-events` accepts either:
+`POST /api/v1/usage/external-events` accepts either:
 
 - A budget-exempt API key. Events bind to that key's user and workspace.
 - The master key. The batch or each event must name an existing user; the
@@ -42,7 +42,7 @@ any exporter was configured gets in. See
 ## Import normalized events
 
 ```bash
-curl "$OTARI_URL/v1/usage/external-events" \
+curl "$OTARI_URL/api/v1/usage/external-events" \
   -H "Authorization: Bearer $OTARI_IMPORT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -87,9 +87,9 @@ duplicates without creating new usage rows.
 Otari accepts OTLP over HTTP:
 
 ```text
-POST /v1/traces    GenAI spans
-POST /v1/logs      GenAI log events and recognized coding-agent events
-POST /v1/metrics   content-free coding-agent outcome metrics
+POST /otlp/v1/traces    GenAI spans
+POST /otlp/v1/logs      GenAI log events and recognized coding-agent events
+POST /otlp/v1/metrics   content-free coding-agent outcome metrics
 ```
 
 Protobuf and JSON are accepted, with optional gzip. gRPC is not. Authenticate

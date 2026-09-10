@@ -28,8 +28,8 @@ Each SDK reports the Otari/spec version its generated core was built from.
   endpoint or field that SDK uses.
 - New endpoints are additive. An older SDK simply does not expose them.
 
-To find the running gateway version, check `/health/readiness`, or
-`/openapi.json` (`info.version`) when docs are enabled.
+To find the running gateway version, check `/api/v1/health/readiness`, or
+`/api/v1/openapi.json` (`info.version`) when docs are enabled.
 
 ## Compatibility matrix
 

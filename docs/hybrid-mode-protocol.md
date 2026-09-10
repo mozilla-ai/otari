@@ -222,7 +222,7 @@ its own tenant.
 Called when a request references workspace-scoped MCP server ids (a
 hybrid-only feature). Otari swaps those ids for the inline server configs it
 needs to open the connections. The caller-orchestrated endpoints,
-`GET /v1/mcp/servers/{mcp_server_id}/tools` and `POST /v1/mcp/execute`, call the
+`GET /api/v1/mcp/servers/{mcp_server_id}/tools` and `POST /api/v1/mcp/execute`, call the
 same endpoint with the one id they were asked about. They accept the legacy
 response shape, which returns one enabled connection config without `id` or
 `enabled` and omits disabled servers, while validating either field when a newer

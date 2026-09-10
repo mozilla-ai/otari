@@ -82,7 +82,7 @@ the corresponding startup value after the database is available.
 
 For every field, its current default, validation, and description live on
 `GatewayConfig` in `src/gateway/core/config.py`. Operators can read the
-non-secret effective set through `GET /v1/settings`.
+non-secret effective set through `GET /api/v1/settings`.
 
 ### Database connections
 
@@ -141,7 +141,7 @@ for backends without a model-listing endpoint. See [Models](models.md).
 ### Runtime provider management
 
 Standalone operators can store provider credentials through the Providers page
-or `/v1/provider-credentials`. Stored entries override config-file entries with
+or `/api/v1/provider-credentials`. Stored entries override config-file entries with
 the same instance name. Config-file entries remain read-only in the dashboard.
 
 Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
@@ -161,7 +161,7 @@ pricing:
     output_price_per_million: 10.00
 ```
 
-Config-file prices seed the database. Prices stored through `/v1/pricing` take
+Config-file prices seed the database. Prices stored through `/api/v1/pricing` take
 precedence. Rates and settled costs use decimal arithmetic and costs are rounded
 once to a micro-dollar. Use PostgreSQL for durable accounting.
 
@@ -204,8 +204,8 @@ token price to a request-priced or image-priced endpoint.
 
 ## Search tools
 
-`search_tools` configures direct `POST /v1/search` calls. The same entries can
-be managed at runtime from Tools or `/v1/search-tools`.
+`search_tools` configures direct `POST /api/v1/search` calls. The same entries can
+be managed at runtime from Tools or `/api/v1/search-tools`.
 
 ```yaml
 search_tools:
@@ -214,7 +214,7 @@ search_tools:
     api_base: "http://searxng:8080"
 ```
 
-`GET /v1/search-tools/providers` publishes the supported providers and whether
+`GET /api/v1/search-tools/providers` publishes the supported providers and whether
 each requires an `api_key` or `api_base`. Provider options and request filters
 are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
 an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
@@ -240,11 +240,11 @@ smtp_password: ${SMTP_PASSWORD}
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
-`POST /v1/settings/mail/test`.
+`POST /api/v1/settings/mail/test`.
 
 ## Built-in tools and guardrails variables
 
-The Tools pages and `GET /v1/tool-settings` show effective sandbox, web-search,
+The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,
 and guardrail configuration. Common startup settings are:
 
 - `sandbox_url`
@@ -278,7 +278,7 @@ privacy_url: "https://example.com/privacy"
 
 Each is independent. Unset, the Terms of service row is absent and the Data &
 Privacy row stays disabled. A deployment whose dashboard sits beside a site that
-owns the documents points at that site. `GET /v1/bootstrap` publishes both
+owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
 addresses unauthenticated, so a credential in either is refused at startup, the
 way `data_plane_url` refuses one. The same check covers `docs_url`.
 
@@ -291,8 +291,8 @@ A hosted control plane does not serve inference. Set `data_plane_url` or
 data_plane_url: "https://gateway.example.com"
 ```
 
-Supply the origin or path prefix without a trailing slash or `/v1`. Credentials,
-query strings, and fragments are refused because `GET /v1/bootstrap` publishes
+Supply the origin or path prefix without a trailing slash or `/api/v1`. Credentials,
+query strings, and fragments are refused because `GET /api/v1/bootstrap` publishes
 this value without authentication.
 
 ## otari.ai variables
