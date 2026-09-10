@@ -15,7 +15,7 @@ from typing_extensions import override
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.container import build_container
-from gateway.core.config import API_KEY_HEADER, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
@@ -77,11 +77,12 @@ from gateway.services.tenancy.org_provider_key_service import (
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.version import __version__
 
-_PUBLIC_PREFIXES = ("/health",)
+# Every path here must be mounted; a contract test checks.
+_PUBLIC_PREFIXES = (f"{API_ROOT}/health",)
 # Paths authenticated by the master key in the request body (sign-in) or the
 # session cookie (sign-out) rather than the header schemes; the OpenAPI
 # security stamp below skips them. They still get the no-store cache headers.
-_COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
+_COOKIE_AUTH_PREFIXES = (f"{API_ROOT}/auth/session",)
 # Paths that carry no credential at all. The deployment bootstrap is what tells a
 # browser whether signing in is even possible here, so requiring a credential to
 # read it would be circular; the invitation and signup/verification/reset routes
@@ -103,17 +104,17 @@ _COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
 # shared token rather than by either API-key header. Stamped separately below
 # because the difference is not decoration: an API key does not open these, and
 # a published contract that says it does sends a caller to a 401.
-_GATEWAY_TOKEN_PATHS = frozenset({"/v1/web-search/search"})
+_GATEWAY_TOKEN_PATHS = frozenset({f"{API_ROOT}/web-search/search"})
 _UNAUTHENTICATED_PATHS = frozenset(
     {
-        "/v1/bootstrap",
-        "/v1/invitations/validate",
-        "/v1/invitations/accept",
-        "/v1/auth/signup",
-        "/v1/auth/verify-email",
-        "/v1/auth/resend-verification",
-        "/v1/auth/password/reset",
-        "/v1/auth/password/reset/confirm",
+        f"{API_ROOT}/bootstrap",
+        f"{API_ROOT}/invitations/validate",
+        f"{API_ROOT}/invitations/accept",
+        f"{API_ROOT}/auth/signup",
+        f"{API_ROOT}/auth/verify-email",
+        f"{API_ROOT}/auth/resend-verification",
+        f"{API_ROOT}/auth/password/reset",
+        f"{API_ROOT}/auth/password/reset/confirm",
         # The passkey sign-in ceremony, both halves. Unauthenticated for the
         # reason the sign-in endpoint is: they are how a caller who holds no
         # credential obtains a session. The signed assertion in the second call
@@ -121,15 +122,15 @@ _UNAUTHENTICATED_PATHS = frozenset(
         # Registering, listing, renaming and deleting a passkey are *not* here:
         # those are done from inside a session and are stamped like the rest of
         # the management surface.
-        "/v1/auth/webauthn/authenticate/options",
-        "/v1/auth/webauthn/authenticate",
+        f"{API_ROOT}/auth/webauthn/authenticate/options",
+        f"{API_ROOT}/auth/webauthn/authenticate",
         # The OAuth sign-in, both halves, unauthenticated for the same reason:
         # they are how a caller who holds no credential obtains a session. The
         # authorization code in the second call is the credential, and it is not
         # one of the header schemes below. Spelled with the path parameter
         # because that is how the generated document keys them.
-        "/v1/auth/oauth/{provider}/authorize",
-        "/v1/auth/oauth/{provider}/callback",
+        f"{API_ROOT}/auth/oauth/{{provider}}/authorize",
+        f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
 )
 # Public, unauthenticated static assets that shared caches may keep. Paths here
@@ -548,9 +549,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         title="otari",
         description="Otari, an OpenAI-compatible LLM gateway with API key management",
         version=__version__,
-        docs_url="/docs" if config.enable_docs else None,
-        redoc_url="/redoc" if config.enable_docs else None,
-        openapi_url="/openapi.json" if config.enable_docs else None,
+        docs_url=f"{API_ROOT}/docs" if config.enable_docs else None,
+        redoc_url=f"{API_ROOT}/redoc" if config.enable_docs else None,
+        openapi_url=f"{API_ROOT}/openapi.json" if config.enable_docs else None,
+        swagger_ui_oauth2_redirect_url=f"{API_ROOT}/docs/oauth2-redirect",
         lifespan=_create_lifespan(),
     )
 
