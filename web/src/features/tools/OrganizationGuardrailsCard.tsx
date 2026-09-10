@@ -10,9 +10,13 @@ import type {
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { Select } from "@/design-system/forms/Select"
 import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
@@ -473,12 +477,16 @@ function GuardrailRow({
   )
 }
 
-function AddGuardrailForm({
+function AddGuardrailDialog({
+  isOpen,
+  onClose,
   catalog,
   catalogPending,
   workspaces,
   onSaved,
 }: {
+  isOpen: boolean
+  onClose: () => void
   catalog: GuardrailCatalog | undefined
   catalogPending: boolean
   workspaces: readonly Workspace[]
@@ -491,7 +499,6 @@ function AddGuardrailForm({
   const [credential, setCredential] = useState("")
   const [everywhere, setEverywhere] = useState(false)
   const [scope, setScope] = useState<string[]>([])
-  const [error, setError] = useState("")
   const specs = parameterSpecs(catalog, profile)
   // An empty picker describes nothing, but its panel should not open on that
   // account: there is no profile yet for a raw parameter to belong to.
@@ -501,8 +508,22 @@ function AddGuardrailForm({
   // moves to a profile with a different schema.
   const parameters = useParameterForm(specs, undefined)
 
+  // One predicate naming every field, the parameters included: a form whose
+  // only edits are parameter values is still a form with something to lose.
+  const isPristine =
+    profile === "" &&
+    mode === "monitor" &&
+    url === "" &&
+    credential === "" &&
+    !everywhere &&
+    scope.length === 0 &&
+    Object.keys(parameters.values).every(
+      (name) =>
+        parameters.values[name] === "" || parameters.values[name] === false,
+    ) &&
+    parameters.extraJson === ""
+
   const submit = () => {
-    setError("")
     const named = profile.trim()
     if (!parameters.check()) return
     create.mutate(
@@ -517,21 +538,31 @@ function AddGuardrailForm({
       },
       {
         onSuccess: () => {
-          setProfile("")
-          setUrl("")
-          setCredential("")
-          setScope([])
-          parameters.reset()
           onSaved(`${named} added`)
+          onClose()
         },
-        onError: (err) => setError(errorMessage(err)),
       },
     )
   }
 
   return (
-    <div className="flex flex-col gap-2 py-4">
-      <span className="text-body">Mandate a guardrail</span>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg`, unlike the search-tool dialog beside it: the parameters section
+      // is a variable-length list of controls plus a raw-JSON escape hatch,
+      // which the small frame has no room for.
+      size="lg"
+      title="Mandated guardrail"
+      submitLabel="Mandate a guardrail"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={profile.trim() === ""}
+      isDirty={!isPristine}
+      error={create.error}
+    >
       <GuardrailProfileField
         catalog={catalog}
         pending={catalogPending}
@@ -539,35 +570,27 @@ function AddGuardrailForm({
         disabled={create.isPending}
         onChange={setProfile}
       />
-      <div className="flex flex-wrap items-end gap-2">
-        <FilterSelect
-          ariaLabel="Guardrail mode"
-          value={mode}
-          onChange={(next) => setMode(next as Mode)}
-          options={MODE_OPTIONS}
-          disabled={create.isPending}
-        />
-        <input
-          type="text"
-          inputMode="url"
-          aria-label="Guardrails endpoint"
-          value={url}
-          disabled={create.isPending}
-          placeholder="endpoint (blank uses the URL above)"
-          onChange={(event) => setUrl(event.target.value)}
-          className={`w-full sm:w-72 ${INPUT_CLASS}`}
-        />
-        <input
-          type="password"
-          autoComplete="new-password"
-          aria-label="Guardrail credential"
-          value={credential}
-          disabled={create.isPending}
-          placeholder="credential (needs an https endpoint)"
-          onChange={(event) => setCredential(event.target.value)}
-          className={`w-full sm:w-52 ${INPUT_CLASS}`}
-        />
-      </div>
+      <Select
+        label="Mode"
+        value={mode}
+        onChange={(next) => setMode(next as Mode)}
+        options={MODE_OPTIONS}
+        reserveMessage={false}
+        description="A caller can tighten a mandated guardrail but never weaken it."
+      />
+      <Field
+        label="Endpoint"
+        value={url}
+        onChange={setUrl}
+        isDisabled={create.isPending}
+        placeholder="blank uses the guardrails URL above"
+      />
+      <SecretField
+        label="Credential"
+        value={credential}
+        onChange={setCredential}
+        description="Needs an https endpoint of its own, since the URL above may be a plain-http sidecar, and OTARI_SECRET_KEY set on the gateway."
+      />
       <WorkspaceScope
         scopeName={profile || "New guardrail"}
         everywhere={everywhere}
@@ -599,26 +622,7 @@ function AddGuardrailForm({
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
       />
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="primary"
-          isDisabled={profile.trim() === "" || create.isPending}
-          onPress={submit}
-        >
-          {create.isPending ? "Adding…" : "Add"}
-        </Button>
-      </div>
-      <span className="text-caption">
-        A caller can tighten a mandated guardrail but never weaken it. A
-        credential needs an https endpoint of its own, since the URL above may
-        be a plain-http sidecar, and{" "}
-        <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
-      </span>
-      {error ? (
-        <span className="break-words text-caption text-danger">{error}</span>
-      ) : null}
-    </div>
+    </FormDialog>
   )
 }
 
@@ -638,6 +642,14 @@ export function OrganizationGuardrailsCard({
   // asked for over a form the caller cannot use.
   const catalog = useGuardrailProfiles(manages)
   const workspaces = useWorkspaces()
+  const [adding, setAdding] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in rather than on the way out.
+  const [openCount, setOpenCount] = useState(0)
+  const openAdd = () => {
+    setOpenCount((count) => count + 1)
+    setAdding(true)
+  }
   const entries = guardrails.data ?? []
   const known = workspaces.data ?? []
 
@@ -646,6 +658,13 @@ export function OrganizationGuardrailsCard({
       bounded
       title="Organization guardrails"
       description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
+      action={
+        manages ? (
+          <Button variant="primary" onPress={openAdd}>
+            Mandate a guardrail
+          </Button>
+        ) : null
+      }
     >
       {manages ? null : (
         <InfoBanner>
@@ -671,7 +690,13 @@ export function OrganizationGuardrailsCard({
               for run.
             </p>
           ) : null}
-          <AddGuardrailForm
+          {/* Keyed on the open count, so each open remounts a blank form.
+              Clearing the draft on close instead would blank the fields while
+              the dialog is still animating away. */}
+          <AddGuardrailDialog
+            key={openCount}
+            isOpen={adding}
+            onClose={() => setAdding(false)}
             catalog={catalog.data}
             // `isFetched` rather than `isPending`: an errored query returns to
             // pending when its observers remount, which would leave the picker

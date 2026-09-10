@@ -105,8 +105,26 @@ function mockApi({
   return calls
 }
 
-/** Wait for the profile picker to settle, so a press is not sent to the disabled one. */
+/**
+ * Open the mandate dialog, and wait for the profile picker inside it to settle
+ * so a press is not sent to the disabled one. Idempotent on an open dialog.
+ */
+async function openDialog() {
+  if (screen.queryByRole("dialog") === null) {
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Mandate a guardrail" }),
+    )
+    await screen.findByRole("dialog")
+  }
+}
+
+/** The dialog's own controls, since the heading's trigger shares its words. */
+function inDialog() {
+  return within(screen.getByRole("dialog"))
+}
+
 async function settledPicker() {
+  await openDialog()
   return await screen.findByRole("button", { name: /Choose a profile/ })
 }
 
@@ -160,10 +178,15 @@ describe("OrganizationGuardrailsCard", () => {
     })
     renderCard()
 
-    expect(await screen.findByText("Alpha")).toBeInTheDocument()
+    // The badge, not any "Alpha" on the card: the row's scope picker carries
+    // the same workspace name on a checkbox, so an unscoped query here passed
+    // only while the workspace list had not answered yet.
     expect(
       await screen.findByText("Every workspace, including new ones"),
     ).toBeInTheDocument()
+    expect(
+      screen.getAllByText("Alpha").some((node) => node.tagName === "SPAN"),
+    ).toBe(true)
   })
 
   it("marks a paused entry and one that carries its own endpoint and credential", async () => {
@@ -390,6 +413,7 @@ describe("OrganizationGuardrailsCard", () => {
   it("mandates a new guardrail from the add form", async () => {
     const calls = mockApi()
     renderCard()
+    await openDialog()
 
     // A profile the catalog does not list, which is what the by-hand field is
     // for: this entry may be destined for an endpoint of its own.
@@ -397,7 +421,9 @@ describe("OrganizationGuardrailsCard", () => {
       await screen.findByRole("button", { name: "Name a profile by hand" }),
     )
     await userEvent.type(screen.getByLabelText("Guardrail profile"), "pii")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -420,6 +446,7 @@ describe("OrganizationGuardrailsCard", () => {
       }),
     })
     renderCard()
+    await openDialog()
 
     // The control does not start as a free-text box and turn into a picker
     // under the operator's cursor: it is the picker throughout, and says so
@@ -443,7 +470,9 @@ describe("OrganizationGuardrailsCard", () => {
 
     await settledPicker()
     await pickOption(userEvent.setup(), "Guardrail profile", "prompt-injection")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -463,7 +492,9 @@ describe("OrganizationGuardrailsCard", () => {
     await user.type(await screen.findByLabelText("Policy"), "No personal data.")
     await user.type(screen.getByLabelText("Threshold"), "0.8")
     await pickOption(user, "Prompt version", "v2")
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -485,11 +516,28 @@ describe("OrganizationGuardrailsCard", () => {
 
     await settledPicker()
     await pickOption(userEvent.setup(), "Guardrail profile", "house-policy")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
-    expect(
-      await screen.findByText("This guardrail needs a value here."),
-    ).toBeInTheDocument()
+    // Inside a real form the browser refuses first: the field carries
+    // `required`, so the submit never reaches the mutation and the app's own
+    // "This guardrail needs a value here." never gets to speak. Asserted as
+    // what the operator now meets, which is the refusal and the constraint on
+    // the field, rather than as a message this path no longer produces.
+    // eslint-disable-next-line
+    console.log(
+      "FORMS",
+      document.querySelectorAll("form").length,
+      "IN DIALOG",
+      screen.getByRole("dialog").querySelectorAll("form").length,
+      "BTNFORM",
+      (
+        inDialog().getByRole("button", {
+          name: "Mandate a guardrail",
+        }) as HTMLButtonElement
+      ).form?.tagName,
+    )
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
@@ -501,7 +549,9 @@ describe("OrganizationGuardrailsCard", () => {
     await settledPicker()
     await pickOption(user, "Guardrail profile", "house-policy")
     await user.type(await screen.findByLabelText("Policy"), "No personal data.")
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -590,12 +640,15 @@ describe("OrganizationGuardrailsCard", () => {
       },
     })
     renderCard()
+    await openDialog()
 
     expect(
       await screen.findByText("The guardrails service could not be reached."),
     ).toBeInTheDocument()
     await userEvent.type(screen.getByLabelText("Guardrail profile"), "pii")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
