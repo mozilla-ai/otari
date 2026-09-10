@@ -342,8 +342,8 @@ async def create_log_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def reset_db() -> None:
-    """Dispose the active engine so it can be re-initialized (testing helper)."""
+def _take_engines() -> list[AsyncEngine]:
+    """Forget the active engines and hand them to the caller to dispose."""
 
     global _engine, _SessionLocal, _log_engine, _LogSessionLocal  # noqa: PLW0603
 
@@ -352,7 +352,24 @@ def reset_db() -> None:
     _SessionLocal = None
     _log_engine = None
     _LogSessionLocal = None
+    return engines
 
+
+async def dispose_db() -> None:
+    """Close the active engines' pooled connections at shutdown.
+
+    Without this the pools live until garbage collection, on an event loop
+    that is by then closed; every connection then goes down with a warning
+    instead of a close, and holds its server slot until then.
+    """
+    for engine in _take_engines():
+        await engine.dispose()
+
+
+def reset_db() -> None:
+    """Dispose the active engine so it can be re-initialized (testing helper)."""
+
+    engines = _take_engines()
     if not engines:
         return
 
@@ -372,6 +389,7 @@ __all__ = [
     "DATABASE_ERRORS",
     "create_log_session",
     "create_session",
+    "dispose_db",
     "engine_kwargs",
     "get_db",
     "init_db",

@@ -29,6 +29,7 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
+from gateway.api.deps import set_config
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.db import get_db
@@ -287,25 +288,41 @@ def test_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-_APP_FOR_CONFIG: tuple[GatewayConfig, FastAPI] | None = None
+_APPS: list[tuple[GatewayConfig, FastAPI]] = []
+_APP_CACHE_SIZE = 8
 
 
-def _app_for(config: GatewayConfig) -> FastAPI:
-    """The app for ``config``, built once per worker for as long as it is the config in use.
+def app_for(config: GatewayConfig) -> FastAPI:
+    """An app for ``config``, built once per worker per distinct config.
 
     ``create_app`` is where a test's setup time goes: FastAPI analyzes every
     route's signature and builds its pydantic adapters on each call, which is
-    most of a second on a CI runner, for hundreds of tests. The lifespan still
-    runs per test (``TestClient`` enters it), so the database-backed startup
-    and the cache resets at shutdown are as fresh as they were.
+    most of a second on a CI runner, for thousands of tests. Everything it
+    derives from the config it derives from the config's content, so an app
+    built for an equal config is the same app; what differs per test is redone
+    here. The lifespan still runs per test (``TestClient`` enters it), so the
+    database-backed startup and the cache resets at shutdown are as fresh as
+    they were.
 
-    Keyed on the config's identity, not a session fixture: a module that
-    overrides ``test_config`` per test gets an app per test, as it always did.
+    The match is by value against a snapshot taken before the build, because a
+    booted app mutates the config it holds (runtime-setting and provider
+    overlays land on it). The app is then pointed at the caller's object, the
+    way ``create_app`` would have: ``app.state.config`` is what ``get_config``
+    and the lifespan read, and ``set_config`` is the process-wide fallback. A
+    test that flips a flag on its own config mid-test is therefore still seen.
     """
-    global _APP_FOR_CONFIG
-    if _APP_FOR_CONFIG is None or _APP_FOR_CONFIG[0] is not config:
-        _APP_FOR_CONFIG = (config, create_app(config))
-    return _APP_FOR_CONFIG[1]
+    for snapshot, app in _APPS:
+        if snapshot == config:
+            break
+    else:
+        snapshot = config.model_copy(deep=True)
+        app = create_app(config)
+        _APPS.append((snapshot, app))
+        del _APPS[:-_APP_CACHE_SIZE]
+    app.state.config = config
+    set_config(config)
+    _refresh_process_state(app, config)
+    return app
 
 
 def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
@@ -335,7 +352,7 @@ def dispose_async_engine(async_engine: AsyncEngine) -> None:
         loop.close()
 
 
-def build_test_client(config: GatewayConfig, *, app: FastAPI | None = None) -> Generator[TestClient]:
+def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     """Boot an app on the worker's database and hand back a client for it.
 
     Where a test client that owns its database lifecycle is assembled: the schema
@@ -344,17 +361,11 @@ def build_test_client(config: GatewayConfig, *, app: FastAPI | None = None) -> G
     their own ``yield from`` this rather than restating it. A handful still build
     an app inline through ``build_async_session_override``; those never touched
     the schema, so they were left alone.
-
-    ``app`` is an already-built app for ``config`` to boot instead of a new one;
-    the ``client`` fixture passes the per-worker one from ``_app_for``.
     """
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
     async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    if app is None:
-        app = create_app(config)
-    else:
-        _refresh_process_state(app, config)
+    app = app_for(config)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with async_session_factory() as session:
@@ -372,7 +383,7 @@ def build_test_client(config: GatewayConfig, *, app: FastAPI | None = None) -> G
 @pytest.fixture
 def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
     """Create a test client for the FastAPI app."""
-    yield from build_test_client(test_config, app=_app_for(test_config))
+    yield from build_test_client(test_config)
 
 
 @pytest.fixture

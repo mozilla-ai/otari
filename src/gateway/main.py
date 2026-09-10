@@ -16,7 +16,7 @@ from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import create_session, init_db
+from gateway.core.database import create_session, dispose_db, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
@@ -290,9 +290,12 @@ async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> 
             _log_refresher_stop(task, name)
 
 
-def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
+def _create_lifespan() -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        # From the app, not a closure: app.state.config is what get_config hands
+        # every request, so startup reads the same object.
+        config: GatewayConfig = app.state.config
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
@@ -466,6 +469,9 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # POST /v1/search dispatches on one pooled client for the process, so
             # shutdown owns closing it. A no-op when no search was ever served.
             await close_search_client()
+            # After the log writer, whose final flush is the last thing to need
+            # a session. Hybrid mode never opened an engine, so this is a no-op there.
+            await dispose_db()
 
     return lifespan
 
@@ -545,7 +551,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         docs_url="/docs" if config.enable_docs else None,
         redoc_url="/redoc" if config.enable_docs else None,
         openapi_url="/openapi.json" if config.enable_docs else None,
-        lifespan=_create_lifespan(config),
+        lifespan=_create_lifespan(),
     )
 
     def custom_openapi() -> dict[str, Any]:

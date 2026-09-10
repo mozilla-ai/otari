@@ -28,13 +28,14 @@ from fastapi.testclient import TestClient
 from gateway.api.deps import reset_config
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
-from gateway.main import create_app
+
+from .conftest import app_for
 
 
 @pytest.fixture
 def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = create_app(
+    app = app_for(
         GatewayConfig(
             mode="hybrid",
             platform={"base_url": "http://platform.test/api/v1"},
