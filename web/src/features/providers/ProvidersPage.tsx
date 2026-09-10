@@ -206,7 +206,7 @@ function KnownProviderForm({
         if (!open) onClose()
       }}
       size="lg"
-      title="Provider"
+      title="New provider"
       tabs={tabs}
       submitLabel="Add provider"
       onSubmit={submit}
@@ -357,7 +357,7 @@ function CustomProviderForm({
         if (!open) onClose()
       }}
       size="lg"
-      title="Provider"
+      title="New provider"
       tabs={tabs}
       submitLabel="Add provider"
       onSubmit={submit}

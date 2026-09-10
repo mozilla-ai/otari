@@ -32,7 +32,7 @@ test.describe("dashboard core flows", () => {
     await page.getByRole("button", { name: "Add your first provider" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Add
     // provider", so an unscoped press is ambiguous.
-    const dialog = page.getByRole("dialog", { name: "Provider" })
+    const dialog = page.getByRole("dialog", { name: "New provider" })
     await dialog.getByRole("button", { name: "Custom endpoint" }).click()
     await dialog.getByLabel("Name").fill("e2e-llm")
     await dialog.getByLabel("API base").fill("http://e2e-box:8000/v1")

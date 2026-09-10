@@ -443,7 +443,7 @@ test.describe("the provider dialog", () => {
       page.getByRole("heading", { name: /providers/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Add provider" }).first().click()
-    const dialog = page.getByRole("dialog", { name: "Provider" })
+    const dialog = page.getByRole("dialog", { name: "New provider" })
     await expect(
       dialog.getByRole("button", { name: "Known provider" }),
     ).toBeVisible()
@@ -457,7 +457,7 @@ test.describe("the provider dialog", () => {
       page.getByRole("heading", { name: /providers/i }).first(),
     ).toBeVisible()
     await page.getByRole("button", { name: "Add provider" }).first().click()
-    const dialog = page.getByRole("dialog", { name: "Provider" })
+    const dialog = page.getByRole("dialog", { name: "New provider" })
     await dialog.getByRole("button", { name: "Custom endpoint" }).click()
     await expect(dialog.getByLabel("API base")).toBeVisible()
     await captureScreenshot(page, "providers-add-dialog-custom")
