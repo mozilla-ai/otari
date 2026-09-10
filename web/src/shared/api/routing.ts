@@ -13,6 +13,7 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import {
   ALIASES,
+  CATALOG,
   MODELS,
   ORGANIZATION_ALIASES,
   ORGANIZATION_ROUTING_POLICIES,
@@ -85,6 +86,7 @@ export function useSetRoutingPolicy() {
       })
       // A policy is listed as a model, so the catalog changes too.
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
   })
 }
@@ -115,6 +117,7 @@ export function useDeleteRoutingPolicy() {
         queryKey: [ORGANIZATION_ROUTING_POLICIES],
       })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
   })
 }
@@ -142,6 +145,7 @@ function invalidateRoutingLists(
   void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_ALIASES] })
   // A policy and an alias are both listed as models, so the catalog changes too.
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
 }
 
 export function useSetOrganizationRoutingPolicy() {
@@ -268,6 +272,7 @@ export function useCreateAlias() {
       void queryClient.invalidateQueries({ queryKey: [ALIASES] })
       // An alias is listed as a model, so the catalog changes too.
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
   })
 }
@@ -295,6 +300,7 @@ export function useDeleteAlias() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ALIASES] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
   })
 }
