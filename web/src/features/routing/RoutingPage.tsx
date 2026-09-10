@@ -234,6 +234,12 @@ export function RoutingPage() {
   // document. A frame later anything with a claim has had its turn, and an empty
   // `document.body` means nothing took it.
   const createButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [createCount, setCreateCount] = useState(0)
+  const openCreate = () => {
+    setEditing(null)
+    setCreateCount((n) => n + 1)
+    setAdding(true)
+  }
   const closeCreate = () => {
     setAdding(false)
     requestAnimationFrame(() => {
@@ -478,10 +484,7 @@ export function RoutingPage() {
               // Visible while the dialog is open: the dialog is over the page,
               // so there is nothing for hiding this to prevent.
               variant="primary"
-              onPress={() => {
-                setEditing(null)
-                setAdding(true)
-              }}
+              onPress={openCreate}
             >
               Create policy
             </Button>
@@ -511,14 +514,17 @@ export function RoutingPage() {
         }
       />
 
-      {isAdding ? (
-        <PolicyForm
-          existing={null}
-          initialTarget={initialTarget}
-          workspaceId={writeWorkspaceId}
-          onClose={closeCreate}
-        />
-      ) : null}
+      {/* Mounted while closed so the frame plays its exit with the content
+          intact, and keyed on the open counter so the draft is fresh on the way
+          in rather than cleared on the way out. See feedback.md. */}
+      <PolicyForm
+        key={createCount}
+        existing={null}
+        initialTarget={initialTarget}
+        isOpen={isAdding}
+        workspaceId={writeWorkspaceId}
+        onClose={closeCreate}
+      />
       {editing !== null ? (
         <PolicyForm
           existing={editing}
@@ -534,10 +540,7 @@ export function RoutingPage() {
           <EmptyState
             title="No routing policies yet"
             actionLabel="Create your first policy"
-            onAction={() => {
-              setEditing(null)
-              setAdding(true)
-            }}
+            onAction={openCreate}
           >
             <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
               <li>

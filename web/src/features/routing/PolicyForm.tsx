@@ -54,11 +54,11 @@ type RouterBackend = typeof KNN_BACKEND | typeof WEIGHTED_BACKEND
  *  enabled and stays enabled is better than one that flickers from disabled to
  *  enabled, which reads as a bug.
  */
-function useGuardrailsConfigured(): {
+function useGuardrailsConfigured(enabled: boolean): {
   configured: boolean
   isLoading: boolean
 } {
-  const settings = useToolSettings()
+  const settings = useToolSettings(enabled)
   const field = settings.data?.fields.find(
     (entry) => entry.key === "guardrails_url",
   )
@@ -96,11 +96,19 @@ function conditionsOf(
 function ScopePicker({
   userId,
   onChange,
+  enabled,
 }: {
   userId: string | null
   onChange: (userId: string | null) => void
+  /**
+   * Whether the dialog holding this is open.
+   *
+   * The form stays mounted while closed so the frame can play its exit, which
+   * would otherwise leave the roster fetching on every render of the page.
+   */
+  enabled: boolean
 }) {
-  const users = useUsers()
+  const users = useUsers(enabled)
   const scoped = userId !== null
 
   const modeButton = (value: boolean, label: string) => (
@@ -188,11 +196,22 @@ function ModeToggle({
 export function PolicyForm({
   existing,
   initialTarget = "",
+  isOpen = true,
   workspaceId,
   onClose,
 }: {
   existing: RoutingRow | null
   initialTarget?: string
+  /**
+   * Whether the dialog is open, for a caller that keeps this mounted.
+   *
+   * The create path passes it and stays mounted while it goes false, so the
+   * frame can play its exit with the content intact; HeroUI drives that off
+   * `data-exiting`, which needs the component still there. The edit path mounts
+   * on the row it is editing and keyed on its id, the way the keys page does,
+   * so it takes the default.
+   */
+  isOpen?: boolean
   /**
    * The workspace a tenant admin's write lands in, or null for an operator.
    *
@@ -214,7 +233,7 @@ export function PolicyForm({
   // model_aliases, and silently rewriting it as a policy would leave the original
   // behind under the same name.
   const editingAlias = existing?.kind === "alias"
-  const guardrails_ = useGuardrailsConfigured()
+  const guardrails_ = useGuardrailsConfigured(isOpen)
 
   const [name, setName] = useState(existing?.name ?? "")
   const [userId, setUserId] = useState<string | null>(existing?.user_id ?? null)
@@ -468,7 +487,7 @@ export function PolicyForm({
 
   return (
     <FormDialog
-      isOpen
+      isOpen={isOpen}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -608,7 +627,7 @@ export function PolicyForm({
           This applies to everyone in the selected workspace.
         </p>
       ) : (
-        <ScopePicker userId={userId} onChange={setUserId} />
+        <ScopePicker userId={userId} onChange={setUserId} enabled={isOpen} />
       )}
 
       {/* Conditional tier-down */}

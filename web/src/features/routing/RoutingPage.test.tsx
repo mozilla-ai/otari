@@ -879,6 +879,51 @@ describe("RoutingPage", () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
+  it("does not fetch the form's own reads until the dialog opens", async () => {
+    // The form stays mounted while closed so the frame can play its exit, which
+    // puts its queries on the page unless they are gated: the roster and the
+    // tool settings are the form's, not the table's.
+    const { calls } = mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await screen.findByText("No routing policies yet")
+    const formReads = () =>
+      calls.filter(
+        (call) =>
+          call.url.includes(`${API_ROOT}/users`) ||
+          call.url.includes(`${API_ROOT}/tool-settings`),
+      )
+    expect(formReads()).toHaveLength(0)
+
+    await user.click(await createTrigger())
+    await waitFor(() => expect(formReads().length).toBeGreaterThan(0))
+  })
+
+  it("offers a fresh draft on each open of the create dialog", async () => {
+    // Reset on the way in, not on the way out: the frame keeps its content
+    // while it animates out, so clearing on close blanks the body in front of
+    // the operator. The page keys the form on an open counter instead.
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "half-typed",
+    )
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    await user.click(await createTrigger())
+    expect(screen.getByRole("textbox", { name: /policy name/i })).toHaveValue(
+      "",
+    )
+  })
+
   it("reports a refused save inside the dialog, leaving the form filled", async () => {
     // The failure this guards against is the silent one: the mutation refuses,
     // the dialog stays, and nothing on screen says why. Its delete equivalent
