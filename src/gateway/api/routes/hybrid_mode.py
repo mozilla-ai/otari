@@ -13,8 +13,8 @@ _DISABLED_DETAIL = "This endpoint is not available in hybrid mode. Manage this r
 # three-word literal.
 _METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
-# Not published, for the reason ``hosted_mode`` gives: one handler per prefix
-# answers seven methods at two paths, and an operation id is derived per route.
+# Not published, for the reason ``hosted_mode`` gives: a refusal is a
+# deployment posture, not an operation a client can call.
 router = APIRouter(tags=["hybrid-mode"], include_in_schema=False)
 
 

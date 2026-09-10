@@ -102,10 +102,8 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ),
 )
 
-# Not published. A stub answers seven methods at two paths from one handler,
-# and FastAPI derives one operation id per route, so the document would carry
-# each id seven times. The refusal is a deployment posture, not an operation a
-# client can call.
+# Not published. The document describes what this deployment serves, and a
+# refusal is a deployment posture, not an operation a client can call.
 router = APIRouter(tags=["hosted-mode"], include_in_schema=False)
 
 
