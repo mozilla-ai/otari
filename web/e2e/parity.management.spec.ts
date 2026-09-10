@@ -49,6 +49,13 @@ function row(page: Page, ariaLabel: string, name: string | RegExp): Locator {
 // A routing form's model pickers take any selector, so the value is typed rather
 // than chosen. Their popover has to be put away afterwards or it aria-hides the
 // controls below it, including the form's own submit.
+//
+// The page-level dismissal, deliberately, even though this form is a dialog now.
+// The model box does not reopen on focus, so the `blur()` puts it away and the
+// wait passes. The people picker is the one that does: it is `menuTrigger="focus"`,
+// so blurring it inside a modal hands focus back and the popover returns, which
+// is what `dismissComboBoxInDialog` exists for. Move this to that helper if the
+// model box ever opens on focus too.
 async function fillModelBox(
   page: Page,
   name: RegExp,
@@ -209,7 +216,7 @@ test.describe("budgets", () => {
     // a neighbouring option. Playwright matches an accessible name by substring
     // here, which is what an aliased user's "id (alias)" label needs anyway.
     await page.getByRole("option", { name: PARITY.users.heavy }).click()
-    await dismissComboBox(owner)
+    await dismissComboBoxInDialog(owner)
     // The picked user becomes a removable chip, which is the form's own record of
     // who this budget will cap before it is submitted.
     await expect(

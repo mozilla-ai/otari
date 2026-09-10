@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 import {
-  dismissComboBox,
   dismissComboBoxInDialog,
   login,
   MASTER_KEY,
@@ -163,7 +162,7 @@ test.describe("dashboard core flows", () => {
     })
     await owners.fill("alice@example.com")
     await page.getByRole("option", { name: /alice@example\.com/ }).click()
-    await dismissComboBox(owners)
+    await dismissComboBoxInDialog(owners)
     await editDialog.getByRole("button", { name: "Save" }).click()
 
     // The budget now reports one holder in its People column, which is the
