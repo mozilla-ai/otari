@@ -89,6 +89,9 @@ export function RateOverridesCard() {
   const remove = useDeleteOrganizationPricing()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in rather than on the way out. These values set money.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationPricingOverride>()
   const [pendingDelete, setPendingDelete] =
     useState<OrganizationPricingOverride>()
@@ -97,11 +100,13 @@ export function RateOverridesCard() {
   const rows = overrides.data ?? []
 
   const openAdd = () => {
+    setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
 
   const openEdit = (override: OrganizationPricingOverride) => {
+    setOpenCount((count) => count + 1)
     setEditing(override)
     setDialogOpen(true)
   }
@@ -260,7 +265,9 @@ export function RateOverridesCard() {
         />
       </TableScrollFrame>
 
+      {/* Keyed on the open count, so each open remounts a blank form. */}
       <PricingOverrideDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

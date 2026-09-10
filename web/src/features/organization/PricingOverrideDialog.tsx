@@ -1,8 +1,8 @@
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react"
-import { useEffect, useState } from "react"
+import { Input, Label, TextField } from "@heroui/react"
+import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 
 import {
@@ -99,29 +99,38 @@ export function PricingOverrideDialog({
   error,
   onSubmit,
 }: PricingOverrideDialogProps) {
-  const [modelKey, setModelKey] = useState("")
-  const [input, setInput] = useState("")
-  const [output, setOutput] = useState("")
-  const [cacheRead, setCacheRead] = useState("")
-  const [cacheWrite, setCacheWrite] = useState("")
-  const [cacheWrite1h, setCacheWrite1h] = useState("")
-  const [from, setFrom] = useState("")
-  const [to, setTo] = useState("")
-
-  // The dialog stays mounted across close and reopen, so every field is reseeded
-  // each time it opens. Not a nicety: these values set money, and inheriting the
-  // last row's rates into a different model is the expensive kind of mistake.
-  useEffect(() => {
-    if (!isOpen) return
-    setModelKey(editing?.model_key ?? "")
-    setInput(rateToInput(editing?.input_price_per_million))
-    setOutput(rateToInput(editing?.output_price_per_million))
-    setCacheRead(rateToInput(editing?.cache_read_price_per_million))
-    setCacheWrite(rateToInput(editing?.cache_write_price_per_million))
-    setCacheWrite1h(rateToInput(editing?.cache_write_1h_price_per_million))
-    setFrom(toLocalInput(editing?.effective_from))
-    setTo(toLocalInput(editing?.effective_to))
-  }, [isOpen, editing])
+  // Seeded on mount only, because the caller remounts this on each open. Not a
+  // nicety: these values set money, and inheriting the last row's rates into a
+  // different model is the expensive kind of mistake.
+  const seed = {
+    modelKey: editing?.model_key ?? "",
+    input: rateToInput(editing?.input_price_per_million),
+    output: rateToInput(editing?.output_price_per_million),
+    cacheRead: rateToInput(editing?.cache_read_price_per_million),
+    cacheWrite: rateToInput(editing?.cache_write_price_per_million),
+    cacheWrite1h: rateToInput(editing?.cache_write_1h_price_per_million),
+    from: toLocalInput(editing?.effective_from),
+    to: toLocalInput(editing?.effective_to),
+  }
+  const [modelKey, setModelKey] = useState(seed.modelKey)
+  const [input, setInput] = useState(seed.input)
+  const [output, setOutput] = useState(seed.output)
+  const [cacheRead, setCacheRead] = useState(seed.cacheRead)
+  const [cacheWrite, setCacheWrite] = useState(seed.cacheWrite)
+  const [cacheWrite1h, setCacheWrite1h] = useState(seed.cacheWrite1h)
+  const [from, setFrom] = useState(seed.from)
+  const [to, setTo] = useState(seed.to)
+  // One predicate naming every field, so what "unsaved" means cannot drift
+  // from what the form holds.
+  const isPristine =
+    modelKey === seed.modelKey &&
+    input === seed.input &&
+    output === seed.output &&
+    cacheRead === seed.cacheRead &&
+    cacheWrite === seed.cacheWrite &&
+    cacheWrite1h === seed.cacheWrite1h &&
+    from === seed.from &&
+    to === seed.to
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)
@@ -191,127 +200,98 @@ export function PricingOverrideDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
-      {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>
-                  {editing ? "Edit rate override" : "Add rate override"}
-                </AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-muted">
-                  What this organization pays for a model, above the
-                  deployment&rsquo;s own price list. Requests in the period
-                  below are billed at these rates; a model with no override here
-                  keeps being priced by the deployment.
-                </p>
-                <ErrorBanner error={error} />
-                {editing ? (
-                  <div className="flex flex-col gap-1">
-                    <span className="text-body">Model</span>
-                    <code className="font-mono text-caption">
-                      {editing.model_key}
-                    </code>
-                    <span className="text-caption">
-                      A model cannot be changed here. Delete this override and
-                      add one for the other model.
-                    </span>
-                  </div>
-                ) : (
-                  <Field
-                    label="Model key"
-                    value={modelKey}
-                    onChange={setModelKey}
-                    placeholder="provider:model"
-                    isRequired
-                    autoFocus
-                    description="For example openai:gpt-4o. A provider instance name works too."
-                  />
-                )}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <RateField
-                    label="Input, per 1M tokens"
-                    value={input}
-                    onChange={setInput}
-                    isRequired
-                  />
-                  <RateField
-                    label="Output, per 1M tokens"
-                    value={output}
-                    onChange={setOutput}
-                    isRequired
-                  />
-                  <RateField
-                    label="Cache read, per 1M tokens"
-                    value={cacheRead}
-                    onChange={setCacheRead}
-                    description="Leave blank to price cached reads as fresh input."
-                  />
-                  <RateField
-                    label="Cache write, per 1M tokens"
-                    value={cacheWrite}
-                    onChange={setCacheWrite}
-                    description="Leave blank to price cache writes as fresh input."
-                  />
-                  <RateField
-                    label="Cache write, 1 hour TTL"
-                    value={cacheWrite1h}
-                    onChange={setCacheWrite1h}
-                    description="Anthropic's longer cache TTL. Blank falls back to the ordinary cache-write rate."
-                  />
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <TextField
-                    value={from}
-                    onChange={setFrom}
-                    isRequired={editing !== undefined}
-                    className="flex flex-col gap-1"
-                  >
-                    <Label className="text-body">Applies from</Label>
-                    <Input type="datetime-local" />
-                    <span className="text-caption">
-                      {editing
-                        ? "Required when editing: a replacement states the whole period."
-                        : "Blank starts it now."}
-                    </span>
-                  </TextField>
-                  <TextField
-                    value={to}
-                    onChange={setTo}
-                    className="flex flex-col gap-1"
-                  >
-                    <Label className="text-body">Applies until</Label>
-                    <Input type="datetime-local" />
-                    <span className="text-caption">
-                      Blank leaves it open ended. The end is exclusive, so the
-                      next period may start at the same moment.
-                    </span>
-                  </TextField>
-                </div>
-                {blockedReason ? (
-                  <p className="text-sm text-danger">{blockedReason}</p>
-                ) : null}
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button variant="ghost" onPress={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={invalid}
-                  isPending={isPending}
-                  onPress={submit}
-                >
-                  {editing ? "Save override" : "Add override"}
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={editing ? "Edit rate override" : "New rate override"}
+      description="What this organization pays for a model, above the deployment's own price list. Requests in the period below are billed at these rates; a model with no override here keeps being priced by the deployment."
+      submitLabel={editing ? "Save override" : "Add override"}
+      onSubmit={submit}
+      isPending={isPending}
+      isSubmitDisabled={invalid}
+      isDirty={!isPristine}
+      error={error}
+    >
+      {editing ? (
+        <div className="flex flex-col gap-1">
+          <span className="text-body">Model</span>
+          <code className="font-mono text-caption">{editing.model_key}</code>
+          <span className="text-caption">
+            A model cannot be changed here. Delete this override and add one for
+            the other model.
+          </span>
+        </div>
+      ) : (
+        <Field
+          label="Model key"
+          value={modelKey}
+          onChange={setModelKey}
+          placeholder="provider:model"
+          isRequired
+          autoFocus
+          description="For example openai:gpt-4o. A provider instance name works too."
+        />
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <RateField
+          label="Input, per 1M tokens"
+          value={input}
+          onChange={setInput}
+          isRequired
+        />
+        <RateField
+          label="Output, per 1M tokens"
+          value={output}
+          onChange={setOutput}
+          isRequired
+        />
+        <RateField
+          label="Cache read, per 1M tokens"
+          value={cacheRead}
+          onChange={setCacheRead}
+          description="Leave blank to price cached reads as fresh input."
+        />
+        <RateField
+          label="Cache write, per 1M tokens"
+          value={cacheWrite}
+          onChange={setCacheWrite}
+          description="Leave blank to price cache writes as fresh input."
+        />
+        <RateField
+          label="Cache write, 1 hour TTL"
+          value={cacheWrite1h}
+          onChange={setCacheWrite1h}
+          description="Anthropic's longer cache TTL. Blank falls back to the ordinary cache-write rate."
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <TextField
+          value={from}
+          onChange={setFrom}
+          isRequired={editing !== undefined}
+          className="flex flex-col gap-1"
+        >
+          <Label className="text-body">Applies from</Label>
+          <Input type="datetime-local" />
+          <span className="text-caption">
+            {editing
+              ? "Required when editing: a replacement states the whole period."
+              : "Blank starts it now."}
+          </span>
+        </TextField>
+        <TextField value={to} onChange={setTo} className="flex flex-col gap-1">
+          <Label className="text-body">Applies until</Label>
+          <Input type="datetime-local" />
+          <span className="text-caption">
+            Blank leaves it open ended. The end is exclusive, so the next period
+            may start at the same moment.
+          </span>
+        </TextField>
+      </div>
+      {blockedReason ? (
+        <p className="text-sm text-danger">{blockedReason}</p>
       ) : null}
-    </AlertDialog>
+    </FormDialog>
   )
 }

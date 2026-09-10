@@ -1234,7 +1234,7 @@ describe("ActivityPage", () => {
     await user.click(within(row).getByRole("checkbox"))
     await user.click(screen.getByRole("button", { name: "Set price" }))
 
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "3")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "15")
     await user.click(within(dialog).getByRole("button", { name: "Set price" }))
@@ -1286,7 +1286,7 @@ describe("ActivityPage", () => {
     await user.click(row)
     await user.click(screen.getByRole("button", { name: "Price this model" }))
 
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByLabelText("Model key")).toHaveValue(
       "vllm:mistral-small",
     )
@@ -1374,7 +1374,7 @@ describe("ActivityPage", () => {
     await user.click(row)
     await user.click(screen.getByRole("button", { name: "Price this model" }))
 
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByLabelText("Model key")).toHaveValue(
       "vllm:mistral-small",
     )

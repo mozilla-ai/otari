@@ -53,6 +53,9 @@ export function SpendCeilingsCard({
   const remove = useDeleteOrganizationSpendCeiling()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in rather than on the way out.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationSpendCeiling>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationSpendCeiling>()
 
@@ -60,11 +63,13 @@ export function SpendCeilingsCard({
   const workspaceRows = workspaces.data ?? []
 
   const openAdd = () => {
+    setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
 
   const openEdit = (ceiling: OrganizationSpendCeiling) => {
+    setOpenCount((count) => count + 1)
     setEditing(ceiling)
     setDialogOpen(true)
   }
@@ -203,6 +208,7 @@ export function SpendCeilingsCard({
       </Card>
 
       <SpendCeilingDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

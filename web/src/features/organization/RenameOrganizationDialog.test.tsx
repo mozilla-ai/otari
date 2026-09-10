@@ -24,7 +24,7 @@ function renderDialog(overrides: Partial<RenameOrganizationDialogProps> = {}) {
 }
 
 function dialog() {
-  return within(screen.getByRole("alertdialog"))
+  return within(screen.getByRole("dialog"))
 }
 
 function newNameField() {
@@ -83,16 +83,27 @@ describe("RenameOrganizationDialog", () => {
   })
 
   it("starts each open from the name as it stands, not from the abandoned draft", async () => {
+    // The dialog seeds on mount and the caller remounts it on each open, which
+    // is what clears an abandoned draft: on the way in, so the fields survive
+    // the closing animation. The harness keys it the way the page does.
     const user = userEvent.setup()
 
     function Harness() {
       const [isOpen, setIsOpen] = useState(true)
+      const [openCount, setOpenCount] = useState(0)
       return (
         <>
-          <button type="button" onClick={() => setIsOpen(true)}>
+          <button
+            type="button"
+            onClick={() => {
+              setOpenCount((count) => count + 1)
+              setIsOpen(true)
+            }}
+          >
             Reopen
           </button>
           <RenameOrganizationDialog
+            key={openCount}
             isOpen={isOpen}
             onOpenChange={setIsOpen}
             currentName="Default Organization"
@@ -106,7 +117,9 @@ describe("RenameOrganizationDialog", () => {
 
     await user.clear(newNameField())
     await user.type(newNameField(), "Abandoned")
+    // A changed name is dirty, so leaving goes through the guard.
     await user.click(dialog().getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
     await user.click(screen.getByRole("button", { name: "Reopen" }))
 
     expect(newNameField()).toHaveValue("Default Organization")

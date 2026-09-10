@@ -1,12 +1,11 @@
-import { AlertDialog, Button } from "@heroui/react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import type {
   OrganizationBudget,
   OrganizationSpendCeiling,
   Workspace,
 } from "@/client"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
@@ -58,18 +57,24 @@ export function SpendCeilingDialog({
   // "organization", or a workspace id. One control rather than a kind and an id,
   // because the two scopes this page creates are a closed list and asking for a
   // kind first would be a step with one real choice in it.
-  const [target, setTarget] = useState(ORGANIZATION_SCOPE)
-  const [budgetId, setBudgetId] = useState("")
-  const [provider, setProvider] = useState("")
-  const [name, setName] = useState("")
-
-  useEffect(() => {
-    if (!isOpen) return
-    setTarget(ORGANIZATION_SCOPE)
-    setBudgetId(editing?.budget_id ?? budgets[0]?.budget_id ?? "")
-    setProvider(editing?.provider_key_id ?? "")
-    setName(editing?.name ?? "")
-  }, [isOpen, editing, budgets])
+  // Seeded on mount only, because the caller remounts this on each open.
+  const seed = {
+    target: ORGANIZATION_SCOPE,
+    budgetId: editing?.budget_id ?? budgets[0]?.budget_id ?? "",
+    provider: editing?.provider_key_id ?? "",
+    name: editing?.name ?? "",
+  }
+  const [target, setTarget] = useState(seed.target)
+  const [budgetId, setBudgetId] = useState(seed.budgetId)
+  const [provider, setProvider] = useState(seed.provider)
+  const [name, setName] = useState(seed.name)
+  // One predicate naming every field, so what "unsaved" means cannot drift
+  // from what the form holds.
+  const isPristine =
+    target === seed.target &&
+    budgetId === seed.budgetId &&
+    provider === seed.provider &&
+    name === seed.name
 
   const ownOptions = budgets.map((budget) => ({
     value: budget.budget_id,
@@ -134,100 +139,72 @@ export function SpendCeilingDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
-      {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="md">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>
-                  {editing ? "Edit spend ceiling" : "Add spend ceiling"}
-                </AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-muted">
-                  A ceiling holds one identity to one budget. Every ceiling that
-                  applies to a request has to pass, so an organization-wide cap
-                  and a workspace cap both bind.
-                </p>
-                <ErrorBanner error={error} />
-                {editing ? (
-                  <div className="flex flex-col gap-1">
-                    <span className="text-body">Capping</span>
-                    <span className="text-sm text-muted">
-                      {scopeLabel(editing, { organizationName, workspaces })}
-                      {editing.provider_key_id
-                        ? `, on ${editing.provider_key_id}`
-                        : ", on every provider"}
-                    </span>
-                    <span className="text-caption">
-                      What a ceiling caps cannot be changed. Delete it and add
-                      one for the other identity.
-                    </span>
-                  </div>
-                ) : (
-                  <>
-                    <FilterSelect
-                      label="Capping"
-                      value={target}
-                      onChange={setTarget}
-                      options={targetOptions}
-                    />
-                    <Field
-                      label="Provider instance"
-                      value={provider}
-                      onChange={setProvider}
-                      placeholder="openai-eu"
-                      description="Optional. Narrows the cap to one provider; leave blank to cap spend across every provider."
-                    />
-                  </>
-                )}
-                <FilterSelect
-                  label="Budget"
-                  value={budgetId}
-                  onChange={setBudgetId}
-                  options={budgetOptions}
-                  disabled={noBudgets}
-                />
-                <Field
-                  label="Name"
-                  value={name}
-                  onChange={setName}
-                  placeholder="Whole organization"
-                  description="Optional. A label for this ceiling, separate from the budget's own name."
-                />
-                {editing && !editing.manageable ? (
-                  <p className="text-sm text-muted">
-                    This ceiling currently holds a budget set at the deployment
-                    level. Choosing one of your own moves it, and leaves that
-                    budget as it is.
-                  </p>
-                ) : null}
-                {blockedReason ? (
-                  <p className="text-sm text-warning">{blockedReason}</p>
-                ) : null}
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button
-                  variant="ghost"
-                  isDisabled={isPending}
-                  onPress={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={blockedReason !== undefined}
-                  isPending={isPending}
-                  onPress={submit}
-                >
-                  {editing ? "Save ceiling" : "Add ceiling"}
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      title={editing ? "Edit spend ceiling" : "New spend ceiling"}
+      description="A ceiling holds one identity to one budget. Every ceiling that applies to a request has to pass, so an organization-wide cap and a workspace cap both bind."
+      submitLabel={editing ? "Save ceiling" : "Add ceiling"}
+      onSubmit={submit}
+      isPending={isPending}
+      isSubmitDisabled={blockedReason !== undefined}
+      isDirty={!isPristine}
+      error={error}
+    >
+      {editing ? (
+        <div className="flex flex-col gap-1">
+          <span className="text-body">Capping</span>
+          <span className="text-sm text-muted">
+            {scopeLabel(editing, { organizationName, workspaces })}
+            {editing.provider_key_id
+              ? `, on ${editing.provider_key_id}`
+              : ", on every provider"}
+          </span>
+          <span className="text-caption">
+            What a ceiling caps cannot be changed. Delete it and add one for the
+            other identity.
+          </span>
+        </div>
+      ) : (
+        <>
+          <FilterSelect
+            label="Capping"
+            value={target}
+            onChange={setTarget}
+            options={targetOptions}
+          />
+          <Field
+            label="Provider instance"
+            value={provider}
+            onChange={setProvider}
+            placeholder="openai-eu"
+            description="Optional. Narrows the cap to one provider; leave blank to cap spend across every provider."
+          />
+        </>
+      )}
+      <FilterSelect
+        label="Budget"
+        value={budgetId}
+        onChange={setBudgetId}
+        options={budgetOptions}
+        disabled={noBudgets}
+      />
+      <Field
+        label="Name"
+        value={name}
+        onChange={setName}
+        placeholder="Whole organization"
+        description="Optional. A label for this ceiling, separate from the budget's own name."
+      />
+      {editing && !editing.manageable ? (
+        <p className="text-sm text-muted">
+          This ceiling currently holds a budget set at the deployment level.
+          Choosing one of your own moves it, and leaves that budget as it is.
+        </p>
       ) : null}
-    </AlertDialog>
+      {blockedReason ? (
+        <p className="text-sm text-warning">{blockedReason}</p>
+      ) : null}
+    </FormDialog>
   )
 }

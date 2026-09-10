@@ -181,7 +181,11 @@ describe("WorkspaceMcpServersCard", () => {
       screen.getByLabelText("Allowed tools"),
       "list_issues, get_issue",
     )
-    await user.click(screen.getByRole("button", { name: "Add server" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
 
     const post = writes(calls).find((call) => call.method === "POST")
     expect(post?.body).toEqual({
@@ -210,7 +214,11 @@ describe("WorkspaceMcpServersCard", () => {
       screen.getByLabelText("URL"),
       "https://mcp.example.com/github",
     )
-    await user.click(screen.getByRole("button", { name: "Add server" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
 
     expect(
       await screen.findByText(/already has an MCP server named 'github'/),
@@ -297,10 +305,17 @@ describe("WorkspaceMcpServersCard", () => {
     await user.click(screen.getByRole("button", { name: "Add MCP server" }))
     await user.type(screen.getByLabelText("Name"), "github")
     await user.type(screen.getByLabelText("URL"), "https://mcp.example.com")
-    await user.click(screen.getByRole("button", { name: "Add server" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
     expect(await screen.findByText("already taken")).toBeVisible()
 
+    // The typed draft is dirty, so leaving goes through the guard.
     await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     await user.click(screen.getByRole("button", { name: "Add MCP server" }))
 
     expect(screen.queryByText("already taken")).not.toBeInTheDocument()
@@ -324,7 +339,11 @@ describe("WorkspaceMcpServersCard", () => {
         /needs an https URL/,
       ),
     )
-    await user.click(screen.getByRole("button", { name: "Add server" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
     expect(writes(calls)).toHaveLength(0)
   })
 

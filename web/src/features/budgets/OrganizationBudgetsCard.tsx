@@ -33,17 +33,23 @@ export function OrganizationBudgetsCard() {
   const remove = useDeleteOrganizationBudget()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in. Clearing it on close would blank the fields while the dialog
+  // is still animating away.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationBudget>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationBudget>()
 
   const rows = budgets.data ?? []
 
   const openAdd = () => {
+    setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
 
   const openEdit = (budget: OrganizationBudget) => {
+    setOpenCount((count) => count + 1)
     setEditing(budget)
     setDialogOpen(true)
   }
@@ -140,6 +146,7 @@ export function OrganizationBudgetsCard() {
       </Card>
 
       <OrganizationBudgetDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

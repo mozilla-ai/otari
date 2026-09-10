@@ -48,7 +48,7 @@ async function openRenameDialog(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
     await screen.findByRole("button", { name: "Change organization name" }),
   )
-  return within(await screen.findByRole("alertdialog"))
+  return within(await screen.findByRole("dialog"))
 }
 
 afterEach(() => {
@@ -124,7 +124,7 @@ describe("OrganizationGeneralPage", () => {
     await user.type(name, "Platform")
     await user.click(dialog.getByRole("button", { name: "Change name" }))
 
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("will not save a name that has not changed", async () => {

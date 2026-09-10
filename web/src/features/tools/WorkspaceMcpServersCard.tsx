@@ -87,6 +87,10 @@ export function WorkspaceMcpServersCard({
   const remove = useDeleteWorkspaceMcpServer()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in. Clearing it on close would blank the fields while the dialog
+  // is still animating away.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<WorkspaceMcpServer>()
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
@@ -117,12 +121,14 @@ export function WorkspaceMcpServersCard({
   const openAdd = () => {
     setEditing(undefined)
     create.reset()
+    setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
 
   const openEdit = (server: WorkspaceMcpServer) => {
     setEditing(server)
     update.reset()
+    setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
 
@@ -254,7 +260,11 @@ export function WorkspaceMcpServersCard({
         />
       </TableScrollFrame>
 
+      {/* Keyed on the open count, so each open remounts the form: it seeds its
+          fields on mount, and one row's draft must not survive into the next
+          row's dialog. */}
       <McpServerDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

@@ -1092,7 +1092,7 @@ describe("ModelsPage", () => {
       await screen.findByRole("button", { name: "Price vllm:mistral-small" }),
     )
 
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByLabelText("Model key")).toHaveValue(
       "vllm:mistral-small",
     )
@@ -1136,7 +1136,7 @@ describe("ModelsPage", () => {
       await screen.findByRole("button", { name: "Price a model by hand" }),
     )
 
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     await user.type(within(dialog).getByLabelText("Model key"), "mistral-small")
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
@@ -1170,7 +1170,7 @@ describe("ModelsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Price a model" }))
 
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:")
     // A bare prefix is not yet a key, so the price cannot be submitted.
     expect(
@@ -1207,9 +1207,7 @@ describe("ModelsPage", () => {
     await user.click(screen.getByRole("button", { name: "Price a model" }))
 
     expect(
-      within(await screen.findByRole("alertdialog")).getByLabelText(
-        "Model key",
-      ),
+      within(await screen.findByRole("dialog")).getByLabelText("Model key"),
     ).toHaveValue("")
   })
 

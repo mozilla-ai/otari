@@ -1646,6 +1646,9 @@ export function ModelsPage() {
   // Non-null while the hand-pricing dialog is open, holding the key it opened
   // with: a searched selector, a provider prefix, or "" for a blank field.
   const [customPriceKey, setCustomPriceKey] = useState<string | null>(null)
+  // Bumped on every open and used as the dialog's key, so the rates are cleared
+  // on the way in rather than on the way out. These values set money.
+  const [priceOpenCount, setPriceOpenCount] = useState(0)
   const [customPending, setCustomPending] = useState(false)
   const [customError, setCustomError] = useState<unknown>(undefined)
 
@@ -2171,7 +2174,10 @@ export function ModelsPage() {
         <Button
           size="sm"
           variant="ghost"
-          onPress={() => setCustomPriceKey(searchedSelector ?? "")}
+          onPress={() => {
+            setPriceOpenCount((count) => count + 1)
+            setCustomPriceKey(searchedSelector ?? "")
+          }}
         >
           {searchedSelector
             ? `Price ${searchedSelector}`
@@ -2287,7 +2293,10 @@ export function ModelsPage() {
 
         <DiscoveredErrors
           providers={discoveredErrors}
-          onPriceModel={setCustomPriceKey}
+          onPriceModel={(key) => {
+            setPriceOpenCount((count) => count + 1)
+            setCustomPriceKey(key)
+          }}
         />
 
         <div
@@ -2360,7 +2369,9 @@ export function ModelsPage() {
         </div>
       </div>
 
+      {/* Keyed on the open count, so each open remounts a blank form. */}
       <SetPriceDialog
+        key={priceOpenCount}
         isOpen={customPriceKey !== null}
         onOpenChange={(open) =>
           setCustomPriceKey(open ? (customPriceKey ?? "") : null)

@@ -39,7 +39,7 @@ function organizationDetail(page: Page, term: string): Locator {
 // before it takes the one replacing it.
 async function rename(page: Page, to: string): Promise<void> {
   await page.getByRole("button", { name: "Change organization name" }).click()
-  const dialog = page.getByRole("alertdialog")
+  const dialog = page.getByRole("dialog", { name: "Change organization name" })
   await expect(dialog.getByText("Current name")).toBeVisible()
   await dialog.getByLabel("New name").fill(to)
   await dialog.getByRole("button", { name: "Change name" }).click()

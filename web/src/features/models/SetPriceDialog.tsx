@@ -1,6 +1,6 @@
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react"
-import { useEffect, useState } from "react"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Input, Label, TextField } from "@heroui/react"
+import { useState } from "react"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 
@@ -100,24 +100,22 @@ export function SetPriceDialog({
   collectModelKey = false,
   initialModelKey = "",
 }: SetPriceDialogProps) {
+  // Seeded on mount only, because the caller remounts this on each open.
+  // Reopening for a different selection must not inherit the last rates, which
+  // is a real footgun when the values set money.
   const [modelKey, setModelKey] = useState(initialModelKey)
   const [input, setInput] = useState("")
   const [output, setOutput] = useState("")
   const [cacheRead, setCacheRead] = useState("")
   const [cacheWrite, setCacheWrite] = useState("")
-
-  // The dialog stays mounted across close/reopen, so clear the rate fields each time
-  // it opens: reopening for a different selection must not inherit the last rates
-  // (a real footgun when the values set money).
-  useEffect(() => {
-    if (isOpen) {
-      setModelKey(initialModelKey)
-      setInput("")
-      setOutput("")
-      setCacheRead("")
-      setCacheWrite("")
-    }
-  }, [isOpen, initialModelKey])
+  // One predicate naming every field, so what "unsaved" means cannot drift
+  // from what the form holds.
+  const isPristine =
+    modelKey === initialModelKey &&
+    input === "" &&
+    output === "" &&
+    cacheRead === "" &&
+    cacheWrite === ""
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)
@@ -153,83 +151,62 @@ export function SetPriceDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
-      {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{title}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-muted">{description(targetCount)}</p>
-                {collectModelKey ? (
-                  <Field
-                    label="Model key"
-                    value={modelKey}
-                    onChange={setModelKey}
-                    placeholder="provider:model"
-                    isRequired
-                    autoFocus
-                    description={
-                      modelKey.trim() !== "" && keyInvalid
-                        ? "Include the provider or instance prefix, as in ollama:llama3.2."
-                        : "The selector callers send as model, prefix included (for example vllm:mistral-small)."
-                    }
-                  />
-                ) : null}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <RateField
-                    label="Input $ / 1M"
-                    value={input}
-                    onChange={setInput}
-                    isRequired
-                    autoFocus={!collectModelKey}
-                  />
-                  <RateField
-                    label="Output $ / 1M"
-                    value={output}
-                    onChange={setOutput}
-                    isRequired
-                  />
-                  <RateField
-                    label="Cache read $ / 1M"
-                    value={cacheRead}
-                    onChange={setCacheRead}
-                  />
-                  <RateField
-                    label="Cache write $ / 1M"
-                    value={cacheWrite}
-                    onChange={setCacheWrite}
-                  />
-                </div>
-                <InfoBanner tone="info">
-                  Leave a cache rate blank to bill those tokens at the input
-                  rate.
-                </InfoBanner>
-                <ErrorBanner error={error} />
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button
-                  variant="ghost"
-                  isDisabled={isPending}
-                  onPress={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={invalid}
-                  isPending={isPending}
-                  onPress={submit}
-                >
-                  Set price
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={title}
+      description={description(targetCount)}
+      submitLabel="Set price"
+      onSubmit={submit}
+      isPending={isPending}
+      isSubmitDisabled={invalid}
+      isDirty={!isPristine}
+      error={error}
+    >
+      {collectModelKey ? (
+        <Field
+          label="Model key"
+          value={modelKey}
+          onChange={setModelKey}
+          placeholder="provider:model"
+          isRequired
+          autoFocus
+          description={
+            modelKey.trim() !== "" && keyInvalid
+              ? "Include the provider or instance prefix, as in ollama:llama3.2."
+              : "The selector callers send as model, prefix included (for example vllm:mistral-small)."
+          }
+        />
       ) : null}
-    </AlertDialog>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <RateField
+          label="Input $ / 1M"
+          value={input}
+          onChange={setInput}
+          isRequired
+          autoFocus={!collectModelKey}
+        />
+        <RateField
+          label="Output $ / 1M"
+          value={output}
+          onChange={setOutput}
+          isRequired
+        />
+        <RateField
+          label="Cache read $ / 1M"
+          value={cacheRead}
+          onChange={setCacheRead}
+        />
+        <RateField
+          label="Cache write $ / 1M"
+          value={cacheWrite}
+          onChange={setCacheWrite}
+        />
+      </div>
+      <InfoBanner tone="info">
+        Leave a cache rate blank to bill those tokens at the input rate.
+      </InfoBanner>
+    </FormDialog>
   )
 }
