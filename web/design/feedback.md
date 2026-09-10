@@ -190,6 +190,34 @@ disabled, because they genuinely are refused until it lands.
 click outside swap the actions for "Unsaved changes · Keep editing · Discard".
 A dialog never opens a dialog.
 
+**A draft is fresh on every open and untouched through the exit.** Reset on the
+way in, never on the way out. The frame keeps its content while it animates out,
+so clearing state when `isOpen` goes false blanks the body for the length of the
+exit, and a success step blanks to an empty form in front of the operator. The
+component holding the draft stays mounted through that, and the page remounts it
+on each open by keying it on a counter it bumps where the trigger opens the
+dialog:
+
+```tsx
+// Correct: the page owns isOpen and the mutation, the draft lives below the key
+const [isOpen, setIsOpen] = useState(false)
+const [openCount, setOpenCount] = useState(0)
+…
+<Button onPress={() => { setOpenCount((n) => n + 1); setIsOpen(true) }}>
+  Create key
+</Button>
+<CreateKeyDialog key={openCount} isOpen={isOpen} onOpenChange={setIsOpen} />
+
+// Incorrect: the close handler clears what is still on screen
+const close = () => { setIsOpen(false); setCreated(null); resetForm() }
+```
+
+`close()` then only sets `isOpen` false. A `requestAnimationFrame` does not
+cover it, because the exit is an animation and not a frame. The remount is also
+what keeps one row's draft out of the next row's dialog, which is the promise
+this component's own docstring makes; a page that holds the draft above the
+dialog defeats it, and holding it above is what every page does.
+
 **The success step is not a prop.** When a mutation has something to hand back
 (a key's secret), the caller swaps the children and the submit label to "Done"
 and the frame stays where it was. `footerStart` is where "Create another" goes.

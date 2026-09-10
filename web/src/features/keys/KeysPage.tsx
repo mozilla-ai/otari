@@ -481,9 +481,11 @@ function CreateKeyDialog({
   const blocked = !scopeValid || ownerMissing || workspaceUnresolved
 
   // What the form owns, in one place, because `resetForm` and `isDirty` are the
-  // same list read two ways and they drifted: reopening kept the previous owner
-  // and budget exemption, and the guard armed for three fields out of seven.
-  // `showAdvanced` is not in either: it reveals fields rather than holding a
+  // same list read two ways and they drifted: the guard armed for three fields
+  // out of seven, and "Create another" left the rest behind. Reopening is a
+  // remount now (the page keys this on an open counter), so `resetForm` answers
+  // for "Create another" alone, which is a reset inside an open dialog.
+  // `showAdvanced` is in neither: it reveals fields rather than holding a
   // value, and a disclosure left open is not unsaved work.
   const isPristine =
     keyName === "" &&
@@ -518,10 +520,6 @@ function CreateKeyDialog({
         returnFocusRef.current?.focus()
       }
     })
-    // The frame keeps its content while it animates out, so the reset waits for
-    // the next open rather than blanking the dialog as it goes.
-    setCreated(null)
-    resetForm()
   }
 
   const submit = () => {
@@ -941,6 +939,22 @@ export function KeysPage() {
   const memberLabels = useMemberAttributionLabels()
 
   const [addOpen, setAddOpen] = useState(false)
+  // Bumped on each open, and the create dialog is keyed on it, so the draft is
+  // fresh every time and untouched through the exit: the dialog keeps its
+  // content while it animates out, so clearing on the way out blanked the
+  // secret step to an empty form for the length of the animation.
+  //
+  // No guard against a second press while it is open: react-aria takes the page
+  // out of the accessibility tree behind a modal, so the heading's trigger
+  // cannot be reached until the dialog has closed. Probed rather than assumed,
+  // because the trigger is still on screen: with the dialog open there is
+  // exactly one control named "Create key" and it is the dialog's own submit.
+  const [openCount, setOpenCount] = useState(0)
+  const openCreate = () => {
+    setEditing(null)
+    setOpenCount((n) => n + 1)
+    setAddOpen(true)
+  }
   const [editing, setEditing] = useState<string | null>(null)
   const [regenerated, setRegenerated] = useState<{
     title: string
@@ -1233,10 +1247,7 @@ export function KeysPage() {
             // inconsistency this page had.
             ref={createButtonRef}
             variant="primary"
-            onPress={() => {
-              setEditing(null)
-              setAddOpen(true)
-            }}
+            onPress={openCreate}
           >
             Create key
           </Button>
@@ -1302,14 +1313,12 @@ export function KeysPage() {
           title="No API keys yet"
           description="An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
           actionLabel="Create your first key"
-          onAction={() => {
-            setEditing(null)
-            setAddOpen(true)
-          }}
+          onAction={openCreate}
         />
       ) : null}
 
       <CreateKeyDialog
+        key={openCount}
         isDeploymentWide={isDeploymentWide}
         isOpen={addOpen}
         onOpenChange={setAddOpen}

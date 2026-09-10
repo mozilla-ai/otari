@@ -646,10 +646,12 @@ describe("KeysPage", () => {
   })
 
   it("clears the owner and the budget exemption when it reopens", async () => {
-    // `resetForm` left both behind, so the next key silently inherited the
-    // previous owner and its exemption. The owner surviving also made a
-    // reopened dialog dirty on arrival, which armed the guard on a form nobody
-    // had touched.
+    // The draft is fresh on every open, which is what the page's open counter
+    // buys: the dialog stays mounted through the exit so its content is intact
+    // while it animates out, and the remount on the way in is what clears it.
+    // Before that, the reset ran on close and left the owner and the exemption
+    // behind, so the next key inherited both and a reopened dialog was dirty on
+    // arrival, arming the guard on a form nobody had touched.
     mockApi({ keys: [], users: [user({ user_id: "alice", alias: "Alice" })] })
     const usr = userEvent.setup()
     renderPage(<KeysPage />)
