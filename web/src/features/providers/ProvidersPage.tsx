@@ -14,6 +14,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Dot } from "@/design-system/indicators/Dot"
@@ -119,7 +120,15 @@ function ConnectionTest({
 
 // Add a hosted provider whose endpoint is built into the SDK: pick it, paste a
 // key. Name and api_base are only exposed under Advanced.
-function KnownProviderForm({ onClose }: { onClose: () => void }) {
+function KnownProviderForm({
+  isOpen,
+  onClose,
+  tabs,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  tabs: ReactNode
+}) {
   const create = useCreateStoredProvider()
   const [providerId, setProviderId] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -191,8 +200,22 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <ErrorBanner error={create.error} />
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="lg"
+      title="Provider"
+      tabs={tabs}
+      submitLabel="Add provider"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={!canSubmit}
+      isDirty={providerId !== "" || apiKey.trim() !== ""}
+      error={create.error}
+      footerStart={<ConnectionTest getPayload={buildPayload} />}
+    >
       <ProviderComboBox
         label="Provider"
         value={providerId}
@@ -282,22 +305,21 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
           />
         </div>
       ) : null}
-      <div className="flex flex-wrap items-start gap-2">
-        <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
-          {create.isPending ? "Adding…" : "Add provider"}
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-        <ConnectionTest getPayload={buildPayload} />
-      </div>
-    </div>
+    </FormDialog>
   )
 }
 
 // Add a self-hosted or OpenAI-compatible endpoint: name it anything, say what
 // API it speaks, and give the base URL (and a key if it needs one).
-function CustomProviderForm({ onClose }: { onClose: () => void }) {
+function CustomProviderForm({
+  isOpen,
+  onClose,
+  tabs,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  tabs: ReactNode
+}) {
   const create = useCreateStoredProvider()
   const [name, setName] = useState("")
   const [providerType, setProviderType] = useState("openai-compatible")
@@ -329,8 +351,36 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <ErrorBanner error={create.error} />
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="lg"
+      title="Provider"
+      tabs={tabs}
+      submitLabel="Add provider"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={!canSubmit}
+      isDirty={name.trim() !== "" || apiBase.trim() !== ""}
+      error={create.error}
+      footerStart={
+        <ConnectionTest
+          getPayload={() =>
+            name.trim() === "" || apiBase.trim() === "" || !clientArgs.ok
+              ? null
+              : {
+                  instance: name.trim(),
+                  provider_type: providerType || "openai-compatible",
+                  api_base: apiBase.trim(),
+                  api_key: apiKey.trim() || null,
+                  client_args: clientArgs.value,
+                }
+          }
+        />
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Name"
@@ -380,61 +430,54 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
         onChange={setClientArgsText}
         error={clientArgs.ok ? null : clientArgs.error}
       />
-      <div className="flex flex-wrap items-start gap-2">
-        <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
-          {create.isPending ? "Adding…" : "Add provider"}
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-        <ConnectionTest
-          getPayload={() =>
-            name.trim() === "" || apiBase.trim() === "" || !clientArgs.ok
-              ? null
-              : {
-                  instance: name.trim(),
-                  provider_type: providerType || "openai-compatible",
-                  api_base: apiBase.trim(),
-                  api_key: apiKey.trim() || null,
-                  client_args: clientArgs.value,
-                }
-          }
-        />
-      </div>
-    </div>
+    </FormDialog>
   )
 }
 
 type ProviderTab = "known" | "custom"
 
-function AddProviderForm({ onClose }: { onClose: () => void }) {
+/**
+ * The two ways to attach a provider, in one dialog.
+ *
+ * Each tab keeps its own mutation, its own validity and its own submit, which
+ * is what it had as a panel. The two write the same five fields but derive them
+ * from different questions: one asks which provider and fills the rest from its
+ * built-in detail, the other asks for a name, an API flavor and a base URL. A
+ * shared submit would be a switch on the tab, which is the same code with one
+ * more place to look.
+ *
+ * What is shared is the frame. Each half renders the same `FormDialog` with the
+ * same title, size and tab row, so switching tabs changes the fields and
+ * nothing else, and a half-filled tab still does not survive a switch away from
+ * it, which is what it did as a panel.
+ */
+function AddProviderForm({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) {
   const [tab, setTab] = useState<ProviderTab>("known")
+  const tabs = (
+    <TabRow>
+      {(
+        [
+          ["known", "Known provider"],
+          ["custom", "Custom endpoint"],
+        ] as const
+      ).map(([id, label]) => (
+        <Tab key={id} isActive={tab === id} onPress={() => setTab(id)}>
+          {label}
+        </Tab>
+      ))}
+    </TabRow>
+  )
 
-  return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
-    >
-      <div className="flex items-center justify-between">
-        <TabRow>
-          {(
-            [
-              ["known", "Known provider"],
-              ["custom", "Custom endpoint"],
-            ] as const
-          ).map(([id, label]) => (
-            <Tab key={id} isActive={tab === id} onPress={() => setTab(id)}>
-              {label}
-            </Tab>
-          ))}
-        </TabRow>
-      </div>
-      {tab === "known" ? (
-        <KnownProviderForm onClose={onClose} />
-      ) : (
-        <CustomProviderForm onClose={onClose} />
-      )}
-    </Section>
+  return tab === "known" ? (
+    <KnownProviderForm isOpen={isOpen} onClose={onClose} tabs={tabs} />
+  ) : (
+    <CustomProviderForm isOpen={isOpen} onClose={onClose} tabs={tabs} />
   )
 }
 
@@ -1115,18 +1158,20 @@ export function ProvidersPage() {
              either is open. Disabled rather than hidden when the server has no
              secret key: an operator who cannot add a provider still needs to see
              that adding one is the thing they are being denied. */
-          addOpen || showOnboarding ? undefined : (
-            <Button
-              variant="primary"
-              isDisabled={!secretKeyConfigured}
-              onPress={() => {
-                setEditing(null)
-                setAddOpen(true)
-              }}
-            >
-              Add provider
-            </Button>
-          )
+          <Button
+            // Visible while the dialog is open and beside the first-run
+            // panel's own copy of it: the dialog is over the page. Disabled
+            // rather than hidden without a server secret key, which is the
+            // rule for a control that carries its own reason nearby.
+            variant="primary"
+            isDisabled={!secretKeyConfigured}
+            onPress={() => {
+              setEditing(null)
+              setAddOpen(true)
+            }}
+          >
+            Add provider
+          </Button>
         }
       >
         Add provider API keys here to serve models without editing config.yml.
@@ -1206,9 +1251,10 @@ export function ProvidersPage() {
           if it was opened while settings were still loading and the key then turns
           out to be unavailable, retract it so its submit can never reach the create
           mutation. The banner above explains why. */}
-      {addOpen && secretKeyConfigured ? (
-        <AddProviderForm onClose={() => setAddOpen(false)} />
-      ) : null}
+      <AddProviderForm
+        isOpen={addOpen && secretKeyConfigured}
+        onClose={() => setAddOpen(false)}
+      />
       {editingProvider ? (
         <EditProviderForm
           // Remount when the operator switches rows: the fields are seeded from

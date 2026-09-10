@@ -432,3 +432,34 @@ test.describe("the workspace dialogs", () => {
     await captureScreenshot(page, "workspaces-create-dialog")
   })
 })
+
+test.describe("the provider dialog", () => {
+  // The `lg` size with a tab row under the header, which no other dialog in the
+  // product has: both ways to attach a provider share one frame.
+  test("the add dialog, on the known-provider tab", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/providers")
+    await expect(
+      page.getByRole("heading", { name: /providers/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Add provider" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "Provider" })
+    await expect(
+      dialog.getByRole("button", { name: "Known provider" }),
+    ).toBeVisible()
+    await captureScreenshot(page, "providers-add-dialog")
+  })
+
+  test("the add dialog, on the custom-endpoint tab", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/providers")
+    await expect(
+      page.getByRole("heading", { name: /providers/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Add provider" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "Provider" })
+    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
+    await expect(dialog.getByLabel("API base")).toBeVisible()
+    await captureScreenshot(page, "providers-add-dialog-custom")
+  })
+})

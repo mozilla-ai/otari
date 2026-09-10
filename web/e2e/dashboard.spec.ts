@@ -30,10 +30,13 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("Welcome to Otari")).toBeVisible()
 
     await page.getByRole("button", { name: "Add your first provider" }).click()
-    await page.getByRole("button", { name: "Custom endpoint" }).click()
-    await page.getByLabel("Name").fill("e2e-llm")
-    await page.getByLabel("API base").fill("http://e2e-box:8000/v1")
-    await page.getByRole("button", { name: "Add provider" }).click()
+    // Scoped: the heading's trigger and the dialog's submit both say "Add
+    // provider", so an unscoped press is ambiguous.
+    const dialog = page.getByRole("dialog", { name: "Provider" })
+    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
+    await dialog.getByLabel("Name").fill("e2e-llm")
+    await dialog.getByLabel("API base").fill("http://e2e-box:8000/v1")
+    await dialog.getByRole("button", { name: "Add provider" }).click()
 
     await expect(page.getByText("e2e-llm")).toBeVisible()
     // Onboarding clears once a provider exists.

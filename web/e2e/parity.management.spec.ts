@@ -74,10 +74,13 @@ test.describe("standalone provider setup", () => {
     await openPage(page, "Providers", "Providers")
 
     await page.getByRole("button", { name: "Add provider" }).click()
-    await page.getByRole("button", { name: "Custom endpoint" }).click()
-    await page.getByLabel("Name").fill(PROVIDER)
-    await page.getByLabel("API base").fill(UNREACHABLE)
-    await page.getByRole("button", { name: "Add provider" }).click()
+    // Scoped: the heading's trigger and the dialog's submit both say "Add
+    // provider", so an unscoped press is ambiguous.
+    const dialog = page.getByRole("dialog", { name: "Provider" })
+    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
+    await dialog.getByLabel("Name").fill(PROVIDER)
+    await dialog.getByLabel("API base").fill(UNREACHABLE)
+    await dialog.getByRole("button", { name: "Add provider" }).click()
 
     const provider = row(page, "Providers", PROVIDER)
     await expect(provider).toBeVisible()

@@ -425,7 +425,9 @@ describe("ProvidersPage", () => {
     await user.click(screen.getByPlaceholderText("Search providers…"))
     await user.click(await screen.findByRole("option", { name: "Bedrock" }))
 
-    const add = screen.getByRole("button", { name: "Add provider" })
+    const add = within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add provider",
+    })
     await user.type(screen.getByLabelText(/Bedrock API key/), "bearer-token")
     // The region is required and outside Advanced, so nothing that blocks the
     // submit is hidden behind a collapsed section.
@@ -596,10 +598,13 @@ describe("ProvidersPage", () => {
 
     await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI")
     await user.click(await screen.findByRole("option", { name: /OpenAI/ }))
-    // Close the combobox popover, which otherwise aria-hides the submit button.
-    await user.keyboard("{Escape}")
+    // No Escape here any more. Picking an option closes the combo box's own
+    // popover, so the keystroke would reach the dialog instead and arm its
+    // unsaved-changes guard, which swaps the submit out of the footer.
 
-    const submit = screen.getByRole("button", { name: "Add provider" })
+    const submit = within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add provider",
+    })
     expect(submit).toBeDisabled()
 
     await user.type(screen.getByLabelText("API key"), "sk-live-xxxx")
@@ -628,8 +633,9 @@ describe("ProvidersPage", () => {
 
     await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI")
     await user.click(await screen.findByRole("option", { name: /OpenAI/ }))
-    // Close the combobox popover, which otherwise aria-hides the submit button.
-    await user.keyboard("{Escape}")
+    // No Escape here any more. Picking an option closes the combo box's own
+    // popover, so the keystroke would reach the dialog instead and arm its
+    // unsaved-changes guard, which swaps the submit out of the footer.
 
     // The field is optional and the copy explains the env fallback. The hint
     // arrives once the selected provider's detail loads, so wait for it.
@@ -637,7 +643,9 @@ describe("ProvidersPage", () => {
     expect(screen.getByLabelText("API key (optional)")).toBeInTheDocument()
 
     // Submit with no key: the server stores none and any-llm reads OPENAI_API_KEY.
-    const submit = screen.getByRole("button", { name: "Add provider" })
+    const submit = within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add provider",
+    })
     expect(submit).toBeEnabled()
     await user.click(submit)
 
@@ -659,9 +667,12 @@ describe("ProvidersPage", () => {
     renderPage(<ProvidersPage />)
 
     expect(await screen.findByText("Welcome to Otari")).toBeInTheDocument()
+    // The heading keeps its action beside the first-run panel's own copy of it.
+    // It used to hide while that panel showed, on the reasoning that two
+    // competed; the panel is a band and the form it opens is over the page.
     expect(
-      screen.queryByRole("button", { name: "Add provider" }),
-    ).not.toBeInTheDocument()
+      screen.getByRole("button", { name: "Add provider" }),
+    ).toBeInTheDocument()
     // Only the onboarding panel ("Welcome to Otari") shows: the table (and its own
     // "no rows" fallback, whose "No providers yet" text is unique to it) is
     // suppressed so the two empty states are not stacked.
