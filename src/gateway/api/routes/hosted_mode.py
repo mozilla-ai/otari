@@ -102,7 +102,11 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ),
 )
 
-router = APIRouter(tags=["hosted-mode"])
+# Not published. A stub answers seven methods at two paths from one handler,
+# and FastAPI derives one operation id per route, so the document would carry
+# each id seven times. The refusal is a deployment posture, not an operation a
+# client can call.
+router = APIRouter(tags=["hosted-mode"], include_in_schema=False)
 
 
 def _detail(data_plane_url: str | None) -> str:
@@ -119,8 +123,7 @@ def _register(prefix: str) -> None:
     async def refuse(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_detail(config.data_plane_url))
 
-    # A distinct name per prefix, so the generated operation ids stay as
-    # readable as the hand-written siblings' in hybrid_mode.
+    # A distinct name per prefix, so the routing table reads like hybrid_mode's.
     refuse.__name__ = f"{prefix.removeprefix('/').replace('/', '_')}_disabled"
     for path in (prefix, f"{prefix}/{{path:path}}"):
         router.api_route(path, methods=_METHODS)(refuse)

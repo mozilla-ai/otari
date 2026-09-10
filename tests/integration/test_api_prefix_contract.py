@@ -188,6 +188,19 @@ def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI
         assert not stray, f"{mode}: operation ids carry a mount root: {stray}"
 
 
+def test_operation_ids_are_unique_in_every_mode(standalone: FastAPI, hosted: FastAPI, hybrid: FastAPI) -> None:
+    """A duplicate id makes the document invalid, and only one mode's document is committed.
+
+    The mode stubs answer seven methods at two paths from one handler, and an
+    id is derived once per route, so any stub that reaches the document
+    duplicates itself. Standalone mounts no stub, which is why the committed
+    document never showed it.
+    """
+    for mode, app in (("standalone", standalone), ("hosted", hosted), ("hybrid", hybrid)):
+        duplicated = sorted(op for op, count in _operation_ids(app).items() if count > 1)
+        assert not duplicated, f"{mode}: duplicate operation ids: {duplicated}"
+
+
 # Paths that may appear in published prose without being ours to move. The usage
 # filters quote the frozen label a row carries, not a route; the rest belong to
 # somebody else's contract.
