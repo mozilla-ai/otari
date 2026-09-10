@@ -1,4 +1,4 @@
-import { Button, Spinner } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -277,10 +278,12 @@ const defaultHold = () =>
  * wide there and the dialog clipped it away to an empty modal.
  */
 export function CreateWorkspaceForm({
+  isOpen,
   onClose,
   onCreated,
   hold = defaultHold,
 }: {
+  isOpen: boolean
   onClose: () => void
   /**
    * The acknowledged-press beat, as a gate rather than a duration. Defaults to
@@ -354,16 +357,73 @@ export function CreateWorkspaceForm({
   // a create that failed for another reason, and the default-budget call, which
   // fails after the workspace already exists.
   const bannerError = createDefault.error ?? (nameRefusal ? null : create.error)
+  const submit = () => {
+    // Started before the request, not after it answers, so the two run
+    // together: the operator waits a beat, not a beat plus a round
+    // trip. A create slower than the hold keeps the spinner until it
+    // answers, which is the honest reading of the same indicator.
+    const held = entersWorkspace ? hold() : Promise.resolve()
+    setHolding(entersWorkspace)
+    create.mutate(
+      { name: trimmed, description: description.trim() || null },
+      {
+        // The default is a second call: the workspace has to exist
+        // before anything can be defaulted onto its members. A failure
+        // here leaves the workspace created and undefaulted, which the
+        // banner reports and the edit form can finish.
+        onSuccess: (workspace) => {
+          const finish = async () => {
+            await held
+            // Dismissed while it was held: the workspace exists, and
+            // the list and the switcher will both show it, but the
+            // operator said not to go there.
+            if (!active.current) return
+            // No setHolding here: the form unmounts on close, and the
+            // failure paths below are what release the button.
+            onClose()
+            onCreated?.(workspace)
+          }
+          if (budgetId === NO_DEFAULT) {
+            void finish()
+            return
+          }
+          createDefault.mutate(
+            {
+              workspaceId: workspace.id,
+              body: { budget_id: budgetId },
+            },
+            {
+              onSuccess: () => {
+                void finish()
+              },
+              onError: () => setHolding(false),
+            },
+          )
+        },
+        onError: () => setHolding(false),
+      },
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-4">
-      <h2 className="text-title">Create workspace</h2>
-      {/* A refusal about the name is carried by the name, not by a block above
-          the form that resizes whatever frames it. What is left here is what
-          no field state can honestly say: a failure the operator cannot
-          retype their way out of, and the default-budget call, which is a
-          separate call about a different control and fails after the
-          workspace already exists. */}
-      <ErrorBanner error={bannerError} />
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="New workspace"
+      submitLabel={entersWorkspace ? "Create and open" : "Create workspace"}
+      onSubmit={submit}
+      isPending={pending}
+      isSubmitDisabled={trimmed === ""}
+      isDirty={trimmed !== "" || description.trim() !== ""}
+      // A refusal about the name is carried by the name, not by a block above
+      // the form. What reaches the banner is what no field state can honestly
+      // say: a failure the operator cannot retype their way out of, and the
+      // default-budget call, which is a separate call about a different control
+      // and fails after the workspace already exists.
+      error={bannerError}
+    >
       <Field
         label="Name"
         value={name}
@@ -408,95 +468,7 @@ export function CreateWorkspaceForm({
           onChange={setBudgetId}
         />
       ) : null}
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={trimmed === ""}
-          isPending={pending}
-          onPress={() => {
-            // Started before the request, not after it answers, so the two run
-            // together: the operator waits a beat, not a beat plus a round
-            // trip. A create slower than the hold keeps the spinner until it
-            // answers, which is the honest reading of the same indicator.
-            const held = entersWorkspace ? hold() : Promise.resolve()
-            setHolding(entersWorkspace)
-            create.mutate(
-              { name: trimmed, description: description.trim() || null },
-              {
-                // The default is a second call: the workspace has to exist
-                // before anything can be defaulted onto its members. A failure
-                // here leaves the workspace created and undefaulted, which the
-                // banner reports and the edit form can finish.
-                onSuccess: (workspace) => {
-                  const finish = async () => {
-                    await held
-                    // Dismissed while it was held: the workspace exists, and
-                    // the list and the switcher will both show it, but the
-                    // operator said not to go there.
-                    if (!active.current) return
-                    // No setHolding here: the form unmounts on close, and the
-                    // failure paths below are what release the button.
-                    onClose()
-                    onCreated?.(workspace)
-                  }
-                  if (budgetId === NO_DEFAULT) {
-                    void finish()
-                    return
-                  }
-                  createDefault.mutate(
-                    {
-                      workspaceId: workspace.id,
-                      body: { budget_id: budgetId },
-                    },
-                    {
-                      onSuccess: () => {
-                        void finish()
-                      },
-                      onError: () => setHolding(false),
-                    },
-                  )
-                },
-                onError: () => setHolding(false),
-              },
-            )
-          }}
-        >
-          {/* The spinner takes the label's place rather than sitting beside
-              it, so pressing moves nothing: the label holds the button's width
-              while faded, and the spinner is centered over it by the `relative`
-              that `.button` already sets.
-
-              `opacity-0`, not `invisible`: visibility removes the label from
-              the accessibility tree, which would leave the button unnamed for
-              the whole wait. Faded, it still names the control while the
-              spinner reports the state. That is also why the spinner is
-              `aria-hidden` (and it is its own live region as of HeroUI 3.2.4,
-              which would announce a bare "Loading" over the name).
-
-              `color="current"` because the default is `accent`, which on this
-              accent-filled variant paints the spinner in the fill's own
-              color; `current` inherits the label's. */}
-          <span className={pending ? "opacity-0" : undefined}>
-            {entersWorkspace ? "Create and open" : "Create workspace"}
-          </span>
-          {pending ? (
-            <Spinner
-              size="sm"
-              color="current"
-              aria-hidden="true"
-              className="absolute inset-0 m-auto"
-            />
-          ) : null}
-        </Button>
-        {/* Disabled while the create is in flight, as `ConfirmDialog` does
-            with its own: the workspace is already being made, so offering to
-            abandon it mid-flight only invites the operator to expect that it
-            was not. */}
-        <Button variant="ghost" onPress={onClose} isDisabled={pending}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+    </FormDialog>
   )
 }
 
@@ -816,7 +788,7 @@ export function WorkspacesPage() {
       <PageIntro
         title="Workspaces"
         action={
-          creating || !manages ? null : (
+          !manages ? null : (
             <Button
               variant="primary"
               onPress={() => {
@@ -847,11 +819,10 @@ export function WorkspacesPage() {
         </InfoBanner>
       )}
 
-      {creating ? (
-        <Section className="border-y border-border py-5">
-          <CreateWorkspaceForm onClose={() => setCreating(false)} />
-        </Section>
-      ) : null}
+      <CreateWorkspaceForm
+        isOpen={creating}
+        onClose={() => setCreating(false)}
+      />
 
       {/* Keyed on the workspace so switching which one is edited remounts the
           form: its fields seed from `workspace` on mount only. */}

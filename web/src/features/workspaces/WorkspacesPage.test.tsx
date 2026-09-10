@@ -163,7 +163,11 @@ describe("WorkspacesPage", () => {
   // The form itself carries no band, so that the scope switcher can put it in a
   // modal (otari-ai#2107). The band belongs to this page, and it is pinned here
   // because losing it is invisible in jsdom: the fields render either way.
-  it("frames the create form as a band of the page", async () => {
+  it("opens the create form in the dialog rather than as a band of the page", async () => {
+    // The contract this asserts is the opposite of the one it used to: the form
+    // was a bleeding band between the page's header and its table, and the same
+    // form in the scope switcher was a Modal of its own. One frame now, and it
+    // is over the page rather than in it.
     mockApi({})
     const user = userEvent.setup()
     renderPage(<WorkspacesPage />)
@@ -172,11 +176,11 @@ describe("WorkspacesPage", () => {
       await screen.findByRole("button", { name: "Create workspace" }),
     )
 
-    // Reached from the field rather than from the page, because a page is
-    // several bands and only this one frames the form.
-    const band = screen.getByLabelText("Name").closest("section.otari-bleed")
-    expect(band).not.toBeNull()
-    expect(band).toHaveClass("border-y")
+    const dialog = await screen.findByRole("dialog", { name: "New workspace" })
+    expect(within(dialog).getByLabelText("Name")).toBeInTheDocument()
+    expect(
+      screen.getByLabelText("Name").closest("section.otari-bleed"),
+    ).toBeNull()
   })
 
   it("puts a refused create on the name that caused it, not in a banner", async () => {

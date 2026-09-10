@@ -1,4 +1,4 @@
-import { Button, Modal, Popover } from "@heroui/react"
+import { Button, Popover } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiCheck, FiChevronDown, FiMail, FiPlus } from "react-icons/fi"
@@ -348,77 +348,31 @@ export function WorkspaceSwitcher({
           </Popover.Dialog>
         </Popover.Content>
       </Popover>
-      {/* Reuses the Workspaces page's own form rather than restating its fields:
-          the popover has no room for a form, and it dismisses on the first click
-          outside itself, which a name field cannot survive. */}
-      <Modal isOpen={creating} onOpenChange={setCreating}>
-        {/* The menu row is the trigger, and it lives inside a popover that has
-            already dismissed by the time this opens, so the modal is driven from
-            state instead. HeroUI still renders a press responder for the trigger
-            slot and warns when nothing fills it, which is why this is hidden
-            rather than absent; `SettingsPage` does the same for its own dialog. */}
-        <Modal.Trigger className="hidden">Create workspace</Modal.Trigger>
-        {/* An explicit dim: HeroUI maps `--backdrop` to opaque black, which the
-            AlertDialog softens itself and the Modal does not, so without this the
-            page behind the form goes fully black. */}
-        <Modal.Backdrop className="bg-backdrop/50">
-          {/* A fixed width, not the content's own. The container is the
-              `sm:w-fit` element and `size="md"` only caps the dialog at
-              `max-w-md`, so the modal was as wide as whatever was in it: a
-              message longer than the fields made it jump out to the cap the
-              moment one appeared. 28rem is that cap, so this pins the width it
-              was already growing to, and the dialog's own `w-full` fills it.
-              Below `sm` the container is `w-full` and this does not apply. */}
-          <Modal.Container
-            placement="center"
-            size="md"
-            className="sm:w-[28rem]"
-          >
-            {/* The dialog's own padding, because the form inside it is
-                fields only: the page that also renders it supplies a band, and
-                a band cannot come in here (`.otari-bleed` measures `<main>`,
-                which a portalled modal is outside of). */}
-            <Modal.Dialog aria-label="Create workspace" className="p-5">
-              <CreateWorkspaceForm
-                onClose={() => setCreating(false)}
-                // Creating from the scope switcher is a request to work in the
-                // new workspace, so the flow ends inside it rather than back on
-                // the page it was started from: the shell's scope moves, and the
-                // overview is where that scope reads. Selecting by id is enough
-                // even though the switcher's list comes from the organization
-                // context: the mutation invalidates that context, and the
-                // selection resolves against the membership as soon as it
-                // arrives. Navigating also leaves whatever organization-scoped
-                // page the operator was on, which the new scope does not apply
-                // to.
-                onCreated={(workspace) => {
-                  select(workspace.id)
-                  void navigate({ to: "/" })
-                }}
-                hold={createHold}
-              />
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      {/* Its own modal rather than one dialog switching on which row opened it:
-          the two forms share no field, and a single state would have to encode
-          "which" as well as "open". */}
-      <Modal
+      {/* Both entry points from this menu open the dialog every create in the
+          dashboard opens in, rather than a Modal wrapped by hand here: the two
+          forms were already the page's, and what was local was the frame. */}
+      <CreateWorkspaceForm
+        isOpen={creating}
+        onClose={() => setCreating(false)}
+        // Creating from the scope switcher is a request to work in the new
+        // workspace, so the flow ends inside it rather than back on the page it
+        // was started from: the shell's scope moves, and the overview is where
+        // that scope reads. Selecting by id is enough even though the switcher's
+        // list comes from the organization context: the mutation invalidates
+        // that context, and the selection resolves against the membership as
+        // soon as it arrives. Navigating also leaves whatever
+        // organization-scoped page the operator was on, which the new scope does
+        // not apply to.
+        onCreated={(workspace) => {
+          select(workspace.id)
+          void navigate({ to: "/" })
+        }}
+        hold={createHold}
+      />
+      <CreateOrganizationForm
         isOpen={creatingOrganization}
-        onOpenChange={setCreatingOrganization}
-      >
-        <Modal.Trigger className="hidden">Create organization</Modal.Trigger>
-        <Modal.Backdrop className="bg-backdrop/50">
-          <Modal.Container placement="center" size="md">
-            <Modal.Dialog aria-label="Create organization" className="p-0">
-              <CreateOrganizationForm
-                onClose={() => setCreatingOrganization(false)}
-              />
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
+        onClose={() => setCreatingOrganization(false)}
+      />
     </>
   )
 }

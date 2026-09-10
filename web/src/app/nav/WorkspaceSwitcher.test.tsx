@@ -295,7 +295,9 @@ async function fillCreateForm(user: ReturnType<typeof userEvent.setup>) {
       name: "Create workspace",
     }),
   )
-  const form = await screen.findByRole("dialog", { name: "Create workspace" })
+  // The dialog's title names the object and its submit names the action, so
+  // this is "New workspace" and the button below is "Create workspace".
+  const form = await screen.findByRole("dialog", { name: "New workspace" })
   await user.type(within(form).getByLabelText(/^Name/), "Staging")
   return form
 }
@@ -348,13 +350,18 @@ describe("the workspace half of the scope switcher", () => {
   // `<main>`, so a band that travelled here measured a viewport wide and the
   // dialog's `overflow-clip` cropped it to an empty modal (otari-ai#2107). jsdom
   // computes no layout, so what is pinned is the class that causes it.
-  it("frames the create form without the page's bleeding band", async () => {
+  it("opens the same dialog the workspaces page opens", async () => {
+    // The same form once had two frames, a bleeding band on the page and a
+    // Modal here, and this asserted it was not the band. There is one frame and
+    // neither entry point owns it, so the fact worth holding is that this is
+    // the shared dialog.
     mockApi({ context: startedInAWorkspace })
     const user = userEvent.setup()
     await renderSwitcherOnAPage({})
 
     const form = await fillCreateForm(user)
 
+    expect(form).toHaveClass("otari-form-dialog")
     expect(form.querySelector(".otari-bleed")).toBeNull()
     expect(within(form).getByLabelText(/^Name/)).toBeInTheDocument()
   })
@@ -374,7 +381,13 @@ describe("the workspace half of the scope switcher", () => {
     // The press is acknowledged before the page moves, rather than the create
     // landing them somewhere else with nothing in between. The button keeps its
     // name through the beat, so it is still the control it was.
-    expect(submit).toHaveAttribute("data-pending", "true")
+    //
+    // On the form, not the button: `FormDialog` withholds `isPending` from the
+    // submit because the prop paints it at the disabled 0.4, and a submit in
+    // flight is working rather than refused. React-aria filters `aria-busy` off
+    // a Button anyway.
+    expect(submit.closest("form")).toHaveAttribute("aria-busy", "true")
+    expect(submit).toHaveAccessibleName(/Create and open/)
     expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
 
     beat.release()
@@ -389,7 +402,7 @@ describe("the workspace half of the scope switcher", () => {
     ).toBeInTheDocument()
   })
 
-  it("does not enter a workspace the operator dismissed the form over", async () => {
+  it("cannot be dismissed mid-create, so the entry it promised happens", async () => {
     // The beat is a gate this test opens, so the window the guard exists for is
     // entered and left on purpose rather than by sleeping long enough to have
     // been inside it. Nothing here waits on a duration.
@@ -402,9 +415,13 @@ describe("the workspace half of the scope switcher", () => {
     await user.click(
       within(form).getByRole("button", { name: /Create and open/ }),
     )
-    // Escape rather than Cancel: Cancel is disabled while the create is in
-    // flight, so dismissal is what is left, and it is the path that bypasses
-    // every button.
+    // This asserted the opposite until the form moved into `FormDialog`, and the
+    // change is deliberate rather than incidental. Escape used to dismiss the
+    // form mid-flight and suppress the navigation, which was the one path that
+    // bypassed a Cancel the form had already disabled for the same window.
+    // `FormDialog` closes that path: while a submit is in flight neither
+    // Escape, the backdrop nor the close control dismisses it, so there is one
+    // answer to "can I abandon this" rather than two that disagree.
     await user.keyboard("{Escape}")
     beat.release()
 
@@ -418,16 +435,10 @@ describe("the workspace half of the scope switcher", () => {
     const staging = await within(menu).findByRole("button", { name: /Staging/ })
     expect(staging).toBeVisible()
 
-    // The workspace was created and the switcher offers it; what must not
-    // happen is being taken there after saying not to.
-    expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
-    expect(screen.getByText("USAGE PAGE")).toBeInTheDocument()
-    // Read from the menu rather than the trigger, which the open menu hides
-    // from the accessibility tree: the scope never moved.
-    expect(
-      within(menu).getByRole("button", { name: /Default Workspace/ }),
-    ).toHaveTextContent("Selected")
-    expect(staging).not.toHaveTextContent("Selected")
+    // The workspace was created and the operator is in it, because the create
+    // they started was never abandoned.
+    expect(staging).toHaveTextContent("Selected")
+    expect(screen.getByText("OVERVIEW PAGE")).toBeInTheDocument()
   })
 
   it("still completes after StrictMode's development remount", async () => {

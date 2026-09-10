@@ -167,11 +167,14 @@ test.describe("standalone tenancy", () => {
     await openPage(page, "Workspaces", "Workspaces")
 
     await page.getByRole("button", { name: "Create workspace" }).click()
-    await page.getByLabel("Name").fill(WORKSPACE)
-    await page
+    // Scoped: the heading's trigger and the dialog's submit both say "Create
+    // workspace", so an unscoped press is ambiguous.
+    const dialog = page.getByRole("dialog", { name: "New workspace" })
+    await dialog.getByLabel("Name").fill(WORKSPACE)
+    await dialog
       .getByLabel("Description (optional)")
       .fill("Created by the parity suite")
-    await page.getByRole("button", { name: "Create workspace" }).click()
+    await dialog.getByRole("button", { name: "Create workspace" }).click()
 
     const created = workspaceRow(page, WORKSPACE)
     await expect(created).toBeVisible()

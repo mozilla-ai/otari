@@ -418,3 +418,17 @@ test.describe("the budget dialog", () => {
     await captureScreenshot(page, "budgets-create-dialog")
   })
 })
+
+test.describe("the workspace dialogs", () => {
+  test("the create dialog, from the page", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/workspaces")
+    await expect(
+      page.getByRole("heading", { name: /workspaces/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create workspace" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "New workspace" })
+    await expect(dialog.getByLabel("Name")).toBeVisible()
+    await captureScreenshot(page, "workspaces-create-dialog")
+  })
+})

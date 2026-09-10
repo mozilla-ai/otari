@@ -1,6 +1,5 @@
-import { Button, Card } from "@heroui/react"
 import { useState } from "react"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import {
   useCreateOrganization,
@@ -13,47 +12,51 @@ import {
 // somebody else should not be moved out of their own. From the scope switcher
 // the two belong together, so this chains them, and a switch that fails leaves
 // the organization created and reachable from the same menu rather than lost.
-export function CreateOrganizationForm({ onClose }: { onClose: () => void }) {
+export function CreateOrganizationForm({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) {
   const create = useCreateOrganization()
   const switchTo = useSwitchOrganization()
   const [name, setName] = useState("")
   const trimmed = name.trim()
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <h2 className="text-title">Create organization</h2>
-        <ErrorBanner error={create.error ?? switchTo.error} />
-        <Field
-          label="Name"
-          value={name}
-          onChange={setName}
-          placeholder="Research"
-          isRequired
-          autoFocus
-          description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
-        />
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={trimmed === ""}
-            isPending={create.isPending || switchTo.isPending}
-            onPress={() =>
-              create.mutate(
-                { name: trimmed },
-                {
-                  onSuccess: (organization) =>
-                    switchTo.mutate(organization.id, { onSuccess: onClose }),
-                },
-              )
-            }
-          >
-            Create organization
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // One field, which is what `sm` is for.
+      size="sm"
+      title="New organization"
+      submitLabel="Create organization"
+      onSubmit={() =>
+        create.mutate(
+          { name: trimmed },
+          {
+            onSuccess: (organization) =>
+              switchTo.mutate(organization.id, { onSuccess: onClose }),
+          },
+        )
+      }
+      isPending={create.isPending || switchTo.isPending}
+      isSubmitDisabled={trimmed === ""}
+      isDirty={trimmed !== ""}
+      error={create.error ?? switchTo.error}
+    >
+      <Field
+        label="Name"
+        value={name}
+        onChange={setName}
+        placeholder="Research"
+        isRequired
+        autoFocus
+        description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
+        reserveMessage
+      />
+    </FormDialog>
   )
 }
