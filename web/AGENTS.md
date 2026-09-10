@@ -112,6 +112,13 @@ Import API shapes from `@/client`, not directly from the generated schema.
 `src/client/schema.ts` is generated from `docs/public/openapi.json` and
 committed. Keep `src/client/local.ts` limited to shapes OpenAPI cannot own.
 
+`apiFetch` in `shared/api/client.ts` prepends `API_ROOT` to every request. A
+call site passes the resource only, `apiFetch("/keys")`, and never spells
+`/api/v1`. A test that stubs `fetch` sees the whole URL; one that spies on
+`apiFetch` sees the resource. The gateway's
+`tests/integration/test_api_prefix_contract.py` fails on a doubled root
+anywhere under `src/`.
+
 File routes live in `src/routes/`. Each route file exports `Route` and
 nothing else so automatic code splitting works. The generated
 `src/routeTree.gen.ts` is committed.

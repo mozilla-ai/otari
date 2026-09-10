@@ -45,6 +45,23 @@ A new provider-calling scaffold must register with `track_request` so
 which wraps the complete ASGI response and therefore outlives a streaming route
 handler.
 
+The API is mounted once, under `API_ROOT`, in `api/main.py`. A route module
+declares its resource and nothing above it, `APIRouter(prefix="/keys")`, and
+never writes `/api/v1` or `/v1` in a prefix or a decorator. Code that must
+build a path takes `API_ROOT`, `API_VERSION`, or `OTLP_ROOT` from
+`core/config.py`; the root is never spelled. OTLP is a sibling namespace at
+`OTLP_ROOT`, and the `/v1/{traces,logs,metrics}` tail under it belongs to
+OTel, not to us.
+
+Some strings look like paths and are not: the usage-log and in-flight labels
+(`USAGE_ENDPOINT*` and the other `*_ENDPOINT` constants in `api/routes/`), the
+metric `endpoint` label, and operation ids. They are identifiers, written to
+rows or into generated clients, and keep their values when a route moves. A
+docstring in `services/`, `models/`, `ports/`, or `repositories/` never names
+the route that calls it. After adding or moving a route, run
+`tests/integration/test_api_prefix_contract.py`; it also fails on a spelled
+root anywhere under `src/gateway`.
+
 ## Authentication and authority
 
 `verify_master_key` authenticates either a header master key or an active
