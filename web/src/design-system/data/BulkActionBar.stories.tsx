@@ -19,7 +19,7 @@ const meta = {
         <Button size="sm" variant="ghost">
           Export
         </Button>
-        <Button size="sm" variant="danger">
+        <Button size="sm" variant="ghost">
           Delete
         </Button>
       </>
@@ -44,7 +44,7 @@ export const SingleSelection: Story = {
   args: {
     selectedCount: 1,
     children: (
-      <Button size="sm" variant="danger">
+      <Button size="sm" variant="ghost">
         Delete
       </Button>
     ),

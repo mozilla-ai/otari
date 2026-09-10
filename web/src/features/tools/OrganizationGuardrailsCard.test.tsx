@@ -204,9 +204,13 @@ describe("OrganizationGuardrailsCard", () => {
       await screen.findByRole("button", { name: "Remove prompt-injection" }),
     )
     const dialog = await screen.findByRole("alertdialog")
+    // The fixture monitors rather than blocks, so the consequence is that
+    // requests go unchecked. Saying they would have been blocked would describe
+    // a guardrail that never blocked one.
     expect(
       within(dialog).getByText(/prompt-injection stops running/),
     ).toBeVisible()
+    expect(within(dialog).getByText(/go unchecked/)).toBeVisible()
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
 
     await userEvent.click(
@@ -216,6 +220,26 @@ describe("OrganizationGuardrailsCard", () => {
     await waitFor(() =>
       expect(calls.some((call) => call.method === "DELETE")).toBe(true),
     )
+  })
+
+  it("says what a blocking guardrail's removal serves, not what it records", async () => {
+    mockApi({
+      guardrails: [
+        organizationGuardrail({
+          mode: "block",
+          applies_to_all_workspaces: true,
+        }),
+      ],
+    })
+    renderCard()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Remove prompt-injection" }),
+    )
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/would have blocked are served/),
+    ).toBeVisible()
   })
 
   it("rewrites the endpoint in place, so a typo is not a delete and recreate", async () => {

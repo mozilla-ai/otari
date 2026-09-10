@@ -323,7 +323,13 @@ function GuardrailRow({
           if (!open) remove.reset()
         }}
         heading="Remove guardrail"
-        body={`${guardrail.profile} stops running on every request it covers, and its stored credential is removed with it. The prompts it would have blocked are served.`}
+        // The stored mode, not the row's unsaved `mode`: this describes what is
+        // in force, and a monitoring guardrail never blocked anything.
+        body={
+          guardrail.mode === "block"
+            ? `${guardrail.profile} stops running on every request it covers, and its stored credential is removed with it. Requests it would have blocked are served.`
+            : `${guardrail.profile} stops running on every request it covers, and its stored credential is removed with it. Requests it would have recorded go unchecked.`
+        }
         confirmLabel="Remove permanently"
         isPending={remove.isPending}
         error={remove.error}
