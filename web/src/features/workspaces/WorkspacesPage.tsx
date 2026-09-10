@@ -456,6 +456,9 @@ export function CreateWorkspaceForm({
         label="Description (optional)"
         value={description}
         onChange={setDescription}
+        // No description under it, so no line held open for one. See forms.md:
+        // the reserve exists for an error to replace a description in.
+        reserveMessage={false}
       />
       {/* Withheld from a caller who does not operate the deployment: the
           picker's options come from the operator-gated `/budgets` read, so
