@@ -200,7 +200,9 @@ test.describe("budgets", () => {
     await dialog.getByLabel("Spending limit (USD)").fill("25")
     // Assigning at creation is the path that makes a budget enforceable; a budget
     // with no users caps nothing.
-    const owner = dialog.getByRole("combobox", { name: "Add a person" })
+    const owner = dialog.getByRole("combobox", {
+      name: "Assign to people (optional)",
+    })
     await owner.fill(PARITY.users.heavy)
     // Plain string, not a RegExp built from the id: an address is full of regex
     // metacharacters, so `.` would match any character and the pattern could pick

@@ -329,7 +329,10 @@ describe("BudgetsPage", () => {
     )
     await user.type(screen.getByLabelText("Spending limit (USD)"), "100")
     // Pick a user from the assignment combobox, then submit.
-    await user.type(screen.getByLabelText("Add a person"), "alice")
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
@@ -361,7 +364,10 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.type(screen.getByLabelText("Add a person"), "alice")
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
@@ -403,7 +409,10 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.type(screen.getByLabelText("Add a person"), "alice")
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))

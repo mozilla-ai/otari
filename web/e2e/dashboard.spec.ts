@@ -154,12 +154,13 @@ test.describe("dashboard core flows", () => {
     await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
     await budgetRow.getByRole("button", { name: "Edit" }).click()
-    // "Add a person" is the input's own accessible name; "Assign to people" is
-    // the section heading beside it and labels nothing. Same shape as
-    // `addFilterValue` otherwise: the popover aria-hides the rest of the page, so
-    // it has to be put away before the submit button is reachable.
+    // The field's visible label is its accessible name now: the picker used to
+    // carry a hidden "Add a person" beside a heading that labelled nothing, so
+    // one control had two names.
     const editDialog = page.getByRole("dialog")
-    const owners = editDialog.getByRole("combobox", { name: "Add a person" })
+    const owners = editDialog.getByRole("combobox", {
+      name: "Assign to people (optional)",
+    })
     await owners.fill("alice@example.com")
     await page.getByRole("option", { name: /alice@example\.com/ }).click()
     await dismissComboBox(owners)
