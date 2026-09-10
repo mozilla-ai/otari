@@ -62,19 +62,19 @@ from gateway.api.routes import (
     workspaces,
 )
 from gateway.container import Container
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 
 
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     """Mount Otari's own routers, then whatever the bootstrap contributed.
 
-    One aggregate router carries them all, so the mount prefix has one owner.
+    One aggregate router carries the API, so its mount prefix has one owner.
     Mount order on that router matters. The hybrid and hosted stubs are
     ``{path:path}`` catch-alls and the first matching route wins, so the
     stubs go last. A stub mounted earlier would answer a path that a
     contributed router serves.
     """
-    api = APIRouter()
+    api = APIRouter(prefix=API_ROOT)
     _register_core_routers(api, config)
     _register_contributed_routers(api, app.state.container)
     if config.is_hybrid_mode:
@@ -85,6 +85,12 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
         # adds one has made a choice, and a fallback does not overrule it.
         api.include_router(hosted_mode.router)
     app.include_router(api)
+    # OTLP is a sibling namespace, not a child of the API root: OTel owns the
+    # /v1/{traces,logs,metrics} tail, so an exporter pointed at `{origin}/otlp`
+    # appends it unaided. Standalone and hosted only, like the rest of the
+    # management surface; a hybrid data plane stores no telemetry.
+    if not config.is_hybrid_mode:
+        app.include_router(otlp.router, prefix=OTLP_ROOT)
 
 
 def _register_contributed_routers(api: APIRouter, container: Container) -> None:
@@ -216,7 +222,6 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(usage.operator_router)
     api.include_router(usage.ingest_router)
     api.include_router(agent_telemetry.router)
-    api.include_router(otlp.router)
     api.include_router(settings.router)
     api.include_router(mail.router)
     api.include_router(maintenance_mode.router)
