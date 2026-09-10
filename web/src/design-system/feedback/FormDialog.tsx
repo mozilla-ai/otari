@@ -9,14 +9,10 @@ import { ErrorBanner } from "./ErrorBanner"
 export type FormDialogSize = "sm" | "md" | "lg"
 
 /**
- * The widths, as an inline custom property rather than a class.
- *
- * `globals.css` pins `.modal__dialog` to `width: fit-content` with
- * `min-width: min(28rem, …)`, unlayered so it outranks `@layer utilities`. A
- * `w-[27.5rem]` here compiles, lints, ships and loses; and even where the width
- * did land, the 448px floor makes `sm` unreachable. The rule that reads this
- * property is unlayered beside that one, so the geometry is settled in CSS and
- * the size a call site picks travels as a value.
+ * The widths, as an inline custom property rather than a class: the rule that
+ * reads it is unlayered beside the `.modal__dialog` rule it has to outrank, so
+ * a `w-[27.5rem]` at this call site would lose and the 448px floor would put
+ * `sm` out of reach. Derived on `.otari-form-dialog` in `globals.css`.
  */
 const WIDTH: Record<FormDialogSize, string> = {
   sm: "27.5rem",
@@ -122,10 +118,9 @@ export function FormDialog({
           nothing fills it. These dialogs are driven from state, so the slot is
           hidden rather than absent; `WorkspaceSwitcher` does the same. */}
       <Modal.Trigger className="hidden">{submitLabel}</Modal.Trigger>
-      {/* No `bg-backdrop/50` here, despite the two dialogs that carry it:
-          globals.css dims `.modal__backdrop--opaque` to 50% in an unlayered
-          rule, which outranks the utility. Measured in the built stylesheet,
-          the class changes nothing. */}
+      {/* No `bg-backdrop/50`: globals.css dims `.modal__backdrop--opaque` in
+          an unlayered rule that outranks the utility, so the class changes
+          nothing (#1033). */}
       <Modal.Backdrop isDismissable={!isPending}>
         <Modal.Container
           placement="top"
@@ -135,11 +130,9 @@ export function FormDialog({
           // container is the sheet's own frame and takes no padding.
           className="p-0 sm:px-4 sm:pt-[7.5rem] sm:pb-10"
         >
-          {/* No edge spelled here. `globals.css` gives every floating surface
-              one opaque control-border hairline, unlayered, in the rule that
-              replaced elevation; a `border-border` at this call site would
-              compile, lint, ship and lose to it, and it argues against that
-              tier by name. */}
+          {/* No edge spelled here: globals.css gives every floating surface one
+              opaque control-border hairline, unlayered, and argues that tier by
+              name, so a `border-border` here would lose to it. */}
           <Modal.Dialog
             className="otari-form-dialog flex flex-col p-0"
             style={
