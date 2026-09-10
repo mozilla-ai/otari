@@ -1,4 +1,4 @@
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react"
+import { Button, Input, Label, Modal, TextField } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
@@ -191,17 +191,23 @@ export function PricingOverrideDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
+    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
+      <Modal.Trigger aria-hidden="true" className="hidden">
+        {editing ? "Edit rate override" : "Add rate override"}
+      </Modal.Trigger>
       {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>
+        <Modal.Backdrop
+          isDismissable={!isPending}
+          isKeyboardDismissDisabled={isPending}
+        >
+          <Modal.Container placement="center" size="lg">
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>
                   {editing ? "Edit rate override" : "Add rate override"}
-                </AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
+                </Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="flex flex-col gap-4">
                 <p className="text-sm text-muted">
                   What this organization pays for a model, above the
                   deployment&rsquo;s own price list. Requests in the period
@@ -294,9 +300,13 @@ export function PricingOverrideDialog({
                 {blockedReason ? (
                   <p className="text-sm text-danger">{blockedReason}</p>
                 ) : null}
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button variant="ghost" onPress={() => onOpenChange(false)}>
+              </Modal.Body>
+              <Modal.Footer>
+                <Button
+                  variant="ghost"
+                  isDisabled={isPending}
+                  onPress={() => onOpenChange(false)}
+                >
                   Cancel
                 </Button>
                 <Button
@@ -307,11 +317,11 @@ export function PricingOverrideDialog({
                 >
                   {editing ? "Save override" : "Add override"}
                 </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
       ) : null}
-    </AlertDialog>
+    </Modal>
   )
 }
