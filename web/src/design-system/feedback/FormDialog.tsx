@@ -232,7 +232,12 @@ export function FormDialog({
                   event.currentTarget.requestSubmit()
               }}
               aria-busy={isPending}
-              className="flex min-h-0 flex-col"
+              // `flex-1` as well as `min-h-0`: on a phone the dialog is the height of
+              // the viewport rather than of its content, so without this the form
+              // sizes to its fields and the footer sits halfway up an empty sheet.
+              // On a desktop the dialog has a max-height and no height, so there is
+              // no free space to claim and this changes nothing.
+              className="flex min-h-0 flex-1 flex-col"
             >
               {/* `min-h-0` above and here is what lets this scroll rather than
                   push the footer off the viewport: a flex child's default
@@ -242,7 +247,7 @@ export function FormDialog({
                 onScroll={(event) =>
                   setIsScrolled(event.currentTarget.scrollTop > 0)
                 }
-                className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 pt-1 pb-6"
+                className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-1 pb-6"
               >
                 <ErrorBanner error={error} />
                 {children}
