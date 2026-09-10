@@ -186,7 +186,7 @@ export default defineConfig({
   webServer: [
     {
       command: "bash e2e/serve.sh",
-      url: "http://127.0.0.1:8000/health",
+      url: "http://127.0.0.1:8000/api/v1/health",
       // Opt-in only: by default always start a fresh gateway (serve.sh resets the
       // DB), so a stray server already on :8000 can't silently skip the reset and
       // leave the serial flows running against dirty state. Set
@@ -198,7 +198,7 @@ export default defineConfig({
     },
     {
       command: "bash e2e/serve-hybrid.sh",
-      url: `${HYBRID_BASE_URL}/health`,
+      url: `${HYBRID_BASE_URL}/api/v1/health`,
       // Same opt-in as above, for consistency rather than for the reset: this
       // gateway holds no state to leave dirty, but a stray process on :8010 in a
       // mode of its own would be a confusing thing to run against.

@@ -55,7 +55,7 @@ export type SessionType = DeploymentBootstrap["session_type"]
  * type.
  */
 export type GatewayHealth =
-  operations["health_check_health_get"]["responses"][200]["content"]["application/json"]
+  operations["health_check_api_v1_health_get"]["responses"][200]["content"]["application/json"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials
@@ -175,12 +175,12 @@ export type ToolMeter = Schemas["ToolMeter"]
 // than as named schemas, so they are pinned to the operation instead of being
 // restated as literal unions that could drift.
 type SummaryQuery = NonNullable<
-  operations["usage_summary_v1_usage_summary_get"]["parameters"]["query"]
+  operations["usage_summary_api_v1_usage_summary_get"]["parameters"]["query"]
 >
 export type UsageBucket = NonNullable<SummaryQuery["bucket"]>
 export type SummaryDimension = NonNullable<SummaryQuery["dimensions"]>[number]
 type SeriesQuery = NonNullable<
-  operations["usage_series_v1_usage_series_get"]["parameters"]["query"]
+  operations["usage_series_api_v1_usage_series_get"]["parameters"]["query"]
 >
 export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
 
@@ -192,7 +192,7 @@ export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
 // the operation that carries all of them, and a name the spec drops (or a typo)
 // fails to compile here rather than going quiet on the wire.
 type RequestsQuery = NonNullable<
-  operations["list_usage_v1_usage_get"]["parameters"]["query"]
+  operations["list_usage_api_v1_usage_get"]["parameters"]["query"]
 >
 /** Fails to compile unless `T` is `true`, so a `false` below is a build error. */
 type Assert<T extends true> = T
@@ -448,7 +448,7 @@ export type SettableMemberStatus = NonNullable<
 >
 export type WorkspaceMemberRole = NonNullable<
   NonNullable<
-    operations["add_workspace_member_v1_workspaces__workspace_id__members__user_id__post"]["parameters"]["query"]
+    operations["add_workspace_member_api_v1_workspaces__workspace_id__members__user_id__post"]["parameters"]["query"]
   >["role"]
 >
 // ---------------------------------------------------------------------------
