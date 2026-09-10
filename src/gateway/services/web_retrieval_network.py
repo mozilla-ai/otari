@@ -170,11 +170,12 @@ class NetworkDeadline:
             raise NetworkDeadlineExceeded("web retrieval network deadline exceeded")
         return remaining
 
-    async def run(self, operation: Awaitable[T]) -> T:
-        """Run one operation within the remaining shared deadline."""
+    async def run(self, operation: Callable[[], Awaitable[T]]) -> T:
+        """Create and run one operation within the remaining shared deadline."""
+        remaining = self.remaining
         try:
-            async with asyncio.timeout(self.remaining):
-                return await operation
+            async with asyncio.timeout(remaining):
+                return await operation()
         except TimeoutError as exc:
             raise NetworkDeadlineExceeded("web retrieval network deadline exceeded") from exc
 
@@ -205,8 +206,12 @@ async def validate_retrieval_target(
         resolved: Sequence[IPAddress] = (literal,)
     else:
         active_resolver = resolver or SystemAddressResolver()
-        operation = active_resolver.resolve(canonical_url.origin.host.value, canonical_url.origin.port)
-        resolved = await deadline.run(operation) if deadline is not None else await operation
+        if deadline is not None:
+            resolved = await deadline.run(
+                lambda: active_resolver.resolve(canonical_url.origin.host.value, canonical_url.origin.port)
+            )
+        else:
+            resolved = await active_resolver.resolve(canonical_url.origin.host.value, canonical_url.origin.port)
     if not resolved:
         raise RetrievalAddressError("destination hostname could not be resolved")
 
@@ -587,7 +592,7 @@ async def read_capped_decoded_body(
     try:
         if response.is_stream_consumed:
             raise httpx.StreamConsumed()
-        return await deadline.run(read())
+        return await deadline.run(read)
     finally:
         await response.aclose()
 
