@@ -1,6 +1,6 @@
 """Accepting an organization invitation (standalone mode only).
 
-Deliberately public, unlike every other route under ``/v1``: the person
+Deliberately public, unlike every other route under ``/api/v1``: the person
 following an emailed link holds no master key and no session, and the token
 in the link is their whole proof of anything here. Both routes therefore take
 no ``CurrentIdentity`` and are scoped to exactly the one invitation the token

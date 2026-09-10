@@ -451,7 +451,7 @@ def import_claude_code(
 
     The OTLP exporter documented in docs/use-with-claude-code.md only carries
     sessions that run after it is configured. This reads the transcripts Claude
-    Code has already written and posts them to /v1/usage/external-events, which
+    Code has already written and posts them to /api/v1/usage/external-events, which
     is idempotent on (source, source_event_id): re-running imports only what is
     new and reports the rest as duplicates.
 

@@ -17,7 +17,7 @@ size, published-date) are ignored rather than rejected. Both are called out in
 ``docs/api-reference.md`` so a migrating caller can check for them.
 
 Both the body-selected (``POST /api/v1/search``) and path-selected
-(``POST /v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
+(``POST /api/v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
 so one Activity filter covers every search regardless of how the tool was
 named.
 

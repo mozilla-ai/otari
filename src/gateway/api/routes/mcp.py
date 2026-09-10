@@ -108,7 +108,7 @@ TOOLS_ENDPOINT = "/v1/mcp/servers/{mcp_server_id}/tools"
 
 # The in-flight registry describes work by model, and these endpoints run no
 # model. The label names what is actually being done instead, so an operator
-# watching /v1/usage/in-flight sees a stateless MCP call rather than a blank.
+# watching /api/v1/usage/in-flight sees a stateless MCP call rather than a blank.
 EXECUTE_LABEL = "mcp.execute"
 TOOLS_LABEL = "mcp.list_tools"
 

@@ -700,7 +700,7 @@ async def create_message(
     except HTTPException as exc:
         # The hybrid preamble (platform resolve / auth) raises format-agnostic
         # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
-        # them in the Anthropic envelope so /v1/messages errors stay structured.
+        # them in the Anthropic envelope so /api/v1/messages errors stay structured.
         raise _ensure_anthropic_error(exc) from exc
 
     if request.container is not None and ctx.hybrid_mode:
@@ -901,7 +901,7 @@ async def count_message_tokens(
             # the plane a cookie may not reach, so it must not report on one.
             await verify_api_key_or_master_key(raw_request, db, config)
     except HTTPException as exc:
-        # Keep /v1/messages/count_tokens auth errors in the Anthropic envelope too.
+        # Keep count_tokens auth errors in the Anthropic envelope too.
         raise _ensure_anthropic_error(exc) from exc
 
     return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

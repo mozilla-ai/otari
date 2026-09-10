@@ -19,7 +19,7 @@ gated, mirroring the other management routers.
   and applies them to the running worker.
 * ``POST /api/v1/tool-settings/{service}/test`` structurally validates a (typically
   unsaved) URL and probes it for reachability, returning ``{ok, reason}``.
-* ``GET /v1/tool-settings/guardrails/profiles`` reads the guardrail catalog off
+* ``GET /api/v1/tool-settings/guardrails/profiles`` reads the guardrail catalog off
   the service ``guardrails_url`` names. It sits here because that field is the
   only input it takes, and on the reader router for the reason the GET above is:
   a profile name is what a caller puts in a request body, so the set of them is
