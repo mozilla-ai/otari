@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { CreateKeyResponse } from "@/client"
 import { formatDate } from "@/shared/helpers/format"
-import { secretCaption } from "./KeysPage"
+import { secretCaption } from "./secretCaption"
 
 const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   allowed_models: null,
