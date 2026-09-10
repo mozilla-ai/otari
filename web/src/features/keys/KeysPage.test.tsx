@@ -657,7 +657,9 @@ describe("KeysPage", () => {
 
     await screen.findByText("No API keys yet")
     const usersCalls = () =>
-      fetchMock.mock.calls.filter(([u]) => String(u).includes("/v1/users"))
+      fetchMock.mock.calls.filter(([u]) =>
+        String(u).includes(`${API_ROOT}/users`),
+      )
     expect(usersCalls()).toHaveLength(0)
 
     await user.click(
@@ -919,9 +921,13 @@ describe("KeysPage", () => {
     await usr.click(
       await screen.findByRole("option", { name: "alice (Alice)" }),
     )
-    // No Escape here any more. Picking an option closes the combo box's own
-    // popover, so the keystroke would reach the dialog instead and arm its
-    // unsaved-changes guard, which swaps the submit out of the footer.
+    // Focus goes to another field rather than Escape putting the popover away.
+    // The box is `menuTrigger="focus"`, so selecting an option hands focus back
+    // to the input and the popover reopens, and react-aria marks the rest of the
+    // page `aria-hidden` while it is open, which is what puts the submit out of
+    // reach. Escape would close it and then reach the dialog, arming the
+    // unsaved-changes guard and taking the submit out of the footer instead.
+    await usr.click(screen.getByLabelText("Name"))
     await submitTheCreateDialog(usr)
 
     const post = fetchMock.mock.calls.find(
