@@ -20,26 +20,26 @@ def _raise_disabled() -> None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_DISABLED_DETAIL)
 
 
-@router.api_route("/v1/users/{path:path}", methods=_METHODS)
-@router.api_route("/v1/users", methods=_METHODS)
+@router.api_route("/users/{path:path}", methods=_METHODS)
+@router.api_route("/users", methods=_METHODS)
 async def users_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/keys/{path:path}", methods=_METHODS)
-@router.api_route("/v1/keys", methods=_METHODS)
+@router.api_route("/keys/{path:path}", methods=_METHODS)
+@router.api_route("/keys", methods=_METHODS)
 async def keys_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/budgets/{path:path}", methods=_METHODS)
-@router.api_route("/v1/budgets", methods=_METHODS)
+@router.api_route("/budgets/{path:path}", methods=_METHODS)
+@router.api_route("/budgets", methods=_METHODS)
 async def budgets_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/usage/{path:path}", methods=_METHODS)
-@router.api_route("/v1/usage", methods=_METHODS)
+@router.api_route("/usage/{path:path}", methods=_METHODS)
+@router.api_route("/usage", methods=_METHODS)
 async def usage_disabled() -> None:
     _raise_disabled()
 
@@ -48,26 +48,26 @@ async def usage_disabled() -> None:
 # is standalone-only for the same reason as the resources above: in hybrid mode
 # these are owned by the platform. Stubbed so an operator hitting them gets the
 # same "manage via the platform UI" hint instead of a bare 404.
-@router.api_route("/v1/settings/{path:path}", methods=_METHODS)
-@router.api_route("/v1/settings", methods=_METHODS)
+@router.api_route("/settings/{path:path}", methods=_METHODS)
+@router.api_route("/settings", methods=_METHODS)
 async def settings_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/aliases/{path:path}", methods=_METHODS)
-@router.api_route("/v1/aliases", methods=_METHODS)
+@router.api_route("/aliases/{path:path}", methods=_METHODS)
+@router.api_route("/aliases", methods=_METHODS)
 async def aliases_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/providers/{path:path}", methods=_METHODS)
-@router.api_route("/v1/providers", methods=_METHODS)
+@router.api_route("/providers/{path:path}", methods=_METHODS)
+@router.api_route("/providers", methods=_METHODS)
 async def providers_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/pricing/{path:path}", methods=_METHODS)
-@router.api_route("/v1/pricing", methods=_METHODS)
+@router.api_route("/pricing/{path:path}", methods=_METHODS)
+@router.api_route("/pricing", methods=_METHODS)
 async def pricing_disabled() -> None:
     _raise_disabled()
 
@@ -75,14 +75,14 @@ async def pricing_disabled() -> None:
 # Tenancy is the clearest case of the rule above: a hybrid gateway holds no
 # tenancy state at all, because the platform's control plane is where its
 # organizations and workspaces live.
-@router.api_route("/v1/organizations/{path:path}", methods=_METHODS)
-@router.api_route("/v1/organizations", methods=_METHODS)
+@router.api_route("/organizations/{path:path}", methods=_METHODS)
+@router.api_route("/organizations", methods=_METHODS)
 async def organizations_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/workspaces/{path:path}", methods=_METHODS)
-@router.api_route("/v1/workspaces", methods=_METHODS)
+@router.api_route("/workspaces/{path:path}", methods=_METHODS)
+@router.api_route("/workspaces", methods=_METHODS)
 async def workspaces_disabled() -> None:
     _raise_disabled()
 
@@ -90,7 +90,7 @@ async def workspaces_disabled() -> None:
 # Invitations are tenancy, same reasoning as organizations/workspaces above: a
 # hybrid gateway holds no membership state to accept an invitation into, so
 # there is nothing this stub could hand off to even if it tried.
-@router.api_route("/v1/invitations/{path:path}", methods=_METHODS)
-@router.api_route("/v1/invitations", methods=_METHODS)
+@router.api_route("/invitations/{path:path}", methods=_METHODS)
+@router.api_route("/invitations", methods=_METHODS)
 async def invitations_disabled() -> None:
     _raise_disabled()
