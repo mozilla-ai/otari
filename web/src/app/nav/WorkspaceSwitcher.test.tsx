@@ -71,14 +71,14 @@ function mockApi(
       method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
-    if (url.startsWith("/v1/budgets")) {
+    if (url.startsWith("/budgets")) {
       return [] as never
     }
-    if (url === "/v1/workspaces" && method === "POST") {
+    if (url === "/workspaces" && method === "POST") {
       createdWorkspace = true
       return workspace({ id: CREATED_WORKSPACE_ID, name: "Staging" }) as never
     }
-    if (url === "/v1/organizations/me") {
+    if (url === "/organizations/me") {
       const base = organizationContext(options.context)
       if (!createdWorkspace) return base as never
       return {
@@ -93,23 +93,23 @@ function mockApi(
         ],
       } as never
     }
-    if (url.startsWith("/v1/organizations/me/pending-memberships")) {
+    if (url.startsWith("/organizations/me/pending-memberships")) {
       if (options.pendingInvitationsFail) {
         throw new apiClient.ApiError(404, "Not found")
       }
       const pending = options.pendingInvitations ?? []
       return { data: pending, count: pending.length } as never
     }
-    if (url.startsWith("/v1/organizations/me/memberships")) {
+    if (url.startsWith("/organizations/me/memberships")) {
       return { data: memberships, count: memberships.length } as never
     }
-    if (url === "/v1/organizations/me/switch") {
+    if (url === "/organizations/me/switch") {
       if (options.switchFails) {
         throw new apiClient.ApiError(404, "Organization not found")
       }
       return organizationContext() as never
     }
-    if (url === "/v1/organizations") {
+    if (url === "/organizations") {
       return organization({ id: SECOND_ORGANIZATION_ID }) as never
     }
     return organizationContext(options.context) as never
@@ -170,7 +170,7 @@ describe("the organization half of the scope switcher", () => {
     )
 
     const posted = requests.find((request) => request.method === "POST")
-    expect(posted?.url).toBe("/v1/organizations/me/switch")
+    expect(posted?.url).toBe("/organizations/me/switch")
     expect(posted?.body).toEqual({ organization_id: SECOND_ORGANIZATION_ID })
   })
 
@@ -220,8 +220,8 @@ describe("the organization half of the scope switcher", () => {
 
     const posts = requests.filter((request) => request.method === "POST")
     expect(posts.map((request) => request.url)).toEqual([
-      "/v1/organizations",
-      "/v1/organizations/me/switch",
+      "/organizations",
+      "/organizations/me/switch",
     ])
     expect(posts[0]?.body).toEqual({ name: "Research" })
     // The second call is what makes the new organization the one on screen; the
@@ -517,7 +517,7 @@ describe("the invitations row in the scope switcher", () => {
 
   it("stays silent when the read fails, rather than breaking the chrome", async () => {
     // A gateway older than this bundle does not serve the route, and a hybrid
-    // one answers 404 for every `/v1/organizations` path. The switcher still
+    // one answers 404 for every /api/v1/organizations path. The switcher still
     // has to switch.
     mockApi({
       memberships: twoOrganizations(),

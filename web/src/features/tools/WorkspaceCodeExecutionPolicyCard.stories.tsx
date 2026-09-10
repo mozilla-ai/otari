@@ -7,6 +7,7 @@ import {
 } from "@/tests/fixtures"
 
 import { WorkspaceCodeExecutionPolicyCard } from "./WorkspaceCodeExecutionPolicyCard"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * A workspace's stance on code execution, plus the ceilings it may narrow.
@@ -20,7 +21,7 @@ import { WorkspaceCodeExecutionPolicyCard } from "./WorkspaceCodeExecutionPolicy
  * a workspace may narrow them, never widen them.
  *
  * This card reads the *selected* workspace from context rather than a prop, so
- * these stories mock `/v1/organizations/me`, that is what
+ * these stories mock /api/v1/organizations/me, that is what
  * `SelectedWorkspaceProvider` seeds itself from (see `.storybook/appContext.tsx`).
  */
 const WORKSPACE_ID = "44444444-4444-4444-4444-444444444444"
@@ -34,12 +35,12 @@ const CONTEXT = organizationContext({
   ],
 })
 
-const policyPath = `/v1/workspaces/${WORKSPACE_ID}/code-execution-policy`
+const policyPath = `${API_ROOT}/workspaces/${WORKSPACE_ID}/code-execution-policy`
 
 function api(policy: ReturnType<typeof workspaceCodeExecutionPolicy>) {
   return {
-    "/v1/organizations/me": CONTEXT,
-    "/v1/workspaces": [workspace({ id: WORKSPACE_ID, name: "Platform" })],
+    [`${API_ROOT}/organizations/me`]: CONTEXT,
+    [`${API_ROOT}/workspaces`]: [workspace({ id: WORKSPACE_ID, name: "Platform" })],
     [policyPath]: policy,
   }
 }

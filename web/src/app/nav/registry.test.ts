@@ -96,9 +96,9 @@ describe("nav registry", () => {
     // tenant-scoped read, so there is no longer a caller it refuses. Models and
     // Routing left it the same way (otari-ai#1942): the catalog reads already
     // served any session, and Routing gained
-    // `/v1/organizations/me/routing-policies`. API keys left it for the same
+    // /api/v1/organizations/me/routing-policies. API keys left it for the same
     // reason (otari-ai#1941): members create and manage their own keys through
-    // `/v1/organizations/me/keys`. Removing a row from here is as
+    // /api/v1/organizations/me/keys. Removing a row from here is as
     // much a design decision as adding one.
     //
     // Model pricing left it a third way (otari-ai#1943): the page behind it was
@@ -155,7 +155,7 @@ describe("nav registry", () => {
       ["Model pricing", "pricing"],
     ])
     // No row gates on `users` any more. The gateway still serves that surface
-    // (budgets, keys and the roster all read `/v1/users`), but a person is a
+    // (budgets, keys and the roster all read /api/v1/users), but a person is a
     // member now: what they may spend and what their keys may call are columns
     // on Members & roles rather than a second people-shaped destination.
     expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("users")

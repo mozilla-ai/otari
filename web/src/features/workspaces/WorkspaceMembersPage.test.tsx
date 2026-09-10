@@ -11,6 +11,7 @@ import {
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { pickOption } from "@/tests/select"
+import { API_ROOT } from "@/shared/api/client"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const USER = "33333333-3333-3333-3333-333333333333"
@@ -37,10 +38,10 @@ function mockApi({
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     requests.push({ url, method: (init?.method ?? "GET").toUpperCase() })
-    if (url.includes("/members") && url.includes("/v1/workspaces/")) {
+    if (url.includes("/members") && url.includes(`${API_ROOT}/workspaces/`)) {
       return Response.json({ data: members, count: members.length })
     }
-    if (url.includes("/v1/organizations/me/members")) {
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       if (rosterFails) {
         return Response.json({ detail: "Roster unavailable" }, { status: 500 })
       }
@@ -161,7 +162,7 @@ describe("WorkspaceMembersPage", () => {
     // The role travels as a query parameter, which is the rehomed wire
     // contract; a body would be ignored.
     expect(post?.url).toContain(
-      `/v1/workspaces/${ALPHA}/members/77777777-7777-7777-7777-777777777777?role=admin`,
+      `${API_ROOT}/workspaces/${ALPHA}/members/77777777-7777-7777-7777-777777777777?role=admin`,
     )
   })
 

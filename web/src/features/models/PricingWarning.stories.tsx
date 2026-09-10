@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import { PricingWarning } from "./PricingWarning"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * The shell-level warning that requests are being refused for want of a price.
@@ -47,8 +48,8 @@ type Story = StoryObj<typeof meta>
 export const RequestsBeingRefused: Story = {
   parameters: {
     api: {
-      "/v1/settings": settings(),
-      "/v1/usage/count": { total: 142 },
+      [`${API_ROOT}/settings`]: settings(),
+      [`${API_ROOT}/usage/count`]: { total: 142 },
     },
   },
   render: () => (
@@ -66,8 +67,8 @@ export const RequestsBeingRefused: Story = {
 export const NoFailuresYet: Story = {
   parameters: {
     api: {
-      "/v1/settings": settings(),
-      "/v1/usage/count": { total: 0 },
+      [`${API_ROOT}/settings`]: settings(),
+      [`${API_ROOT}/usage/count`]: { total: 0 },
     },
   },
   render: () => (
@@ -85,8 +86,8 @@ export const NoFailuresYet: Story = {
 export const PricingNotRequired: Story = {
   parameters: {
     api: {
-      "/v1/settings": settings({ require_pricing: false }),
-      "/v1/usage/count": { total: 142 },
+      [`${API_ROOT}/settings`]: settings({ require_pricing: false }),
+      [`${API_ROOT}/usage/count`]: { total: 142 },
     },
   },
   render: () => (
@@ -104,8 +105,8 @@ export const PricingNotRequired: Story = {
 export const DefaultPricingCoversIt: Story = {
   parameters: {
     api: {
-      "/v1/settings": settings({ default_pricing: true }),
-      "/v1/usage/count": { total: 142 },
+      [`${API_ROOT}/settings`]: settings({ default_pricing: true }),
+      [`${API_ROOT}/usage/count`]: { total: 142 },
     },
   },
   render: () => (
@@ -120,8 +121,8 @@ export const DefaultPricingCoversIt: Story = {
 export const ManyFailures: Story = {
   parameters: {
     api: {
-      "/v1/settings": settings(),
-      "/v1/usage/count": { total: 48_912 },
+      [`${API_ROOT}/settings`]: settings(),
+      [`${API_ROOT}/usage/count`]: { total: 48_912 },
     },
   },
   render: () => (

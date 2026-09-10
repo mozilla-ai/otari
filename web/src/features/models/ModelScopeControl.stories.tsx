@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
 import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * The allow-list editor: either any model, or an explicit list.
@@ -67,9 +68,9 @@ const ALIASES = [
 ]
 
 const API = {
-  "/v1/models/discoverable": DISCOVERABLE,
-  "/v1/providers": PROVIDERS,
-  "/v1/aliases": ALIASES,
+  [`${API_ROOT}/models/discoverable`]: DISCOVERABLE,
+  [`${API_ROOT}/providers`]: PROVIDERS,
+  [`${API_ROOT}/aliases`]: ALIASES,
 }
 
 const meta = {

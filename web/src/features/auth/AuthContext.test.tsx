@@ -6,6 +6,7 @@ import { useAuth } from "@/features/auth/AuthContext"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { AppProviders } from "@/tests/providers"
 import { identify, recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+import { API_ROOT } from "@/shared/api/client"
 
 // The telemetry seam, replaced the way a superset build's alias replaces it, so
 // the sign-out this provider records is observable at all: the base module is a
@@ -95,7 +96,7 @@ describe("AuthProvider", () => {
     expect(window.localStorage.getItem("otari.dashboard.hasSession")).toBeNull()
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        ([url]) => url === "/v1/auth/session",
+        ([url]) => url === `${API_ROOT}/auth/session`,
       )
       expect(call?.[1]?.method).toBe("DELETE")
     })

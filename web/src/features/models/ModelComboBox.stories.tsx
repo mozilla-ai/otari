@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
 import { ModelComboBox } from "./ModelComboBox"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * A flat, searchable `provider:model` picker over what the providers actually
@@ -49,7 +50,7 @@ const meta = {
   title: "Dashboard/Models/ModelComboBox",
   component: ModelComboBox,
   args: { label: "Model", value: "", onChange: () => {} },
-  parameters: { api: { "/v1/models/discoverable": CATALOG } },
+  parameters: { api: { [`${API_ROOT}/models/discoverable`]: CATALOG } },
 } satisfies Meta<typeof ModelComboBox>
 
 export default meta
@@ -93,7 +94,7 @@ export const WithDescription: Story = {
 
 /** Model discovery is off, or no provider is configured: nothing to suggest. */
 export const NoModels: Story = {
-  parameters: { api: { "/v1/models/discoverable": { providers: [] } } },
+  parameters: { api: { [`${API_ROOT}/models/discoverable`]: { providers: [] } } },
   render: (args) => (
     <div className="w-[24rem]">
       <ModelComboBox {...args} placeholder="provider:model" />
@@ -108,7 +109,7 @@ export const NoModels: Story = {
 export const ProviderUnreachable: Story = {
   parameters: {
     api: {
-      "/v1/models/discoverable": {
+      [`${API_ROOT}/models/discoverable`]: {
         providers: [
           ...CATALOG.providers.slice(0, 1),
           {
@@ -134,7 +135,7 @@ export const ProviderUnreachable: Story = {
 export const LargeCatalog: Story = {
   parameters: {
     api: {
-      "/v1/models/discoverable": discoverable([
+      [`${API_ROOT}/models/discoverable`]: discoverable([
         {
           provider: "openrouter",
           models: Array.from(

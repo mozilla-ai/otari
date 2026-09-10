@@ -7,6 +7,7 @@ import { useOrganizationMembers } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
+import { API_ROOT } from "@/shared/api/client"
 
 // Which of the two forms this card renders comes from the bootstrap, so every
 // render goes through a DeploymentProvider. `master_key` is the unclaimed
@@ -68,7 +69,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe("/v1/auth/password")
+    expect(url).toBe(`${API_ROOT}/auth/password`)
     expect(init?.method).toBe("PUT")
     // No `current_password`: there is none to prove, and sending null would be
     // a different request from the one the claim documents.
@@ -296,7 +297,7 @@ describe("PasswordCard and the member roster", () => {
     let memberFetches = 0
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/organizations/me/members")) {
+      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         memberFetches += 1
         return jsonResponse({ count: 0, data: [] })
       }

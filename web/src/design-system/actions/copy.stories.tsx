@@ -54,7 +54,7 @@ export const MultilineField: Story = {
   args: {
     label: "Try it with curl",
     multiline: true,
-    value: `curl https://gateway.example.com/v1/chat/completions \\
+    value: `curl https://gateway.example.com/api/v1/chat/completions \\
   -H "Authorization: Bearer otari_sk_…" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"openai:gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'`,
@@ -158,8 +158,8 @@ export const Concealed: Story = {
       <CopyField
         label="Example request"
         multiline
-        value={`curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer sk-otari-4f8a2c9e1b7d3a6f5e0c8b2d"`}
-        concealed={`curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer ${CONCEALED_SECRET}"`}
+        value={`curl https://gateway.example.com/api/v1/chat/completions \\\n  -H "Authorization: Bearer sk-otari-4f8a2c9e1b7d3a6f5e0c8b2d"`}
+        concealed={`curl https://gateway.example.com/api/v1/chat/completions \\\n  -H "Authorization: Bearer ${CONCEALED_SECRET}"`}
       />
     </div>
   ),

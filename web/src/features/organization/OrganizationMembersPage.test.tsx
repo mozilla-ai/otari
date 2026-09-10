@@ -27,6 +27,7 @@ import {
   workspaceMember,
 } from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
+import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -77,40 +78,40 @@ function mockApi(opts: {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
-    if (url.includes("/v1/providers")) {
+    if (url.includes(`${API_ROOT}/providers`)) {
       return jsonResponse({ providers: [] })
     }
-    if (url.includes("/v1/models/discoverable")) {
+    if (url.includes(`${API_ROOT}/models/discoverable`)) {
       return jsonResponse({ models: [] })
     }
-    if (url.includes("/v1/aliases")) {
+    if (url.includes(`${API_ROOT}/aliases`)) {
       return jsonResponse([])
     }
-    if (url.includes("/v1/budgets")) {
+    if (url.includes(`${API_ROOT}/budgets`)) {
       return jsonResponse(budgetList)
     }
-    if (url.includes("/v1/scoped-budgets")) {
+    if (url.includes(`${API_ROOT}/scoped-budgets`)) {
       if (method === "GET") return jsonResponse(scopedBudgets)
       return jsonResponse(
         scopedBudgets[0] ?? {},
         method === "DELETE" ? 204 : 200,
       )
     }
-    if (url.includes("/members") && url.includes("/v1/workspaces/")) {
-      const id = url.split("/v1/workspaces/")[1]?.split("/")[0] ?? ""
+    if (url.includes("/members") && url.includes(`${API_ROOT}/workspaces/`)) {
+      const id = url.split(`${API_ROOT}/workspaces/`)[1]?.split("/")[0] ?? ""
       const roster = workspaceMembers[id] ?? []
       if (method === "GET") {
         return jsonResponse({ data: roster, count: roster.length })
       }
       return jsonResponse(roster[0] ?? {})
     }
-    if (url.includes("/v1/workspaces")) {
+    if (url.includes(`${API_ROOT}/workspaces`)) {
       return jsonResponse({ data: workspaces, count: workspaces.length })
     }
-    if (url.includes("/v1/users")) {
+    if (url.includes(`${API_ROOT}/users`)) {
       return jsonResponse(method === "PATCH" ? users[0] : users)
     }
-    if (url.includes("/v1/organizations/me/member-invitations")) {
+    if (url.includes(`${API_ROOT}/organizations/me/member-invitations`)) {
       if (method === "POST") {
         return jsonResponse(
           opts.inviteResult ?? {
@@ -129,7 +130,7 @@ function mockApi(opts: {
       }
       return jsonResponse({ message: "Invitation revoked" })
     }
-    if (url.includes("/v1/organizations/me/members")) {
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       if (method === "GET") {
         return jsonResponse({ data: members, count: members.length })
       }
@@ -211,7 +212,7 @@ describe("OrganizationMembersPage", () => {
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toContain(
-      "/v1/organizations/me/members/analyst-membership",
+      `${API_ROOT}/organizations/me/members/analyst-membership`,
     )
     expect(patch?.body).toEqual({ role: "admin" })
   })
@@ -256,7 +257,7 @@ describe("OrganizationMembersPage", () => {
 
     const remove = requests.find((request) => request.method === "DELETE")
     expect(remove?.url).toContain(
-      "/v1/organizations/me/members/analyst-membership",
+      `${API_ROOT}/organizations/me/members/analyst-membership`,
     )
   })
 
@@ -291,7 +292,7 @@ describe("OrganizationMembersPage", () => {
     await user.click(screen.getByRole("button", { name: "Add member" }))
 
     const post = requests.find((request) => request.method === "POST")
-    expect(post?.url).toContain("/v1/organizations/me/members")
+    expect(post?.url).toContain(`${API_ROOT}/organizations/me/members`)
     expect(post?.body).toEqual({
       email: "ada@example.com",
       role: "admin",
@@ -432,7 +433,7 @@ describe("OrganizationMembersPage", () => {
 
     const revoke = requests.find((request) => request.method === "DELETE")
     expect(revoke?.url).toContain(
-      "/v1/organizations/me/member-invitations/invitation-1",
+      `${API_ROOT}/organizations/me/member-invitations/invitation-1`,
     )
   })
 
@@ -517,7 +518,7 @@ describe("OrganizationMembersPage", () => {
     await actor.click(block)
 
     const patch = requests.find(
-      (r) => r.method === "PATCH" && r.url.includes("/v1/users/"),
+      (r) => r.method === "PATCH" && r.url.includes(`${API_ROOT}/users/`),
     )
     expect(patch?.body).toEqual({ blocked: true })
   })
@@ -576,20 +577,20 @@ describe("OrganizationMembersPage", () => {
     // row the membership is joined to, and it is the third table the editor
     // touches: without this the title would be claiming it without proof.
     const access = requests.find(
-      (r) => r.method === "PATCH" && r.url.includes("/v1/users/"),
+      (r) => r.method === "PATCH" && r.url.includes(`${API_ROOT}/users/`),
     )
     expect(access?.body).toEqual({ allowed_models: ANALYST_ACCESS })
 
     const join = requests.find(
       (r) =>
         r.method === "POST" &&
-        r.url.includes(`/v1/workspaces/${SECOND}/members/`),
+        r.url.includes(`${API_ROOT}/workspaces/${SECOND}/members/`),
     )
     expect(join).toBeDefined()
 
     const ceiling = requests.find(
       (r) =>
-        r.method === "PATCH" && r.url.includes("/v1/scoped-budgets/ceiling-1"),
+        r.method === "PATCH" && r.url.includes(`${API_ROOT}/scoped-budgets/ceiling-1`),
     )
     expect(ceiling?.body).toEqual({ budget_id: "bud-large" })
 
@@ -606,7 +607,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
   })
 
   it("asks for none of the deployment-wide reads", async () => {
-    // `/v1/users`, `/v1/budgets` and `/v1/scoped-budgets` have refused a tenant
+    // /api/v1/users, /api/v1/budgets and /api/v1/scoped-budgets have refused a tenant
     // since #821. An organization owner is one, so the page must not ask: the
     // refusals rendered as "this endpoint requires deployment operator access"
     // across a page that is theirs (otari#838).
@@ -621,9 +622,9 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     // asked for nothing at all.
     await screen.findByText("Analyst")
     expect(
-      requests.some((r) => r.url.includes("/v1/organizations/me/members")),
+      requests.some((r) => r.url.includes(`${API_ROOT}/organizations/me/members`)),
     ).toBe(true)
-    for (const path of ["/v1/users", "/v1/budgets", "/v1/scoped-budgets"]) {
+    for (const path of [`${API_ROOT}/users`, `${API_ROOT}/budgets`, `${API_ROOT}/scoped-budgets`]) {
       expect(
         requests.filter((r) => r.method === "GET" && r.url.includes(path)),
       ).toHaveLength(0)
@@ -666,7 +667,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
   it("saves a workspace placement without asking for scoped budgets", async () => {
     // The gate cannot live on the query alone: `refetch()` runs the query
     // function even when `enabled` is false, so the editor's ceilings pass would
-    // still ask `/v1/scoped-budgets`, be refused, and put the operator refusal
+    // still ask /api/v1/scoped-budgets, be refused, and put the operator refusal
     // back on a page this branch just cleared of it (otari#838).
     const requests = mockApi({
       members: [OWNER, ANALYST],
@@ -688,7 +689,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     await actor.click(screen.getByRole("button", { name: "Save changes" }))
 
     await waitFor(() =>
-      expect(requests.some((r) => r.url.includes("/v1/scoped-budgets"))).toBe(
+      expect(requests.some((r) => r.url.includes(`${API_ROOT}/scoped-budgets`))).toBe(
         false,
       ),
     )

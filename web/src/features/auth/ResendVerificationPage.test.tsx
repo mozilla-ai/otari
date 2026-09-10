@@ -58,7 +58,7 @@ describe("ResendVerificationPage", () => {
       expect(window.location.hash).toBe("#/check-email?type=resend")
     })
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
-      "/v1/auth/resend-verification",
+      "/auth/resend-verification",
     )
   })
 })

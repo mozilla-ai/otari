@@ -226,30 +226,30 @@ function mockApi(
       if (method === "DELETE") {
         return null as never
       }
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith("/organizations/me")) {
         return (opts.context ?? organizationContext()) as never
       }
-      if (url.includes("/v1/settings")) {
+      if (url.includes("/settings")) {
         return (opts.settings ?? SETTINGS) as never
       }
       // Specific /v1/models/* routes before the /v1/models/ catch-all (which 404s,
       // matching the server's route order).
-      if (url.includes("/v1/models/discoverable")) {
+      if (url.includes("/models/discoverable")) {
         return (opts.discoverable ?? DISCOVERABLE) as never
       }
-      if (url.includes("/v1/models/metadata")) {
+      if (url.includes("/models/metadata")) {
         return (opts.metadata ?? METADATA) as never
       }
-      if (url.includes("/v1/aliases")) {
+      if (url.includes("/aliases")) {
         return (opts.aliases ?? ALIASES) as never
       }
-      if (url.includes("/v1/models/")) {
+      if (url.includes("/models/")) {
         throw new Error("Model not found")
       }
-      if (url.includes("/v1/models")) {
+      if (url.includes("/models")) {
         return (opts.catalog ?? CATALOG) as never
       }
-      if (url.includes("/v1/pricing")) {
+      if (url.includes("/pricing")) {
         return (opts.pricing ?? [PRICED]) as never
       }
       return [] as never
@@ -810,7 +810,7 @@ describe("ModelsPage", () => {
       ([, init]) => (init?.method ?? "") === "POST",
     )
     expect(call).toBeDefined()
-    expect(String(call?.[0])).toContain("/v1/pricing")
+    expect(String(call?.[0])).toContain("/pricing")
     expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
       model_key: "openai:gpt-4o",
       input_price_per_million: 4,
@@ -852,7 +852,7 @@ describe("ModelsPage", () => {
     const call = fetchMock.mock.calls.find(
       ([, init]) => (init?.method ?? "") === "POST",
     )
-    expect(String(call?.[0])).toContain("/v1/pricing")
+    expect(String(call?.[0])).toContain("/pricing")
     expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
       model_key: "openai:gpt-4o",
       cache_read_price_per_million: 0.3,
@@ -1035,7 +1035,7 @@ describe("ModelsPage", () => {
     const call = fetchMock.mock.calls.find(
       ([, init]) => (init?.method ?? "") === "POST",
     )
-    expect(String(call?.[0])).toContain("/v1/pricing")
+    expect(String(call?.[0])).toContain("/pricing")
     expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
       model_key: "openai:gpt-4o",
       cache_read_price_per_million: 0.3,
@@ -1103,7 +1103,7 @@ describe("ModelsPage", () => {
     await vi.waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).includes("/v1/pricing") &&
+          String(u).includes("/pricing") &&
           (init?.method ?? "").toUpperCase() === "POST",
       )
       expect(call).toBeTruthy()
@@ -1364,11 +1364,11 @@ describe("ModelsPage", () => {
     expect(filterTrigger("Pricing")).not.toBeNull()
 
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
-    expect(urls.some((url) => url.includes("/v1/settings"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/models/discoverable"))).toBe(
+    expect(urls.some((url) => url.includes("/settings"))).toBe(false)
+    expect(urls.some((url) => url.includes("/models/discoverable"))).toBe(
       false,
     )
-    expect(urls.some((url) => url.includes("/v1/models/metadata"))).toBe(false)
+    expect(urls.some((url) => url.includes("/models/metadata"))).toBe(false)
   })
 
   // The models page offers no row selection, because there is no bulk price

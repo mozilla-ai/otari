@@ -36,7 +36,7 @@ describe("App", () => {
       if (path === "/dashboard-build.json") {
         return { build: "test-build" } as never
       }
-      if (path === "/v1/settings") {
+      if (path === "/settings") {
         return { default_pricing: true, require_pricing: false } as never
       }
       return [] as never
@@ -105,7 +105,7 @@ describe("App", () => {
     vi.mocked(apiFetch).mockImplementation(async (path) => {
       if (
         typeof path === "string" &&
-        path.startsWith("/v1/invitations/validate")
+        path.startsWith("/invitations/validate")
       ) {
         return {
           email: "ada@example.com",
@@ -197,7 +197,7 @@ describe("App", () => {
     vi.mocked(apiFetch).mockImplementation(async (path, init) => {
       if (
         typeof path === "string" &&
-        path.startsWith("/v1/invitations/validate")
+        path.startsWith("/invitations/validate")
       ) {
         const body = init?.body ? JSON.parse(String(init.body)) : {}
         return {

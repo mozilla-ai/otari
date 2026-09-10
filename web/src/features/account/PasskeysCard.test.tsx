@@ -7,6 +7,7 @@ import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
+import { API_ROOT } from "@/shared/api/client"
 
 const PASSKEY = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -221,7 +222,7 @@ describe("PasskeysCard", () => {
     await waitFor(() => {
       const registered = fetchMock.mock.calls.find(
         ([url, init]) =>
-          String(url) === "/v1/auth/webauthn/register" &&
+          String(url) === `${API_ROOT}/auth/webauthn/register` &&
           (init as RequestInit)?.method === "POST",
       )
       if (!registered) {

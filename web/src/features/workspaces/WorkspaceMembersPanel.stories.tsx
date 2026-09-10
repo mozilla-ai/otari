@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { organizationMember, workspaceMember } from "@/tests/fixtures"
 
 import { WorkspaceMembersPanel } from "./WorkspaceMembersPanel"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * One workspace's roster, plus the form that adds to it.
@@ -57,7 +58,7 @@ const ROSTER = [
   }),
 ]
 
-const membersPath = `/v1/workspaces/${WORKSPACE_ID}/members`
+const membersPath = `${API_ROOT}/workspaces/${WORKSPACE_ID}/members`
 
 const meta = {
   title: "Dashboard/Workspaces/WorkspaceMembersPanel",

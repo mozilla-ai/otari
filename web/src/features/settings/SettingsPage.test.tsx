@@ -14,6 +14,7 @@ import type {
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { fieldMatches, SettingsPage } from "@/features/settings/SettingsPage"
 import { pickOption } from "@/tests/select"
+import { API_ROOT } from "@/shared/api/client"
 
 describe("fieldMatches", () => {
   const field: ConfigField = {
@@ -213,7 +214,7 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
       if (
-        url.includes("/v1/provider-credentials/reencrypt") &&
+        url.includes(`${API_ROOT}/provider-credentials/reencrypt`) &&
         method === "POST"
       ) {
         storedList = storedList.map((provider) => ({
@@ -222,18 +223,18 @@ function mockApi(
         }))
         return jsonResponse(reencryptResult)
       }
-      if (url.includes("/v1/provider-credentials")) {
+      if (url.includes(`${API_ROOT}/provider-credentials`)) {
         return jsonResponse(storedList)
       }
       // Ahead of the /v1/settings branch below, which would otherwise answer
       // the mail card's request with the whole settings payload.
-      if (url.includes("/v1/settings/mail")) {
+      if (url.includes(`${API_ROOT}/settings/mail`)) {
         return jsonResponse(MAIL_SETTINGS)
       }
-      if (url.includes("/v1/settings/master-key/rotate")) {
+      if (url.includes(`${API_ROOT}/settings/master-key/rotate`)) {
         return jsonResponse({ master_key: "otari-mk-new" })
       }
-      if (url.includes("/v1/settings")) {
+      if (url.includes(`${API_ROOT}/settings`)) {
         if (method === "PATCH") {
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>
           current = {
@@ -295,7 +296,7 @@ describe("SettingsPage", () => {
       ([, init]) => (init?.method ?? "") === "PATCH",
     )
     expect(call).toBeDefined()
-    expect(String(call?.[0])).toContain("/v1/settings")
+    expect(String(call?.[0])).toContain(`${API_ROOT}/settings`)
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
       model_discovery: false,
     })
@@ -381,7 +382,7 @@ describe("SettingsPage", () => {
 
     const call = fetchMock.mock.calls.find(
       ([url, init]) =>
-        String(url).endsWith("/v1/provider-credentials/reencrypt") &&
+        String(url).endsWith(`${API_ROOT}/provider-credentials/reencrypt`) &&
         (init?.method ?? "") === "POST",
     )
     expect(call).toBeDefined()

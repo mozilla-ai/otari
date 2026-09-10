@@ -57,7 +57,7 @@ describe("ResetPasswordPage", () => {
       screen.getByText(/Any other session this account held has ended/),
     ).toBeInTheDocument()
     const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
-    expect(path).toBe("/v1/auth/password/reset/confirm")
+    expect(path).toBe("/auth/password/reset/confirm")
     expect(JSON.parse(String(init?.body))).toEqual({
       token: "abc123",
       new_password: "correct-horse",

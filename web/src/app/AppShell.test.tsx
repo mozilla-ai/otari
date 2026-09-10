@@ -24,6 +24,7 @@ import {
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+import { API_ROOT } from "@/shared/api/client"
 
 // The telemetry seam, replaced the way a superset build's alias replaces it: the
 // base module records nothing, so a navigation is only observable through a
@@ -102,16 +103,16 @@ function renderShell(
     // panel. Answered from the same option, because a harness that could tell
     // the rail one thing and the page another would be describing a deployment
     // that does not exist.
-    if (path.startsWith("/v1/admin/access")) {
+    if (path.startsWith(`${API_ROOT}/admin/access`)) {
       return Response.json({ granted: options.operator ?? true })
     }
-    if (path.startsWith("/v1/admin/users")) {
+    if (path.startsWith(`${API_ROOT}/admin/users`)) {
       return Response.json({ data: [], count: 0 })
     }
-    if (path.startsWith("/v1/organizations/me/memberships")) {
+    if (path.startsWith(`${API_ROOT}/organizations/me/memberships`)) {
       return Response.json({ data: memberships, count: memberships.length })
     }
-    if (path.includes("/v1/settings")) {
+    if (path.includes(`${API_ROOT}/settings`)) {
       return Response.json(options.settings ?? SETTINGS_WITH_PRICING)
     }
     // The membership context, which carries the caller axis. An operator by
@@ -720,7 +721,7 @@ describe("AppShell entitlement gating", () => {
       vi
         .mocked(globalThis.fetch)
         .mock.calls.some((call) =>
-          String(call[0]).includes("/v1/admin/access"),
+          String(call[0]).includes(`${API_ROOT}/admin/access`),
         ),
     ).toBe(false)
   })

@@ -29,7 +29,7 @@ function mockApi(opts: {
 }) {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     const url = String(path)
-    if (url === "/v1/invitations/validate") {
+    if (url === "/invitations/validate") {
       if (opts.previewError) {
         throw new ApiError(400, opts.previewError)
       }
@@ -40,7 +40,7 @@ function mockApi(opts: {
         expires_at: "2026-01-08T00:00:00+00:00",
       }) as never
     }
-    if (url === "/v1/invitations/accept") {
+    if (url === "/invitations/accept") {
       if (opts.acceptError) {
         throw new ApiError(400, opts.acceptError)
       }
@@ -226,7 +226,7 @@ describe("AcceptInvitationPage", () => {
     let accepted = false
     vi.mocked(apiFetch).mockImplementation(async (path) => {
       const url = String(path)
-      if (url === "/v1/invitations/validate") {
+      if (url === "/invitations/validate") {
         if (accepted) {
           throw new ApiError(
             400,

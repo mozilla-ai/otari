@@ -17,6 +17,7 @@ import { ProvidersPage } from "@/features/providers/ProvidersPage"
 import { PROVIDER_HEALTH_REFRESH_MS } from "@/shared/api/providers"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { API_ROOT } from "@/shared/api/client"
 
 const CAPS = {
   streaming: false,
@@ -163,7 +164,7 @@ function mockApi(opts: MockOpts = {}) {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
 
-      if (url.includes("/v1/provider-credentials")) {
+      if (url.includes(`${API_ROOT}/provider-credentials`)) {
         if (url.endsWith("/test") && method === "POST") {
           const scripted = opts.testCalls?.[testCallCount]
           testCallCount += 1
@@ -255,29 +256,29 @@ function mockApi(opts: MockOpts = {}) {
         }
         return jsonResponse(storedList)
       }
-      if (url.includes("/v1/providers/catalog/")) {
+      if (url.includes(`${API_ROOT}/providers/catalog/`)) {
         // Detail endpoint: autofill hints for one selected provider.
         const id = decodeURIComponent(
-          url.split("/v1/providers/catalog/")[1].split("?")[0],
+          url.split(`${API_ROOT}/providers/catalog/`)[1].split("?")[0],
         )
         const detail = catalog.find((p) => p.id === id)
         return detail
           ? jsonResponse(detail)
           : jsonResponse({ detail: `Unknown provider: ${id}` }, 404)
       }
-      if (url.includes("/v1/providers/catalog")) {
+      if (url.includes(`${API_ROOT}/providers/catalog`)) {
         // List endpoint: id + display name only.
         return jsonResponse(catalog.map((p) => ({ id: p.id, name: p.name })))
       }
-      if (url.includes("/v1/providers/health")) {
+      if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse(
           healthResponse(url.includes("refresh=true") ? healthRefresh : health),
         )
       }
-      if (url.includes("/v1/providers")) {
+      if (url.includes(`${API_ROOT}/providers`)) {
         return jsonResponse({ providers: meta })
       }
-      if (url.includes("/v1/settings")) {
+      if (url.includes(`${API_ROOT}/settings`)) {
         if (opts.settingsRefused) {
           return jsonResponse({ detail: "Not authorized" }, 403)
         }
@@ -286,7 +287,7 @@ function mockApi(opts: MockOpts = {}) {
         }
         return jsonResponse(settings)
       }
-      if (url.includes("/v1/organizations/me")) {
+      if (url.includes(`${API_ROOT}/organizations/me`)) {
         if (opts.contextGate) await opts.contextGate
         if (opts.contextError) return jsonResponse({ detail: "boom" }, 500)
         return jsonResponse(opts.context ?? organizationContext())
@@ -307,7 +308,7 @@ function renderPage(
 
 function healthRequestCount(fetchMock: ReturnType<typeof mockApi>): number {
   return fetchMock.mock.calls.filter(([url]) =>
-    String(url).includes("/v1/providers/health"),
+    String(url).includes(`${API_ROOT}/providers/health`),
   ).length
 }
 
@@ -355,7 +356,7 @@ describe("ProvidersPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).endsWith("/v1/provider-credentials") &&
+        String(u).endsWith(`${API_ROOT}/provider-credentials`) &&
         (init?.method ?? "") === "POST",
     )
     expect(post).toBeDefined()
@@ -439,7 +440,7 @@ describe("ProvidersPage", () => {
     const post = await waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).endsWith("/v1/provider-credentials") &&
+          String(u).endsWith(`${API_ROOT}/provider-credentials`) &&
           (init?.method ?? "") === "POST",
       )
       expect(call).toBeDefined()
@@ -558,7 +559,7 @@ describe("ProvidersPage", () => {
 
     const detailCalls = () =>
       fetchMock.mock.calls.filter(([u]) =>
-        String(u).includes("/v1/providers/catalog/openai"),
+        String(u).includes(`${API_ROOT}/providers/catalog/openai`),
       )
 
     // Opening the picker lists providers (id + name) but must not import any
@@ -642,7 +643,7 @@ describe("ProvidersPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).endsWith("/v1/provider-credentials") &&
+        String(u).endsWith(`${API_ROOT}/provider-credentials`) &&
         (init?.method ?? "") === "POST",
     )
     expect(post).toBeDefined()
@@ -729,7 +730,7 @@ describe("ProvidersPage", () => {
   })
 
   it("keeps adding providers available when the operator-only settings read is refused", async () => {
-    // #839: the gate used to be inferred from `/v1/settings`, which is
+    // #839: the gate used to be inferred from /api/v1/settings, which is
     // operator-only, so a refusal reported a missing key on a deployment that
     // has one.
     mockApi({
@@ -1007,7 +1008,7 @@ describe("ProvidersPage", () => {
     const post = await waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).endsWith("/v1/provider-credentials") &&
+          String(u).endsWith(`${API_ROOT}/provider-credentials`) &&
           (init?.method ?? "") === "POST",
       )
       expect(call).toBeDefined()
@@ -1055,7 +1056,7 @@ describe("ProvidersPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).endsWith("/v1/provider-credentials") &&
+          String(u).endsWith(`${API_ROOT}/provider-credentials`) &&
           (init?.method ?? "") === "POST",
       ),
     ).toBe(false)

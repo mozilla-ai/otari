@@ -13,6 +13,7 @@ import { RoutingPage } from "@/features/routing/RoutingPage"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { API_ROOT } from "@/shared/api/client"
 
 const policy = (
   name: string,
@@ -91,9 +92,9 @@ function mockApi(
     // its list read off `deployment_operator`, and most tests here are about
     // the management view.
     context?: OrganizationContext
-    // What `/v1/organizations/me/routing-policies` answers, for member tests.
+    // What /api/v1/organizations/me/routing-policies answers, for member tests.
     memberPolicies?: RoutingPolicyResponse[]
-    // What `/v1/organizations/me/aliases` answers, its sibling.
+    // What /api/v1/organizations/me/aliases answers, its sibling.
     memberAliases?: {
       name: string
       target: string
@@ -119,7 +120,7 @@ function mockApi(
         init?.body === undefined ? undefined : JSON.parse(String(init.body))
       calls.push({ url, method, body })
 
-      if (url.includes("/v1/organizations/me/routing-policies")) {
+      if (url.includes(`${API_ROOT}/organizations/me/routing-policies`)) {
         if (method === "POST") {
           const row = policy(body.name, body.spec)
           memberList = [
@@ -137,7 +138,7 @@ function mockApi(
         }
         return jsonResponse(memberList)
       }
-      if (url.includes("/v1/organizations/me/aliases")) {
+      if (url.includes(`${API_ROOT}/organizations/me/aliases`)) {
         if (method === "POST") {
           const row = {
             name: body.name as string,
@@ -161,10 +162,10 @@ function mockApi(
         }
         return jsonResponse(memberAliasList)
       }
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())
       }
-      if (url.includes("/v1/routing/policies/explain")) {
+      if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
         return jsonResponse({
           name: "fast",
           selection_reason: "default",
@@ -188,7 +189,7 @@ function mockApi(
           guardrails: [],
         })
       }
-      if (url.includes("/v1/routing/status")) {
+      if (url.includes(`${API_ROOT}/routing/status`)) {
         return jsonResponse({
           user_id: "alice",
           embedding_model: "openai:text-embedding-3-small",
@@ -209,14 +210,14 @@ function mockApi(
           ],
         })
       }
-      if (url.includes("/v1/routing/preferences/rank")) {
+      if (url.includes(`${API_ROOT}/routing/preferences/rank`)) {
         return jsonResponse({
           recorded: (body as { examples: unknown[] }).examples.length,
           seed_count: 20,
           pools: [{ task_id: null, records: 7, warm: false }],
         })
       }
-      if (url.includes("/v1/routing/policies")) {
+      if (url.includes(`${API_ROOT}/routing/policies`)) {
         if (method === "POST") {
           // An upsert, like the real endpoint: appending would put two rows under
           // one name and scope, which is a state the API cannot produce. And
@@ -258,14 +259,14 @@ function mockApi(
         }
         return jsonResponse(list)
       }
-      if (url.includes("/v1/aliases")) {
+      if (url.includes(`${API_ROOT}/aliases`)) {
         if (method === "DELETE") {
           aliasList = []
           return new Response(null, { status: 204 })
         }
         return jsonResponse(aliasList)
       }
-      if (url.includes("/v1/tool-settings")) {
+      if (url.includes(`${API_ROOT}/tool-settings`)) {
         return jsonResponse({
           fields: [
             {
@@ -277,8 +278,8 @@ function mockApi(
           ],
         })
       }
-      if (url.includes("/v1/users")) return jsonResponse(USERS)
-      if (url.includes("/v1/models"))
+      if (url.includes(`${API_ROOT}/users`)) return jsonResponse(USERS)
+      if (url.includes(`${API_ROOT}/models`))
         return jsonResponse({ object: "list", data: [] })
       return jsonResponse([])
     })
@@ -511,7 +512,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const body = post!.body as {
       name: string
@@ -540,7 +541,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     expect((post!.body as { rename_from?: string }).rename_from).toBeUndefined()
   })
@@ -768,7 +769,7 @@ describe("RoutingPage", () => {
     expect(deletes).toHaveLength(1)
     // An alias still lives in model_aliases; deleting it as a policy would 404 and
     // leave the row in place.
-    expect(deletes[0].url).toContain("/v1/aliases/legacy")
+    expect(deletes[0].url).toContain(`${API_ROOT}/aliases/legacy`)
   })
 
   it("will not let an alias grow options an alias cannot hold", async () => {
@@ -855,7 +856,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[1]).toEqual({ default: "openai:gpt-5-nano" })
@@ -882,7 +883,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -967,7 +968,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1002,7 +1003,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1046,7 +1047,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0].weights).toEqual({
@@ -1086,7 +1087,7 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1482,10 +1483,10 @@ describe("RoutingPage", () => {
     await screen.findByText("fast")
 
     const urls = calls.map((call) => call.url)
-    expect(urls.some((url) => url.endsWith("/v1/routing/policies"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/aliases"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/tool-settings"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/users"))).toBe(false)
+    expect(urls.some((url) => url.endsWith(`${API_ROOT}/routing/policies`))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/aliases`))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/tool-settings`))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/users`))).toBe(false)
   })
 
   it("withholds the deep-linked add form from a member", async () => {
@@ -1565,7 +1566,7 @@ describe("RoutingPage for an organization admin", () => {
     const written = calls.find(
       (call) =>
         call.method === "POST" &&
-        call.url.includes("/v1/organizations/me/routing-policies"),
+        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
     )
     expect(written).toBeDefined()
     expect(written?.body).toMatchObject({
@@ -1576,7 +1577,7 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       calls.some(
         (call) =>
-          call.method === "POST" && call.url.endsWith("/v1/routing/policies"),
+          call.method === "POST" && call.url.endsWith(`${API_ROOT}/routing/policies`),
       ),
     ).toBe(false)
   })
@@ -1610,7 +1611,7 @@ describe("RoutingPage for an organization admin", () => {
     )
 
     const deleted = calls.find((call) => call.method === "DELETE")
-    expect(deleted?.url).toContain("/v1/organizations/me/routing-policies/")
+    expect(deleted?.url).toContain(`${API_ROOT}/organizations/me/routing-policies/`)
     expect(deleted?.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
   })
 
@@ -1635,7 +1636,7 @@ describe("RoutingPage for an organization admin", () => {
     const written = calls.find(
       (call) =>
         call.method === "POST" &&
-        call.url.includes("/v1/organizations/me/routing-policies"),
+        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
     )
     expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
   })
@@ -1687,7 +1688,7 @@ describe("RoutingPage for an organization admin", () => {
     const written = calls.find(
       (call) =>
         call.method === "POST" &&
-        call.url.includes("/v1/organizations/me/aliases"),
+        call.url.includes(`${API_ROOT}/organizations/me/aliases`),
     )
     expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
   })
@@ -1719,7 +1720,7 @@ describe("RoutingPage for an organization admin", () => {
     )
 
     const deleted = calls.find((call) => call.method === "DELETE")
-    expect(deleted?.url).toContain("/v1/organizations/me/aliases/")
+    expect(deleted?.url).toContain(`${API_ROOT}/organizations/me/aliases/`)
     expect(deleted?.url).toContain(`workspace_id=${OTHER_WORKSPACE}`)
   })
 

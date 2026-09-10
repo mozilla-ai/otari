@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationContext } from "@/client"
 import { OrganizationGeneralPage } from "@/features/organization/OrganizationGeneralPage"
 import { organizationContext } from "@/tests/fixtures"
+import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -108,7 +109,7 @@ describe("OrganizationGeneralPage", () => {
     await user.click(dialog.getByRole("button", { name: "Change name" }))
 
     const patch = requests.find((request) => request.method === "PATCH")
-    expect(patch?.url).toContain("/v1/organizations/me")
+    expect(patch?.url).toContain(`${API_ROOT}/organizations/me`)
     expect(patch?.body).toEqual({ name: "Platform" })
   })
 

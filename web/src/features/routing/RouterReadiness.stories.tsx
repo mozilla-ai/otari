@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { user } from "@/tests/fixtures"
 
 import { RouterReadiness } from "./RouterReadiness"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * How warm a learned routing policy is, for one user at a time.
@@ -58,8 +59,8 @@ const meta = {
   },
   parameters: {
     api: {
-      "/v1/users": USERS,
-      "/v1/routing/status": status(),
+      [`${API_ROOT}/users`]: USERS,
+      [`${API_ROOT}/routing/status`]: status(),
     },
     layout: "padded",
   },
@@ -86,8 +87,8 @@ export const Warm: Story = {
 export const Cold: Story = {
   parameters: {
     api: {
-      "/v1/users": USERS,
-      "/v1/routing/status": status({
+      [`${API_ROOT}/users`]: USERS,
+      [`${API_ROOT}/routing/status`]: status({
         seed_count: 0,
         default_pool: { records: 0, warm: false },
         tasks: [],

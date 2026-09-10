@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ApiError, apiFetch, createSession, deleteSession } from "./client"
+import { API_ROOT } from "@/shared/api/client"
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -38,7 +39,7 @@ describe("apiFetch", () => {
           }),
       )
 
-      const pending = apiFetch("/v1/models")
+      const pending = apiFetch(`${API_ROOT}/models`)
       const assertion = expect(pending).rejects.toMatchObject({
         status: 0,
         message: expect.stringContaining("did not respond within 30s"),
@@ -60,8 +61,8 @@ describe("apiFetch", () => {
       json: () => Promise.reject(new DOMException("timed out", "TimeoutError")),
     } as unknown as Response)
 
-    await expect(apiFetch("/v1/models")).rejects.toBeInstanceOf(ApiError)
-    await expect(apiFetch("/v1/models")).rejects.toMatchObject({
+    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toBeInstanceOf(ApiError)
+    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       status: 0,
       message: expect.stringContaining("did not respond within 30s"),
     })
@@ -75,7 +76,7 @@ describe("apiFetch", () => {
       return Promise.resolve(new Response("{}", { status: 200 }))
     })
 
-    await apiFetch("/v1/models", { signal: controller.signal })
+    await apiFetch(`${API_ROOT}/models`, { signal: controller.signal })
 
     expect(seen[0]).toBe(controller.signal)
   })
@@ -90,7 +91,7 @@ describe("apiFetch", () => {
     )
 
     await expect(
-      apiFetch("/v1/usage", { signal: controller.signal }),
+      apiFetch(`${API_ROOT}/usage`, { signal: controller.signal }),
     ).rejects.toMatchObject({
       status: 0,
       message: "The gateway did not respond in time.",
@@ -102,8 +103,8 @@ describe("apiFetch", () => {
       new TypeError("Failed to fetch"),
     )
 
-    await expect(apiFetch("/v1/models")).rejects.toBeInstanceOf(ApiError)
-    await expect(apiFetch("/v1/models")).rejects.toMatchObject({
+    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toBeInstanceOf(ApiError)
+    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       message: expect.stringContaining("could not reach the gateway"),
     })
   })

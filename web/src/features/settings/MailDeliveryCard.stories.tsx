@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import { MailDeliveryCard } from "./MailDeliveryCard"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * Mail transport status, and a send-a-test-message form.
@@ -25,7 +26,7 @@ type Story = StoryObj<typeof meta>
 export const Ready: Story = {
   parameters: {
     api: {
-      "/v1/settings/mail": {
+      [`${API_ROOT}/settings/mail`]: {
         enabled: true,
         ready: true,
         transport: "smtp",
@@ -46,7 +47,7 @@ export const Ready: Story = {
 export const MissingSettings: Story = {
   parameters: {
     api: {
-      "/v1/settings/mail": {
+      [`${API_ROOT}/settings/mail`]: {
         enabled: true,
         ready: false,
         transport: "smtp",
@@ -67,7 +68,7 @@ export const MissingSettings: Story = {
 export const NotConfigured: Story = {
   parameters: {
     api: {
-      "/v1/settings/mail": {
+      [`${API_ROOT}/settings/mail`]: {
         enabled: false,
         ready: false,
         transport: null,
@@ -87,7 +88,7 @@ export const NotConfigured: Story = {
 export const GatewayError: Story = {
   parameters: {
     api: {
-      "/v1/settings/mail": {
+      [`${API_ROOT}/settings/mail`]: {
         $status: 503,
         $body: { detail: "Settings store unavailable." },
       },

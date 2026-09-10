@@ -7,6 +7,7 @@ import {
 } from "@/tests/fixtures"
 
 import { SetupGuideCard } from "./SetupGuideCard"
+import { API_ROOT } from "@/shared/api/client"
 
 /**
  * The first-request guide: mint a setup key, copy two curl calls, watch for the
@@ -19,13 +20,13 @@ import { SetupGuideCard } from "./SetupGuideCard"
  *
  * It says whether a request from this caller could succeed, which is not the same
  * question as "a provider exists": an operator's Overview reads it off
- * `/v1/providers`, which refuses a tenant, and an organization's off the model
+ * /api/v1/providers, which refuses a tenant, and an organization's off the model
  * catalog, which lists the selectors that caller may name.
  *
- * It polls `/v1/workspaces/{id}/activation` for the payoff, so the states below are
+ * It polls /api/v1/workspaces/{id}/activation for the payoff, so the states below are
  * that endpoint's: waiting, succeeded, failed. The workspace comes from
  * `SelectedWorkspaceProvider`, which is why every story mocks
- * `/v1/organizations/me`.
+ * /api/v1/organizations/me.
  */
 const WORKSPACE_ID = "44444444-4444-4444-4444-444444444444"
 
@@ -35,13 +36,13 @@ const CONTEXT = organizationContext({
   ],
 })
 
-const activationPath = `/v1/workspaces/${WORKSPACE_ID}/activation`
+const activationPath = `${API_ROOT}/workspaces/${WORKSPACE_ID}/activation`
 
 function api(activation: ReturnType<typeof workspaceActivation>) {
   return {
-    "/v1/organizations/me": CONTEXT,
+    [`${API_ROOT}/organizations/me`]: CONTEXT,
     [activationPath]: activation,
-    "/v1/models": { models: [], total: 0 },
+    [`${API_ROOT}/models`]: { models: [], total: 0 },
   }
 }
 

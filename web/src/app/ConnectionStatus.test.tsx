@@ -8,13 +8,14 @@ import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { apiFetch } from "@/shared/api/client"
+import { API_ROOT } from "@/shared/api/client"
 
 // Drives one management request so the query cache carries a real success/error,
 // exactly what ConnectionStatus watches.
 function Probe() {
   useQuery({
     queryKey: ["probe"],
-    queryFn: () => apiFetch("/v1/settings"),
+    queryFn: () => apiFetch(`${API_ROOT}/settings`),
     retry: false,
   })
   return null

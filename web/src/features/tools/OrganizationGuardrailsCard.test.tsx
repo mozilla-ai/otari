@@ -6,6 +6,7 @@ import type { OrganizationGuardrail } from "@/client"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { organizationContext, organizationGuardrail } from "@/tests/fixtures"
 import { selectTrigger } from "@/tests/select"
+import { API_ROOT } from "@/shared/api/client"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const BETA = "22222222-2222-2222-2222-222222222222"
@@ -33,7 +34,7 @@ function mockApi({
       }
       return Response.json(guardrails[0] ?? organizationGuardrail())
     }
-    if (url.includes("/v1/workspaces")) {
+    if (url.includes(`${API_ROOT}/workspaces`)) {
       return Response.json({
         data: [
           { id: ALPHA, name: "Alpha" },

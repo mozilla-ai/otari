@@ -47,7 +47,7 @@ describe("RecoverPasswordPage", () => {
       await screen.findByText(/If that address has a password on this gateway/),
     ).toBeInTheDocument()
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
-      "/v1/auth/password/reset",
+      "/auth/password/reset",
     )
   })
 

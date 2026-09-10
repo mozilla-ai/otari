@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationContext, OrgProviderKey } from "@/client"
 import { OrganizationProviderKeysPage } from "@/features/organization/OrganizationProviderKeysPage"
 import { organizationContext, orgProviderKey } from "@/tests/fixtures"
+import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -47,14 +48,14 @@ function mockApi(opts: MockOpts = {}) {
       // through the invalidated list, so one row is enough for all of them.
       return jsonResponse(keys[0] ?? orgProviderKey())
     }
-    // What the deployment actually answers this page's audience: `/v1/settings`
+    // What the deployment actually answers this page's audience: /api/v1/settings
     // is operator-only and an organization owner is not one. Mocked as the
     // refusal rather than as a body, so a page that went back to reading it
     // would fail here rather than pass on a fixture no tenant ever receives.
-    if (url.includes("/v1/settings")) {
+    if (url.includes(`${API_ROOT}/settings`)) {
       return jsonResponse({ detail: "Not authorized" }, 403)
     }
-    if (url.includes("/v1/providers/catalog")) {
+    if (url.includes(`${API_ROOT}/providers/catalog`)) {
       return jsonResponse(
         opts.catalog ?? [{ id: "anthropic", name: "Anthropic" }],
       )
@@ -101,7 +102,7 @@ describe("OrganizationProviderKeysPage", () => {
   })
 
   it("reads the organization's own keys, not the deployment's credentials", async () => {
-    // The whole reason this page exists: `/v1/provider-credentials` is keyed on
+    // The whole reason this page exists: /api/v1/provider-credentials is keyed on
     // an instance name and belongs to the process, so a page that read it would
     // be showing every tenant the same rows.
     const requests = mockApi({ keys: [orgProviderKey()] })
@@ -110,12 +111,12 @@ describe("OrganizationProviderKeysPage", () => {
     await screen.findByText("Production")
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/organizations/me/provider-keys"),
+        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
       ),
     ).toBe(true)
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/provider-credentials"),
+        request.url.includes(`${API_ROOT}/provider-credentials`),
       ),
     ).toBe(false)
   })
@@ -141,14 +142,14 @@ describe("OrganizationProviderKeysPage", () => {
         requests.some(
           (request) =>
             request.method === "POST" &&
-            request.url.endsWith("/v1/organizations/me/provider-keys"),
+            request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
         ),
       ).toBe(true)
     })
     const post = requests.find(
       (request) =>
         request.method === "POST" &&
-        request.url.endsWith("/v1/organizations/me/provider-keys"),
+        request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
     )
     expect(post?.body).toMatchObject({
       provider: "anthropic",
@@ -499,7 +500,7 @@ describe("OrganizationProviderKeysPage", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/organizations/me/provider-keys"),
+        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
       ),
     ).toBe(false)
   })
@@ -522,7 +523,7 @@ describe("OrganizationProviderKeysPage", () => {
 
   it("keeps adding available for an owner the operator-only settings read refuses", async () => {
     // The bug this page shipped with (#839): the flag was inferred from
-    // `/v1/settings`, which 403s for every organization owner, so the banner
+    // /api/v1/settings, which 403s for every organization owner, so the banner
     // reported a missing key on a deployment where the write path works.
     const requests = mockApi()
     renderPage(<OrganizationProviderKeysPage />)
@@ -532,7 +533,7 @@ describe("OrganizationProviderKeysPage", () => {
     ).toBeEnabled()
     expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
     expect(
-      requests.some((request) => request.url.includes("/v1/settings")),
+      requests.some((request) => request.url.includes(`${API_ROOT}/settings`)),
     ).toBe(false)
   })
 

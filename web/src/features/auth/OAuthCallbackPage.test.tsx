@@ -9,6 +9,7 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+import { API_ROOT } from "@/shared/api/client"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
@@ -87,7 +88,7 @@ describe("OAuthCallbackPage", () => {
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe("/v1/auth/oauth/google/callback")
+    expect(url).toBe(`${API_ROOT}/auth/oauth/google/callback`)
     // The code and the state, and no redirect URI: that one is the gateway's
     // own. The state goes back so the gateway can check it against the pending
     // authorization it recorded, which is the half this tab cannot do.

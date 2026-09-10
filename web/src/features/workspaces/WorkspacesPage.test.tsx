@@ -21,6 +21,7 @@ import {
   workspaceBudgetDefault,
   workspaceMember,
 } from "@/tests/fixtures"
+import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -66,7 +67,7 @@ function mockApi(
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
-    if (url.includes("/members") && url.includes("/v1/workspaces/")) {
+    if (url.includes("/members") && url.includes(`${API_ROOT}/workspaces/`)) {
       if (method === "GET") {
         return jsonResponse({ data: members, count: members.length })
       }
@@ -74,18 +75,18 @@ function mockApi(
     }
     if (url.includes("provider-keys")) {
       if (url.includes("/models")) return jsonResponse({ models: [] })
-      if (url.includes("/v1/workspaces/")) return jsonResponse({ data: [] })
+      if (url.includes(`${API_ROOT}/workspaces/`)) return jsonResponse({ data: [] })
       return jsonResponse({ data: [], count: 0 })
     }
     if (url.includes("member-budget-policies")) {
-      const id = url.split("/v1/workspaces/")[1]?.split("/")[0] ?? ""
+      const id = url.split(`${API_ROOT}/workspaces/`)[1]?.split("/")[0] ?? ""
       const rows = budgetDefaults[id] ?? []
       return jsonResponse({ data: rows, count: rows.length })
     }
-    if (url.includes("/v1/budgets")) {
+    if (url.includes(`${API_ROOT}/budgets`)) {
       return jsonResponse(budgets)
     }
-    if (url.includes("/v1/workspaces")) {
+    if (url.includes(`${API_ROOT}/workspaces`)) {
       if (method === "GET") {
         return jsonResponse({ data: list, count: list.length })
       }
@@ -98,7 +99,7 @@ function mockApi(
       }
       return jsonResponse(workspace({ name: "Created" }))
     }
-    if (url.includes("/v1/organizations/me/members")) {
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       return jsonResponse({ data: orgMembers, count: orgMembers.length })
     }
     return jsonResponse(context)
@@ -151,7 +152,7 @@ describe("WorkspacesPage", () => {
     await user.click(screen.getByRole("button", { name: "Create workspace" }))
 
     const post = requests.find((request) => request.method === "POST")
-    expect(post?.url).toContain("/v1/workspaces")
+    expect(post?.url).toContain(`${API_ROOT}/workspaces`)
     expect(post?.body).toEqual({
       name: "Research",
       description: "Experiments",
@@ -248,7 +249,7 @@ describe("WorkspacesPage", () => {
 
     const remove = requests.find((request) => request.method === "DELETE")
     expect(remove?.url).toContain(
-      "/v1/workspaces/44444444-4444-4444-4444-444444444444",
+      `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444`,
     )
   })
 
@@ -296,7 +297,7 @@ describe("WorkspacesPage", () => {
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toContain(
-      "/v1/workspaces/44444444-4444-4444-4444-444444444444",
+      `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444`,
     )
     expect(patch?.body).toEqual({ name: "Renamed", description: null })
   })
@@ -347,7 +348,7 @@ describe("WorkspacesPage", () => {
     await screen.findByText("Bravo")
     expect(screen.queryByText("Default member budget")).toBeNull()
     expect(
-      requests.some((request) => request.url.includes("/v1/budgets")),
+      requests.some((request) => request.url.includes(`${API_ROOT}/budgets`)),
     ).toBe(false)
     expect(
       requests.some((request) =>
@@ -376,7 +377,7 @@ describe("WorkspacesPage", () => {
     const post = requests.find((request) => request.method === "POST")
     expect(post?.body).toEqual({ name: "Research", description: null })
     expect(
-      requests.some((request) => request.url.includes("/v1/budgets")),
+      requests.some((request) => request.url.includes(`${API_ROOT}/budgets`)),
     ).toBe(false)
   })
 
@@ -471,8 +472,8 @@ describe("WorkspacesPage", () => {
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.body).toEqual({ name: "Renamed", description: null })
     const operatorOnly = [
-      "/v1/budgets",
-      "/v1/providers",
+      `${API_ROOT}/budgets`,
+      `${API_ROOT}/providers`,
       "member-budget-policies",
     ]
     expect(
@@ -499,13 +500,13 @@ describe("WorkspacesPage", () => {
     expect(
       requests.some((request) =>
         request.url.includes(
-          "/v1/workspaces/44444444-4444-4444-4444-444444444444/provider-keys",
+          `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444/provider-keys`,
         ),
       ),
     ).toBe(true)
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/organizations/me/provider-keys"),
+        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
       ),
     ).toBe(true)
   })

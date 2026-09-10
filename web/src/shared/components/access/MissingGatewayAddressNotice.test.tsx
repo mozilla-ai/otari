@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
+import { API_ROOT } from "@/shared/api/client"
 
 describe("MissingGatewayAddressNotice", () => {
   it("says why there is no snippet and what to ask for instead", () => {
@@ -12,7 +13,7 @@ describe("MissingGatewayAddressNotice", () => {
     expect(
       screen.getByText(/has not published the gateway address/),
     ).toBeInTheDocument()
-    expect(screen.getByText("/v1/chat/completions")).toBeInTheDocument()
+    expect(screen.getByText(`${API_ROOT}/chat/completions`)).toBeInTheDocument()
     expect(screen.getByText("Otari-Key")).toBeInTheDocument()
   })
 })

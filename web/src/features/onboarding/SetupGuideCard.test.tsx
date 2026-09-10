@@ -17,6 +17,7 @@ import {
   workspaceActivation,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { API_ROOT } from "@/shared/api/client"
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
@@ -68,7 +69,7 @@ function mockApi({
         const next = queue.length > 1 ? queue.shift() : queue[0]
         return Response.json(next)
       }
-      if (url.includes("/v1/models")) {
+      if (url.includes(`${API_ROOT}/models`)) {
         return Response.json({
           object: "list",
           data: models.map((id) => ({
