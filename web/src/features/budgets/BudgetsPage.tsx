@@ -1053,9 +1053,22 @@ function CreateBudgetDialog({
   // Create the budget, then (optionally) attach it to the chosen users. The
   // per-user PATCH sets each user's reset clock. Failed assignments stay in the
   // form so a retry never creates a duplicate budget.
-  const createAndAssign = (body: CreateBudgetRequest, userIds: string[]) => {
+  const createAndAssign = async (
+    body: CreateBudgetRequest,
+    userIds: string[],
+  ) => {
     if (pendingAssignments) {
-      void assignUsers(pendingAssignments.budgetId, pendingAssignments.userIds)
+      // Awaited, because the retry's success is what closes the form. Left
+      // open, the label reverts to "Create budget" the moment the assignments
+      // land and the next press creates a second budget.
+      if (
+        await assignUsers(
+          pendingAssignments.budgetId,
+          pendingAssignments.userIds,
+        )
+      ) {
+        onClose()
+      }
       return
     }
 

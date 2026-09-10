@@ -466,6 +466,50 @@ describe("BudgetsPage", () => {
     expect(budgetPosts).toHaveLength(1)
   })
 
+  it("closes the form when a retried assignment finally succeeds", async () => {
+    // The retry's answer is what decides whether the form is done, so it has to
+    // be awaited. Left open, `pendingAssignments` clears the moment the
+    // assignments land, the label reverts to "Create budget", and the next
+    // press creates a second budget for the same people.
+    let patches = 0
+    const fetchMock = mockApi({
+      budgets: [],
+      users: [testUser("alice")],
+      updateUser: () => {
+        patches += 1
+        return patches === 1
+          ? jsonResponse({ detail: "User update failed" }, 500)
+          : jsonResponse(testUser("alice"))
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create your first budget" }),
+    )
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
+    await user.click(await screen.findByRole("option", { name: /alice/ }))
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+
+    expect(
+      await screen.findByText(/these people were not updated: alice/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Retry assignments" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    const budgetPosts = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(budgetPosts).toHaveLength(1)
+  })
+
   it("prevents closing the form while initial user assignments are pending", async () => {
     let resolveUserUpdate: ((response: Response) => void) | undefined
     const userUpdate = new Promise<Response>((resolve) => {
