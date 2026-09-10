@@ -184,6 +184,7 @@ export function ProviderComboBox({
   extra = [],
   includeCatalog = true,
   excludeIds,
+  autoFocus,
 }: {
   label: string
   value: string
@@ -199,6 +200,9 @@ export function ProviderComboBox({
   // depends on what the form collects, not on the catalog. See
   // `BYO_UNSUPPORTED_PROVIDERS`.
   excludeIds?: readonly string[]
+  // Takes focus on mount, for the instance that is a form's first field. It
+  // also selects the trigger: see `menuTrigger` below.
+  autoFocus?: boolean
 }) {
   const catalog = useProviderCatalog()
   const options = useMemo(() => {
@@ -235,10 +239,13 @@ export function ProviderComboBox({
   return (
     <ComboBox.Root
       allowsEmptyCollection
-      // Open the full list on focus/click and filter as you type: this is a
-      // pick-from-a-list control, not a free-text field, and it is not
-      // autofocused, so the list does not spring open when the form appears.
-      menuTrigger="focus"
+      // Opening on focus makes this read as a pick-from-a-list control rather
+      // than a free-text field, but an autofocused instance opens its list on
+      // mount: measured in jsdom, `autoFocus` leaves the input
+      // `aria-expanded="true"` with a listbox rendered, which puts the catalog
+      // over the form before anything has been asked. So that instance opens on
+      // typing instead, and its chevron still shows the whole catalog.
+      menuTrigger={autoFocus ? "input" : "focus"}
       inputValue={text}
       onInputChange={setText}
       onSelectionChange={(key) => {
@@ -261,6 +268,7 @@ export function ProviderComboBox({
             appending to it (otherwise "OpenAI-compatible" + typing filters to nothing). */}
         <Input
           placeholder={placeholder ?? "Search providers…"}
+          autoFocus={autoFocus}
           autoComplete="off"
           data-1p-ignore
           data-lpignore="true"

@@ -57,28 +57,39 @@ import {
   parseClientArgs,
 } from "./providerFields"
 
-// A "Test connection" button + inline result, testing the form's credentials
-// before they are saved. `getPayload` returns null when the minimum fields for a
-// test are not filled in yet, which disables the button.
-function ConnectionTest({
+// Testing the form's credentials before they are saved, in two nodes because
+// they belong in two places: the button sits in the footer beside the submit,
+// its outcome at the end of the body. The unverified case below is four lines
+// plus the provider's own reply, and a footer that grows shoves the form up
+// under the operator's hands; in the body it scrolls with everything else.
+type ConnectionTestState = ReturnType<typeof useTestProviderCredentials>
+
+// `getPayload` returns null when the minimum fields for a test are not filled
+// in yet, which disables the button.
+function ConnectionTestButton({
+  test,
   getPayload,
 }: {
+  test: ConnectionTestState
   getPayload: () => CreateStoredProviderRequest | null
 }) {
-  const test = useTestProviderCredentials()
   const payload = getPayload()
+  return (
+    <Button
+      variant="ghost"
+      isDisabled={payload === null || test.isPending}
+      onPress={() => {
+        if (payload) test.mutate(payload)
+      }}
+    >
+      {test.isPending ? "Testing…" : "Test connection"}
+    </Button>
+  )
+}
 
+function ConnectionTestResult({ test }: { test: ConnectionTestState }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Button
-        variant="ghost"
-        isDisabled={payload === null || test.isPending}
-        onPress={() => {
-          if (payload) test.mutate(payload)
-        }}
-      >
-        {test.isPending ? "Testing…" : "Test connection"}
-      </Button>
       {/* aria-live so the connection outcome is announced to assistive tech. */}
       <span role="status" aria-live="polite">
         {test.isPending ? null : test.error ? (
@@ -130,6 +141,7 @@ function KnownProviderForm({
   tabs: ReactNode
 }) {
   const create = useCreateStoredProvider()
+  const test = useTestProviderCredentials()
   const [providerId, setProviderId] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -168,8 +180,7 @@ function KnownProviderForm({
     !nameHasDelimiter &&
     (!needsKey || apiKey.trim() !== "") &&
     clientArgs.ok &&
-    Object.keys(credentialErrors).length === 0 &&
-    !create.isPending
+    Object.keys(credentialErrors).length === 0
   // Hold the section open while something inside it is what's blocking submit,
   // so collapsing it can't leave a disabled button with its reason off screen.
   // A hide requested meanwhile is remembered and applies once the field is fixed.
@@ -195,7 +206,9 @@ function KnownProviderForm({
 
   const submit = () => {
     const payload = buildPayload()
-    if (!canSubmit || payload === null) return
+    // `create.isPending` is a reason not to send twice, not a reason to draw
+    // the primary as refused, so it guards the call rather than `canSubmit`.
+    if (!canSubmit || create.isPending || payload === null) return
     create.mutate(payload, { onSuccess: onClose })
   }
 
@@ -214,9 +227,13 @@ function KnownProviderForm({
       isSubmitDisabled={!canSubmit}
       isDirty={providerId !== "" || apiKey.trim() !== ""}
       error={create.error}
-      footerStart={<ConnectionTest getPayload={buildPayload} />}
+      footerStart={
+        <ConnectionTestButton test={test} getPayload={buildPayload} />
+      }
     >
       <ProviderComboBox
+        // The known tab is the dialog's default, so this is its first field.
+        autoFocus
         label="Provider"
         value={providerId}
         onChange={(id) => {
@@ -305,6 +322,7 @@ function KnownProviderForm({
           />
         </div>
       ) : null}
+      <ConnectionTestResult test={test} />
     </FormDialog>
   )
 }
@@ -321,6 +339,7 @@ function CustomProviderForm({
   tabs: ReactNode
 }) {
   const create = useCreateStoredProvider()
+  const test = useTestProviderCredentials()
   const [name, setName] = useState("")
   const [providerType, setProviderType] = useState("openai-compatible")
   const [apiBase, setApiBase] = useState("")
@@ -333,11 +352,10 @@ function CustomProviderForm({
     name.trim() !== "" &&
     !nameHasDelimiter &&
     apiBase.trim() !== "" &&
-    clientArgs.ok &&
-    !create.isPending
+    clientArgs.ok
 
   const submit = () => {
-    if (!canSubmit || !clientArgs.ok) return
+    if (!canSubmit || create.isPending || !clientArgs.ok) return
     create.mutate(
       {
         instance: name.trim(),
@@ -363,10 +381,13 @@ function CustomProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={name.trim() !== "" || apiBase.trim() !== ""}
+      isDirty={
+        name.trim() !== "" || apiBase.trim() !== "" || apiKey.trim() !== ""
+      }
       error={create.error}
       footerStart={
-        <ConnectionTest
+        <ConnectionTestButton
+          test={test}
           getPayload={() =>
             name.trim() === "" || apiBase.trim() === "" || !clientArgs.ok
               ? null
@@ -430,6 +451,7 @@ function CustomProviderForm({
         onChange={setClientArgsText}
         error={clientArgs.ok ? null : clientArgs.error}
       />
+      <ConnectionTestResult test={test} />
     </FormDialog>
   )
 }
@@ -953,9 +975,21 @@ export function ProvidersPage() {
   const updateSettings = useUpdateSettings()
 
   const [addOpen, setAddOpen] = useState(false)
+  const [addOpenCount, setAddOpenCount] = useState(0)
   const [editing, setEditing] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string>()
   const [tests, setTests] = useState<Record<string, TestState>>({})
+  // `addOpenCount` above is bumped on each open, and the add form is keyed on
+  // it, so the draft (a pasted provider key included) is fresh every time and
+  // untouched through the exit: the dialog keeps its content while it animates
+  // out, so clearing on the way out would blank the body in front of the
+  // operator. See feedback.md, "A draft is fresh on every open and untouched
+  // through the exit". Both openers on this page go through here.
+  const openAdd = () => {
+    setEditing(null)
+    setAddOpenCount((n) => n + 1)
+    setAddOpen(true)
+  }
 
   const rows = buildRows(meta.data?.providers, stored.data)
   const healthByInstance = new Map(
@@ -971,7 +1005,10 @@ export function ProvidersPage() {
   // membership context reports and `/settings` no longer answers for every
   // caller who reaches this page (#839).
   const secretKeyConfigured = useProviderKeyEncryption()
-  const showOnboarding = !loading && rows.length === 0 && !addOpen
+  // Not gated on `addOpen`: unmounting the first-run panel when the dialog
+  // opens takes away the node react-aria restores focus to, so closing drops
+  // focus to `<body>`. The heading's action is ungated for the same reason.
+  const showOnboarding = !loading && rows.length === 0
 
   // Which test run each row is currently showing. A row's result is only worth
   // recording while it is still the answer to the newest thing the operator asked
@@ -1153,11 +1190,6 @@ export function ProvidersPage() {
       <PageIntro
         title="Providers"
         action={
-          /* The first-run strip supplies its own focused call to action, and the
-             form has its own Close, so the header action is redundant while
-             either is open. Disabled rather than hidden when the server has no
-             secret key: an operator who cannot add a provider still needs to see
-             that adding one is the thing they are being denied. */
           <Button
             // Visible while the dialog is open and beside the first-run
             // panel's own copy of it: the dialog is over the page. Disabled
@@ -1165,10 +1197,7 @@ export function ProvidersPage() {
             // rule for a control that carries its own reason nearby.
             variant="primary"
             isDisabled={!secretKeyConfigured}
-            onPress={() => {
-              setEditing(null)
-              setAddOpen(true)
-            }}
+            onPress={openAdd}
           >
             Add provider
           </Button>
@@ -1231,10 +1260,7 @@ export function ProvidersPage() {
 
       {showOnboarding ? (
         <OnboardingPanel
-          onAddProvider={() => {
-            setEditing(null)
-            setAddOpen(true)
-          }}
+          onAddProvider={openAdd}
           needsPricing={needsPricing}
           onEnablePricing={() =>
             updateSettings.mutate({ default_pricing: true })
@@ -1252,6 +1278,7 @@ export function ProvidersPage() {
           out to be unavailable, retract it so its submit can never reach the create
           mutation. The banner above explains why. */}
       <AddProviderForm
+        key={addOpenCount}
         isOpen={addOpen && secretKeyConfigured}
         onClose={() => setAddOpen(false)}
       />
