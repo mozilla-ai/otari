@@ -186,6 +186,11 @@ it has to read as denied, and a submit in flight is working rather than refused,
 so it keeps its fill and blocks its own press. Cancel and the close control *are*
 disabled, because they genuinely are refused until it lands.
 
+**An empty state or first-run panel whose action opens the dialog stays mounted
+while the dialog is open; it is the node focus returns to.** Hiding it while the
+form is up was right when the form was a band on the page and takes away the
+only thing focus can go back to now that it is a dialog over one.
+
 **A page whose empty state disappears after the first create passes
 `returnFocusRef` to the control that survives.** React Aria restores focus to
 whatever opened the dialog, and that node is gone when creating the first row is
