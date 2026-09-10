@@ -480,11 +480,27 @@ function CreateKeyDialog({
   const workspaceUnresolved = workspaceLoading
   const blocked = !scopeValid || ownerMissing || workspaceUnresolved
 
+  // What the form owns, in one place, because `resetForm` and `isDirty` are the
+  // same list read two ways and they drifted: reopening kept the previous owner
+  // and budget exemption, and the guard armed for three fields out of seven.
+  // `showAdvanced` is not in either: it reveals fields rather than holding a
+  // value, and a disclosure left open is not unsaved work.
+  const isPristine =
+    keyName === "" &&
+    expiresAt === "" &&
+    userId === "" &&
+    allowedModels === null &&
+    excludeFromBudget === false &&
+    rejectUserMismatch === null &&
+    scopeValid
+
   const resetForm = () => {
     setKeyName("")
     setExpiresAt("")
     setShowAdvanced(false)
+    setUserId("")
     setAllowedModels(null)
+    setExcludeFromBudget(false)
     setRejectUserMismatch(null)
     setScopeValid(true)
     create.reset()
@@ -586,9 +602,7 @@ function CreateKeyDialog({
       isPending={create.isPending}
       isSubmitDisabled={blocked}
       error={create.error}
-      isDirty={
-        keyName.trim() !== "" || expiresAt !== "" || userId.trim() !== ""
-      }
+      isDirty={!isPristine}
     >
       <Field
         label="Name"

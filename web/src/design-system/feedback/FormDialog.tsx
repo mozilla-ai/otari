@@ -156,7 +156,7 @@ export function FormDialog({
           // because the gap is symmetric by design and the height cap the body
           // scrolls at is the viewport minus both. Below `sm` the container is
           // the sheet's own frame and takes no padding.
-          className="p-0 sm:px-4 sm:pt-[7.5rem] sm:pb-[7.5rem]"
+          className="otari-form-dialog__container p-0 sm:px-4 sm:pt-[7.5rem] sm:pb-[7.5rem]"
         >
           {/* No edge spelled here: globals.css gives every floating surface one
               opaque control-border hairline, unlayered, and argues that tier by

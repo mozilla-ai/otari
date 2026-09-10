@@ -2189,16 +2189,25 @@ main {
   max-width: none;
 }
 
-/* Below 640px every size is a full-screen sheet: a centered box with a phone's
- * margins around it wastes the only axis a form needs, and the keyboard takes
- * half of what is left.
+/* A full-screen sheet below 640px in EITHER dimension. The 120px gap above and
+ * below is a desktop luxury, and a viewport that cannot afford it in either axis
+ * gets the sheet rather than a third layout: at a landscape phone (844x390 is
+ * the common one) the width query alone left the dialog a 150px height budget,
+ * of which the header and footer are about 137px.
+ *
+ * The container's own `sm:` paddings still apply at that width, so they are
+ * overridden here too; without that the sheet would sit inside a 240px vertical
+ * inset and none of this would help.
  *
  * The footer's bottom padding is a plain 1rem and not a safe-area inset:
  * `env(safe-area-inset-bottom)` is 0 without `viewport-fit=cover`, which
  * `index.html` leaves off deliberately (the shell has no insets to sit out of
  * the way), so adding it would read as clearing the home indicator while
  * changing nothing. */
-@media (max-width: 639px) {
+@media (width <= 639px), (height <= 639px) {
+  .otari-form-dialog__container {
+    padding: 0;
+  }
   .otari-form-dialog {
     width: 100%;
     max-width: none;

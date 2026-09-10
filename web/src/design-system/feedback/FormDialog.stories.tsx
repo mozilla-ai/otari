@@ -277,6 +277,27 @@ function ManyFields() {
  * the preview frame, so a wrapper `<div>` would not produce it. The dialog
  * portals to the frame's `<body>` and never sees a wrapper at all.
  */
+/**
+ * The same sheet, landscape. `isRotated` puts the phone at 844x390, which is
+ * wider than 640 and shorter than it: the sheet keys on either dimension, so a
+ * viewport that cannot afford the 120px gap vertically gets the sheet rather
+ * than a third layout. Without that this was a 150px dialog with 137px of
+ * header and footer in it.
+ */
+export const PhoneSheetLandscape: Story = {
+  globals: { viewport: { value: "mobile2", isRotated: true } },
+  args: {
+    footerStart: (
+      <p className="text-caption">In effect for new requests within 30s.</p>
+    ),
+  },
+  render: (args) => (
+    <FormDialog {...args}>
+      <KeyFields />
+    </FormDialog>
+  ),
+}
+
 export const PhoneSheet: Story = {
   globals: { viewport: { value: "mobile2", isRotated: false } },
   // With a `footerStart` caption, which is the case that does not fit a row:

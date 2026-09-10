@@ -645,6 +645,57 @@ describe("KeysPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
+  it("clears the owner and the budget exemption when it reopens", async () => {
+    // `resetForm` left both behind, so the next key silently inherited the
+    // previous owner and its exemption. The owner surviving also made a
+    // reopened dialog dirty on arrival, which armed the guard on a form nobody
+    // had touched.
+    mockApi({ keys: [], users: [user({ user_id: "alice", alias: "Alice" })] })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await usr.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await usr.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    // Focus off the picker before reaching for anything else: its popover is
+    // open and react-aria aria-hides the rest of the dialog while it is.
+    await usr.click(screen.getByLabelText("Name"))
+    await usr.click(screen.getByRole("button", { name: "Advanced" }))
+    await usr.click(screen.getByLabelText("Exempt from budget"))
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await usr.keyboard("{Escape}")
+    await usr.click(screen.getByRole("button", { name: "Discard" }))
+
+    await usr.click(screen.getByRole("button", { name: "Create key" }))
+    expect(screen.getByPlaceholderText(/Pick a user/)).toHaveValue("")
+    await usr.click(screen.getByRole("button", { name: "Advanced" }))
+    expect(screen.getByLabelText("Exempt from budget")).not.toBeChecked()
+    // And nothing is unsaved on arrival, so Escape closes rather than guarding.
+    await usr.keyboard("{Escape}")
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("guards a field the old dirty check did not know about", async () => {
+    // The check read three of the seven values the form owns, so a backdrop
+    // press or Escape discarded the rest without asking.
+    mockApi({ keys: [] })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await usr.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await usr.click(screen.getByRole("button", { name: "Advanced" }))
+    await usr.click(screen.getByLabelText("Exempt from budget"))
+
+    await usr.keyboard("{Escape}")
+    expect(screen.getByRole("dialog")).toHaveTextContent("Unsaved changes")
+  })
+
   it("does not walk /v1/users until the create dialog is opened", async () => {
     // The dialog stays mounted while closed so it can animate out, which left
     // its owner picker's roster fetching on every visit to the page.
