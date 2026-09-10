@@ -11,6 +11,7 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
+import { Select } from "@/design-system/forms/Select"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -80,7 +81,7 @@ function DefaultBudgetPicker({
   onChange: (budgetId: string) => void
 }) {
   return (
-    <FilterSelect
+    <Select
       label="Default member budget"
       value={value}
       onChange={onChange}
