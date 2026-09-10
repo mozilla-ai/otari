@@ -6,13 +6,13 @@
 // what the screenshot suite would give if it were a gate (it is
 // workflow-dispatch only, with gitignored baselines).
 //
-//   pnpm --dir web run storybook                      # dev server on :6006
+//   STORYBOOK_HARNESS=1 pnpm --dir web run storybook   # dev server on :6006
 //   pnpm --dir web exec node .storybook/__tableGeometry.mjs > before.json
 //   ...edit src/styles/globals.css...
 //   pnpm --dir web exec node .storybook/__tableGeometry.mjs > after.json
 //   diff <(jq -S . before.json) <(jq -S . after.json)
 //
-// It reads `_TableGeometry.stories.tsx`, which renders `DataTable` inside every
+// It reads `harness/TableGeometry.stories.tsx`, which renders `DataTable` inside every
 // wrapper class the stylesheet targets plus one with no wrapper at all. The
 // contexts and their column ids are derived from globals.css rather than
 // transcribed from the feature files, so it measures what the CSS reaches.

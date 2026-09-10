@@ -66,6 +66,14 @@ Three traps it was written around, all worth keeping:
 - `main.ts`: story glob, the `viteFinal` that strips the TanStack Router plugins
   so a Storybook run can never rewrite `src/routeTree.gen.ts`, and the
   `STORYBOOK_BASE_PATH` seam.
+- `harness/`: measuring harnesses, which are **not** catalog entries. Each
+  renders a component in every context some stylesheet rule targets so a script
+  can read the computed geometry before and after a change. They are outside
+  `../src/**` on purpose, because that is the only reliable way to keep them out
+  of the published catalog: **Storybook ignores a `!` pattern in the `stories`
+  array**, so an earlier attempt to exclude one that way published it to the live
+  site. Opt in with `STORYBOOK_HARNESS=1`.
+  `__tableGeometry.mjs` is the reader for the one that exists.
 - `preview.tsx`: imports `globals.css` (the whole design system) and composes
   the decorators. Note the order: innermost first.
 - `theme.tsx`: the light/dark toolbar, writing the same three properties on

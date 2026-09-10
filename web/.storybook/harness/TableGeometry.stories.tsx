@@ -1,13 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
-import { TableScrollFrame } from "../layout/TableScrollFrame"
-import { DataTable, type DataTableColumn } from "./DataTable"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 
 /**
  * A measurement harness, not a catalog entry.
  *
- * The `_` prefix is what keeps it out of the published catalog: `main.ts`'s
- * story glob excludes `_*.stories.tsx`. Its reader is
+ * It lives here rather than under `src/` because that is what keeps it out of
+ * the published catalog: `main.ts`'s default glob covers `../src/**` only, and
+ * this directory is added to it just for `STORYBOOK_HARNESS=1`. An earlier
+ * version sat in `src/` and tried to exclude itself with a `!` pattern, which
+ * Storybook ignores, so it published. Its reader is
  * `.storybook/__tableGeometry.mjs`, which renders this one story and reports the
  * computed geometry of every lane; run it before and after a change to table
  * CSS and diff the two, which is the check the screenshot suite would give if it

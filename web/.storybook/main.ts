@@ -43,14 +43,24 @@ function withoutTanstackPlugins(plugins: PluginOption[]): PluginOption[] {
 }
 
 const config: StorybookConfig = {
-  // A `_`-prefixed story file is a measuring harness rather than a catalog
-  // entry: it renders a component in every context some stylesheet rule
-  // targets, so a script can read the computed geometry before and after a
-  // change. Excluded here so it does not publish, which also keeps it out of
-  // the smoke run; see `__tableGeometry.mjs` for the one that exists.
+  // The catalog, plus the measuring harness when it is asked for.
+  //
+  // A harness renders a component in every context some stylesheet rule targets
+  // so a script can read the computed geometry before and after a change. It is
+  // not a catalog entry, and it used to try to say so with a `!` pattern in this
+  // array. **Storybook does not support negation here**: the entry was ignored
+  // and `Zz-measure/TableGeometry` published to the live site, in the sidebar,
+  // for anyone reading the design system to trip over.
+  //
+  // So the harness sits outside `../src/**` instead, where the default glob
+  // cannot reach it, and is opted into by an environment variable. That also
+  // keeps it out of the smoke run, which is what a harness wants: it renders one
+  // enormous story whose only reader is a script.
+  //
+  //   STORYBOOK_HARNESS=1 pnpm --dir web run storybook
   stories: [
     "../src/**/*.stories.tsx",
-    "!../src/**/_*.stories.tsx",
+    ...(process.env.STORYBOOK_HARNESS ? ["./harness/*.stories.tsx"] : []),
   ],
   addons: ["@storybook/addon-docs"],
   framework: { name: "@storybook/react-vite", options: {} },
