@@ -201,7 +201,7 @@ describe("OrganizationGuardrailsCard", () => {
     renderCard()
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Remove guardrail" }),
+      await screen.findByRole("button", { name: "Remove prompt-injection" }),
     )
     const dialog = await screen.findByRole("alertdialog")
     expect(

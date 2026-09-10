@@ -148,6 +148,9 @@ function StoredToolLine({
         <Button
           size="sm"
           variant="ghost"
+          // Named per row, as this row's fields are: the card is a list of
+          // tools, so a bare "Remove" is the same name on every one of them.
+          aria-label={`Remove ${tool.name}`}
           isDisabled={busy}
           onPress={() => setDeleteOpen(true)}
         >

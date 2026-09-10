@@ -401,7 +401,9 @@ describe("WorkspacesPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
     await screen.findByText("Per-provider defaults")
-    await user.click(screen.getByRole("button", { name: "Remove" }))
+    await user.click(
+      screen.getByRole("button", { name: "Remove default for openai" }),
+    )
 
     // The click opens the dialog and sends nothing.
     const dialog = await screen.findByRole("alertdialog")
@@ -434,7 +436,9 @@ describe("WorkspacesPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
     await screen.findByText("Per-provider defaults")
-    await user.click(screen.getByRole("button", { name: "Remove" }))
+    await user.click(
+      screen.getByRole("button", { name: "Remove default for openai" }),
+    )
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Cancel",

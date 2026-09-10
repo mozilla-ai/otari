@@ -157,6 +157,9 @@ function NarrowedDefaults({
               <Button
                 size="sm"
                 variant="ghost"
+                // Named per row, as the picker beside it is: this is a list of
+                // providers, not a table with a row header to lean on.
+                aria-label={`Remove default for ${row.provider_key_id}`}
                 isDisabled={pending}
                 onPress={() => setPendingDelete(row)}
               >

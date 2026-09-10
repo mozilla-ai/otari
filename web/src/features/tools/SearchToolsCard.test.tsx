@@ -332,7 +332,7 @@ describe("SearchToolsCard", () => {
     await renderOpened(user)
     await screen.findByText("local")
 
-    await user.click(screen.getByRole("button", { name: "Remove" }))
+    await user.click(screen.getByRole("button", { name: "Remove local" }))
     const dialog = await screen.findByRole("alertdialog")
     expect(
       within(dialog).getByText(/local and the key stored with it/),

@@ -301,6 +301,9 @@ function GuardrailRow({
         <Button
           size="sm"
           variant="ghost"
+          // Named per row, as the Save beside it is: the card is a list of
+          // profiles, so a bare "Remove guardrail" is the same name N times.
+          aria-label={`Remove ${guardrail.profile}`}
           isDisabled={busy}
           onPress={() => setDeleteOpen(true)}
         >
