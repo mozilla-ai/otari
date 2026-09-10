@@ -15,6 +15,7 @@ from gateway.services.model_identity import (
     infer_vendor,
     normalize,
     slugify,
+    vendor_slug,
 )
 
 
@@ -121,8 +122,9 @@ def test_group_offerings_folds_the_fireworks_spellings_with_everyone_else() -> N
     assert set(groups) == {"glm53"}
     identity = groups["glm53"]
     assert identity.name == "GLM-5.3"
-    assert identity.slug == "glm-5-3"
+    assert identity.slug == "glm-5.3"
     assert identity.vendor == "Z.ai"
+    assert identity.id == "z-ai/glm-5.3"
     assert identity.selectors == tuple(seed.selector for seed in seeds)
 
 
@@ -153,8 +155,36 @@ def test_a_model_nobody_names_is_named_after_its_cleaned_id() -> None:
     assert identity.name == "qwen3-32b"
     assert identity.slug == "qwen3-32b"
     assert identity.vendor == "Alibaba"
+    assert identity.id == "alibaba/qwen3-32b"
 
 
 def test_slug_removes_to_the_key() -> None:
     for name in ("GLM-5.3", "DeepSeek V4 Pro", "Kimi K2.6", "gpt-oss-120b", "Claude Sonnet 4.6"):
         assert normalize(slugify(name)) == normalize(name)
+
+
+@pytest.mark.parametrize(
+    ("name", "slug"),
+    [
+        ("GLM-5.3", "glm-5.3"),
+        ("DeepSeek V4 Pro", "deepseek-v4-pro"),
+        ("Kimi K2.6", "kimi-k2.6"),
+        ("glm-5p3", "glm-5.3"),
+    ],
+)
+def test_slug_keeps_a_version_s_dot(name: str, slug: str) -> None:
+    assert slugify(name) == slug
+
+
+@pytest.mark.parametrize(
+    ("vendor", "slug"),
+    [
+        ("Z.ai", "z-ai"),
+        ("Moonshot AI", "moonshotai"),
+        ("OpenAI", "openai"),
+        ("Mistral AI", "mistralai"),
+        ("xAI", "xai"),
+    ],
+)
+def test_vendor_slug_spells_the_vendor_the_way_the_ecosystem_does(vendor: str, slug: str) -> None:
+    assert vendor_slug(vendor) == slug

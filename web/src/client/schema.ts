@@ -5473,7 +5473,7 @@ export interface components {
             family?: string | null;
             /**
              * Id
-             * @description URL-safe id, derived from the display name.
+             * @description The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug.
              */
             id: string;
             /** Input Modalities */
@@ -5573,7 +5573,7 @@ export interface components {
             family?: string | null;
             /**
              * Id
-             * @description URL-safe id, derived from the display name.
+             * @description The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug.
              */
             id: string;
             /** Input Modalities */

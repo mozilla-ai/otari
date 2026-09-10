@@ -146,9 +146,9 @@ def test_the_catalog_folds_two_spellings_into_one_model(priced: TestClient, mast
     assert body["metadata_available"] is True
     assert body["defaults_as_of"] is None
     by_id = {model["id"]: model for model in body["models"]}
-    assert set(by_id) == {"glm-5-3", "kimi-k2-6"}
+    assert set(by_id) == {"z-ai/glm-5.3", "moonshotai/kimi-k2.6"}
 
-    glm = by_id["glm-5-3"]
+    glm = by_id["z-ai/glm-5.3"]
     # Two spellings, one each: the tie goes to the first selector in order,
     # which is Fireworks'. The vote is decided in the unit tests; this pins that
     # the fold happened and the vendor came from the model, not the provider.
@@ -166,7 +166,7 @@ def test_the_catalog_folds_two_spellings_into_one_model(priced: TestClient, mast
 
 
 def test_the_detail_lists_every_offering_cheapest_first(priced: TestClient, master_header: dict[str, str]) -> None:
-    body = _get(priced, "/v1/catalog/models/glm-5-3", headers=master_header)
+    body = _get(priced, "/v1/catalog/models/z-ai/glm-5.3", headers=master_header)
 
     # The description comes from the offering whose spelling named the model.
     assert body["description"] == "GLM 5.3 on Fireworks."
@@ -200,8 +200,8 @@ def test_without_metadata_the_catalog_still_groups_by_the_id(priced: TestClient,
     assert body["metadata_available"] is False
     by_id = {model["id"]: model for model in body["models"]}
     # ``glm-5p3`` and ``GLM-5.3`` still meet through the id rung.
-    assert by_id["glm-5-3"]["offering_count"] == 2
-    assert by_id["glm-5-3"]["name"]
+    assert by_id["z-ai/glm-5.3"]["offering_count"] == 2
+    assert by_id["z-ai/glm-5.3"]["name"]
 
 
 def test_the_catalog_requires_a_credential(catalog_client: TestClient) -> None:
@@ -221,10 +221,10 @@ def test_an_api_key_sees_only_the_models_its_allow_list_permits(
     key_header = {"Authorization": f"Bearer {created.json()['key']}"}
 
     body = _get(priced, "/v1/catalog/models", headers=key_header)
-    assert [model["id"] for model in body["models"]] == ["kimi-k2-6"]
+    assert [model["id"] for model in body["models"]] == ["moonshotai/kimi-k2.6"]
 
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
-        denied = priced.get("/v1/catalog/models/glm-5-3", headers=key_header)
+        denied = priced.get("/v1/catalog/models/z-ai/glm-5.3", headers=key_header)
     # Indistinguishable from a model that does not exist.
     assert denied.status_code == status.HTTP_404_NOT_FOUND
 
@@ -279,7 +279,7 @@ def test_a_session_is_priced_at_its_organizations_override(
 
     priced.cookies.set(SESSION_COOKIE_NAME, token)
     try:
-        body = _get(priced, "/v1/catalog/models/glm-5-3")
+        body = _get(priced, "/v1/catalog/models/z-ai/glm-5.3")
     finally:
         priced.cookies.clear()
 
@@ -294,7 +294,7 @@ def test_a_session_is_priced_at_its_organizations_override(
     assert body["min_input_price_per_million"] == 0.1
 
     # The master key is not that organization, and keeps the deployment rate.
-    operator = _get(priced, "/v1/catalog/models/glm-5-3", headers=master_header)
+    operator = _get(priced, "/v1/catalog/models/z-ai/glm-5.3", headers=master_header)
     assert {o["selector"]: o["price_source"] for o in operator["offerings"]} == {
         _NEBIUS_GLM: "deployment",
         _FIREWORKS_GLM: "deployment",
@@ -319,7 +319,7 @@ def test_the_list_carries_what_the_filters_and_the_search_need(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:
     body = _get(priced, "/v1/catalog/models", headers=master_header)
-    glm = next(model for model in body["models"] if model["id"] == "glm-5-3")
+    glm = next(model for model in body["models"] if model["id"] == "z-ai/glm-5.3")
     assert glm["selectors"] == sorted([_FIREWORKS_GLM, _NEBIUS_GLM])
     assert glm["price_sources"] == ["deployment"]
     assert glm["unpriced_count"] == 0
@@ -342,12 +342,13 @@ def test_prices_compare_at_the_tier_a_request_size_settles_at(
     )
     assert response.status_code == status.HTTP_200_OK, response.text
 
-    base = next(m for m in _get(priced, "/v1/catalog/models", headers=master_header)["models"] if m["id"] == "glm-5-3")
+    listed_base = _get(priced, "/v1/catalog/models", headers=master_header)["models"]
+    base = next(m for m in listed_base if m["id"] == "z-ai/glm-5.3")
     assert base["min_input_price_per_million"] == 0.5
     at_8k = _get(priced, "/v1/catalog/models?at_context=8000", headers=master_header)["models"]
-    assert next(m for m in at_8k if m["id"] == "glm-5-3")["min_input_price_per_million"] == 0.5
+    assert next(m for m in at_8k if m["id"] == "z-ai/glm-5.3")["min_input_price_per_million"] == 0.5
     listed = _get(priced, "/v1/catalog/models?at_context=200000", headers=master_header)["models"]
-    at_200k = next(m for m in listed if m["id"] == "glm-5-3")
+    at_200k = next(m for m in listed if m["id"] == "z-ai/glm-5.3")
     # Fireworks' 0.7 is now the floor; the tier's unset output rate falls back to the base.
     assert at_200k["min_input_price_per_million"] == 0.7
     assert at_200k["min_output_price_per_million"] == 2.0
@@ -371,17 +372,17 @@ def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
             rebuilt = priced.post("/v1/catalog/selectors/refresh", headers=master_header)
         assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
         assert rebuilt.json()["models"] >= 1
-        detail = _get(priced, "/v1/catalog/models/glm-5-3", headers=master_header)
+        detail = _get(priced, "/v1/catalog/models/z-ai/glm-5.3", headers=master_header)
         by_selector = {offering["selector"]: offering for offering in detail["offerings"]}
         assert by_selector[_NEBIUS_GLM]["short_selector"] == "nebius:glm-5.3"
-        assert by_selector[_FIREWORKS_GLM]["short_selector"] == "fireworks:glm-5p3"
+        assert by_selector[_FIREWORKS_GLM]["short_selector"] == "fireworks:glm-5.3"
         # Nebius is the cheaper of the two, so the slug lands there.
-        assert detail["selector"] == "glm-5-3"
+        assert detail["selector"] == "z-ai/glm-5.3"
         assert detail["resolves_to"] == _NEBIUS_GLM
 
-        resolved = resolve_provider_selector(config, "glm-5-3")
-        assert (resolved.instance, resolved.model, resolved.alias) == ("nebius", "zai-org/GLM-5.3", "glm-5-3")
-        short = resolve_provider_selector(config, "fireworks:glm-5p3")
+        resolved = resolve_provider_selector(config, "z-ai/glm-5.3")
+        assert (resolved.instance, resolved.model, resolved.alias) == ("nebius", "zai-org/GLM-5.3", "z-ai/glm-5.3")
+        short = resolve_provider_selector(config, "fireworks:glm-5.3")
         assert short.model == "accounts/fireworks/models/glm-5p3"
     finally:
         selectors.reset_selector_index()
@@ -398,8 +399,8 @@ def test_a_visitor_reads_the_catalog_only_while_it_is_public(
 
     _price(public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
     body = _get(public_client, "/v1/catalog/models")
-    assert [model["id"] for model in body["models"]] == ["glm-5-3"]
-    detail = _get(public_client, "/v1/catalog/models/glm-5-3")
+    assert [model["id"] for model in body["models"]] == ["z-ai/glm-5.3"]
+    detail = _get(public_client, "/v1/catalog/models/z-ai/glm-5.3")
     offering = detail["offerings"][0]
     assert offering["credential"] == "deployment"
     assert offering["price_source"] == "deployment"
@@ -429,7 +430,7 @@ def test_a_visitor_is_throttled_on_the_catalogs_own_budget(
         statuses = [throttled_public_client.get("/v1/catalog/models").status_code for _ in range(3)]
         assert statuses == [status.HTTP_200_OK, status.HTTP_200_OK, status.HTTP_429_TOO_MANY_REQUESTS]
         # The detail shares the budget: it is the same catalog being read.
-        detail = throttled_public_client.get("/v1/catalog/models/glm-5-3")
+        detail = throttled_public_client.get("/v1/catalog/models/z-ai/glm-5.3")
         assert detail.status_code == status.HTTP_429_TOO_MANY_REQUESTS
         # A credentialed caller is not a visitor and is not counted against it.
         signed_in = throttled_public_client.get("/v1/catalog/models", headers=master_header)
@@ -486,7 +487,7 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     finally:
         session.close()
 
-    body = _get(priced, "/v1/catalog/models/glm-5-3", headers=master_header)
+    body = _get(priced, "/v1/catalog/models/z-ai/glm-5.3", headers=master_header)
     by_selector = {offering["selector"]: offering for offering in body["offerings"]}
     usage = by_selector[_NEBIUS_GLM]["usage_30d"]
     assert usage["requests"] == 2

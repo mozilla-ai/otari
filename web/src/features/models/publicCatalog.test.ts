@@ -9,8 +9,8 @@ describe("publicCatalogPath", () => {
   it("names the list and a selected model", () => {
     expect(publicCatalogPath("#/models")).toEqual({ modelId: undefined })
     expect(publicCatalogPath("#/models/")).toEqual({ modelId: undefined })
-    expect(publicCatalogPath("#/models/glm-5-3")).toEqual({
-      modelId: "glm-5-3",
+    expect(publicCatalogPath("#/models/z-ai/glm-5.3")).toEqual({
+      modelId: "z-ai/glm-5.3",
     })
   })
 
@@ -20,12 +20,13 @@ describe("publicCatalogPath", () => {
     })
     expect(publicCatalogPath("#/")).toBeNull()
     expect(publicCatalogPath("#/keys")).toBeNull()
-    expect(publicCatalogPath("#/models/a/b")).toBeNull()
   })
 
   it("round-trips through the href", () => {
-    expect(publicCatalogPath(publicCatalogHref("kimi-k2-6"))).toEqual({
-      modelId: "kimi-k2-6",
+    expect(
+      publicCatalogPath(publicCatalogHref("moonshotai/kimi-k2.6")),
+    ).toEqual({
+      modelId: "moonshotai/kimi-k2.6",
     })
     expect(publicCatalogHref()).toBe("#/models")
   })

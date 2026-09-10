@@ -169,13 +169,28 @@ def normalize(text: str) -> str:
     return _NON_ALNUM.sub("", _P_FOR_POINT.sub(".", text.lower()))
 
 
-def slugify(text: str) -> str:
-    """A URL-safe id from a display name: ``GLM-5.3`` becomes ``glm-5-3``.
+_NON_SLUG = re.compile(r"[^a-z0-9.]+")
+_VENDOR_SPACES = re.compile(r"\s+")
 
-    Removing the dashes gives :func:`normalize` of the same text, so two groups
-    with different keys cannot share a slug.
+
+def slugify(text: str) -> str:
+    """A URL-safe id from a display name: ``GLM-5.3`` becomes ``glm-5.3``.
+
+    Dots stay, since a version reads as one; everything else that is not a
+    letter or digit becomes a dash. Removing the dashes and dots gives
+    :func:`normalize` of the same text, so two groups with different keys
+    cannot share a slug.
     """
-    return _NON_ALNUM.sub("-", _P_FOR_POINT.sub(".", text.lower())).strip("-")
+    return _NON_SLUG.sub("-", _P_FOR_POINT.sub(".", text.lower())).strip("-.")
+
+
+def vendor_slug(vendor: str) -> str:
+    """The vendor's segment of a model id: ``Z.ai`` becomes ``z-ai``, ``Moonshot AI`` ``moonshotai``.
+
+    Spaces vanish and other punctuation becomes a dash, which is the spelling
+    the wider ecosystem already uses for these vendors.
+    """
+    return _NON_ALNUM.sub("-", _VENDOR_SPACES.sub("", vendor.lower())).strip("-")
 
 
 @dataclass(frozen=True)
@@ -271,9 +286,19 @@ class ModelIdentity:
 
     key: str
     slug: str
+    """The model's own segment of its id: ``glm-5.3``."""
     name: str
     vendor: str | None
     selectors: tuple[str, ...]
+
+    @property
+    def id(self) -> str:
+        """The catalog id, vendor-qualified where the vendor is known: ``z-ai/glm-5.3``.
+
+        What a request may send as ``model`` to reach the model, and the path
+        of its page. A model whose vendor nobody could name is its bare slug.
+        """
+        return f"{vendor_slug(self.vendor)}/{self.slug}" if self.vendor else self.slug
 
 
 def _fallback_name(model_id: str) -> str:
@@ -338,6 +363,7 @@ def group_offerings(seeds: Iterable[OfferingSeed]) -> dict[str, ModelIdentity]:
 
 __all__ = [
     "CleanedId",
+    "vendor_slug",
     "ModelIdentity",
     "OfferingSeed",
     "clean_model_id",

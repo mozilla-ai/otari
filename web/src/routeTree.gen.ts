@@ -29,7 +29,7 @@ import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
-import { Route as ModelsModelIdRouteImport } from './routes/models.$modelId'
+import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
 import { Route as OrganizationDomainsRouteImport } from './routes/organization.domains'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
@@ -143,9 +143,9 @@ const ModelsIndexRoute = ModelsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ModelsRoute,
 } as any)
-const ModelsModelIdRoute = ModelsModelIdRouteImport.update({
-  id: '/$modelId',
-  path: '/$modelId',
+const ModelsSplatRoute = ModelsSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
   getParentRoute: () => ModelsRoute,
 } as any)
 const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
@@ -230,7 +230,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
-  '/models/$modelId': typeof ModelsModelIdRoute
+  '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
@@ -262,7 +262,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
-  '/models/$modelId': typeof ModelsModelIdRoute
+  '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
@@ -298,7 +298,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
   '/admin/accounts': typeof AdminAccountsRoute
-  '/models/$modelId': typeof ModelsModelIdRoute
+  '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
@@ -335,7 +335,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
-    | '/models/$modelId'
+    | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
@@ -367,7 +367,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
-    | '/models/$modelId'
+    | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
@@ -402,7 +402,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/workspaces'
     | '/admin/accounts'
-    | '/models/$modelId'
+    | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
     | '/organization/members'
@@ -582,11 +582,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModelsIndexRouteImport
       parentRoute: typeof ModelsRoute
     }
-    '/models/$modelId': {
-      id: '/models/$modelId'
-      path: '/$modelId'
-      fullPath: '/models/$modelId'
-      preLoaderRoute: typeof ModelsModelIdRouteImport
+    '/models/$': {
+      id: '/models/$'
+      path: '/$'
+      fullPath: '/models/$'
+      preLoaderRoute: typeof ModelsSplatRouteImport
       parentRoute: typeof ModelsRoute
     }
     '/organization/': {
@@ -677,12 +677,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface ModelsRouteChildren {
-  ModelsModelIdRoute: typeof ModelsModelIdRoute
+  ModelsSplatRoute: typeof ModelsSplatRoute
   ModelsIndexRoute: typeof ModelsIndexRoute
 }
 
 const ModelsRouteChildren: ModelsRouteChildren = {
-  ModelsModelIdRoute: ModelsModelIdRoute,
+  ModelsSplatRoute: ModelsSplatRoute,
   ModelsIndexRoute: ModelsIndexRoute,
 }
 

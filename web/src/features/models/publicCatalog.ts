@@ -13,12 +13,14 @@ export function publicCatalogPath(
   if (path === "/models" || path === "/models/") {
     return { modelId: undefined }
   }
-  const match = /^\/models\/([^/]+)$/.exec(path)
+  // A model id carries its vendor, `z-ai/glm-5.3`, so the rest of the path is
+  // the id whole.
+  const match = /^\/models\/(.+)$/.exec(path)
   if (!match) return null
   return { modelId: decodeURIComponent(match[1] ?? "") }
 }
 
 /** The hash a public catalog link points at. */
 export function publicCatalogHref(modelId?: string): string {
-  return modelId ? `#/models/${encodeURIComponent(modelId)}` : "#/models"
+  return modelId ? `#/models/${modelId}` : "#/models"
 }

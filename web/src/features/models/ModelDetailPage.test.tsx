@@ -25,7 +25,7 @@ const CAPABILITIES = {
 }
 
 const GLM: CatalogModelSummary = {
-  id: "glm-5-3",
+  id: "z-ai/glm-5.3",
   name: "GLM-5.3",
   vendor: "Z.ai",
   description: "Z.ai's flagship.",
@@ -42,7 +42,7 @@ const GLM: CatalogModelSummary = {
   offering_count: 2,
   provider_count: 2,
   providers: ["fireworks", "nebius"],
-  selector: "glm-5-3",
+  selector: "z-ai/glm-5.3",
   resolves_to: "nebius:zai-org/GLM-5.3",
   selectors: [
     "fireworks:accounts/fireworks/models/glm-5p3",
@@ -57,7 +57,7 @@ const GLM: CatalogModelSummary = {
 
 const KIMI: CatalogModelSummary = {
   ...GLM,
-  id: "kimi-k2-6",
+  id: "moonshotai/kimi-k2.6",
   name: "Kimi K2.6",
   vendor: "Moonshot AI",
   description: null,
@@ -152,7 +152,7 @@ function mockApi(
   const context = options.context ?? organizationContext()
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
-    if (url.includes("/v1/catalog/models/glm-5-3")) {
+    if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
       return jsonResponse(GLM_DETAIL)
     }
     if (url.includes("/v1/catalog/models/")) {
@@ -164,7 +164,7 @@ function mockApi(
   })
 }
 
-function renderPage(ui: ReactElement, url = "/models/glm-5-3") {
+function renderPage(ui: ReactElement, url = "/models/z-ai/glm-5.3") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -177,7 +177,7 @@ function renderPage(ui: ReactElement, url = "/models/glm-5-3") {
         url,
         routes: [
           {
-            path: "/models/$modelId",
+            path: "/models/$vendor/$model",
             element: <span>opened a model</span>,
           },
         ],
@@ -193,7 +193,7 @@ describe("ModelDetailPage", () => {
 
   it("shows the model's facts and its offerings, cheapest first, with each price's source", async () => {
     mockApi()
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     expect(
       await screen.findByRole("heading", { name: "Z.ai: GLM-5.3" }),
@@ -230,7 +230,7 @@ describe("ModelDetailPage", () => {
 
   it("opens an offering's selector and request under its row", async () => {
     mockApi()
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
     const user = userEvent.setup()
 
     const grid = await screen.findByRole("grid", {
@@ -252,7 +252,7 @@ describe("ModelDetailPage", () => {
 
   it("links an operator to Model pricing to edit a rate, and nobody else", async () => {
     mockApi()
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     const links = await screen.findAllByRole("link", { name: "Edit rate" })
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
@@ -272,7 +272,7 @@ describe("ModelDetailPage", () => {
         deployment_operator: false,
       }),
     })
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     const links = await screen.findAllByRole("link", { name: "Set your rate" })
     expect(links.map((link) => link.getAttribute("href"))).toContain(
@@ -294,7 +294,7 @@ describe("ModelDetailPage", () => {
       },
     })
     try {
-      renderPage(<ModelDetailPage modelId="glm-5-3" />)
+      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
       const grid = await screen.findByRole("grid", {
         name: "Offerings of GLM-5.3",
@@ -315,7 +315,7 @@ describe("ModelDetailPage", () => {
       metadata_output_price_per_million: 2.01,
     })
     try {
-      renderPage(<ModelDetailPage modelId="glm-5-3" />)
+      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
       await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
       // Input is metered at half the list price and says so; output is within
@@ -332,7 +332,7 @@ describe("ModelDetailPage", () => {
 
   it("keeps the page read-only for a member", async () => {
     mockApi({ context: organizationContext({ deployment_operator: false }) })
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
@@ -350,7 +350,7 @@ describe("ModelDetailPage", () => {
   it("says why an offering is unpriced when defaults are off", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/catalog/models/glm-5-3")) {
+      if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
         return jsonResponse({
           ...GLM_DETAIL,
           offerings: [
@@ -369,7 +369,7 @@ describe("ModelDetailPage", () => {
         return jsonResponse(organizationContext())
       return jsonResponse([])
     })
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     expect(
       await screen.findByText(

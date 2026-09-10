@@ -49,7 +49,7 @@ function model(
 }
 
 const GLM = model({
-  id: "glm-5-3",
+  id: "z-ai/glm-5.3",
   name: "GLM-5.3",
   vendor: "Z.ai",
   capabilities: {
@@ -64,7 +64,7 @@ const GLM = model({
   providers: ["fireworks", "nebius"],
   provider_count: 2,
   offering_count: 2,
-  selector: "glm-5-3",
+  selector: "z-ai/glm-5.3",
   resolves_to: "nebius:zai-org/GLM-5.3",
   selectors: [
     "fireworks:accounts/fireworks/models/glm-5p3",
@@ -75,7 +75,7 @@ const GLM = model({
   min_output_price_per_million: 2,
 })
 const KIMI = model({
-  id: "kimi-k2-6",
+  id: "moonshotai/kimi-k2.6",
   name: "Kimi K2.6",
   vendor: "Moonshot AI",
   input_modalities: ["image", "text"],
@@ -155,18 +155,18 @@ describe("filterModels, the price and release filters", () => {
       filterModels(priced, { ...ANY, query: "accounts/fireworks" }).map(
         (m) => m.id,
       ),
-    ).toEqual(["glm-5-3"])
+    ).toEqual(["z-ai/glm-5.3"])
     expect(
       filterModels(priced, { ...ANY, query: "nebius" }).map((m) => m.id),
-    ).toEqual(["glm-5-3", "kimi-k2-6"])
+    ).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
   })
 
   it("narrows by where a price came from", () => {
     const ids = (pricing: string) =>
       filterModels(priced, { ...ANY, pricing }).map((m) => m.id)
-    expect(ids("custom")).toEqual(["glm-5-3"])
-    expect(ids("default")).toEqual(["glm-5-3", "kimi-k2-6"])
-    expect(ids("priced")).toEqual(["glm-5-3", "kimi-k2-6"])
+    expect(ids("custom")).toEqual(["z-ai/glm-5.3"])
+    expect(ids("default")).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
+    expect(ids("priced")).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
     expect(ids("unpriced")).toEqual(["old-and-free"])
   })
 
@@ -182,7 +182,7 @@ describe("filterModels, the price and release filters", () => {
   it("caps the cheapest input rate, dropping the unpriced", () => {
     expect(
       filterModels(priced, { ...ANY, maxInput: 0.55 }).map((m) => m.id),
-    ).toEqual(["glm-5-3"])
+    ).toEqual(["z-ai/glm-5.3"])
   })
 
   it("keeps only a release inside the window, and none with no date", () => {
@@ -190,12 +190,12 @@ describe("filterModels, the price and release filters", () => {
       filterModels(priced, { ...ANY, releasedWithinDays: 365 }, now).map(
         (m) => m.id,
       ),
-    ).toEqual(["glm-5-3", "kimi-k2-6"])
+    ).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
     expect(
       filterModels(priced, { ...ANY, releasedWithinDays: 3 * 365 }, now).map(
         (m) => m.id,
       ),
-    ).toEqual(["glm-5-3", "kimi-k2-6"])
+    ).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
     expect(
       filterModels(priced, { ...ANY, releasedWithinDays: 5 * 365 }, now),
     ).toHaveLength(3)
@@ -205,16 +205,24 @@ describe("filterModels, the price and release filters", () => {
 describe("compareModels", () => {
   it("puts an unpriced model last whichever way the price sorts", () => {
     const asc = [LOCAL, KIMI, GLM].sort(compareModels("input", "asc"))
-    expect(asc.map((m) => m.id)).toEqual(["glm-5-3", "kimi-k2-6", "qwen3-32b"])
+    expect(asc.map((m) => m.id)).toEqual([
+      "z-ai/glm-5.3",
+      "moonshotai/kimi-k2.6",
+      "qwen3-32b",
+    ])
     const desc = [LOCAL, KIMI, GLM].sort(compareModels("input", "desc"))
-    expect(desc.map((m) => m.id)).toEqual(["kimi-k2-6", "glm-5-3", "qwen3-32b"])
+    expect(desc.map((m) => m.id)).toEqual([
+      "moonshotai/kimi-k2.6",
+      "z-ai/glm-5.3",
+      "qwen3-32b",
+    ])
   })
 
   it("sorts release dates lexically, which is chronological for ISO dates", () => {
     const newest = [GLM, KIMI, LOCAL].sort(compareModels("released", "desc"))
     expect(newest.map((m) => m.id)).toEqual([
-      "glm-5-3",
-      "kimi-k2-6",
+      "z-ai/glm-5.3",
+      "moonshotai/kimi-k2.6",
       "qwen3-32b",
     ])
   })

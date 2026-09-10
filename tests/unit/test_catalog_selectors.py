@@ -15,7 +15,7 @@ _ROWS = [
     ("cerebras:gpt-oss-120b", "cerebras", "gpt-oss-120b", None),
 ]
 _IDENTITIES = {
-    "glm-5-3": (
+    "z-ai/glm-5.3": (
         "glm-5.3",
         (
             "nebius:zai-org/GLM-5.3",
@@ -23,7 +23,7 @@ _IDENTITIES = {
             "fireworks:accounts/fireworks/models/glm-5p3-fp8",
         ),
     ),
-    "gpt-oss-120b": ("gpt-oss-120b", ("cerebras:gpt-oss-120b",)),
+    "openai/gpt-oss-120b": ("gpt-oss-120b", ("cerebras:gpt-oss-120b",)),
 }
 
 
@@ -44,15 +44,18 @@ def test_a_short_spelling_is_kept_only_where_it_is_unambiguous(index: selectors.
 
 
 def test_a_slug_resolves_to_the_cheapest_priced_offering(index: selectors.SelectorIndex) -> None:
-    assert selectors.model_selector_for_slug("glm-5-3") == "nebius:zai-org/GLM-5.3"
+    assert selectors.model_selector_for_slug("z-ai/glm-5.3") == "nebius:zai-org/GLM-5.3"
     # Unpriced: the first offering, rather than nothing.
-    assert selectors.model_selector_for_slug("gpt-oss-120b") == "cerebras:gpt-oss-120b"
+    assert selectors.model_selector_for_slug("openai/gpt-oss-120b") == "cerebras:gpt-oss-120b"
 
 
 def test_a_real_selector_is_never_rewritten(index: selectors.SelectorIndex) -> None:
     assert selectors.resolve_catalog_selector("cerebras:gpt-oss-120b") is None
+    # The legacy slash spelling of a real offering is that offering, not a model id.
+    assert selectors.resolve_catalog_selector("cerebras/gpt-oss-120b") is None
+    assert selectors.resolve_catalog_selector("openai/gpt-oss-120b") == "cerebras:gpt-oss-120b"
     assert selectors.resolve_catalog_selector("nebius:glm-5.3") == "nebius:zai-org/GLM-5.3"
-    assert selectors.resolve_catalog_selector("glm-5-3") == "nebius:zai-org/GLM-5.3"
+    assert selectors.resolve_catalog_selector("z-ai/glm-5.3") == "nebius:zai-org/GLM-5.3"
     assert selectors.resolve_catalog_selector("nope") is None
 
 
@@ -63,13 +66,13 @@ def test_the_resolver_relabels_a_short_or_model_selector_like_an_alias(index: se
     )
     short = resolve_provider_selector(config, "nebius:glm-5.3")
     assert (short.instance, short.model, short.alias) == ("nebius", "zai-org/GLM-5.3", "nebius:glm-5.3")
-    slug = resolve_provider_selector(config, "glm-5-3")
-    assert (slug.instance, slug.model, slug.alias) == ("nebius", "zai-org/GLM-5.3", "glm-5-3")
+    slug = resolve_provider_selector(config, "z-ai/glm-5.3")
+    assert (slug.instance, slug.model, slug.alias) == ("nebius", "zai-org/GLM-5.3", "z-ai/glm-5.3")
     verbatim = resolve_provider_selector(config, "cerebras:gpt-oss-120b")
     assert (verbatim.model, verbatim.alias) == ("gpt-oss-120b", None)
 
 
 def test_an_empty_index_resolves_nothing() -> None:
     selectors.reset_selector_index()
-    assert selectors.resolve_catalog_selector("glm-5-3") is None
+    assert selectors.resolve_catalog_selector("z-ai/glm-5.3") is None
     assert selectors.short_selector_for("nebius:zai-org/GLM-5.3") is None

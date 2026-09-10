@@ -50,7 +50,7 @@ import {
 import { useUrlValue } from "@/shared/helpers/urlState"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
-// right a search, a sort, and one card per model. A card is a link to the model's own page, `/models/$modelId`,
+// right a search, a sort, and one card per model. A card is a link to the model's own page, `/models/<id>`,
 // where its offerings are compared. Below `lg` the rail folds behind a
 // "Filters" button.
 //
@@ -345,8 +345,8 @@ function ModelCard({
             </a>
           ) : (
             <Link
-              to="/models/$modelId"
-              params={{ modelId: model.id }}
+              to="/models/$"
+              params={{ _splat: model.id }}
               className={titleClass}
               onClick={(event) => {
                 event.preventDefault()
@@ -685,7 +685,7 @@ export function ModelCatalogView({
   )
 }
 
-/** The catalog on the router: a pressed card navigates to `/models/$modelId`. */
+/** The catalog on the router: a pressed card navigates to the model's page. */
 export function ModelCatalogPage() {
   const navigate = useNavigate()
   // A provider clicked on the Providers page arrives as ?provider=<instance>,
@@ -695,7 +695,7 @@ export function ModelCatalogPage() {
     <ModelCatalogView
       initialProvider={providerParam}
       onOpen={(id) => {
-        void navigate({ to: "/models/$modelId", params: { modelId: id } })
+        void navigate({ to: "/models/$", params: { _splat: id } })
       }}
     />
   )

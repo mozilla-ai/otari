@@ -78,6 +78,7 @@ from gateway.services.model_identity import (
     clean_model_id,
     group_offerings,
     identity_key,
+    slugify,
 )
 from gateway.services.pricing_refresh_service import GENAI_PRICES_SOURCE
 from gateway.services.pricing_service import (
@@ -196,7 +197,9 @@ class CatalogOffering(BaseModel):
 class CatalogModelSummary(BaseModel):
     """One model, as the list shows it."""
 
-    id: str = Field(description="URL-safe id, derived from the display name.")
+    id: str = Field(
+        description="The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug."
+    )
     selector: str | None = Field(
         default=None,
         description=(
@@ -450,10 +453,10 @@ async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fet
         seed, _metadata, instance, model_id, _provider_type = _seed(config, catalog, obj)
         seeds.append(seed)
         rate = obj.pricing.input_price_per_million if obj.pricing is not None else None
-        rows.append((obj.id, instance, clean_model_id(model_id).model, rate))
-    identities = {
-        identity.slug: (identity.key, identity.selectors) for identity in group_offerings(seeds).values()
-    }
+        # The short id is spelled the way the catalog spells a name, so the
+        # short selector and the model id agree: `fireworks:glm-5.3-flash`.
+        rows.append((obj.id, instance, slugify(clean_model_id(model_id).model), rate))
+    identities = {identity.id: (identity.key, identity.selectors) for identity in group_offerings(seeds).values()}
     set_selector_index(build_selector_index(rows, identities))
 
 
@@ -644,10 +647,10 @@ def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int 
     winners = [entry for entry in described if entry.name and entry.name.rsplit("/", 1)[-1] == identity.name]
     contexts = [member.wire.context_window for member in members if member.wire.context_window is not None]
     outputs = [member.wire.max_output_tokens for member in members if member.wire.max_output_tokens is not None]
-    resolves_to = model_selector_for_slug(identity.slug)
+    resolves_to = model_selector_for_slug(identity.id)
     return CatalogModelSummary(
-        id=identity.slug,
-        selector=identity.slug if resolves_to is not None else None,
+        id=identity.id,
+        selector=identity.id if resolves_to is not None else None,
         resolves_to=resolves_to,
         name=identity.name,
         vendor=identity.vendor,
@@ -776,7 +779,7 @@ async def get_catalog_model(
     """
     merged = await _merged_for(db, config, caller, session_identity)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
-    identity = next((identity for identity in grouped.identities.values() if identity.slug == model_id), None)
+    identity = next((identity for identity in grouped.identities.values() if identity.id == model_id), None)
     if identity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
 

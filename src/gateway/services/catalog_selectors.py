@@ -5,10 +5,12 @@ provider's id can be as long as ``accounts/fireworks/models/gpt-oss-120b``.
 The catalog groups such ids by the model they name, and this index lets a
 caller send what the catalog shows:
 
-- a **short selector**, ``instance:<cleaned id>`` (``fireworks:gpt-oss-120b``),
-  which resolves to the provider's full id on that instance; and
-- a **model selector**, the catalog's slug alone (``gpt-oss-120b``), which
-  resolves to the cheapest offering of that model the deployment serves.
+- a **short selector**, ``instance:<cleaned id>`` (``fireworks:glm-5.3``, spelled
+  as the catalog spells the name), which resolves to the provider's full id
+  on that instance; and
+- a **model selector**, the catalog's id (``openai/gpt-oss-120b``, or the
+  bare slug where the vendor is unknown), which resolves to the cheapest
+  offering of that model the deployment serves.
 
 The index is process-wide and rebuilt from the deployment's own catalog view
 (the configured instances, priced from the deployment's list and the
@@ -38,7 +40,7 @@ class SelectorIndex:
     """``instance:<cleaned id>``, lowercased, to the full selector, where the short id is unambiguous there."""
 
     models: dict[str, str] = field(default_factory=dict)
-    """Catalog slug to the offering a bare slug resolves to."""
+    """Catalog id, lowercased, to the offering it resolves to."""
 
     model_selectors: dict[str, str] = field(default_factory=dict)
     """Full selector to its short spelling, for the catalog to show."""
@@ -70,6 +72,12 @@ def resolve_catalog_selector(model_selector: str) -> str | None:
     """
     index = _index
     if model_selector in index.full:
+        return None
+    # ``openai/gpt-oss-120b`` is both the legacy spelling of an offering on the
+    # ``openai`` instance and, read as vendor/model, a catalog id. Where the
+    # instance really serves that id, the caller meant the offering.
+    prefix, slash, rest = model_selector.partition("/")
+    if slash and f"{prefix}:{rest}" in index.full:
         return None
     # Short spellings are case-insensitive: they are the catalog's, not the
     # provider's, and a provider's own casing is the thing they leave behind.

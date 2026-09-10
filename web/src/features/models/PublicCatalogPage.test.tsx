@@ -13,7 +13,7 @@ import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 
 const GLM: CatalogModelSummary = {
-  id: "glm-5-3",
+  id: "z-ai/glm-5.3",
   name: "GLM-5.3",
   vendor: "Z.ai",
   family: "glm",
@@ -35,7 +35,7 @@ const GLM: CatalogModelSummary = {
   offering_count: 2,
   provider_count: 2,
   providers: ["fireworks", "nebius"],
-  selector: "glm-5-3",
+  selector: "z-ai/glm-5.3",
   resolves_to: "nebius:zai-org/GLM-5.3",
   selectors: [
     "fireworks:accounts/fireworks/models/glm-5p3",
@@ -109,7 +109,7 @@ function jsonResponse(body: unknown): Response {
 function mockApi() {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
-    if (url.includes("/v1/catalog/models/glm-5-3")) {
+    if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
       return jsonResponse(GLM_DETAIL)
     }
     if (url.includes("/v1/catalog/models")) return jsonResponse(CATALOG)
@@ -147,7 +147,7 @@ describe("PublicCatalogPage", () => {
     // A plain hash link, since there is no router ahead of the session.
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
-    ).toHaveAttribute("href", "#/models/glm-5-3")
+    ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
       "href",
       "#/",
@@ -163,7 +163,7 @@ describe("PublicCatalogPage", () => {
 
   it("shows a model's offerings without the links that need a session", async () => {
     mockApi()
-    renderPage("glm-5-3")
+    renderPage("z-ai/glm-5.3")
 
     const grid = await screen.findByRole("grid", {
       name: "Offerings of GLM-5.3",
@@ -181,7 +181,7 @@ describe("PublicCatalogPage", () => {
 
   it("tells a visitor to sign in before the request an offering opens", async () => {
     mockApi()
-    renderPage("glm-5-3")
+    renderPage("z-ai/glm-5.3")
     const user = userEvent.setup()
 
     const grid = await screen.findByRole("grid", {

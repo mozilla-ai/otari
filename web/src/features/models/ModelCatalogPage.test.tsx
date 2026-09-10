@@ -25,7 +25,7 @@ const CAPABILITIES = {
 }
 
 const GLM: CatalogModelSummary = {
-  id: "glm-5-3",
+  id: "z-ai/glm-5.3",
   name: "GLM-5.3",
   vendor: "Z.ai",
   description: "Z.ai's flagship.",
@@ -42,7 +42,7 @@ const GLM: CatalogModelSummary = {
   offering_count: 2,
   provider_count: 2,
   providers: ["fireworks", "nebius"],
-  selector: "glm-5-3",
+  selector: "z-ai/glm-5.3",
   resolves_to: "nebius:zai-org/GLM-5.3",
   selectors: [
     "fireworks:accounts/fireworks/models/glm-5p3",
@@ -57,7 +57,7 @@ const GLM: CatalogModelSummary = {
 
 const KIMI: CatalogModelSummary = {
   ...GLM,
-  id: "kimi-k2-6",
+  id: "moonshotai/kimi-k2.6",
   name: "Kimi K2.6",
   vendor: "Moonshot AI",
   description: null,
@@ -152,7 +152,7 @@ function mockApi(
   const context = options.context ?? organizationContext()
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
-    if (url.includes("/v1/catalog/models/glm-5-3")) {
+    if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
       return jsonResponse(GLM_DETAIL)
     }
     if (url.includes("/v1/catalog/models/")) {
@@ -177,7 +177,7 @@ function renderPage(ui: ReactElement, url = "/models") {
         url,
         routes: [
           {
-            path: "/models/$modelId",
+            path: "/models/$vendor/$model",
             element: <span>opened a model</span>,
           },
         ],
@@ -197,7 +197,7 @@ describe("ModelCatalogPage", () => {
 
     const list = await screen.findByRole("list", { name: "Models" })
     const glm = within(list).getByRole("link", { name: "Z.ai: GLM-5.3" })
-    expect(glm).toHaveAttribute("href", "/models/glm-5-3")
+    expect(glm).toHaveAttribute("href", "/models/z-ai/glm-5.3")
     const card = glm.closest("article") as HTMLElement
     // Two providers folded into one card, priced from the cheaper.
     expect(within(card).getByText("2 providers")).toBeInTheDocument()

@@ -34,8 +34,13 @@ export function useCatalogModel(modelId: string | undefined) {
     ...NO_RETRY,
     queryKey: [CATALOG, modelId],
     queryFn: () =>
+      // Segment by segment: the id carries its vendor, `z-ai/glm-5.3`, and
+      // the slash is the path's, not the id's to encode.
       apiFetch<CatalogModelDetail>(
-        `/v1/catalog/models/${encodeURIComponent(modelId ?? "")}`,
+        `/v1/catalog/models/${(modelId ?? "")
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
       ),
     staleTime: 60_000,
     enabled: modelId !== undefined,
