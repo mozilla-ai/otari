@@ -154,6 +154,7 @@ An overlay (or your own deployment) rebinds ports to its own adapters **without 
 def register(container: Container) -> None:
     container.bind(BillingPort, _wallet_billing_adapter)
     container.contribute_router(RouterContribution(capability="billing", router=wallet_router))
+    container.contribute_background_task(BackgroundTaskContribution(name="budget alerts", start=run_alert_evaluator))
 ```
 
 With nothing configured nothing is imported, the defaults stand, and Otari boots standalone. A selector that is set but cannot be loaded fails startup rather than quietly falling back, because a build nobody chose is worse than a gateway that will not start.
@@ -161,6 +162,8 @@ With nothing configured nothing is imported, the defaults stand, and Otari boots
 A contributed router is the additive half of the seam, and it is gated rather than swapped: Otari mounts it behind `require_capability(...)`, which resolves `EntitlementPort` and answers a request for an unentitled capability with the same 404 a path nothing serves gets. That gate is the server-side half of the entitlement axis; hiding a nav item in the dashboard is not authorization.
 
 Entitlement is not authentication either, and the mount point adds none. A capability names no caller, so on an entitled deployment a contributed route is reachable by anyone unless the router says otherwise. A contribution declares the credential each of its routes needs on the route, the way Otari's own routers do; there is no router-level default to mount, because the right answer differs per route, a contributed route may be deliberately public, and the header check resolves a database session a hybrid gateway does not have.
+
+A contributed background task is the additive seam for a periodic worker (an alert evaluator, a sync job, a purge), which would otherwise need a line in the lifespan's hand-kept refresher list. `start` is a coroutine function that receives the `GatewayConfig`; the lifespan schedules it after Otari's own refreshers, in every mode, and stops it under the same shared cancellation bound, so a task that ignores cancellation is abandoned rather than allowed to hang shutdown, and one that dies is logged under its `name` and never takes the process down. Names are unique per container, and the startup summary lists them beside the contributed routers.
 
 > **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps.py`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
 

@@ -22,8 +22,11 @@ from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAda
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.container import (
+    BackgroundTaskContribution,
     BootstrapError,
     Container,
+    ContainerError,
+    DuplicateBackgroundTaskError,
     PortNotBoundError,
     RouterContribution,
     build_container,
@@ -96,6 +99,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
     container = build_container()
 
     assert container.router_contributions() == ()
+    assert container.background_task_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
     for port in (
         BillingPort,
@@ -300,3 +304,71 @@ def test_router_contributions_keep_their_order() -> None:
     container.contribute_router(second)
 
     assert container.router_contributions() == (first, second)
+
+
+async def _never_runs(_config: object) -> None:
+    raise AssertionError("the container records a task; only the lifespan starts one")
+
+
+def test_background_task_contributions_keep_their_order() -> None:
+    container = Container()
+    first = BackgroundTaskContribution(name="one", start=_never_runs)
+    second = BackgroundTaskContribution(name="two", start=_never_runs)
+
+    container.contribute_background_task(first)
+    container.contribute_background_task(second)
+
+    assert container.background_task_contributions() == (first, second)
+
+
+def test_a_duplicate_background_task_name_is_refused_and_the_first_stands() -> None:
+    container = Container()
+    first = BackgroundTaskContribution(name="sync", start=_never_runs)
+    container.contribute_background_task(first)
+
+    with pytest.raises(DuplicateBackgroundTaskError, match="'sync' is already contributed") as caught:
+        container.contribute_background_task(BackgroundTaskContribution(name="sync", start=_never_runs))
+
+    assert isinstance(caught.value, ContainerError)
+    assert caught.value.name == "sync"
+    assert container.background_task_contributions() == (first,)
+
+
+def test_bootstrap_summary_names_the_contributed_background_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "tasks_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import BackgroundTaskContribution, Container, RouterContribution
+
+
+async def evaluate(config) -> None:
+    pass
+
+
+async def purge(config) -> None:
+    pass
+
+
+def register(container: Container) -> None:
+    container.contribute_router(RouterContribution(capability="alerts", router=APIRouter()))
+    container.contribute_background_task(BackgroundTaskContribution(name="budget alerts", start=evaluate))
+    container.contribute_background_task(BackgroundTaskContribution(name="purge", start=purge))
+""",
+    )
+
+    container = build_container("tasks_bootstrap:register")
+
+    assert [contribution.name for contribution in container.background_task_contributions()] == [
+        "budget alerts",
+        "purge",
+    ]
+    assert container.summary == (
+        "tasks_bootstrap:register rebound no ports, contributed routers for alerts, "
+        "contributed background tasks budget alerts, purge"
+    )

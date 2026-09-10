@@ -17,14 +17,15 @@ claim a swap point that does not exist.
 An overlay rebinds ports without editing any Otari source file, by pointing
 ``OTARI_BOOTSTRAP`` at a ``module:callable`` selector. The callable receives
 this container after the core defaults are bound, and may rebind any port and
-contribute routers of its own. Unset, the defaults stand.
+contribute routers and lifespan background tasks of its own. Unset, the
+defaults stand.
 """
 
 import importlib
 import inspect
-from collections.abc import Callable, ItemsView
+from collections.abc import Callable, Coroutine, ItemsView
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,9 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+
+if TYPE_CHECKING:
+    from gateway.core.config import GatewayConfig
 
 T = TypeVar("T")
 
@@ -90,6 +94,25 @@ class RouterContribution:
     router: APIRouter
 
 
+@dataclass(frozen=True)
+class BackgroundTaskContribution:
+    """One periodic worker an overlay runs for the life of the process.
+
+    The lifespan (``gateway.main``) schedules ``start(config)`` as a task after
+    Otari's own refreshers, in every mode, and stops it under the same shared
+    cancellation bound, so a contributed task that ignores cancellation cannot
+    hang shutdown. ``name`` labels the task in the startup summary and in the
+    shutdown log, and is unique per container.
+
+    ``start`` is a coroutine function, not the coroutine itself: a coroutine
+    object built at register time in a container that never runs (as the test
+    suite builds) would only leak a "never awaited" warning.
+    """
+
+    name: str
+    start: Callable[["GatewayConfig"], Coroutine[Any, Any, None]]
+
+
 class ContainerError(Exception):
     """Base error for composition-root wiring failures."""
 
@@ -107,6 +130,14 @@ class BootstrapError(ContainerError):
     """Raised when the bootstrap module ``OTARI_BOOTSTRAP`` names cannot be loaded."""
 
 
+class DuplicateBackgroundTaskError(ContainerError):
+    """Raised when a second background task is contributed under a name already taken."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"A background task named {name!r} is already contributed")
+        self.name = name
+
+
 class Container:
     """A registry mapping each port to the adapter that satisfies it.
 
@@ -119,6 +150,7 @@ class Container:
     def __init__(self) -> None:
         self._factories: dict[Any, PortFactory[Any]] = {}
         self._router_contributions: list[RouterContribution] = []
+        self._background_task_contributions: dict[str, BackgroundTaskContribution] = {}
         # One line naming what this container was built from, logged by
         # build_container and asserted on by tests.
         self.summary = "unbuilt"
@@ -159,6 +191,24 @@ class Container:
     def router_contributions(self) -> tuple[RouterContribution, ...]:
         """Return the recorded router contributions, in contribution order."""
         return tuple(self._router_contributions)
+
+    def contribute_background_task(self, contribution: BackgroundTaskContribution) -> None:
+        """Record a background task the lifespan runs beside Otari's own refreshers.
+
+        Raises:
+            DuplicateBackgroundTaskError: If a task of the same name is already
+                contributed. Two tasks sharing a name would be indistinguishable
+                in the shutdown log, and a bootstrap registering the same worker
+                twice is a mistake worth refusing at startup.
+
+        """
+        if contribution.name in self._background_task_contributions:
+            raise DuplicateBackgroundTaskError(contribution.name)
+        self._background_task_contributions[contribution.name] = contribution
+
+    def background_task_contributions(self) -> tuple[BackgroundTaskContribution, ...]:
+        """Return the recorded background task contributions, in contribution order."""
+        return tuple(self._background_task_contributions.values())
 
 
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
@@ -249,8 +299,8 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
     Binds the core adapters, then, if a selector is given, lets the bootstrap it
-    names rebind ports and contribute routers. With no selector the core
-    defaults stand and Otari boots standalone.
+    names rebind ports and contribute routers and background tasks. With no
+    selector the core defaults stand and Otari boots standalone.
 
     Raises:
         BootstrapError: If the selector is present but blank, or names a
@@ -320,6 +370,9 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:
         container.summary += f", contributed routers for {contributed}"
+    contributed_tasks = ", ".join(contribution.name for contribution in container.background_task_contributions())
+    if contributed_tasks:
+        container.summary += f", contributed background tasks {contributed_tasks}"
     logger.info("Composition root: %s", container.summary)
     return container
 
