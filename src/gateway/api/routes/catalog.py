@@ -170,6 +170,7 @@ class CatalogModelSummary(BaseModel):
     id: str = Field(description="URL-safe id, derived from the display name.")
     name: str
     vendor: str | None
+    description: str | None = Field(default=None, description="models.dev's, from the offering that named the model.")
     family: str | None = None
     capabilities: CatalogCapabilities
     input_modalities: list[str]
@@ -206,7 +207,6 @@ class CatalogElsewhere(BaseModel):
 class CatalogModelDetail(CatalogModelSummary):
     """One model with everything the detail page shows."""
 
-    description: str | None = None
     offerings: list[CatalogOffering]
     also_available_from: list[CatalogElsewhere]
 
@@ -514,12 +514,16 @@ def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int 
     described = [member.metadata for member in members if member.metadata is not None]
     priced = [member.wire.pricing for member in members if member.wire.pricing is not None]
     rates = [_rates_at_context(pricing, at_context) for pricing in priced]
+    # The description from the offering whose spelling won the name, so the two
+    # read as one source; any offering's when none of them named the model.
+    winners = [entry for entry in described if entry.name and entry.name.rsplit("/", 1)[-1] == identity.name]
     contexts = [member.wire.context_window for member in members if member.wire.context_window is not None]
     outputs = [member.wire.max_output_tokens for member in members if member.wire.max_output_tokens is not None]
     return CatalogModelSummary(
         id=identity.slug,
         name=identity.name,
         vendor=identity.vendor,
+        description=_first(entry.description for entry in [*winners, *described]),
         family=_first(entry.family for entry in described),
         capabilities=CatalogCapabilities(
             reasoning=any(entry.reasoning for entry in described),
@@ -650,11 +654,6 @@ async def get_catalog_model(
 
     members = [grouped.offerings[selector] for selector in identity.selectors]
     summary = _summary(identity, members)
-    # The description from the offering whose spelling won the name, so the two
-    # read as one source; any offering's when none of them named the model.
-    described = [member.metadata for member in members if member.metadata is not None]
-    winners = [entry for entry in described if entry.name and entry.name.rsplit("/", 1)[-1] == identity.name]
-    description = _first(entry.description for entry in [*winners, *described])
     # The cheapest offering first, unpriced ones last, so the comparison the
     # page exists for is the order the rows arrive in.
     offerings = sorted(
@@ -663,7 +662,6 @@ async def get_catalog_model(
     )
     return CatalogModelDetail(
         **summary.model_dump(),
-        description=description,
         offerings=offerings,
         also_available_from=_elsewhere(
             grouped, identity.key, {models_dev_provider_id(o.provider_type) for o in offerings}

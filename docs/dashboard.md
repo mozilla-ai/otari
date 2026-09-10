@@ -71,10 +71,10 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Models and Routing. Models is the catalog grouped by model: the list on the
-  left, and the selected model's offerings on the right, one per provider that
-  serves it, each with its own context limits and the price your organization
-  is charged. It is read-only; a rate is set on Model pricing.
+- Models and Routing. Models is the catalog grouped by model: a list of cards
+  with a rail of filters beside it, and a page per model where every offering
+  of it is compared, one per provider, each with its own limits and the price
+  your organization is charged. It is read-only; a rate is set on Model pricing.
 - Tools
 - API keys, providers, and workspace members
 

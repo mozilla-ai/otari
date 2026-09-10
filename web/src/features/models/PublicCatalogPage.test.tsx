@@ -139,7 +139,11 @@ describe("PublicCatalogPage", () => {
     const fetchMock = mockApi()
     renderPage()
 
-    expect(await screen.findByText("GLM-5.3")).toBeInTheDocument()
+    const list = await screen.findByRole("list", { name: "Models" })
+    // A plain hash link, since there is no router ahead of the session.
+    expect(
+      within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
+    ).toHaveAttribute("href", "#/models/glm-5-3")
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
       "href",
       "#/",
@@ -157,32 +161,32 @@ describe("PublicCatalogPage", () => {
     mockApi()
     renderPage("glm-5-3")
 
-    const panel = await screen.findByRole("complementary", {
-      name: "Model details",
-    })
-    const grid = await within(panel).findByRole("grid", {
+    const grid = await screen.findByRole("grid", {
       name: "Offerings of GLM-5.3",
     })
     expect(within(grid).getAllByRole("row")).toHaveLength(3)
-    expect(within(panel).queryByRole("link", { name: "Edit rate" })).toBeNull()
-    expect(
-      within(panel).queryByRole("link", { name: "Set your rate" }),
-    ).toBeNull()
-    expect(
-      within(panel).queryByRole("link", { name: /route across/ }),
-    ).toBeNull()
-    expect(
-      within(panel).getByRole("link", { name: "← All models" }),
-    ).toHaveAttribute("href", "#/models")
+    expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
+    expect(screen.queryByRole("link", { name: /route across/ })).toBeNull()
+    expect(screen.queryByText(/Your effective price/)).toBeNull()
+    expect(screen.getByRole("link", { name: "← All models" })).toHaveAttribute(
+      "href",
+      "#/models",
+    )
   })
 
-  it("opens a model by moving the hash", async () => {
+  it("tells a visitor to sign in before the request to copy", async () => {
     mockApi()
-    renderPage()
+    renderPage("glm-5-3")
     const user = userEvent.setup()
 
-    await user.click(await screen.findByText("GLM-5.3"))
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
 
-    expect(window.location.hash).toBe("#/models/glm-5-3")
+    const dialog = await screen.findByRole("dialog", { name: "Use this model" })
+    expect(
+      within(dialog).getByRole("link", { name: "Sign in" }),
+    ).toHaveAttribute("href", "#/")
   })
 })

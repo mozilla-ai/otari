@@ -8,6 +8,11 @@ import { buildManifest } from "../../pwaManifest"
 // Resolved from the Vitest root (web/) rather than import.meta.url, which the
 // jsdom environment reports as an http URL. Same reason as src/routes.test.ts.
 const WEB = process.cwd()
+
+// `architecture.test.ts` plants throwaway modules under `__boundary_probe__`
+// while it runs, and the workers share one tree: a sweep that lands mid-plant
+// would grade a fixture that is not source.
+const notAProbe = (name: string) => !name.includes("__boundary_probe__")
 const CSS = readFileSync(join(WEB, "src", "styles", "globals.css"), "utf8")
 
 /**
@@ -579,6 +584,7 @@ describe("semantic tokens only", () => {
   const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(notAProbe)
     .filter(
       (name) =>
         /\.tsx?$/.test(name) &&
@@ -653,6 +659,7 @@ describe("headings wear a type role", () => {
   const SRC = join(WEB, "src")
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(notAProbe)
     .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
 
   it("covers the source tree", () => {
@@ -789,6 +796,7 @@ describe("content text wears a type role", () => {
   const SRC = join(WEB, "src")
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(notAProbe)
     .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
   // Block comments go first, for the reason the heading sweep drops them:
   // `ActivityPage` explains in a JSX comment, in backticks, why a `<th>` on
@@ -1148,6 +1156,7 @@ describe("checkboxes come from the design foundation", () => {
   const SRC = join(WEB, "src")
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(notAProbe)
     .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
 
   it("covers the source tree", () => {
@@ -1169,6 +1178,7 @@ describe("every column header says what it heads", () => {
   const SRC = join(WEB, "src")
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(notAProbe)
     .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
 
   it("covers the source tree", () => {
@@ -1240,6 +1250,7 @@ describe("buttons come in three variants", () => {
   const RETIRED = ["outline", "secondary", "tertiary", "danger-soft"]
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(notAProbe)
     .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
 
   /**

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -28,6 +28,7 @@ const GLM: CatalogModelSummary = {
   id: "glm-5-3",
   name: "GLM-5.3",
   vendor: "Z.ai",
+  description: "Z.ai's flagship.",
   family: "glm",
   capabilities: CAPABILITIES,
   input_modalities: ["text"],
@@ -57,6 +58,7 @@ const KIMI: CatalogModelSummary = {
   id: "kimi-k2-6",
   name: "Kimi K2.6",
   vendor: "Moonshot AI",
+  description: null,
   family: null,
   capabilities: { ...CAPABILITIES, reasoning: false },
   context_window: 262_144,
@@ -99,7 +101,6 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
 
 const GLM_DETAIL: CatalogModelDetail = {
   ...GLM,
-  description: "Z.ai's flagship.",
   offerings: [
     offering({}),
     offering({
@@ -184,33 +185,34 @@ describe("ModelCatalogPage", () => {
     vi.restoreAllMocks()
   })
 
-  it("lists one row per model with the cheapest offering's price", async () => {
+  it("lists one card per model with the cheapest offering's price and a link to its page", async () => {
     mockApi()
     renderPage(<ModelCatalogPage />)
 
-    // The grid renders its loading row before the rows, so wait on a row.
-    const glm = (await screen.findByText("GLM-5.3")).closest(
-      "tr",
-    ) as HTMLElement
-    // Two providers folded into one row, priced from the cheaper.
-    expect(within(glm).getByText("from $0.50")).toBeInTheDocument()
-    expect(
-      within(glm).getByText(/Z\.ai · 2 providers · up to 200K/),
-    ).toBeInTheDocument()
+    const list = await screen.findByRole("list", { name: "Models" })
+    const glm = within(list).getByRole("link", { name: "Z.ai: GLM-5.3" })
+    expect(glm).toHaveAttribute("href", "/models/glm-5-3")
+    const card = glm.closest("article") as HTMLElement
+    // Two providers folded into one card, priced from the cheaper.
+    expect(within(card).getByText("2 providers")).toBeInTheDocument()
+    expect(within(card).getByText("$0.50/M input tokens")).toBeInTheDocument()
+    expect(within(card).getByText("$2.00/M output tokens")).toBeInTheDocument()
+    expect(within(card).getByText("200K context")).toBeInTheDocument()
+    expect(within(card).getByText("Z.ai's flagship.")).toBeInTheDocument()
     expect(screen.getByText(/2 models across 2 providers/)).toBeInTheDocument()
-    // Nothing selected: the detail column says so instead of guessing.
-    expect(
-      screen.getByText(/Select a model to compare the providers/),
-    ).toBeInTheDocument()
   })
 
   it("narrows the list to the provider the Providers page linked with", async () => {
     mockApi()
     renderPage(<ModelCatalogPage />, "/models?provider=fireworks")
 
-    const table = await screen.findByRole("grid", { name: "Models" })
-    expect(await within(table).findByText("GLM-5.3")).toBeInTheDocument()
-    expect(within(table).queryByText("Kimi K2.6")).toBeNull()
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(
+      within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
+    ).toBeInTheDocument()
+    expect(within(list).queryByText(/Kimi K2.6/)).toBeNull()
+    // The rail says one provider is in force.
+    expect(screen.getByRole("checkbox", { name: "fireworks" })).toBeChecked()
   })
 
   it("searches by vendor", async () => {
@@ -218,213 +220,95 @@ describe("ModelCatalogPage", () => {
     renderPage(<ModelCatalogPage />)
     const user = userEvent.setup()
 
-    await screen.findByText("GLM-5.3")
+    await screen.findByRole("list", { name: "Models" })
     await user.type(
       screen.getByRole("searchbox", { name: "Search models" }),
       "moonshot",
     )
 
-    const table = screen.getByRole("grid", { name: "Models" })
-    expect(within(table).queryByText("GLM-5.3")).toBeNull()
-    expect(within(table).getByText("Kimi K2.6")).toBeInTheDocument()
+    const list = screen.getByRole("list", { name: "Models" })
+    expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
+    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
   })
 
-  it("shows the selected model's offerings, cheapest first, with each price's source", async () => {
-    mockApi()
-    renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-    const panel = await screen.findByRole("complementary", {
-      name: "Model details",
-    })
-    expect(
-      await within(panel).findByRole("heading", { name: "GLM-5.3" }),
-    ).toBeInTheDocument()
-    expect(within(panel).getByText("Z.ai's flagship.")).toBeInTheDocument()
-    // Derived limits carry their rule: the largest any offering serves.
-    expect(within(panel).getByText("up to 200K")).toBeInTheDocument()
-
-    const offerings = within(panel).getByRole("grid", {
-      name: "Offerings of GLM-5.3",
-    })
-    const rows = within(offerings).getAllByRole("row").slice(1)
-    expect(rows).toHaveLength(2)
-    expect(
-      within(rows[0] as HTMLElement).getByText("nebius:zai-org/GLM-5.3"),
-    ).toBeInTheDocument()
-    expect(
-      within(rows[0] as HTMLElement).getByText("CUSTOM"),
-    ).toBeInTheDocument()
-    // A sub-cent rate keeps its digits (otari#700).
-    expect(
-      within(rows[1] as HTMLElement).getByText("$0.075"),
-    ).toBeInTheDocument()
-    expect(
-      within(rows[1] as HTMLElement).getByText("DEFAULT"),
-    ).toBeInTheDocument()
-    // The provider models.dev knows and this deployment does not.
-    expect(within(panel).getByText(/Also served by Groq/)).toBeInTheDocument()
-    // The runnable request names the cheapest offering.
-    const curl = within(panel).getByLabelText("cURL") as HTMLTextAreaElement
-    expect(curl.value).toContain("nebius:zai-org/GLM-5.3")
-  })
-
-  it("links an operator to Model pricing to edit a rate, and nobody else", async () => {
-    mockApi()
-    renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-    const panel = await screen.findByRole("complementary", {
-      name: "Model details",
-    })
-    const links = await within(panel).findAllByRole("link", {
-      name: "Edit rate",
-    })
-    expect(links).toHaveLength(2)
-    expect(links[0]).toHaveAttribute(
-      "href",
-      "/organization/pricing?model=nebius%3Azai-org%2FGLM-5.3",
-    )
-    // Nothing on this page writes a price.
-    expect(within(panel).queryByRole("button", { name: /price/i })).toBeNull()
-  })
-
-  it("points an organization admin at its own rate override, not the deployment's price", async () => {
-    mockApi({
-      context: organizationContext({
-        role: "admin",
-        deployment_operator: false,
-      }),
-    })
-    renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-    const panel = await screen.findByRole("complementary", {
-      name: "Model details",
-    })
-    const links = await within(panel).findAllByRole("link", {
-      name: "Set your rate",
-    })
-    expect(links[0]).toHaveAttribute(
-      "href",
-      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
-    )
-    expect(within(panel).queryByRole("link", { name: "Edit rate" })).toBeNull()
-  })
-
-  it("shows what the organization was charged for an offering beside its sticker price", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      usage_30d: {
-        requests: 42,
-        total_tokens: 1_000_000,
-        cache_read_tokens: 250_000,
-        spend_usd: 0.4,
-        cache_hit_rate: 0.25,
-        effective_price_per_million: 0.4,
-      },
-    })
-    try {
-      renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-      const panel = await screen.findByRole("complementary", {
-        name: "Model details",
-      })
-      const grid = await within(panel).findByRole("grid", {
-        name: "Offerings of GLM-5.3",
-      })
-      expect(
-        within(grid).getByRole("columnheader", { name: "Yours, 30d" }),
-      ).toBeInTheDocument()
-      expect(within(grid).getByText("42 req · cache 25%")).toBeInTheDocument()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
-  it("marks a metered rate that differs from the provider's list price", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      metadata_input_price_per_million: 1,
-      metadata_output_price_per_million: 2.01,
-    })
-    try {
-      renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-      const panel = await screen.findByRole("complementary", {
-        name: "Model details",
-      })
-      await within(panel).findByRole("grid", { name: "Offerings of GLM-5.3" })
-      // Input is metered at half the list price and says so; output is within
-      // rounding of it and does not.
-      expect(within(panel).getByText("list $1.00")).toBeInTheDocument()
-      expect(within(panel).queryByText("list $2.01")).toBeNull()
-      expect(
-        within(panel).getByText(
-          /differs from the price the provider publishes/,
-        ),
-      ).toBeInTheDocument()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
-  it("keeps the catalog read-only for a member", async () => {
-    mockApi({ context: organizationContext({ deployment_operator: false }) })
-    renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-    const panel = await screen.findByRole("complementary", {
-      name: "Model details",
-    })
-    await within(panel).findByRole("grid", { name: "Offerings of GLM-5.3" })
-    expect(within(panel).queryByRole("link", { name: "Edit rate" })).toBeNull()
-    expect(
-      within(panel).queryByRole("link", { name: "Add a provider" }),
-    ).toBeNull()
-  })
-
-  it("opens a model when its row is pressed", async () => {
+  it("narrows by a checkbox in the rail and says how many are in force", async () => {
     mockApi()
     renderPage(<ModelCatalogPage />)
     const user = userEvent.setup()
 
-    await user.click(await screen.findByText("Kimi K2.6"))
+    await screen.findByRole("list", { name: "Models" })
+    // Capabilities is folded until something in it is chosen.
+    await user.click(screen.getByRole("button", { name: "Capabilities" }))
+    await user.click(screen.getByRole("checkbox", { name: "Reasoning" }))
+
+    const list = screen.getByRole("list", { name: "Models" })
+    expect(within(list).queryByText(/Kimi K2.6/)).toBeNull()
+    expect(within(list).getByText(/GLM-5.3/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /^Capabilities\s*1$/ }),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+  })
+
+  it("tabs by what a model produces", async () => {
+    mockApi({
+      catalog: {
+        ...CATALOG,
+        models: [GLM, { ...KIMI, output_modalities: ["image"] }],
+      },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: /^Image/ }))
+
+    const list = screen.getByRole("list", { name: "Models" })
+    expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
+    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+  })
+
+  it("re-reads the list at a comparison size", async () => {
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: /Compare prices at/ }))
+    await user.click(screen.getByRole("radio", { name: "Compare at 200K" }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes("/v1/catalog/models?at_context=200000"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("offers the same rows as a table", async () => {
+    mockApi()
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("radio", { name: "Table" }))
+
+    const grid = await screen.findByRole("grid", { name: "Models" })
+    expect(within(grid).getByText("GLM-5.3")).toBeInTheDocument()
+    expect(within(grid).getByText("from $0.50")).toBeInTheDocument()
+  })
+
+  it("opens a model when its card is pressed", async () => {
+    mockApi()
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole("link", { name: "Moonshot AI: Kimi K2.6" }),
+    )
 
     expect(await screen.findByText("opened a model")).toBeInTheDocument()
-  })
-
-  it("reports a model that does not exist rather than an empty panel", async () => {
-    mockApi()
-    renderPage(<ModelCatalogPage modelId="nope" />, "/models/nope")
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/not found/)
-  })
-
-  it("says why an offering is unpriced when defaults are off", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.includes("/v1/catalog/models/glm-5-3")) {
-        return jsonResponse({
-          ...GLM_DETAIL,
-          offerings: [
-            offering({
-              pricing: null,
-              price_source: null,
-              price_reference: null,
-            }),
-          ],
-        })
-      }
-      if (url.includes("/v1/catalog/models")) {
-        return jsonResponse({ ...CATALOG, default_pricing: false })
-      }
-      if (url.includes("/v1/organizations/me"))
-        return jsonResponse(organizationContext())
-      return jsonResponse([])
-    })
-    renderPage(<ModelCatalogPage modelId="glm-5-3" />, "/models/glm-5-3")
-
-    expect(
-      await screen.findByText(
-        /Default pricing is off, so an offering with no stored rate/,
-      ),
-    ).toBeInTheDocument()
   })
 })

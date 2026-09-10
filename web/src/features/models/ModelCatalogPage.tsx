@@ -1,27 +1,34 @@
+import { Button } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
+import { FiChevronDown } from "react-icons/fi"
 
 import type { CatalogModelSummary } from "@/client"
 import {
+  activeFilterCount,
   CAPABILITY_FILTERS,
+  type CatalogFilters,
   type CatalogSortColumn,
   COMPARE_AT_OPTIONS,
   CONTEXT_OPTIONS,
   compareModels,
+  EMPTY_FILTERS,
   filterModels,
+  INPUT_MODALITIES,
+  MODALITY_LABELS,
+  outputTabs,
   PRICE_OPTIONS,
   PRICING_OPTIONS,
   providerOptions,
   RELEASE_OPTIONS,
+  SORT_OPTIONS,
   SOURCE_OPTIONS,
   vendorOptions,
 } from "@/features/models/catalog"
-import { ModelDetailPanel } from "@/features/models/ModelDetailPanel"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
-import { useCatalog, useCatalogModel } from "@/shared/api/models"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useCatalog } from "@/shared/api/models"
 import {
   DataTable,
   type DataTableColumn,
@@ -29,29 +36,31 @@ import {
 import { TablePagination } from "@/shared/components/data/TablePagination"
 import { EmptyMessage } from "@/shared/components/feedback/EmptyMessage"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
+import { PageLoading } from "@/shared/components/feedback/PageLoading"
+import { Checkbox } from "@/shared/components/forms/Checkbox"
 import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
+import { Badge } from "@/shared/components/indicators/Badge"
 import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { Toolbar } from "@/shared/components/layout/Toolbar"
 import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
+import { Segmented } from "@/shared/components/navigation/Segmented"
+import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import {
   formatContext,
   formatRate,
   formatRelative,
+  formatReleaseDate,
 } from "@/shared/helpers/format"
 import { useUrlValue } from "@/shared/helpers/urlState"
 
-// The catalog, grouped by model.
+// The catalog, grouped by model: a rail of filters on the left, and on the
+// right a search, a sort, a row of tabs by what the model produces, and one
+// card per model. A card is a link to the model's own page, `/models/$modelId`,
+// where its offerings are compared. Below `lg` the rail folds behind a
+// "Filters" button.
 //
-// Two columns at 1:1.75, each static on the page and scrolling on its own
-// (otari-ai#2109, #2112): the list of models on the left, the selected model's
-// offerings on the right. The selection is the route, `/models/$modelId`, so a
-// model is a place somebody can be sent to; below `lg` the columns stack and
-// the one that has something to say is shown.
-//
-// Read-only for every caller. A price is set on Model pricing, which the
-// detail's "Edit rate" link reaches with the selector in hand, so the catalog
-// cannot be used to reprice anything by accident (otari-ai#2095, #2096).
+// Read-only for every caller. A price is set on Model pricing, which the model
+// page's links reach with the selector in hand, so the catalog cannot be used
+// to reprice anything by accident (otari-ai#2095, #2096).
 //
 // `ModelCatalogView` is the page with its navigation handed in; `ModelCatalogPage`
 // binds it to the router. The split lets the same page render ahead of a
@@ -59,13 +68,6 @@ import { useUrlValue } from "@/shared/helpers/urlState"
 // router to link through and no organization to ask about.
 
 const DEFAULT_PAGE_SIZE = 25
-const CAPABILITY_OPTIONS = [
-  { value: "all", label: "Any capability" },
-  ...CAPABILITY_FILTERS.map((entry) => ({
-    value: entry.value,
-    label: entry.label,
-  })),
-]
 
 function SearchInput({
   value,
@@ -90,9 +92,311 @@ function fromRate(value: number | null | undefined): string {
   return value == null ? "—" : `from ${formatRate(value)}`
 }
 
-function columns(atContext: number): DataTableColumn<CatalogModelSummary>[] {
-  // The rate lanes say what size they compare at, since the same offering is a
-  // different price at 8K and at 500K once it is tiered.
+/** A group in the rail: a heading that folds its choices away. */
+function FilterGroup({
+  label,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  label: string
+  /** How many of its choices are in force, shown beside the label. */
+  count: number
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen || count > 0)
+  return (
+    <div className="flex flex-col border-b border-border-subtle py-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex min-h-9 w-full items-center justify-between gap-2 text-left text-sm text-foreground"
+      >
+        <span className="flex items-center gap-2">
+          {label}
+          {count > 0 ? (
+            <span className="text-mono-micro text-muted">{count}</span>
+          ) : null}
+        </span>
+        <FiChevronDown
+          aria-hidden="true"
+          className={`h-4 w-4 shrink-0 text-subtle transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      <div hidden={!open} className="flex flex-col gap-1.5 pb-2">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function toggle(list: string[], value: string, on: boolean): string[] {
+  return on
+    ? [...new Set([...list, value])]
+    : list.filter((entry) => entry !== value)
+}
+
+/** A one-of-many choice in the rail, as a native radio list. */
+function RadioList({
+  name,
+  value,
+  onChange,
+  options,
+}: {
+  name: string
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <div role="radiogroup" aria-label={name} className="flex flex-col gap-1">
+      {options.map((option) => (
+        <label
+          key={option.value}
+          className="flex min-h-8 cursor-pointer items-center gap-2 text-sm text-foreground"
+        >
+          <input
+            type="radio"
+            name={name}
+            value={option.value}
+            checked={value === option.value}
+            onChange={() => onChange(option.value)}
+            className="accent-[var(--color-control-indicator)]"
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  )
+}
+
+function FilterRail({
+  models,
+  filters,
+  onChange,
+  compareAt,
+  onCompareAt,
+}: {
+  models: CatalogModelSummary[]
+  filters: CatalogFilters
+  onChange: (next: CatalogFilters) => void
+  compareAt: string
+  onCompareAt: (value: string) => void
+}) {
+  const set = <K extends keyof CatalogFilters>(
+    key: K,
+    value: CatalogFilters[K],
+  ) => onChange({ ...filters, [key]: value })
+  return (
+    <div className="flex flex-col">
+      <FilterGroup
+        label="Input modalities"
+        count={filters.inputModalities.length}
+        defaultOpen
+      >
+        {INPUT_MODALITIES.map((modality) => (
+          <Checkbox
+            key={modality}
+            isSelected={filters.inputModalities.includes(modality)}
+            onChange={(on) =>
+              set(
+                "inputModalities",
+                toggle(filters.inputModalities, modality, on),
+              )
+            }
+          >
+            {MODALITY_LABELS[modality] ?? modality}
+          </Checkbox>
+        ))}
+      </FilterGroup>
+      <FilterGroup
+        label="Context length"
+        count={filters.minContext > 0 ? 1 : 0}
+      >
+        <RadioList
+          name="Context length"
+          value={String(filters.minContext)}
+          onChange={(value) => set("minContext", Number(value) || 0)}
+          options={CONTEXT_OPTIONS}
+        />
+      </FilterGroup>
+      <FilterGroup label="Prompt pricing" count={filters.maxInput > 0 ? 1 : 0}>
+        <RadioList
+          name="Prompt pricing"
+          value={String(filters.maxInput)}
+          onChange={(value) => set("maxInput", Number(value) || 0)}
+          options={PRICE_OPTIONS}
+        />
+      </FilterGroup>
+      <FilterGroup label="Providers" count={filters.providers.length}>
+        {providerOptions(models).map((option) => (
+          <Checkbox
+            key={option.value}
+            isSelected={filters.providers.includes(option.value)}
+            onChange={(on) =>
+              set("providers", toggle(filters.providers, option.value, on))
+            }
+          >
+            {option.label}
+          </Checkbox>
+        ))}
+      </FilterGroup>
+      <FilterGroup label="Vendors" count={filters.vendors.length}>
+        {vendorOptions(models).map((option) => (
+          <Checkbox
+            key={option.value || "unknown"}
+            isSelected={filters.vendors.includes(option.value)}
+            onChange={(on) =>
+              set("vendors", toggle(filters.vendors, option.value, on))
+            }
+          >
+            {option.label}
+          </Checkbox>
+        ))}
+      </FilterGroup>
+      <FilterGroup label="Capabilities" count={filters.capabilities.length}>
+        {CAPABILITY_FILTERS.map((entry) => (
+          <Checkbox
+            key={entry.value}
+            isSelected={filters.capabilities.includes(entry.value)}
+            onChange={(on) =>
+              set("capabilities", toggle(filters.capabilities, entry.value, on))
+            }
+          >
+            {entry.label}
+          </Checkbox>
+        ))}
+      </FilterGroup>
+      <FilterGroup label="Pricing" count={filters.pricing !== "all" ? 1 : 0}>
+        <RadioList
+          name="Pricing"
+          value={filters.pricing}
+          onChange={(value) => set("pricing", value)}
+          options={PRICING_OPTIONS}
+        />
+      </FilterGroup>
+      <FilterGroup label="Source" count={filters.source !== "all" ? 1 : 0}>
+        <RadioList
+          name="Source"
+          value={filters.source}
+          onChange={(value) => set("source", value)}
+          options={SOURCE_OPTIONS}
+        />
+      </FilterGroup>
+      <FilterGroup
+        label="Model age"
+        count={filters.releasedWithinDays > 0 ? 1 : 0}
+      >
+        <RadioList
+          name="Model age"
+          value={String(filters.releasedWithinDays)}
+          onChange={(value) => set("releasedWithinDays", Number(value) || 0)}
+          options={RELEASE_OPTIONS}
+        />
+      </FilterGroup>
+      <FilterGroup label="Compare prices at" count={compareAt !== "0" ? 1 : 0}>
+        <RadioList
+          name="Compare prices at"
+          value={compareAt}
+          onChange={onCompareAt}
+          options={COMPARE_AT_OPTIONS}
+        />
+      </FilterGroup>
+    </div>
+  )
+}
+
+/** A separator between the facts on a card's last line. */
+function Sep() {
+  return (
+    <span aria-hidden="true" className="text-subtle">
+      |
+    </span>
+  )
+}
+
+function ModelCard({
+  model,
+  publicView,
+  onOpen,
+}: {
+  model: CatalogModelSummary
+  publicView: boolean
+  onOpen: (modelId: string) => void
+}) {
+  const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
+  const titleClass = "text-heading text-link hover:text-link-hover break-words"
+  const providers =
+    model.provider_count === 1
+      ? "1 provider"
+      : `${model.provider_count} providers`
+  return (
+    <article className="flex flex-col gap-2 border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {publicView ? (
+            <a href={publicCatalogHref(model.id)} className={titleClass}>
+              {title}
+            </a>
+          ) : (
+            <Link
+              to="/models/$modelId"
+              params={{ modelId: model.id }}
+              className={titleClass}
+              onClick={(event) => {
+                event.preventDefault()
+                onOpen(model.id)
+              }}
+            >
+              {title}
+            </Link>
+          )}
+          {model.open_weights ? <Badge tone="muted">Open weights</Badge> : null}
+          {model.deprecated ? <Badge tone="warn">Deprecated</Badge> : null}
+        </div>
+        <span className="shrink-0 text-caption">{providers}</span>
+      </div>
+      {model.description ? (
+        <p className="line-clamp-2 text-sm text-muted">{model.description}</p>
+      ) : null}
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
+        <span>by {model.vendor ?? "unknown vendor"}</span>
+        {model.release_date ? (
+          <>
+            <Sep />
+            <span>{formatReleaseDate(model.release_date)}</span>
+          </>
+        ) : null}
+        {model.context_window != null ? (
+          <>
+            <Sep />
+            <span>{formatContext(model.context_window)} context</span>
+          </>
+        ) : null}
+        <Sep />
+        <span className="tabular-nums">
+          {model.min_input_price_per_million == null
+            ? "unpriced"
+            : `${formatRate(model.min_input_price_per_million)}/M input tokens`}
+        </span>
+        {model.min_output_price_per_million != null ? (
+          <>
+            <Sep />
+            <span className="tabular-nums">
+              {formatRate(model.min_output_price_per_million)}/M output tokens
+            </span>
+          </>
+        ) : null}
+      </p>
+    </article>
+  )
+}
+
+function tableColumns(
+  atContext: number,
+): DataTableColumn<CatalogModelSummary>[] {
   const at = atContext ? ` at ${formatContext(atContext)}` : ""
   return [
     {
@@ -108,11 +412,30 @@ function columns(atContext: number): DataTableColumn<CatalogModelSummary>[] {
             {row.provider_count === 1
               ? "1 provider"
               : `${row.provider_count} providers`}
-            {row.context_window != null
-              ? ` · up to ${formatContext(row.context_window)}`
-              : ""}
           </span>
         </div>
+      ),
+    },
+    {
+      id: "context",
+      header: "Context",
+      align: "end",
+      allowsSorting: true,
+      cell: (row) => (
+        <span className="text-mono-caption">
+          {formatContext(row.context_window)}
+        </span>
+      ),
+    },
+    {
+      id: "released",
+      header: "Released",
+      align: "end",
+      allowsSorting: true,
+      cell: (row) => (
+        <span className="text-mono-caption">
+          {formatReleaseDate(row.release_date)}
+        </span>
       ),
     },
     {
@@ -140,59 +463,52 @@ function columns(atContext: number): DataTableColumn<CatalogModelSummary>[] {
   ]
 }
 
+const VIEW_OPTIONS = [
+  { value: "list", label: "List" },
+  { value: "table", label: "Table" },
+]
+
 export function ModelCatalogView({
-  modelId,
   onOpen,
   publicView = false,
   initialProvider = "",
 }: {
-  modelId?: string
-  /** Where a pressed row goes. */
+  /** Where a pressed card goes. */
   onOpen: (modelId: string) => void
   /**
-   * Ahead of a session: no organization to price for, no operator affordance,
-   * and plain hash links because there is no router to link through.
+   * Ahead of a session: no organization to price for, and plain hash links
+   * because there is no router to link through.
    */
   publicView?: boolean
   /** A provider instance to start filtered on. */
   initialProvider?: string
 }) {
-  const organization = useOrganizationContext(!publicView)
-  const isOperator = !publicView && isDeploymentOperator(organization.data)
-  const canOverride = !publicView && canManage(organization.data)
   const [compareAt, setCompareAt] = useState("0")
   const atContext = Number(compareAt) || 0
   const catalog = useCatalog(atContext || null)
-  const selected = useCatalogModel(modelId)
 
-  const [search, setSearch] = useState("")
-  const [vendor, setVendor] = useState("all")
-  const [provider, setProvider] = useState(initialProvider || "all")
-  const [capability, setCapability] = useState("all")
-  const [minContext, setMinContext] = useState("0")
-  const [pricing, setPricing] = useState("all")
-  const [source, setSource] = useState("all")
-  const [maxInput, setMaxInput] = useState("0")
-  const [release, setRelease] = useState("0")
+  const [filters, setFilters] = useState<CatalogFilters>({
+    ...EMPTY_FILTERS,
+    providers: initialProvider ? [initialProvider] : [],
+  })
+  const [sort, setSort] = useState("newest")
+  const [view, setView] = useState("list")
+  const [railOpen, setRailOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [sort, setSort] = useState<{
+  const [tableSort, setTableSort] = useState<{
     column: CatalogSortColumn
     direction: "asc" | "desc"
   }>({ column: "name", direction: "asc" })
 
   const models = catalog.data?.models ?? []
-  const filtered = filterModels(models, {
-    query: search,
-    vendor,
-    provider,
-    capability,
-    minContext: Number(minContext) || 0,
-    pricing,
-    source,
-    maxInput: Number(maxInput) || 0,
-    releasedWithinDays: Number(release) || 0,
-  }).sort(compareModels(sort.column, sort.direction))
+  const sortChoice =
+    SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0]
+  const order =
+    view === "table"
+      ? compareModels(tableSort.column, tableSort.direction)
+      : compareModels(sortChoice.column, sortChoice.direction)
+  const filtered = filterModels(models, filters).sort(order)
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const clampedPage = Math.min(page, pageCount - 1)
   const pageRows = filtered.slice(
@@ -200,20 +516,19 @@ export function ModelCatalogView({
     (clampedPage + 1) * pageSize,
   )
   const providerCount = new Set(models.flatMap((model) => model.providers)).size
+  const activeCount = activeFilterCount(filters)
 
-  const resetPage =
-    <T,>(setter: (value: T) => void) =>
-    (value: T) => {
-      setter(value)
-      setPage(0)
-    }
+  const updateFilters = (next: CatalogFilters) => {
+    setFilters(next)
+    setPage(0)
+  }
 
   const sortDescriptor: SortDescriptor = {
-    column: sort.column,
-    direction: sort.direction === "asc" ? "ascending" : "descending",
+    column: tableSort.column,
+    direction: tableSort.direction === "asc" ? "ascending" : "descending",
   }
   const onSortChange = (descriptor: SortDescriptor) => {
-    setSort({
+    setTableSort({
       column: String(descriptor.column) as CatalogSortColumn,
       direction: descriptor.direction === "ascending" ? "asc" : "desc",
     })
@@ -223,118 +538,162 @@ export function ModelCatalogView({
   const defaultsAsOf = catalog.data?.defaults_as_of
 
   return (
-    <>
-      <PageIntro title="Models">
-        {catalog.data ? (
-          <>
-            {models.length} {models.length === 1 ? "model" : "models"} across{" "}
-            {providerCount} {providerCount === 1 ? "provider" : "providers"}.{" "}
-            {publicView
-              ? "Prices are this deployment's list rates, cheapest offering first."
-              : "Prices are what your organization is charged, cheapest offering first."}{" "}
-            {defaultsAsOf
-              ? `Default rates as of ${formatRelative(defaultsAsOf)}.`
-              : catalog.data.default_pricing
-                ? "Default rates come from the bundled genai-prices dataset."
-                : "Default pricing is off: a model with no stored rate is unpriced."}
-          </>
-        ) : (
-          "Every model this deployment can serve, grouped by model, with each provider's offering and price."
-        )}
-      </PageIntro>
+    <div className="flex flex-col gap-5">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-display">Models</h1>
+        <p className="max-w-[38.75rem] text-sm text-muted">
+          {catalog.data ? (
+            <>
+              {models.length} {models.length === 1 ? "model" : "models"} across{" "}
+              {providerCount} {providerCount === 1 ? "provider" : "providers"}.{" "}
+              {publicView
+                ? "Prices are this deployment's list rates, cheapest offering first."
+                : "Prices are what your organization is charged, cheapest offering first."}{" "}
+              {defaultsAsOf
+                ? `Default rates as of ${formatRelative(defaultsAsOf)}.`
+                : catalog.data.default_pricing
+                  ? "Default rates come from the bundled genai-prices dataset."
+                  : "Default pricing is off: a model with no stored rate is unpriced."}
+            </>
+          ) : (
+            "Every model this deployment can serve, grouped by model, with each provider's offering and price."
+          )}
+        </p>
+      </header>
 
       <ErrorBanner error={catalog.error} />
 
-      {/* Two static columns, each its own scroll region, at 1:1.75. Sticky
-          rather than a fixed-height page, because the shell's <main> is the
-          document's scroll container and a band has no height to fill; pinned
-          to the top with a viewport-bounded height, each column scrolls
-          internally while the page under them stays put. */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.75fr] lg:items-start">
-        <div
-          className={`flex min-w-0 flex-col gap-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-8rem)] lg:overflow-y-auto ${
-            modelId ? "hidden lg:flex" : ""
-          }`}
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">
+        <aside
+          aria-label="Filters"
+          className={`${railOpen ? "flex" : "hidden"} flex-col lg:flex`}
         >
-          <Toolbar>
-            <SearchInput value={search} onChange={resetPage(setSearch)} />
-            <FilterSelect
-              ariaLabel="Filter by provider"
-              value={provider}
-              onChange={resetPage(setProvider)}
-              options={providerOptions(models)}
+          <div className="flex items-center justify-between pb-1">
+            <span className="text-overline">Filters</span>
+            {activeCount > 0 ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => updateFilters(EMPTY_FILTERS)}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
+          <FilterRail
+            models={models}
+            filters={filters}
+            onChange={updateFilters}
+            compareAt={compareAt}
+            onCompareAt={(value) => {
+              setCompareAt(value)
+              setPage(0)
+            }}
+          />
+        </aside>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="otari-toolbar flex flex-wrap items-center gap-2">
+            <div className="min-w-[12rem] flex-1">
+              <SearchInput
+                value={filters.query}
+                onChange={(query) => updateFilters({ ...filters, query })}
+              />
+            </div>
+            {view === "list" ? (
+              <FilterSelect
+                ariaLabel="Sort models"
+                value={sort}
+                onChange={(value) => {
+                  setSort(value)
+                  setPage(0)
+                }}
+                options={SORT_OPTIONS.map(({ value, label }) => ({
+                  value,
+                  label,
+                }))}
+              />
+            ) : null}
+            <Segmented
+              label="View"
+              options={VIEW_OPTIONS}
+              value={view}
+              onChange={setView}
             />
-            <FilterSelect
-              ariaLabel="Filter by vendor"
-              value={vendor}
-              onChange={resetPage(setVendor)}
-              options={vendorOptions(models)}
-            />
-            <FilterSelect
-              ariaLabel="Filter by capability"
-              value={capability}
-              onChange={resetPage(setCapability)}
-              options={CAPABILITY_OPTIONS}
-            />
-            <FilterSelect
-              ariaLabel="Minimum context"
-              value={minContext}
-              onChange={resetPage(setMinContext)}
-              options={CONTEXT_OPTIONS}
-            />
-            <FilterSelect
-              ariaLabel="Filter by pricing"
-              value={pricing}
-              onChange={resetPage(setPricing)}
-              options={PRICING_OPTIONS}
-            />
-            <FilterSelect
-              ariaLabel="Filter by source"
-              value={source}
-              onChange={resetPage(setSource)}
-              options={SOURCE_OPTIONS}
-            />
-            <FilterSelect
-              ariaLabel="Maximum input price"
-              value={maxInput}
-              onChange={resetPage(setMaxInput)}
-              options={PRICE_OPTIONS}
-            />
-            <FilterSelect
-              ariaLabel="Release date"
-              value={release}
-              onChange={resetPage(setRelease)}
-              options={RELEASE_OPTIONS}
-            />
-            <FilterSelect
-              ariaLabel="Compare prices at"
-              value={compareAt}
-              onChange={resetPage(setCompareAt)}
-              options={COMPARE_AT_OPTIONS}
-            />
-          </Toolbar>
-          <TableScrollFrame className="otari-models-table">
-            <DataTable
-              ariaLabel="Models"
-              columns={columns(atContext)}
-              rows={pageRows}
-              getRowKey={(row) => row.id}
-              isLoading={catalog.isPending && !catalog.data}
-              sortDescriptor={sortDescriptor}
-              onSortChange={onSortChange}
-              onRowAction={onOpen}
-              rowClassName={(row) =>
-                row.id === modelId ? "bg-primary-subtle" : undefined
-              }
-              emptyContent={
-                <EmptyMessage>
-                  {models.length === 0
-                    ? "No models yet. Configure a provider, or price a model on Model pricing."
-                    : "No models match these filters."}
-                </EmptyMessage>
-              }
-            />
-          </TableScrollFrame>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="lg:hidden"
+              aria-expanded={railOpen}
+              onPress={() => setRailOpen((prev) => !prev)}
+            >
+              {railOpen
+                ? "Hide filters"
+                : activeCount > 0
+                  ? `Filters (${activeCount})`
+                  : "Filters"}
+            </Button>
+          </div>
+
+          <div className="border-b border-border">
+            <TabRow>
+              {outputTabs(models).map((tab) => (
+                <Tab
+                  key={tab.value}
+                  isActive={filters.output === tab.value}
+                  onPress={() =>
+                    updateFilters({ ...filters, output: tab.value })
+                  }
+                >
+                  {tab.label}{" "}
+                  <span className="text-mono-micro text-subtle">
+                    {tab.count}
+                  </span>
+                </Tab>
+              ))}
+            </TabRow>
+          </div>
+
+          {catalog.isPending && !catalog.data ? (
+            <PageLoading label="Loading models…" />
+          ) : view === "table" ? (
+            <TableScrollFrame className="otari-models-table">
+              <DataTable
+                ariaLabel="Models"
+                columns={tableColumns(atContext)}
+                rows={pageRows}
+                getRowKey={(row) => row.id}
+                sortDescriptor={sortDescriptor}
+                onSortChange={onSortChange}
+                onRowAction={onOpen}
+                emptyContent={
+                  <EmptyMessage>
+                    {models.length === 0
+                      ? "No models yet. Configure a provider, or price a model on Model pricing."
+                      : "No models match these filters."}
+                  </EmptyMessage>
+                }
+              />
+            </TableScrollFrame>
+          ) : pageRows.length === 0 ? (
+            <EmptyMessage minHeightClass="min-h-[12rem]">
+              {models.length === 0
+                ? "No models yet. Configure a provider, or price a model on Model pricing."
+                : "No models match these filters."}
+            </EmptyMessage>
+          ) : (
+            <ul aria-label="Models" className="flex flex-col gap-3">
+              {pageRows.map((model) => (
+                <li key={model.id}>
+                  <ModelCard
+                    model={model}
+                    publicView={publicView}
+                    onOpen={onOpen}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
           <TablePagination
             page={clampedPage}
             pageSize={pageSize}
@@ -347,60 +706,19 @@ export function ModelCatalogView({
             }}
           />
         </div>
-
-        <aside
-          aria-label="Model details"
-          className={`min-w-0 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-8rem)] lg:overflow-y-auto ${
-            modelId ? "" : "hidden lg:block"
-          }`}
-        >
-          {modelId ? (
-            <div className="flex flex-col gap-4">
-              {publicView ? (
-                <a
-                  href={publicCatalogHref()}
-                  className="text-caption text-link hover:text-link-hover lg:hidden"
-                >
-                  ← All models
-                </a>
-              ) : (
-                <Link
-                  to="/models"
-                  className="text-caption text-link hover:text-link-hover lg:hidden"
-                >
-                  ← All models
-                </Link>
-              )}
-              <ModelDetailPanel
-                model={selected.data}
-                isLoading={selected.isPending}
-                error={selected.error}
-                canPrice={isOperator}
-                canOverride={canOverride}
-                publicView={publicView}
-                defaultPricing={catalog.data?.default_pricing}
-              />
-            </div>
-          ) : (
-            <EmptyMessage minHeightClass="min-h-[16rem]">
-              Select a model to compare the providers offering it.
-            </EmptyMessage>
-          )}
-        </aside>
       </div>
-    </>
+    </div>
   )
 }
 
-/** The catalog on the router: a pressed row navigates to `/models/$modelId`. */
-export function ModelCatalogPage({ modelId }: { modelId?: string }) {
+/** The catalog on the router: a pressed card navigates to `/models/$modelId`. */
+export function ModelCatalogPage() {
   const navigate = useNavigate()
   // A provider clicked on the Providers page arrives as ?provider=<instance>,
   // pre-selecting that provider's filter so the list shows only its models.
   const providerParam = useUrlValue("provider")
   return (
     <ModelCatalogView
-      modelId={modelId}
       initialProvider={providerParam}
       onOpen={(id) => {
         void navigate({ to: "/models/$modelId", params: { modelId: id } })

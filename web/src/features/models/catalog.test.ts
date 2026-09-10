@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest"
 
 import type { CatalogModelSummary } from "@/client"
 import {
+  activeFilterCount,
   compareModels,
+  EMPTY_FILTERS,
   filterModels,
+  outputTabs,
   priceSourceLabel,
   providerOptions,
+  ratesAtContext,
   vendorOptions,
 } from "@/features/models/catalog"
 
@@ -86,15 +90,7 @@ const KIMI = model({
 const LOCAL = model({ id: "qwen3-32b", providers: ["home_lab"] })
 
 const ANY = {
-  query: "",
-  vendor: "all",
-  provider: "all",
-  capability: "all",
-  minContext: 0,
-  pricing: "all",
-  source: "all",
-  maxInput: 0,
-  releasedWithinDays: 0,
+  ...EMPTY_FILTERS,
 }
 
 describe("filterModels", () => {
@@ -107,23 +103,25 @@ describe("filterModels", () => {
 
   it("narrows by provider instance, the way the Providers page links here", () => {
     expect(
-      filterModels([GLM, KIMI, LOCAL], { ...ANY, provider: "fireworks" }),
+      filterModels([GLM, KIMI, LOCAL], { ...ANY, providers: ["fireworks"] }),
     ).toEqual([GLM])
     expect(
-      filterModels([GLM, KIMI, LOCAL], { ...ANY, provider: "nebius" }),
+      filterModels([GLM, KIMI, LOCAL], { ...ANY, providers: ["nebius"] }),
     ).toEqual([GLM, KIMI])
   })
 
   it("treats an unknown vendor as its own bucket", () => {
-    expect(filterModels([GLM, LOCAL], { ...ANY, vendor: "" })).toEqual([LOCAL])
+    expect(filterModels([GLM, LOCAL], { ...ANY, vendors: [""] })).toEqual([
+      LOCAL,
+    ])
   })
 
   it("tests a capability against the model's own flags", () => {
-    expect(filterModels([GLM, KIMI], { ...ANY, capability: "vision" })).toEqual(
-      [KIMI],
-    )
     expect(
-      filterModels([GLM, KIMI], { ...ANY, capability: "reasoning" }),
+      filterModels([GLM, KIMI], { ...ANY, inputModalities: ["image"] }),
+    ).toEqual([KIMI])
+    expect(
+      filterModels([GLM, KIMI], { ...ANY, capabilities: ["reasoning"] }),
     ).toEqual([GLM])
   })
 
@@ -221,7 +219,6 @@ describe("compareModels", () => {
 describe("options", () => {
   it("lists vendors with the unknown bucket named", () => {
     expect(vendorOptions([GLM, LOCAL])).toEqual([
-      { value: "all", label: "All vendors" },
       { value: "", label: "Unknown vendor" },
       { value: "Z.ai", label: "Z.ai" },
     ])
@@ -229,10 +226,61 @@ describe("options", () => {
 
   it("lists every provider instance once", () => {
     expect(providerOptions([GLM, KIMI]).map((o) => o.value)).toEqual([
-      "all",
       "fireworks",
       "nebius",
     ])
+  })
+
+  it("tabs the list by what a model produces, every model first", () => {
+    const image = model({ id: "painter", output_modalities: ["image"] })
+    expect(outputTabs([GLM, KIMI, image])).toEqual([
+      { value: "all", label: "All", count: 3 },
+      { value: "text", label: "Text", count: 2 },
+      { value: "image", label: "Image", count: 1 },
+    ])
+    expect(
+      filterModels([GLM, KIMI, image], { ...ANY, output: "image" }),
+    ).toEqual([image])
+  })
+
+  it("counts the choices in force, and not the search or the tab", () => {
+    expect(activeFilterCount(ANY)).toBe(0)
+    expect(
+      activeFilterCount({
+        ...ANY,
+        query: "glm",
+        output: "text",
+        providers: ["nebius", "fireworks"],
+        minContext: 32_000,
+        pricing: "custom",
+      }),
+    ).toBe(4)
+  })
+})
+
+describe("ratesAtContext", () => {
+  const pricing = {
+    input_price_per_million: 0.5,
+    output_price_per_million: 2,
+    cache_read_price_per_million: null,
+    cache_write_price_per_million: null,
+    cache_write_1h_price_per_million: null,
+    pricing_tiers: [
+      { min_input_tokens: 100_000, input_price_per_million: 1 },
+      {
+        min_input_tokens: 500_000,
+        input_price_per_million: 2,
+        output_price_per_million: 4,
+      },
+    ],
+    unit: "tokens",
+  }
+
+  it("takes the highest tier at or below the size, falling back to the base", () => {
+    expect(ratesAtContext(pricing, 0)).toEqual({ input: 0.5, output: 2 })
+    expect(ratesAtContext(pricing, 8_000)).toEqual({ input: 0.5, output: 2 })
+    expect(ratesAtContext(pricing, 200_000)).toEqual({ input: 1, output: 2 })
+    expect(ratesAtContext(pricing, 1_000_000)).toEqual({ input: 2, output: 4 })
   })
 })
 

@@ -201,7 +201,7 @@ def test_without_metadata_the_catalog_still_groups_by_the_id(priced: TestClient,
     by_id = {model["id"]: model for model in body["models"]}
     # ``glm-5p3`` and ``GLM-5.3`` still meet through the id rung.
     assert by_id["glm-5-3"]["offering_count"] == 2
-    assert by_id["glm-5-3"]["description" if "description" in by_id["glm-5-3"] else "name"]
+    assert by_id["glm-5-3"]["name"]
 
 
 def test_the_catalog_requires_a_credential(catalog_client: TestClient) -> None:

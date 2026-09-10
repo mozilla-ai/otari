@@ -2,6 +2,7 @@ import type {
   CatalogCapabilities,
   CatalogModelSummary,
   CatalogOffering,
+  ModelPricingInfo,
 } from "@/client"
 
 // What the list can be narrowed by, and how a row is sorted. Pure, so the page
@@ -35,11 +36,6 @@ export const CAPABILITY_FILTERS: {
   test: (model: CatalogModelSummary) => boolean
 }[] = [
   {
-    value: "vision",
-    label: "Vision",
-    test: (m) => m.input_modalities.includes("image"),
-  },
-  {
     value: "tool_call",
     label: "Tool calling",
     test: (m) => m.capabilities.tool_call,
@@ -55,11 +51,19 @@ export const CAPABILITY_FILTERS: {
     test: (m) => m.capabilities.structured_output,
   },
   {
+    value: "attachment",
+    label: "Attachments",
+    test: (m) => m.capabilities.attachment,
+  },
+  {
     value: "open_weights",
     label: "Open weights",
     test: (m) => m.open_weights,
   },
 ]
+
+/** The input modalities the rail offers, in the order they are listed. */
+export const INPUT_MODALITIES = ["text", "image", "pdf", "audio", "video"]
 
 export const CONTEXT_OPTIONS = [
   { value: "0", label: "Any context" },
@@ -104,8 +108,9 @@ export const RELEASE_OPTIONS = [
 ]
 
 // The request size a price is compared at. Not a filter on the rows but on
-// the numbers: a tiered offering is cheap at 8K and not at 500K, and the list
-// is re-read from the gateway at the chosen size.
+// the numbers: a tiered offering is cheap at 8K and not at 500K. The list is
+// re-read from the gateway at the chosen size; a model page reprices its
+// offerings on the spot from the tiers it already holds.
 export const COMPARE_AT_OPTIONS = [
   { value: "0", label: "Base prices" },
   { value: "8000", label: "Compare at 8K" },
@@ -119,17 +124,50 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface CatalogFilters {
   query: string
-  vendor: string
-  /** A provider instance, as the Providers page links here with; "all" for any. */
-  provider: string
-  capability: string
+  /** An output modality the tab row picks; "all" for every model. */
+  output: string
+  inputModalities: string[]
+  /** Provider instances; empty for any. The Providers page links here with one. */
+  providers: string[]
+  vendors: string[]
+  /** Values of `CAPABILITY_FILTERS`; every one picked must hold. */
+  capabilities: string[]
   minContext: number
-  pricing: string
-  source: string
   /** A ceiling on the cheapest input rate; 0 for none. */
   maxInput: number
+  pricing: string
+  source: string
   /** Days back from `now` a release must fall within; 0 for any. */
   releasedWithinDays: number
+}
+
+export const EMPTY_FILTERS: CatalogFilters = {
+  query: "",
+  output: "all",
+  inputModalities: [],
+  providers: [],
+  vendors: [],
+  capabilities: [],
+  minContext: 0,
+  maxInput: 0,
+  pricing: "all",
+  source: "all",
+  releasedWithinDays: 0,
+}
+
+/** How many narrowing choices are in force, for the rail's toggle to say so. */
+export function activeFilterCount(filters: CatalogFilters): number {
+  return (
+    filters.inputModalities.length +
+    filters.providers.length +
+    filters.vendors.length +
+    filters.capabilities.length +
+    (filters.minContext > 0 ? 1 : 0) +
+    (filters.maxInput > 0 ? 1 : 0) +
+    (filters.pricing !== "all" ? 1 : 0) +
+    (filters.source !== "all" ? 1 : 0) +
+    (filters.releasedWithinDays > 0 ? 1 : 0)
+  )
 }
 
 function pricingMatches(model: CatalogModelSummary, pricing: string): boolean {
@@ -149,14 +187,28 @@ function pricingMatches(model: CatalogModelSummary, pricing: string): boolean {
   }
 }
 
+function matchesQuery(model: CatalogModelSummary, query: string): boolean {
+  // The selectors and instances are searched too: an operator's query is as
+  // often `accounts/fireworks/models/glm-5p3` or `nebius` as it is a name.
+  return (
+    model.name.toLowerCase().includes(query) ||
+    (model.vendor ?? "").toLowerCase().includes(query) ||
+    model.id.includes(query) ||
+    model.selectors.some((selector) =>
+      selector.toLowerCase().includes(query),
+    ) ||
+    model.providers.some((provider) => provider.toLowerCase().includes(query))
+  )
+}
+
 export function filterModels(
   models: CatalogModelSummary[],
   filters: CatalogFilters,
   now: Date = new Date(),
 ): CatalogModelSummary[] {
   const query = filters.query.trim().toLowerCase()
-  const capability = CAPABILITY_FILTERS.find(
-    (entry) => entry.value === filters.capability,
+  const capabilities = CAPABILITY_FILTERS.filter((entry) =>
+    filters.capabilities.includes(entry.value),
   )
   const releasedAfter =
     filters.releasedWithinDays > 0
@@ -165,31 +217,46 @@ export function filterModels(
           .slice(0, 10)
       : null
   return models.filter((model) => {
-    // The selectors and instances are searched too: an operator's query is as
-    // often `accounts/fireworks/models/glm-5p3` or `nebius` as it is a name.
+    if (query && !matchesQuery(model, query)) return false
     if (
-      query &&
-      !model.name.toLowerCase().includes(query) &&
-      !(model.vendor ?? "").toLowerCase().includes(query) &&
-      !model.id.includes(query) &&
-      !model.selectors.some((selector) =>
-        selector.toLowerCase().includes(query),
-      ) &&
-      !model.providers.some((provider) =>
-        provider.toLowerCase().includes(query),
+      filters.output !== "all" &&
+      !model.output_modalities.includes(filters.output)
+    ) {
+      return false
+    }
+    if (
+      filters.inputModalities.length > 0 &&
+      !filters.inputModalities.every((modality) =>
+        model.input_modalities.includes(modality),
       )
     ) {
       return false
     }
-    if (!pricingMatches(model, filters.pricing)) {
+    if (
+      filters.vendors.length > 0 &&
+      !filters.vendors.includes(model.vendor ?? "")
+    ) {
       return false
     }
-    if (filters.source === "discovered" && !model.discovered) {
+    if (
+      filters.providers.length > 0 &&
+      !filters.providers.some((provider) => model.providers.includes(provider))
+    ) {
       return false
     }
-    if (filters.source === "custom" && model.discovered) {
+    if (!capabilities.every((capability) => capability.test(model))) {
       return false
     }
+    if (
+      filters.minContext > 0 &&
+      (model.context_window == null ||
+        model.context_window < filters.minContext)
+    ) {
+      return false
+    }
+    if (!pricingMatches(model, filters.pricing)) return false
+    if (filters.source === "discovered" && !model.discovered) return false
+    if (filters.source === "custom" && model.discovered) return false
     if (
       filters.maxInput > 0 &&
       (model.min_input_price_per_million == null ||
@@ -203,30 +270,17 @@ export function filterModels(
     ) {
       return false
     }
-    if (filters.vendor !== "all" && (model.vendor ?? "") !== filters.vendor) {
-      return false
-    }
-    if (
-      filters.provider !== "all" &&
-      !model.providers.includes(filters.provider)
-    ) {
-      return false
-    }
-    if (capability && !capability.test(model)) {
-      return false
-    }
-    if (
-      filters.minContext > 0 &&
-      (model.context_window == null ||
-        model.context_window < filters.minContext)
-    ) {
-      return false
-    }
     return true
   })
 }
 
-export type CatalogSortColumn = "name" | "released" | "input" | "output"
+export type CatalogSortColumn =
+  | "name"
+  | "released"
+  | "input"
+  | "output"
+  | "context"
+  | "providers"
 
 // Unpriced or undated rows sort last whichever way the column goes, and ties
 // fall back to the name so the order never depends on how the rows arrived.
@@ -243,7 +297,9 @@ export function compareModels(
   const pick = (model: CatalogModelSummary): number | string | null => {
     if (column === "released") return model.release_date ?? null
     if (column === "input") return model.min_input_price_per_million ?? null
-    return model.min_output_price_per_million ?? null
+    if (column === "output") return model.min_output_price_per_million ?? null
+    if (column === "context") return model.context_window ?? null
+    return model.provider_count
   }
   return (a, b) => {
     const av = pick(a)
@@ -256,36 +312,84 @@ export function compareModels(
   }
 }
 
-/** The distinct vendors in a catalog, for the filter, unknown ones folded to "". */
-export function vendorOptions(
+/** The sort menu's choices, each a column and a direction. */
+export const SORT_OPTIONS: {
+  value: string
+  label: string
+  column: CatalogSortColumn
+  direction: "asc" | "desc"
+}[] = [
+  { value: "newest", label: "Newest", column: "released", direction: "desc" },
+  { value: "name", label: "Name", column: "name", direction: "asc" },
+  {
+    value: "price-asc",
+    label: "Price: low to high",
+    column: "input",
+    direction: "asc",
+  },
+  {
+    value: "price-desc",
+    label: "Price: high to low",
+    column: "input",
+    direction: "desc",
+  },
+  {
+    value: "context",
+    label: "Context: high to low",
+    column: "context",
+    direction: "desc",
+  },
+  {
+    value: "providers",
+    label: "Most providers",
+    column: "providers",
+    direction: "desc",
+  },
+]
+
+/** The tab row across the top: every model, then one tab per output modality served. */
+export function outputTabs(
   models: CatalogModelSummary[],
-): { value: string; label: string }[] {
-  const names = Array.from(
-    new Set(models.map((model) => model.vendor ?? "")),
-  ).sort((a, b) => a.localeCompare(b))
+): { value: string; label: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const model of models) {
+    for (const modality of model.output_modalities) {
+      counts.set(modality, (counts.get(modality) ?? 0) + 1)
+    }
+  }
+  const order = ["text", "image", "audio", "video", "pdf"]
+  const known = order.filter((m) => counts.has(m))
+  const rest = [...counts.keys()].filter((m) => !order.includes(m)).sort()
   return [
-    { value: "all", label: "All vendors" },
-    ...names.map((name) => ({
-      value: name,
-      label: name === "" ? "Unknown vendor" : name,
+    { value: "all", label: "All", count: models.length },
+    ...[...known, ...rest].map((modality) => ({
+      value: modality,
+      label: MODALITY_LABELS[modality] ?? modality,
+      count: counts.get(modality) ?? 0,
     })),
   ]
 }
 
-/** The distinct provider instances across a catalog, for the filter. */
+/** Vendors present, with the unknown bucket named, for the rail. */
+export function vendorOptions(
+  models: CatalogModelSummary[],
+): { value: string; label: string }[] {
+  const vendors = new Set(models.map((model) => model.vendor ?? ""))
+  return [...vendors]
+    .sort((a, b) => a.localeCompare(b))
+    .map((vendor) => ({ value: vendor, label: vendor || "Unknown vendor" }))
+}
+
+/** Provider instances present, once each, for the rail. */
 export function providerOptions(
   models: CatalogModelSummary[],
 ): { value: string; label: string }[] {
-  const names = Array.from(
-    new Set(models.flatMap((model) => model.providers)),
-  ).sort((a, b) => a.localeCompare(b))
-  return [
-    { value: "all", label: "All providers" },
-    ...names.map((name) => ({ value: name, label: name })),
-  ]
+  const providers = new Set(models.flatMap((model) => model.providers))
+  return [...providers]
+    .sort((a, b) => a.localeCompare(b))
+    .map((provider) => ({ value: provider, label: provider }))
 }
 
-/** What an offering's price rung is called on screen. */
 export function priceSourceLabel(
   source: CatalogOffering["price_source"],
 ): string {
@@ -301,11 +405,17 @@ export function priceSourceLabel(
   }
 }
 
-/** Whose key an offering runs on, as a word. */
 export function credentialLabel(
   credential: CatalogOffering["credential"],
 ): string {
-  return credential === "organization" ? "your key" : "deployment"
+  switch (credential) {
+    case "organization":
+      return "your key"
+    case "hosted":
+      return "hosted"
+    default:
+      return "deployment"
+  }
 }
 
 /**
@@ -318,4 +428,40 @@ export function defaultOffering(
   offerings: CatalogOffering[],
 ): CatalogOffering | undefined {
   return offerings[0]
+}
+
+/**
+ * The input and output rate a request of `atContext` tokens is metered at:
+ * the highest tier at or below it, each rate falling back to the base where
+ * the tier leaves one unset. The gateway applies the same rule to the list.
+ */
+export function ratesAtContext(
+  pricing: ModelPricingInfo,
+  atContext: number,
+): { input: number; output: number } {
+  const base = {
+    input: pricing.input_price_per_million,
+    output: pricing.output_price_per_million,
+  }
+  if (!atContext) return base
+  const tier = (pricing.pricing_tiers ?? [])
+    .filter(
+      (
+        candidate,
+      ): candidate is { min_input_tokens: number } & Record<string, unknown> =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        typeof (candidate as { min_input_tokens?: unknown })
+          .min_input_tokens === "number" &&
+        (candidate as { min_input_tokens: number }).min_input_tokens <=
+          atContext,
+    )
+    .sort((a, b) => b.min_input_tokens - a.min_input_tokens)[0]
+  if (!tier) return base
+  const input = tier.input_price_per_million
+  const output = tier.output_price_per_million
+  return {
+    input: typeof input === "number" ? input : base.input,
+    output: typeof output === "number" ? output : base.output,
+  }
 }

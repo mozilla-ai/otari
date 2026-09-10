@@ -1,4 +1,5 @@
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
+import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 
@@ -9,7 +10,7 @@ import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 // list rates, and the one action on the page is to sign in.
 //
 // Its own bar rather than `AuthPageShell`'s: that one pins a 520px column for
-// a form, and this page is two columns wide.
+// a form, and these pages are as wide as the dashboard's.
 export function PublicCatalogPage({ modelId }: { modelId?: string }) {
   return (
     <div className="flex min-h-full flex-col">
@@ -27,13 +28,16 @@ export function PublicCatalogPage({ modelId }: { modelId?: string }) {
           This is the deployment's public catalog. Sign in to see the rates your
           organization is charged and to set prices.
         </InfoBanner>
-        <ModelCatalogView
-          modelId={modelId}
-          publicView
-          onOpen={(id) => {
-            window.location.hash = publicCatalogHref(id)
-          }}
-        />
+        {modelId ? (
+          <ModelDetailView modelId={modelId} publicView />
+        ) : (
+          <ModelCatalogView
+            publicView
+            onOpen={(id) => {
+              window.location.hash = publicCatalogHref(id)
+            }}
+          />
+        )}
       </main>
     </div>
   )

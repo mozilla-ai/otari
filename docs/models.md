@@ -202,11 +202,13 @@ where it has one, and for a signed-in caller the organization's last thirty
 days on that offering: requests, cache hit rate, and the effective price per
 million tokens after cache reads and tiers.
 
-The dashboard's Models page is this catalog: the list on the left, the selected
-model's offerings on the right. It is read-only; a deployment rate is set on
-Model pricing, which the offering rows link to for an operator, and an
-organization admin is linked to its own rate override instead. A metered rate
-that differs from the provider's list price is marked with the list price.
+The dashboard's Models page is this catalog: one card per model, with a rail
+of filters beside it, and a page per model with its facts, every offering
+compared in a table, what the organization paid for it, and the request to
+copy. It is read-only; a deployment rate is set on Model pricing, which the
+offering rows link to for an operator, and an organization admin is linked to
+its own rate override instead. A metered rate that differs from the provider's
+list price is marked with the list price.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the

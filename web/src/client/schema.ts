@@ -5439,7 +5439,10 @@ export interface components {
              * @default false
              */
             deprecated: boolean;
-            /** Description */
+            /**
+             * Description
+             * @description models.dev's, from the offering that named the model.
+             */
             description?: string | null;
             /**
              * Discovered
@@ -5526,6 +5529,11 @@ export interface components {
              * @default false
              */
             deprecated: boolean;
+            /**
+             * Description
+             * @description models.dev's, from the offering that named the model.
+             */
+            description?: string | null;
             /**
              * Discovered
              * @description Whether any offering was discovered from its provider.

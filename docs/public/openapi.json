@@ -1884,6 +1884,7 @@
                 "type": "null"
               }
             ],
+            "description": "models.dev's, from the offering that named the model.",
             "title": "Description"
           },
           "discovered": {
@@ -2091,6 +2092,18 @@
             "description": "True only when every offering with metadata says so.",
             "title": "Deprecated",
             "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "models.dev's, from the offering that named the model.",
+            "title": "Description"
           },
           "discovered": {
             "description": "Whether any offering was discovered from its provider.",
