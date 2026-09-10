@@ -264,6 +264,36 @@ describe("FormDialog", () => {
       ).not.toBeInTheDocument()
     })
 
+    it("refuses a keyboard submit while it holds the footer", async () => {
+      // The guard has taken the footer, so the submit control is not on screen.
+      // A keyboard submit under it would run the mutation from a footer whose
+      // only actions are Keep editing and Discard, and `isPending` would never
+      // become visible because the guard owns the footer for its duration.
+      const onSubmit = vi.fn()
+      const user = userEvent.setup()
+      render(
+        <FormDialog {...base} isOpen isDirty onSubmit={onSubmit}>
+          {withField}
+        </FormDialog>,
+      )
+      await user.click(screen.getByRole("button", { name: "Close" }))
+      expect(screen.getByRole("dialog")).toHaveTextContent("Unsaved changes")
+
+      await user.click(screen.getByLabelText("Key name"))
+      await user.keyboard("{Enter}")
+      expect(onSubmit).not.toHaveBeenCalled()
+      await user.keyboard("{Meta>}{Enter}{/Meta}")
+      await user.keyboard("{Control>}{Enter}{/Control}")
+      expect(onSubmit).not.toHaveBeenCalled()
+
+      // And it submits again once the guard is put away, so what is blocked is
+      // the guarded state rather than the gesture.
+      await user.click(screen.getByRole("button", { name: "Keep editing" }))
+      await user.click(screen.getByLabelText("Key name"))
+      await user.keyboard("{Enter}")
+      expect(onSubmit).toHaveBeenCalledTimes(1)
+    })
+
     it("closes on Discard", async () => {
       const onOpenChange = vi.fn()
       const user = userEvent.setup()
@@ -293,6 +323,33 @@ describe("FormDialog", () => {
         "Unsaved changes",
       )
     })
+  })
+
+  it("returns a scrolled body to the top when a request fails", () => {
+    // The banner mounts at the top of the body, which in a scrolled `lg` body
+    // is above the fold: `role="alert"` reaches a screen reader, and a sighted
+    // operator watches the submit finish and sees nothing change.
+    //
+    // jsdom lays nothing out, so `scrollTop` here is only what a test sets. It
+    // still answers the question this covers, which is whether the effect
+    // writes it, and the assertion fails with the effect removed.
+    const { rerender } = render(
+      <FormDialog {...base} isOpen size="lg">
+        {withField}
+      </FormDialog>,
+    )
+    const body = screen
+      .getByRole("dialog")
+      .querySelector("form > div") as HTMLElement
+    body.scrollTop = 240
+    expect(body.scrollTop).toBe(240)
+
+    rerender(
+      <FormDialog {...base} isOpen size="lg" error={new Error("Refused.")}>
+        {withField}
+      </FormDialog>,
+    )
+    expect(body.scrollTop).toBe(0)
   })
 
   it("mounts a request failure at the top of the body, above the fields", () => {
