@@ -370,7 +370,10 @@ export function WorkspaceSwitcher({
           unkeyed mount leaves the next open spinning, its Cancel and Close
           disabled. */}
       <CreateWorkspaceForm
-        key={creatingCount}
+        // Namespaced, not the bare counter: the two forms are siblings and both
+        // counters start at 0, so bare numbers collide on every open where they
+        // match and React resolves its sibling key map last-write-wins.
+        key={`workspace-${creatingCount}`}
         isOpen={creating}
         onClose={() => setCreating(false)}
         // Creating from the scope switcher is a request to work in the new
@@ -389,7 +392,7 @@ export function WorkspaceSwitcher({
         hold={createHold}
       />
       <CreateOrganizationForm
-        key={creatingOrganizationCount}
+        key={`organization-${creatingOrganizationCount}`}
         isOpen={creatingOrganization}
         onClose={() => setCreatingOrganization(false)}
       />

@@ -37,7 +37,10 @@ export function CreateOrganizationForm({
       }}
       // One field, which is what `sm` is for.
       size="sm"
-      title="New organization"
+      // The state, once there is one: nothing is left to create, and the frame
+      // saying "New organization" over a created one is the last thing still
+      // claiming nothing happened. Same shape as the keys page's secret step.
+      title={created ? "Organization created" : "New organization"}
       submitLabel={created ? "Switch to organization" : "Create organization"}
       onSubmit={() => {
         if (created) {
@@ -61,18 +64,27 @@ export function CreateOrganizationForm({
       isDirty={created === null && trimmed !== ""}
       error={create.error ?? switchTo.error}
     >
-      <Field
-        label="Name"
-        value={name}
-        onChange={setName}
-        placeholder="Research"
-        isRequired
-        autoFocus
-        // Editing it after the create would change nothing the retry sends.
-        isDisabled={created !== null}
-        description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
-        reserveMessage
-      />
+      {created ? (
+        // The success step swaps the children as well as the label: a form that
+        // still looks unsubmitted reads as "nothing happened", and the operator
+        // closes it and creates the organization a second time. The field is
+        // gone rather than disabled, and so is its description, which describes
+        // a create that has already happened.
+        <p className="text-body">
+          {created.name} was created. Switching into it failed.
+        </p>
+      ) : (
+        <Field
+          label="Name"
+          value={name}
+          onChange={setName}
+          placeholder="Research"
+          isRequired
+          autoFocus
+          description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
+          reserveMessage
+        />
+      )}
     </FormDialog>
   )
 }

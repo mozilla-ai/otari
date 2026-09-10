@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -204,6 +204,61 @@ describe("WorkspacesPage", () => {
       await screen.findByRole("button", { name: "Create workspace" }),
     )
     expect(screen.getByLabelText("Name")).toHaveValue("")
+  })
+
+  it("keeps the empty state under the dialog, so focus has somewhere to return", async () => {
+    // The empty state used to unmount while the form was open, which was right
+    // for a band on the page and wrong for a dialog over it: it takes away the
+    // node react-aria stored, and closing drops focus to `<body>` where the
+    // next Tab starts at the top of the document.
+    mockApi({ workspaces: [] })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    const trigger = await screen.findByRole("button", {
+      name: "Create a workspace",
+    })
+    await user.click(trigger)
+    await screen.findByRole("dialog", { name: "New workspace" })
+
+    expect(screen.getByText("No workspaces yet")).toBeInTheDocument()
+    // Nothing typed, so Escape closes rather than arming the guard.
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("guards a chosen default budget on the way out, with nothing typed", async () => {
+    // The guard reads one snapshot of the whole draft, so it sees the fields
+    // nobody remembered to list. It used to read the name and the description
+    // only: pick a budget, press Escape, and the choice went with no warning.
+    mockApi({
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Default member budget/ }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: /Team standard/ }),
+    )
+
+    // Through Cancel rather than Escape: in jsdom focus lands on `<body>` after
+    // picking from a `Select`, so a keystroke reaches nothing.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+    // Behind the guard rather than gone, so Keep editing returns to the choice.
+    await user.click(screen.getByRole("button", { name: "Keep editing" }))
+    expect(
+      screen.getByRole("button", { name: /Default member budget/ }),
+    ).toHaveTextContent("Team standard")
   })
 
   it("puts a refused create on the name that caused it, not in a banner", async () => {

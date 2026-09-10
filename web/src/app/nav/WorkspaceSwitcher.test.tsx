@@ -491,6 +491,29 @@ describe("the workspace half of the scope switcher", () => {
         name: /^Switch workspace, currently Staging/,
       }),
     ).toBeInTheDocument()
+
+    // And the next open is usable. This is the path that leaves `holding` set:
+    // the create navigated, so nothing unmounted the form and nothing cleared
+    // the flag, and an unkeyed mount reopens spinning with its Cancel and Close
+    // disabled and no way out. The remount on the way in is what clears it.
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch workspace/ }),
+    )
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Create workspace",
+      }),
+    )
+    const reopened = await screen.findByRole("dialog", {
+      name: "New workspace",
+    })
+    expect(reopened.querySelector("form")).not.toHaveAttribute(
+      "aria-busy",
+      "true",
+    )
+    expect(
+      within(reopened).getByRole("button", { name: "Cancel" }),
+    ).toBeEnabled()
   })
 
   it("cannot be dismissed mid-create, so the entry it promised happens", async () => {
