@@ -433,7 +433,11 @@ function CreateKeyDialog({
 }) {
   const create = useCreateKey()
   // `/users` is operator-only; a member's form has no owner picker to feed.
-  const users = useUsers(isDeploymentWide)
+  // Gated on `isOpen` as well, because this dialog stays mounted while closed so
+  // it can animate out, and `fetchAllUsers` walks up to 100 pages of 1000: left
+  // on the deployment alone it ran that walk on every visit to the page. The
+  // query's own `staleTime` makes a reopen free.
+  const users = useUsers(isDeploymentWide && isOpen)
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")

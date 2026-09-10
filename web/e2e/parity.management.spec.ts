@@ -2,6 +2,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 
 import {
   dismissComboBox,
+  dismissComboBoxInDialog,
   gotoRoute,
   login,
   nav,
@@ -147,10 +148,7 @@ test.describe("api keys", () => {
     // anonymous virtual users an omitted id would.
     const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
     await ownerBox.fill(PARITY.users.heavy)
-    // A bare Escape rather than `dismissComboBox`: that helper follows the key
-    // with a `blur()`, and a modal contains focus, so it lands back on the box
-    // and the box re-opens on focus. Escape alone puts the popover away.
-    await page.keyboard.press("Escape")
+    await dismissComboBoxInDialog(ownerBox)
     await dialog.getByRole("button", { name: "Create key" }).click()
 
     // The secret is shown exactly once, behind an acknowledgement that is the

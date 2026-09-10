@@ -112,6 +112,13 @@ type CopyFieldProps = {
        * `onRevealChange` and shows what the caller says. Several fields sharing
        * one credential share one of these, so they reveal and conceal together
        * rather than one at a time.
+       *
+       * **A controlled field does not re-conceal on a new value.** Uncontrolled,
+       * the reveal is keyed to the value it was asked for (see the comment on
+       * `revealedValue` below), so a rotation arriving into a revealed field
+       * conceals itself. A controlled caller owns that instead: conceal on a
+       * value change, or the replacement is on screen without anyone having
+       * asked to see it.
        */
       isRevealed?: boolean
       /** The toggle's press, for a controlled field. */

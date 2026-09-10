@@ -219,6 +219,87 @@ describe("FormDialog", () => {
     })
   })
 
+  describe("isSubmitDisabled", () => {
+    it("blocks the button, plain Enter, and Cmd/Ctrl+Enter alike", async () => {
+      // `requestSubmit` does not consult the submit button's `disabled` state,
+      // it only runs constraint validation, so the shortcut reached `onSubmit`
+      // while the button and plain Enter were both refused. Every reason the
+      // button is not pressable has to hold for the keyboard too.
+      const onSubmit = vi.fn()
+      const user = userEvent.setup()
+      render(
+        <FormDialog {...base} isOpen isSubmitDisabled onSubmit={onSubmit}>
+          {withTextArea}
+        </FormDialog>,
+      )
+
+      await user.click(screen.getByRole("button", { name: "Create key" }))
+      expect(onSubmit).not.toHaveBeenCalled()
+
+      await user.click(screen.getByLabelText("Instructions"))
+      await user.keyboard("{Meta>}{Enter}{/Meta}")
+      await user.keyboard("{Control>}{Enter}{/Control}")
+      expect(onSubmit).not.toHaveBeenCalled()
+    })
+
+    it("submits once it is not disabled, so the gate is the prop and not the gesture", async () => {
+      const onSubmit = vi.fn()
+      const user = userEvent.setup()
+      render(
+        <FormDialog {...base} isOpen onSubmit={onSubmit}>
+          {withTextArea}
+        </FormDialog>,
+      )
+
+      await user.click(screen.getByLabelText("Instructions"))
+      await user.keyboard("{Meta>}{Enter}{/Meta}")
+      expect(onSubmit).toHaveBeenCalledTimes(1)
+    })
+
+    it("renders the submit disabled rather than letting a press fail", () => {
+      render(
+        <FormDialog {...base} isOpen isSubmitDisabled>
+          {withField}
+        </FormDialog>,
+      )
+
+      expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled()
+    })
+  })
+
+  describe("isDismissable", () => {
+    it("drops the close control and Cancel together when it is off", () => {
+      // One way out, and the submit is it: the content behind this cannot be
+      // recovered once the frame closes, so a dismiss would lose it.
+      render(
+        <FormDialog {...base} isOpen isDismissable={false}>
+          {withField}
+        </FormDialog>,
+      )
+
+      expect(
+        screen.queryByRole("button", { name: "Close" }),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Cancel" }),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Create key" }),
+      ).toBeInTheDocument()
+    })
+
+    it("offers both when it is on, which is the default", () => {
+      render(
+        <FormDialog {...base} isOpen>
+          {withField}
+        </FormDialog>,
+      )
+
+      expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    })
+  })
+
   describe("the dirty guard", () => {
     it("holds the dialog open and swaps the footer instead of closing", async () => {
       const onOpenChange = vi.fn()

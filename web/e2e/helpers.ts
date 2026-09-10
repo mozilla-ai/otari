@@ -180,6 +180,21 @@ export async function dismissComboBox(box: Locator): Promise<void> {
   await expect(box).not.toHaveAttribute("aria-expanded", "true")
 }
 
+// The same, for a combobox inside a dialog, which is the only difference that
+// matters: a modal contains focus, so the `blur()` above lands straight back on
+// the box and the box re-opens on focus. Escape alone closes the popover.
+//
+// The wait stays, because it is what makes either of these deterministic, and
+// dropping it here is worse than dropping it on a page. If the popover is
+// already closed when the key lands (react-aria closes it on an empty filtered
+// list) the Escape reaches the dialog instead, and a dirty form answers that by
+// arming its unsaved-changes guard, which takes the submit out of the footer.
+// The next lookup then fails on a missing button rather than on the real cause.
+export async function dismissComboBoxInDialog(box: Locator): Promise<void> {
+  await box.press("Escape")
+  await expect(box).not.toHaveAttribute("aria-expanded", "true")
+}
+
 // Pick an option from a FilterSelect. It is a HeroUI Select, so the control is a
 // button that opens a listbox popover: there is no native <select> to
 // `selectOption` on, and the option is named by its visible label. React-aria

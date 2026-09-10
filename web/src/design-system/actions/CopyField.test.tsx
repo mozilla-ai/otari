@@ -326,6 +326,84 @@ describe("CopyField, concealed", () => {
     expect(field).toHaveValue(snippet)
   })
 
+  it("opens revealed on `defaultRevealed`, and keeps the toggle", async () => {
+    const user = userEvent.setup()
+    render(
+      <CopyField
+        label="Secret key"
+        value="gw-shown-at-once"
+        concealed={CONCEALED_SECRET}
+        defaultRevealed
+      />,
+    )
+
+    // Revealed on arrival, which is what the one-time secret step needs, and
+    // still able to conceal: the toggle is the affordance, not the default.
+    expect(screen.getByLabelText("Secret key")).toHaveValue("gw-shown-at-once")
+    await user.click(screen.getByRole("button", { name: "Hide Secret key" }))
+    expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+  })
+
+  it("takes its reveal from the caller when controlled, and reports the press", async () => {
+    const onRevealChange = vi.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <CopyField
+        label="Secret key"
+        value="gw-controlled"
+        concealed={CONCEALED_SECRET}
+        isRevealed={false}
+        onRevealChange={onRevealChange}
+      />,
+    )
+
+    expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+    await user.click(screen.getByRole("button", { name: "Show Secret key" }))
+    // Reported rather than acted on: a controlled field shows what the caller
+    // says, which is what lets several fields on one credential move together.
+    expect(onRevealChange).toHaveBeenCalledWith(true)
+    expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+
+    rerender(
+      <CopyField
+        label="Secret key"
+        value="gw-controlled"
+        concealed={CONCEALED_SECRET}
+        isRevealed
+        onRevealChange={onRevealChange}
+      />,
+    )
+    expect(screen.getByLabelText("Secret key")).toHaveValue("gw-controlled")
+  })
+
+  it("leaves a controlled field revealed across a new value, which is the caller's to conceal", () => {
+    // The counterpart of the uncontrolled case below, and the reason the prop
+    // says so: keyed-to-value re-concealing is what a controlled caller gives
+    // up, so this pins the behavior rather than leaving it to be discovered by
+    // a rotation showing a key nobody asked for.
+    const { rerender } = render(
+      <CopyField
+        label="Secret key"
+        value="gw-first-secret"
+        concealed={CONCEALED_SECRET}
+        isRevealed
+        onRevealChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText("Secret key")).toHaveValue("gw-first-secret")
+
+    rerender(
+      <CopyField
+        label="Secret key"
+        value="gw-second-secret"
+        concealed={CONCEALED_SECRET}
+        isRevealed
+        onRevealChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText("Secret key")).toHaveValue("gw-second-secret")
+  })
+
   it("conceals a second value, rather than inheriting the first one's reveal", async () => {
     const user = userEvent.setup()
     const { rerender } = render(

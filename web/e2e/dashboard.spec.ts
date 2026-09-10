@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 import {
   dismissComboBox,
+  dismissComboBoxInDialog,
   login,
   MASTER_KEY,
   nav,
@@ -183,10 +184,9 @@ test.describe("dashboard core flows", () => {
     await dialog.getByLabel("Name").fill("ci-bot")
     // Owner is required (user-first). Reuse the user created earlier; type it and
     // close the combobox popover so it does not aria-hide the submit button.
-    await dialog
-      .getByPlaceholder("Pick a user, or type a new id…")
-      .fill("alice@example.com")
-    await page.keyboard.press("Escape")
+    const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
+    await ownerBox.fill("alice@example.com")
+    await dismissComboBoxInDialog(ownerBox)
     await dialog.getByRole("button", { name: "Create key" }).click()
 
     // The one-time reveal appears; acknowledge it.
