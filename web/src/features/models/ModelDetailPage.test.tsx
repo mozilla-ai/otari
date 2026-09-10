@@ -211,13 +211,36 @@ describe("ModelDetailPage", () => {
       within(rows[0] as HTMLElement).getByText("DEFAULT"),
     ).toBeInTheDocument()
     expect(
-      within(rows[1] as HTMLElement).getByText("nebius:zai-org/GLM-5.3"),
+      within(rows[1] as HTMLElement).getByText("nebius"),
     ).toBeInTheDocument()
     expect(
       within(rows[1] as HTMLElement).getByText("CUSTOM"),
     ).toBeInTheDocument()
+    // The selector is not a lane; it opens under the row a reader picks.
+    expect(within(offerings).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
     // The provider models.dev knows and this deployment does not.
     expect(screen.getByText(/Also served by Groq/)).toBeInTheDocument()
+  })
+
+  it("opens an offering's selector and request under its row", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="glm-5-3" />)
+    const user = userEvent.setup()
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    await user.click(within(grid).getByText("nebius"))
+
+    expect(
+      await within(grid).findByText("nebius:zai-org/GLM-5.3"),
+    ).toBeInTheDocument()
+    expect(within(grid).getByText("zai-org/GLM-5.3")).toBeInTheDocument()
+    const curl = within(grid).getByLabelText("cURL") as HTMLTextAreaElement
+    expect(curl.value).toContain("nebius:zai-org/GLM-5.3")
+
+    await user.click(within(grid).getByRole("button", { name: "Close" }))
+    expect(within(grid).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
   })
 
   it("hands over the request to copy, naming the cheapest offering", async () => {

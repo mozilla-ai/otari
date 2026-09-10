@@ -1,7 +1,7 @@
 import { Button, Modal } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
@@ -220,31 +220,19 @@ function offeringColumns({
       isRowHeader: true,
       allowsSorting: true,
       cell: ({ offering: row }) => (
-        // Two lines, whatever the selector's length: a Fireworks id would
-        // otherwise wrap to three and set the height of every row. The
-        // selector is cut to the lane with the whole of it on hover and on
-        // the copy.
-        <div className="flex max-w-[16rem] flex-col gap-0.5">
-          <span className="text-body">
-            {row.provider}
-            <span className="text-caption">
-              {" · "}
-              {row.provider_type !== row.provider
-                ? `${row.provider_type} · `
-                : ""}
-              {credentialLabel(row.credential)}
-              {row.quantization ? ` · ${row.quantization}` : ""}
-            </span>
+        // One line: the selector, which is as long as the provider makes it,
+        // opens under the row instead of setting every row's height.
+        <span className="text-body whitespace-nowrap">
+          {row.provider}
+          <span className="text-caption">
+            {" · "}
+            {row.provider_type !== row.provider
+              ? `${row.provider_type} · `
+              : ""}
+            {credentialLabel(row.credential)}
+            {row.quantization ? ` · ${row.quantization}` : ""}
           </span>
-          <CopyableValue value={row.selector} label="selector">
-            <code
-              title={row.selector}
-              className="block max-w-[13rem] truncate text-mono-caption"
-            >
-              {row.selector}
-            </code>
-          </CopyableValue>
-        </div>
+        </span>
       ),
     },
     {
@@ -356,6 +344,93 @@ function offeringColumns({
     })
   }
   return columns
+}
+
+/**
+ * What opens under an offering's row: the string to send and the request that
+ * sends it. The table stays a comparison; the row a reader picks becomes the
+ * integration.
+ */
+function OfferingDetail({
+  offering,
+  publicView,
+  onClose,
+}: {
+  offering: CatalogOffering
+  publicView: boolean
+  onClose: () => void
+}) {
+  const deployment = useDeployment()
+  const baseUrl = resolveSnippetBaseUrl(deployment)
+  const [language, setLanguage] = useState("curl")
+  const modelId = offering.selector.startsWith(`${offering.provider}:`)
+    ? offering.selector.slice(offering.provider.length + 1)
+    : offering.selector
+  const input = {
+    baseUrl: baseUrl ?? "",
+    apiKey: "$OTARI_API_KEY",
+    model: offering.selector,
+  }
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-caption">Selector</dt>
+          <dd>
+            <CopyableValue value={offering.selector} label="selector">
+              <code className="text-mono-caption break-all">
+                {offering.selector}
+              </code>
+            </CopyableValue>
+          </dd>
+          <dt className="text-caption">Provider's id</dt>
+          <dd>
+            <code className="text-mono-caption break-all">{modelId}</code>
+          </dd>
+        </dl>
+        <Button size="sm" variant="ghost" onPress={onClose}>
+          Close
+        </Button>
+      </div>
+      {baseUrl === undefined ? (
+        <p className="text-sm text-muted">
+          This deployment has not published its gateway address, so there is no
+          request to copy yet.
+        </p>
+      ) : (
+        <div className="flex max-w-3xl flex-col gap-2">
+          <TabRow>
+            <Tab
+              isActive={language === "curl"}
+              onPress={() => setLanguage("curl")}
+            >
+              cURL
+            </Tab>
+            <Tab
+              isActive={language === "python"}
+              onPress={() => setLanguage("python")}
+            >
+              Python (OpenAI SDK)
+            </Tab>
+          </TabRow>
+          <CopyField
+            label={language === "curl" ? "cURL" : "Python"}
+            value={
+              language === "curl"
+                ? buildCurlSnippet(input)
+                : buildPythonSnippet(input)
+            }
+            multiline
+          />
+          {publicView ? (
+            <p className="text-caption">
+              Sign in and create a key on API keys to send this.
+            </p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const SECTIONS = [
@@ -504,10 +579,23 @@ export function ModelDetailView({
   const [compareAt, setCompareAt] = useState("0")
   const [quantization, setQuantization] = useState("all")
   const [quickStart, setQuickStart] = useState(initialQuickStart)
+  const [opened, setOpened] = useState<string | null>(null)
   const [sort, setSort] = useState<{
     column: OfferingSortColumn
     direction: "asc" | "desc"
   }>({ column: "input", direction: "asc" })
+  // Stable, as the DataTable asks: it depends on nothing that changes after
+  // the first render, so the row cache holds for the life of the page.
+  const renderDetail = useCallback(
+    (row: OfferingRow) => (
+      <OfferingDetail
+        offering={row.offering}
+        publicView={publicView}
+        onClose={() => setOpened(null)}
+      />
+    ),
+    [publicView],
+  )
 
   if (selected.error) return <ErrorBanner error={selected.error} />
   const model = selected.data
@@ -720,9 +808,10 @@ export function ModelDetailView({
               </h2>
               <p className="max-w-prose text-sm text-muted">
                 Several providers serve the same model. Each row is one
-                offering: the selector to send, what{" "}
-                {publicView ? "this deployment lists it at" : "you pay"}, and
-                where that price comes from. {model.offering_count} on{" "}
+                offering: what{" "}
+                {publicView ? "this deployment lists it at" : "you pay"} and
+                where that price comes from; open a row for the selector to send
+                and the request that sends it. {model.offering_count} on{" "}
                 {model.provider_count}{" "}
                 {model.provider_count === 1 ? "provider" : "providers"},
                 cheapest first.
@@ -758,6 +847,11 @@ export function ModelDetailView({
                   })}
                   rows={rows}
                   getRowKey={(row) => row.offering.selector}
+                  onRowAction={(key) =>
+                    setOpened((current) => (current === key ? null : key))
+                  }
+                  detailKey={opened}
+                  renderDetail={renderDetail}
                   sortDescriptor={sortDescriptor}
                   onSortChange={(descriptor) =>
                     setSort({
@@ -889,13 +983,11 @@ export function ModelDetailView({
               ) : null}
             </div>
             {first ? (
-              <Button
-                variant="ghost"
-                className="w-fit"
-                onPress={() => setQuickStart(true)}
-              >
-                Show the request
-              </Button>
+              <p className="max-w-prose text-sm text-muted">
+                Open an offering above for its selector and a request that sends
+                it. "Use this model" at the top of the page does the same for
+                the cheapest one, with the API key step first.
+              </p>
             ) : (
               <p className="text-sm text-muted">
                 No provider you can use serves this model.
