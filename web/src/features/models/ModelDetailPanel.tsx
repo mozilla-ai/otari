@@ -144,13 +144,17 @@ function offeringColumns({
   canOverride: boolean
   withUsage: boolean
 }): DataTableColumn<CatalogOffering>[] {
+  // Lane order is what a laptop sees without scrolling: the provider and its
+  // selector, then the prices the page exists to compare, then where each came
+  // from. Limits sit past the fold, since a model's limits are mostly the
+  // model's and the header above already says them.
   const columns: DataTableColumn<CatalogOffering>[] = [
     {
       id: "provider",
       header: "Provider",
       isRowHeader: true,
       cell: (row) => (
-        <div className="flex flex-col">
+        <div className="flex max-w-[17rem] flex-col gap-0.5">
           <span className="text-body">{row.provider}</span>
           <span className="text-caption">
             {row.provider_type !== row.provider
@@ -159,36 +163,10 @@ function offeringColumns({
             {credentialLabel(row.credential)}
             {row.quantization ? ` · ${row.quantization}` : ""}
           </span>
+          <CopyableValue value={row.selector} label="selector">
+            <code className="text-mono-caption break-all">{row.selector}</code>
+          </CopyableValue>
         </div>
-      ),
-    },
-    {
-      id: "selector",
-      header: "Selector",
-      cell: (row) => (
-        <CopyableValue value={row.selector} label="selector">
-          <code className="text-mono-caption">{row.selector}</code>
-        </CopyableValue>
-      ),
-    },
-    {
-      id: "context",
-      header: "Context",
-      align: "end",
-      cell: (row) => (
-        <span className="text-mono-caption">
-          {formatContext(row.context_window)}
-        </span>
-      ),
-    },
-    {
-      id: "output",
-      header: "Max out",
-      align: "end",
-      cell: (row) => (
-        <span className="text-mono-caption">
-          {formatContext(row.max_output_tokens)}
-        </span>
       ),
     },
     {
@@ -229,6 +207,17 @@ function offeringColumns({
       cell: (row) => <SourceMark source={row.price_source} />,
     },
   ]
+  columns.push({
+    id: "limits",
+    header: "Context / max out",
+    align: "end",
+    cell: (row) => (
+      <span className="text-mono-caption whitespace-nowrap">
+        {formatContext(row.context_window)} /{" "}
+        {formatContext(row.max_output_tokens)}
+      </span>
+    ),
+  })
   if (withUsage) {
     // What the organization was charged for this offering, after cache reads
     // and tiers: the number that says whether the sticker price is the one
