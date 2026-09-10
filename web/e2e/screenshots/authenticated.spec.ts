@@ -331,3 +331,41 @@ test.describe("organization admin", () => {
     await captureScreenshot(page, "organization-spend-budgets")
   })
 })
+
+test.describe("the keys page's one-time secret", () => {
+  // The dialog at rest, which the matrix above cannot reach: its entries open a
+  // route and capture it, and this is a state the page has to be put into.
+  // Captured on every viewport and both themes like the rest, which is how the
+  // phone gets covered: below 640px the dialog is a full-screen sheet, so the
+  // mobile project is the only place that shape appears at all.
+  test("the create dialog, on the form step", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/keys")
+    await expect(
+      page.getByRole("heading", { name: /keys/i }).first(),
+    ).toBeVisible()
+    // The heading's own action, not the empty state's: the seeded database has
+    // rows, so there is no empty state, and this is the placement the whole
+    // change is about.
+    await page.getByRole("button", { name: "Create key" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByLabel("Name")).toBeVisible()
+    await captureScreenshot(page, "keys-create-dialog")
+  })
+
+  // The same dialog with its disclosure open, which is what makes the body
+  // scroll: header and footer pinned, content moving between them.
+  test("the create dialog, with Advanced open", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/keys")
+    await expect(
+      page.getByRole("heading", { name: /keys/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create key" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: "Advanced" }).click()
+    await expect(dialog.getByText("Restrict this key's models")).toBeVisible()
+    await captureScreenshot(page, "keys-create-dialog-advanced")
+  })
+})
