@@ -334,11 +334,13 @@ export function CopyField({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
+      {/* `gap-2` so a long label and the controls beside it cannot meet: a
+          concealed snippet puts two of them in this row. */}
+      <div className="flex items-center justify-between gap-2">
         <label htmlFor={fieldId} className="text-caption">
           {label}
         </label>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           {/* A snippet's toggle sits in the label row rather than in the field,
               for the reason `action` is barred from the multiline variant at
               all: right padding on a textarea indents every line of it. */}
