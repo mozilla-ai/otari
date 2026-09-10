@@ -252,17 +252,21 @@ test.describe("fallback routing", () => {
     await openNested(page, "Routing", "Policies")
     await expect(pageHeading(page, "Routing")).toBeVisible()
 
-    await page.getByRole("button", { name: "New policy" }).click()
-    await page.getByRole("textbox", { name: /Policy name/ }).fill(POLICY)
+    // `.first()` is the heading's action. An empty routing list also offers
+    // the same words from its empty state, and a press has to name which.
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    // Scoped from here: the dialog's submit says "Create policy" too.
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("textbox", { name: /Policy name/ }).fill(POLICY)
     await fillModelBox(page, /Serves/, "openai:gpt-4o")
 
     // The chain is summoned rather than presented, so naming one model stays a
     // short task; a second candidate is then added to the chain that exists.
-    await page.getByRole("button", { name: /Add a fallback chain/ }).click()
+    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
     await fillModelBox(page, /Fallback 1/, "anthropic:claude-3-5-haiku-latest")
     await page.getByRole("button", { name: "+ Another fallback" }).click()
     await fillModelBox(page, /Fallback 2/, "groq:llama-3.3-70b-versatile")
-    await page.getByRole("button", { name: "Create policy" }).click()
+    await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // The table summarises the chain by its length, so the count is the assertion
     // that both fallbacks were saved and not just the first.

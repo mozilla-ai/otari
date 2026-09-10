@@ -369,3 +369,38 @@ test.describe("the keys page's one-time secret", () => {
     await captureScreenshot(page, "keys-create-dialog-advanced")
   })
 })
+
+test.describe("the routing policy dialog", () => {
+  // The form at rest. The matrix at the top of this file opens routes and
+  // captures them; this is a state the page has to be put into, and on the
+  // mobile project it is also the only place the full-screen sheet appears.
+  test("the create dialog, on the form step", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/routing")
+    await expect(
+      page.getByRole("heading", { name: /routing/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await expect(
+      dialog.getByRole("textbox", { name: /Policy name/ }),
+    ).toBeVisible()
+    await captureScreenshot(page, "routing-create-dialog")
+  })
+
+  // The same dialog once a fallback chain has been summoned, which is the
+  // shortest way to a body taller than the frame: the header and the footer stay
+  // put and the fields scroll between them.
+  test("the create dialog, with a fallback chain", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/routing")
+    await expect(
+      page.getByRole("heading", { name: /routing/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
+    await expect(dialog.getByText("If that fails, try")).toBeVisible()
+    await captureScreenshot(page, "routing-create-dialog-fallback")
+  })
+})
