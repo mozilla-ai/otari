@@ -28,6 +28,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import DashboardSession
 from gateway.models.provider_keys import OrgProviderKey, WorkspaceProviderModelRestriction
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -149,10 +150,10 @@ def _byo_key(
 @pytest.fixture
 def world(client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]) -> _World:
     """Two tenants with different BYO providers, and a priced catalog spanning three."""
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
     for model_key in _ALL_MODELS:
         priced = client.post(
-            "/v1/pricing",
+            f"{API_ROOT}/pricing",
             json={"model_key": model_key, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
             headers=master_key_header,
         )
@@ -215,7 +216,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
 def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
     try:
-        response = client.get("/v1/models")
+        response = client.get(f"{API_ROOT}/models")
         assert response.status_code == status.HTTP_200_OK, response.text
         return {model["id"] for model in response.json()["data"]}
     finally:
@@ -226,7 +227,7 @@ def test_the_master_key_still_sees_every_priced_model(
     client: TestClient, master_key_header: dict[str, str], world: _World
 ) -> None:
     """The control: the deployment credential is not narrowed by anyone's membership."""
-    response = client.get("/v1/models", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
     assert {model["id"] for model in response.json()["data"]} == set(_ALL_MODELS)
 
@@ -294,8 +295,8 @@ def test_a_single_model_read_agrees_with_the_listing(client: TestClient, world: 
     """A model withheld from the listing is 404 by id, never a different answer."""
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     try:
-        assert client.get(f"/v1/models/{_OPENAI_MODEL}").status_code == status.HTTP_200_OK
-        assert client.get(f"/v1/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
+        assert client.get(f"{API_ROOT}/models/{_OPENAI_MODEL}").status_code == status.HTTP_200_OK
+        assert client.get(f"{API_ROOT}/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
     finally:
         client.cookies.clear()
 
@@ -325,7 +326,7 @@ def test_a_foreign_workspaces_alias_names_are_not_listed(
     the name out: the case a filter over targets cannot catch (otari-ai#1969).
     """
     created = client.post(
-        "/v1/aliases",
+        f"{API_ROOT}/aliases",
         json={"name": "acme-confidential-summarizer", "target": _OPENAI_MODEL},
         headers=master_key_header,
     )

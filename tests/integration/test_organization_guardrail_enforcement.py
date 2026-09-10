@@ -21,6 +21,7 @@ import pytest
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
 from gateway.services.secret_box import generate_secret_key
 
 _DEPLOYMENT_URL = "http://anyguardrails:8000"
@@ -79,14 +80,14 @@ class _Guardrails:
 
 def _default_workspace_id(client: TestClient, master_key_header: dict[str, str]) -> str:
     """The workspace an API-key request bills to on a fresh deployment."""
-    listed = client.get("/v1/workspaces", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/workspaces", headers=master_key_header)
     assert listed.status_code == 200
     workspace_id: str = listed.json()["data"][0]["id"]
     return workspace_id
 
 
 def _mandate(client: TestClient, master_key_header: dict[str, str], **entry: Any) -> dict[str, Any]:
-    response = client.post("/v1/organizations/me/guardrails", json=entry, headers=master_key_header)
+    response = client.post(f"{API_ROOT}/organizations/me/guardrails", json=entry, headers=master_key_header)
     assert response.status_code == 201, response.text
     stored: dict[str, Any] = response.json()
     return stored
@@ -112,7 +113,7 @@ def _post(
         return _text_response("served")
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
-        response: httpx.Response = cast(Any, client).post("/v1/messages", json=body, headers=headers)
+        response: httpx.Response = cast(Any, client).post(f"{API_ROOT}/messages", json=body, headers=headers)
     return response
 
 
@@ -166,7 +167,7 @@ def test_an_entry_scoped_to_another_workspace_does_not_reach_this_one(
 ) -> None:
     monkeypatch.setenv("OTARI_GUARDRAILS_URL", _DEPLOYMENT_URL)
     created = client.post(
-        "/v1/workspaces",
+        f"{API_ROOT}/workspaces",
         json={"name": "Elsewhere"},
         headers=master_key_header,
     )
@@ -200,10 +201,10 @@ def test_an_entry_for_every_workspace_reaches_one_created_after_it(
         mode="block",
         applies_to_all_workspaces=True,
     )
-    created = client.post("/v1/workspaces", json={"name": "Fresh"}, headers=master_key_header)
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": "Fresh"}, headers=master_key_header)
     assert created.status_code in (200, 201), created.text
     key = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "fresh-key", "workspace_id": created.json()["id"]},
         headers=master_key_header,
     )
@@ -345,7 +346,7 @@ def test_a_disabled_entry_stops_running_without_being_deleted(
         client, master_key_header, profile="prompt-injection", mode="block", applies_to_all_workspaces=True
     )
     disabled = client.patch(
-        f"/v1/organizations/me/guardrails/{entry['id']}",
+        f"{API_ROOT}/organizations/me/guardrails/{entry['id']}",
         json={"enabled": False},
         headers=master_key_header,
     )

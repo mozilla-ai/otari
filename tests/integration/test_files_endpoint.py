@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import FileObject
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.file_store import LocalDirFileStore
@@ -55,14 +56,14 @@ def _make_completion() -> Any:
 
 
 def test_upload_requires_auth(client: TestClient) -> None:
-    resp = client.post("/v1/files", files={"file": ("a.txt", b"x", "text/plain")})
+    resp = client.post(f"{API_ROOT}/files", files={"file": ("a.txt", b"x", "text/plain")})
     assert resp.status_code == 401
 
 
 def test_upload_empty_file_rejected(
     client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
 ) -> None:
-    resp = client.post("/v1/files", headers=api_key_header, files={"file": ("empty.txt", b"", "text/plain")})
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("empty.txt", b"", "text/plain")})
     assert resp.status_code == 400
 
 
@@ -75,7 +76,7 @@ def test_upload_too_large_rejected(
 ) -> None:
     monkeypatch.setattr(test_config, "files_max_bytes", 16)
     resp = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("big.bin", b"x" * 64, "application/octet-stream")},
     )
@@ -90,24 +91,24 @@ def test_files_are_user_scoped(
 ) -> None:
     # Upload as the first key's user (the shared "default" user: this key was
     # created without an explicit user_id).
-    up = client.post("/v1/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
+    up = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
     file_id = up.json()["id"]
 
     # A key owned by a DIFFERENT user must not see it. File isolation is per-user,
     # not per-key, and keys created without a user_id all share the "default" user
     # (see keys.py / get_or_create_default_user), so give this key its own owner.
     other = client.post(
-        "/v1/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
     )
     # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
     # every header form, including Otari-Key (see api_key_header / deps.py
     # _extract_bearer_token), so reuse the fixture's header name with a Bearer value.
     other_header = {next(iter(api_key_header)): f"Bearer {other.json()['key']}"}
 
-    assert client.get(f"/v1/files/{file_id}", headers=other_header).status_code == 404
-    assert client.get(f"/v1/files/{file_id}/content", headers=other_header).status_code == 404
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=other_header).status_code == 404
+    assert client.get(f"{API_ROOT}/files/{file_id}/content", headers=other_header).status_code == 404
     # Owner still sees it.
-    assert client.get(f"/v1/files/{file_id}", headers=api_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=api_key_header).status_code == 200
 
 
 def test_no_owner_keys_share_default_user_files(
@@ -120,28 +121,28 @@ def test_no_owner_keys_share_default_user_files(
     # "default" user, so they intentionally share files (and budget/usage). This
     # pins that deliberate behavior: no-owner keys are NOT isolated from each other;
     # isolation requires giving keys distinct owners (see test_files_are_user_scoped).
-    up = client.post("/v1/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
+    up = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
     file_id = up.json()["id"]
 
-    sibling = client.post("/v1/keys", json={"key_name": "sibling"}, headers=master_key_header)
+    sibling = client.post(f"{API_ROOT}/keys", json={"key_name": "sibling"}, headers=master_key_header)
     sibling_header = {next(iter(api_key_header)): f"Bearer {sibling.json()['key']}"}
 
-    assert client.get(f"/v1/files/{file_id}", headers=sibling_header).status_code == 200
-    assert client.get(f"/v1/files/{file_id}/content", headers=sibling_header).status_code == 200
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=sibling_header).status_code == 200
+    assert client.get(f"{API_ROOT}/files/{file_id}/content", headers=sibling_header).status_code == 200
 
 
 def test_download_filename_header_is_injection_safe(
     client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
 ) -> None:
     up = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ('ev"il\r\nX-Injected: 1.txt', b"data", "text/plain")},
     )
     assert up.status_code == 200
     file_id = up.json()["id"]
 
-    resp = client.get(f"/v1/files/{file_id}/content", headers=api_key_header)
+    resp = client.get(f"{API_ROOT}/files/{file_id}/content", headers=api_key_header)
     assert resp.status_code == 200
     cd = resp.headers["content-disposition"]
     # No raw CR/LF or unescaped quotes leaked into the header.
@@ -163,7 +164,7 @@ def test_upload_get_list_delete_roundtrip(
     media_type: str,
 ) -> None:
     up = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         data={"purpose": "user_data"},
         files={"file": (filename, payload, media_type)},
@@ -175,11 +176,11 @@ def test_upload_get_list_delete_roundtrip(
     assert obj["bytes"] == len(payload)
     assert obj["filename"] == filename
 
-    got = client.get(f"/v1/files/{file_id}", headers=api_key_header)
+    got = client.get(f"{API_ROOT}/files/{file_id}", headers=api_key_header)
     assert got.status_code == 200
     assert got.json()["id"] == file_id
 
-    content = client.get(f"/v1/files/{file_id}/content", headers=api_key_header)
+    content = client.get(f"{API_ROOT}/files/{file_id}/content", headers=api_key_header)
     assert content.status_code == 200
     assert content.content == payload
     assert content.headers["content-type"].split(";")[0] == media_type
@@ -187,16 +188,16 @@ def test_upload_get_list_delete_roundtrip(
     assert f'filename="{filename}"' in content.headers["content-disposition"]
     assert f"filename*=UTF-8''{filename}" in content.headers["content-disposition"]
 
-    listed = client.get("/v1/files", headers=api_key_header)
+    listed = client.get(f"{API_ROOT}/files", headers=api_key_header)
     assert listed.status_code == 200
     assert any(f["id"] == file_id for f in listed.json()["data"])
 
-    deleted = client.delete(f"/v1/files/{file_id}", headers=api_key_header)
+    deleted = client.delete(f"{API_ROOT}/files/{file_id}", headers=api_key_header)
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
 
     # Gone after delete.
-    assert client.get(f"/v1/files/{file_id}", headers=api_key_header).status_code == 404
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=api_key_header).status_code == 404
 
 
 def test_file_id_extracted_reaches_provider(
@@ -213,7 +214,7 @@ def test_file_id_extracted_reaches_provider(
     monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
 
     up = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("report.txt", b"quarterly numbers", "text/plain")},
     )
@@ -242,7 +243,7 @@ def test_file_id_extracted_reaches_provider(
     }
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
-        resp = client.post("/v1/chat/completions", headers=api_key_header, json=body)
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
 
     assert resp.status_code == 200, resp.text
 
@@ -287,7 +288,7 @@ def test_budget_rejection_skips_normalization(
         ],
     }
 
-    resp = client.post("/v1/chat/completions", headers=api_key_header, json=body)
+    resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
     assert resp.status_code == 403
     assert extracted["called"] is False
 
@@ -306,7 +307,7 @@ def test_native_model_passes_file_through(
     monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fail_extract)
 
     up = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("doc.pdf", b"%PDF-1.4 fake", "application/pdf")},
     )
@@ -326,7 +327,7 @@ def test_native_model_passes_file_through(
     }
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
-        resp = client.post("/v1/chat/completions", headers=api_key_header, json=body)
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
 
     assert resp.status_code == 200, resp.text
     sent = json.dumps(captured["messages"])
@@ -342,7 +343,7 @@ def test_expired_file_returns_404(
 ) -> None:
     """A file past its retention window is no longer served (404)."""
     up = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("a.txt", b"hi", "text/plain")},
     )
@@ -354,8 +355,8 @@ def test_expired_file_returns_404(
     record.expires_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
 
-    assert client.get(f"/v1/files/{file_id}", headers=api_key_header).status_code == 404
-    assert client.get(f"/v1/files/{file_id}/content", headers=api_key_header).status_code == 404
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=api_key_header).status_code == 404
+    assert client.get(f"{API_ROOT}/files/{file_id}/content", headers=api_key_header).status_code == 404
 
 
 def test_vision_describe_side_call_is_billed(
@@ -378,7 +379,7 @@ def test_vision_describe_side_call_is_billed(
 
     # Pricing for the vision model → the side-call has a non-zero cost.
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o-mini",
             "input_price_per_million": 2.5,
@@ -386,7 +387,7 @@ def test_vision_describe_side_call_is_billed(
         },
         headers=master_key_header,
     )
-    client.post("/v1/users", json={"user_id": "vision-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "vision-user"}, headers=master_key_header)
 
     async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
         return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
@@ -407,13 +408,13 @@ def test_vision_describe_side_call_is_billed(
     }
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
-        resp = client.post("/v1/chat/completions", headers=master_key_header, json=body)
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=master_key_header, json=body)
 
     assert resp.status_code == 200, resp.text
     # The caption reached the provider in place of the image block...
     assert "a chart of revenue" in json.dumps(captured["messages"])
     # ...and the describe side-call's cost (1000/1e6*2.5 + 500/1e6*10) was billed.
-    user = client.get("/v1/users/vision-user", headers=master_key_header).json()
+    user = client.get(f"{API_ROOT}/users/vision-user", headers=master_key_header).json()
     assert user["spend"] == pytest.approx(0.0075)
 
 
@@ -424,7 +425,7 @@ def test_files_user_mismatch_rejected_by_default(
 ) -> None:
     """Strict default: a non-master key naming a different 'user' is rejected."""
     resp = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("a.txt", b"hello", "text/plain")},
         data={"user": "someone-else"},
@@ -448,7 +449,7 @@ def test_files_user_mismatch_ignored_when_lenient(
     """
     monkeypatch.setattr(test_config, "reject_user_mismatch", False)
     resp = client.post(
-        "/v1/files",
+        f"{API_ROOT}/files",
         headers=api_key_header,
         files={"file": ("a.txt", b"hello", "text/plain")},
         data={"user": "someone-else"},
@@ -458,6 +459,6 @@ def test_files_user_mismatch_ignored_when_lenient(
 
     # The file is scoped to the key's user, not the mismatched name: listing
     # with the key (which resolves to its own user) returns it.
-    listing = client.get("/v1/files", headers=api_key_header)
+    listing = client.get(f"{API_ROOT}/files", headers=api_key_header)
     assert listing.status_code == 200
     assert any(f["id"] == file_id for f in listing.json()["data"])

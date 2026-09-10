@@ -5,13 +5,15 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 
 def test_list_models_empty(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
     """GET /v1/models returns empty list when no pricing is configured."""
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     data = resp.json()
     assert data["object"] == "list"
@@ -24,7 +26,7 @@ def test_list_models_returns_configured_models(
     model_pricing: dict[str, Any],
 ) -> None:
     """GET /v1/models returns models from the pricing table."""
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     data = resp.json()
     assert data["object"] == "list"
@@ -50,7 +52,7 @@ def test_list_models_deduplicates_effective_entries(
 
     for effective_at, input_price in ((older, 1.0), (newer, 2.0)):
         resp = client.post(
-            "/v1/pricing",
+            f"{API_ROOT}/pricing",
             json={
                 "model_key": model_key,
                 "input_price_per_million": input_price,
@@ -61,7 +63,7 @@ def test_list_models_deduplicates_effective_entries(
         )
         assert resp.status_code == 200
 
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     models = [m for m in resp.json()["data"] if m["id"] == model_key]
     assert len(models) == 1
@@ -73,7 +75,7 @@ def test_list_models_owned_by_from_provider(
 ) -> None:
     """Models owned_by field is derived from the provider prefix."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -82,7 +84,7 @@ def test_list_models_owned_by_from_provider(
         headers=master_key_header,
     )
 
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     models = resp.json()["data"]
     gpt4 = next(m for m in models if m["id"] == "openai:gpt-4o")
@@ -95,7 +97,7 @@ def test_list_models_exposes_cache_pricing(
 ) -> None:
     """Cache read/write rates set via /v1/pricing surface on the model catalog."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-sonnet-4",
             "input_price_per_million": 3.0,
@@ -106,7 +108,7 @@ def test_list_models_exposes_cache_pricing(
         headers=master_key_header,
     )
 
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     model = next(m for m in resp.json()["data"] if m["id"] == "anthropic:claude-sonnet-4")
     assert model["pricing"]["cache_read_price_per_million"] == 0.3
@@ -114,11 +116,11 @@ def test_list_models_exposes_cache_pricing(
 
     # A model priced without cache rates reports them as null, not absent.
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
         headers=master_key_header,
     )
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     gpt4 = next(m for m in resp.json()["data"] if m["id"] == "openai:gpt-4o")
     assert gpt4["pricing"]["cache_read_price_per_million"] is None
     assert gpt4["pricing"]["cache_write_price_per_million"] is None
@@ -131,7 +133,7 @@ def test_get_model_found(
 ) -> None:
     """GET /v1/models/{model_id} returns the model when it exists."""
     model_key = model_pricing["model_key"]
-    resp = client.get(f"/v1/models/{model_key}", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models/{model_key}", headers=master_key_header)
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == model_key
@@ -145,19 +147,19 @@ def test_get_model_not_found(
     master_key_header: dict[str, str],
 ) -> None:
     """GET /v1/models/{model_id} returns 404 for unknown models."""
-    resp = client.get("/v1/models/nonexistent:model", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models/nonexistent:model", headers=master_key_header)
     assert resp.status_code == 404
 
 
 def test_list_models_requires_auth(client: TestClient) -> None:
     """GET /v1/models requires authentication."""
-    resp = client.get("/v1/models")
+    resp = client.get(f"{API_ROOT}/models")
     assert resp.status_code == 401
 
 
 def test_get_model_requires_auth(client: TestClient) -> None:
     """GET /v1/models/{model_id} requires authentication."""
-    resp = client.get("/v1/models/openai:gpt-4o")
+    resp = client.get(f"{API_ROOT}/models/openai:gpt-4o")
     assert resp.status_code == 401
 
 
@@ -166,7 +168,7 @@ def test_list_models_with_api_key(
     api_key_header: dict[str, str],
 ) -> None:
     """GET /v1/models works with API key authentication (not just master key)."""
-    resp = client.get("/v1/models", headers=api_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=api_key_header)
     assert resp.status_code == 200
     assert resp.json()["object"] == "list"
 
@@ -178,7 +180,7 @@ def test_list_models_sorted_by_key(
     """GET /v1/models returns models sorted by model_key."""
     for model_key in ["openai:gpt-4o", "anthropic:claude-3-haiku"]:
         client.post(
-            "/v1/pricing",
+            f"{API_ROOT}/pricing",
             json={
                 "model_key": model_key,
                 "input_price_per_million": 1.0,
@@ -187,7 +189,7 @@ def test_list_models_sorted_by_key(
             headers=master_key_header,
         )
 
-    resp = client.get("/v1/models", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
     assert ids == sorted(ids)

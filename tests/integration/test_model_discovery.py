@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services.model_discovery_service import get_model_cache
 
 from .conftest import build_test_client
@@ -95,7 +95,7 @@ def test_list_models_with_discovery(
             return_value=fake_models,
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -147,7 +147,7 @@ def test_list_models_excludes_env_only_provider(
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", side_effect=fake_alist),
         ):
-            resp = client.get("/v1/models", headers=discovery_master_header)
+            resp = client.get(f"{API_ROOT}/models", headers=discovery_master_header)
     finally:
         client_gen.close()
 
@@ -194,7 +194,7 @@ def test_list_models_includes_keyless_local_provider(
             patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
             patch("gateway.services.model_discovery_service.alist_models", side_effect=fake_alist),
         ):
-            resp = client.get("/v1/models", headers=discovery_master_header)
+            resp = client.get(f"{API_ROOT}/models", headers=discovery_master_header)
     finally:
         client_gen.close()
 
@@ -208,7 +208,7 @@ def test_list_models_discovery_disabled(
     discovery_master_header: dict[str, str],
 ) -> None:
     """When discovery is disabled, only pricing-table models appear."""
-    resp = no_discovery_client.get("/v1/models", headers=discovery_master_header)
+    resp = no_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
     assert resp.status_code == 200
     assert resp.json()["data"] == []
 
@@ -224,7 +224,7 @@ def test_list_models_pricing_enrichment(
 
     # First, set pricing for this model.
     resp = discovery_client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -245,7 +245,7 @@ def test_list_models_pricing_enrichment(
             return_value=fake_models,
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     models = resp.json()["data"]
@@ -275,7 +275,7 @@ def test_list_models_no_pricing_returns_null(
             return_value=fake_models,
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     models = resp.json()["data"]
@@ -290,7 +290,7 @@ def test_list_models_pricing_only_still_appears(
     """Models only in the pricing table still appear even when discovery returns nothing."""
     # Add a pricing-only model (for a provider not in config.providers).
     resp = discovery_client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:legacy-model",
             "input_price_per_million": 1.0,
@@ -311,7 +311,7 @@ def test_list_models_pricing_only_still_appears(
             return_value=[],
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
@@ -329,7 +329,7 @@ def test_list_models_provider_filter(
 
     # Add a pricing entry for a different provider.
     discovery_client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-3-opus",
             "input_price_per_million": 15.0,
@@ -349,7 +349,7 @@ def test_list_models_provider_filter(
             return_value=fake_models,
         ),
     ):
-        resp = discovery_client.get("/v1/models?provider=openai", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models?provider=openai", headers=discovery_master_header)
 
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
@@ -374,7 +374,7 @@ def test_list_models_discovery_error_graceful(
             side_effect=ConnectionError("upstream unreachable"),
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     assert resp.json()["object"] == "list"
@@ -408,7 +408,7 @@ def test_list_models_tolerates_a_provider_without_created(
             return_value=fake_models,
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     by_id = {m["id"]: m for m in resp.json()["data"]}
@@ -428,7 +428,7 @@ def test_get_model_tolerates_a_provider_without_created(
         [Model.construct(id="local-model", object="model", created=None, owned_by="openai")],
     )
 
-    resp = discovery_client.get("/v1/models/openai:local-model", headers=discovery_master_header)
+    resp = discovery_client.get(f"{API_ROOT}/models/openai:local-model", headers=discovery_master_header)
     assert resp.status_code == 200
     assert resp.json()["created"] == 0
 
@@ -446,7 +446,7 @@ def test_get_model_from_discovery_cache(
     cache = get_model_cache()
     cache.set("openai", fake_models)
 
-    resp = discovery_client.get("/v1/models/openai:gpt-4o", headers=discovery_master_header)
+    resp = discovery_client.get(f"{API_ROOT}/models/openai:gpt-4o", headers=discovery_master_header)
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == "openai:gpt-4o"
@@ -459,7 +459,7 @@ def test_get_model_not_found_with_discovery(
 ) -> None:
     """GET /v1/models/{id} returns 404 when not in cache or pricing table."""
     resp = discovery_client.get(
-        "/v1/models/openai:nonexistent-model",
+        f"{API_ROOT}/models/openai:nonexistent-model",
         headers=discovery_master_header,
     )
     assert resp.status_code == 404
@@ -489,7 +489,7 @@ def test_list_models_sorted(
             return_value=fake_models,
         ),
     ):
-        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
@@ -554,7 +554,7 @@ def test_discoverable_reports_each_provider_separately(
             side_effect=_alist_models_per_provider,
         ),
     ):
-        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+        resp = two_provider_client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
 
     assert resp.status_code == 200
     providers = {p["provider"]: p for p in resp.json()["providers"]}
@@ -591,8 +591,8 @@ def test_discoverable_queries_providers_when_discovery_disabled(
             side_effect=_alist_models_per_provider,
         ),
     ):
-        discoverable = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
-        listed = two_provider_client.get("/v1/models", headers=discovery_master_header)
+        discoverable = two_provider_client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
+        listed = two_provider_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     openai_models = next(p for p in discoverable.json()["providers"] if p["provider"] == "openai")
     assert [m["id"] for m in openai_models["models"]] == ["gpt-4o", "gpt-4o-mini"]
@@ -630,7 +630,7 @@ def test_discoverable_falls_back_to_declared_models(
             "gateway.services.model_discovery_service._supports_list_models",
             return_value=False,
         ):
-            resp = client.get("/v1/models/discoverable", headers=discovery_master_header)
+            resp = client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
 
         assert resp.status_code == 200
         provider = resp.json()["providers"][0]
@@ -650,7 +650,7 @@ def test_discoverable_explains_a_provider_that_cannot_list(
         "gateway.services.model_discovery_service._supports_list_models",
         return_value=False,
     ):
-        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+        resp = two_provider_client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
 
     assert resp.status_code == 200
     for provider in resp.json()["providers"]:
@@ -666,7 +666,7 @@ def test_discoverable_requires_master_key(
 ) -> None:
     """A working non-master API key is rejected: errors describe the config."""
     created = two_provider_client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "discoverable-probe"},
         headers=discovery_master_header,
     )
@@ -674,7 +674,7 @@ def test_discoverable_requires_master_key(
     api_key = created.json()["key"]
 
     resp = two_provider_client.get(
-        "/v1/models/discoverable",
+        f"{API_ROOT}/models/discoverable",
         headers={API_KEY_HEADER: f"Bearer {api_key}"},
     )
     # 401 rather than 403: verify_master_key treats a non-master key as
@@ -683,7 +683,9 @@ def test_discoverable_requires_master_key(
 
     # Same key on the caller-facing listing still works, so the 401 is the gate
     # and not a broken key.
-    assert two_provider_client.get("/v1/models", headers={API_KEY_HEADER: f"Bearer {api_key}"}).status_code == 200
+    assert (
+        two_provider_client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: f"Bearer {api_key}"}).status_code == 200
+    )
 
 
 def test_discoverable_is_not_shadowed_by_get_model(
@@ -699,7 +701,7 @@ def test_discoverable_is_not_shadowed_by_get_model(
         "gateway.services.model_discovery_service._supports_list_models",
         return_value=False,
     ):
-        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+        resp = two_provider_client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -728,7 +730,7 @@ def test_provider_health_reports_each_provider(
             side_effect=_alist_models_per_provider,
         ),
     ):
-        resp = two_provider_client.get("/v1/providers/health", headers=discovery_master_header)
+        resp = two_provider_client.get(f"{API_ROOT}/providers/health", headers=discovery_master_header)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -786,7 +788,7 @@ def test_provider_health_flags_a_missing_models_endpoint_instead_of_unreachable(
             side_effect=_alist_models_missing_endpoint,
         ),
     ):
-        resp = two_provider_client.get("/v1/providers/health", headers=discovery_master_header)
+        resp = two_provider_client.get(f"{API_ROOT}/providers/health", headers=discovery_master_header)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -816,7 +818,7 @@ def test_discoverable_flags_a_missing_models_endpoint(
             side_effect=_alist_models_missing_endpoint,
         ),
     ):
-        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+        resp = two_provider_client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
 
     assert resp.status_code == 200
     providers = {p["provider"]: p for p in resp.json()["providers"]}
@@ -854,10 +856,10 @@ def test_provider_health_refresh_forces_a_live_recheck(
         ),
     ):
         # Without refresh, openai is served from the cached healthy listing (not dialed).
-        cached = two_provider_client.get("/v1/providers/health", headers=discovery_master_header)
+        cached = two_provider_client.get(f"{API_ROOT}/providers/health", headers=discovery_master_header)
         # With refresh, the cache is cleared, openai is dialed live, and the outage surfaces.
         refreshed = two_provider_client.get(
-            "/v1/providers/health?refresh=true", headers=discovery_master_header
+            f"{API_ROOT}/providers/health?refresh=true", headers=discovery_master_header
         )
 
     cached_openai = next(p for p in cached.json()["providers"] if p["instance"] == "openai")
@@ -895,7 +897,7 @@ def test_provider_health_refresh_is_debounced_within_the_window(
         ),
     ):
         refreshed = two_provider_client.get(
-            "/v1/providers/health?refresh=true", headers=discovery_master_header
+            f"{API_ROOT}/providers/health?refresh=true", headers=discovery_master_header
         )
 
     # Debounced: the recent healthy listing is served, not a fresh failed dial.
@@ -908,7 +910,7 @@ def test_provider_health_requires_master_key(
     two_provider_client: TestClient,
 ) -> None:
     """The endpoint describes gateway config, so it is master-key gated."""
-    resp = two_provider_client.get("/v1/providers/health")
+    resp = two_provider_client.get(f"{API_ROOT}/providers/health")
     assert resp.status_code in (401, 403)
 
 
@@ -967,7 +969,7 @@ def test_models_read_serves_an_expired_cache_without_dialing(
         "gateway.services.model_discovery_service.alist_models",
         new_callable=AsyncMock,
     ) as mock_alist:
-        resp = cached_discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = cached_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     assert "openai:gpt-4o" in [model["id"] for model in resp.json()["data"]]
@@ -985,7 +987,7 @@ def test_discoverable_read_serves_an_expired_cache_without_dialing(
         "gateway.services.model_discovery_service.alist_models",
         new_callable=AsyncMock,
     ) as mock_alist:
-        resp = cached_discovery_client.get("/v1/models/discoverable", headers=discovery_master_header)
+        resp = cached_discovery_client.get(f"{API_ROOT}/models/discoverable", headers=discovery_master_header)
 
     assert resp.status_code == 200
     provider = resp.json()["providers"][0]
@@ -1015,7 +1017,7 @@ def test_discoverable_refresh_still_dials(
         ) as mock_alist,
     ):
         resp = cached_discovery_client.get(
-            "/v1/models/discoverable?refresh=true", headers=discovery_master_header
+            f"{API_ROOT}/models/discoverable?refresh=true", headers=discovery_master_header
         )
 
     assert resp.status_code == 200
@@ -1034,7 +1036,7 @@ def test_provider_health_read_serves_an_expired_cache_without_dialing(
         "gateway.services.model_discovery_service.alist_models",
         new_callable=AsyncMock,
     ) as mock_alist:
-        resp = cached_discovery_client.get("/v1/providers/health", headers=discovery_master_header)
+        resp = cached_discovery_client.get(f"{API_ROOT}/providers/health", headers=discovery_master_header)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -1082,7 +1084,7 @@ def test_models_read_dials_when_caching_is_disabled(
             return_value=[Model(**_make_openai_model("fresh-model"))],
         ) as mock_alist,
     ):
-        resp = uncached_discovery_client.get("/v1/models", headers=discovery_master_header)
+        resp = uncached_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
 
     assert resp.status_code == 200
     assert "openai:fresh-model" in [model["id"] for model in resp.json()["data"]]
@@ -1107,8 +1109,8 @@ def test_model_detail_agrees_with_the_listing_on_a_stale_entry(
         "gateway.services.model_discovery_service.alist_models",
         new_callable=AsyncMock,
     ) as mock_alist:
-        listed = cached_discovery_client.get("/v1/models", headers=discovery_master_header)
-        detail = cached_discovery_client.get("/v1/models/openai:gpt-4o", headers=discovery_master_header)
+        listed = cached_discovery_client.get(f"{API_ROOT}/models", headers=discovery_master_header)
+        detail = cached_discovery_client.get(f"{API_ROOT}/models/openai:gpt-4o", headers=discovery_master_header)
 
     assert "openai:gpt-4o" in [model["id"] for model in listed.json()["data"]]
     assert detail.status_code == 200
@@ -1135,7 +1137,7 @@ def test_model_detail_does_not_serve_a_cached_failure_as_a_model(
         checked_at=datetime.now(UTC),
     )
 
-    resp = cached_discovery_client.get("/v1/models/openai:never-seen", headers=discovery_master_header)
+    resp = cached_discovery_client.get(f"{API_ROOT}/models/openai:never-seen", headers=discovery_master_header)
 
     # Falls through to the pricing/genai-prices answer rather than inventing a
     # discovered model out of a failed dial.

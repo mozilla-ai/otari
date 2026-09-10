@@ -20,7 +20,7 @@ would be unsatisfiable no matter what the shells did.
 
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 
 # A well-formed but unknown key: its hash reaches the lookup and misses, the
 # closest inference-path analog to an invalid master key (both are
@@ -28,18 +28,18 @@ from gateway.core.config import API_KEY_HEADER
 INVALID_API_KEY = "gw-" + "a" * 60
 
 # The inference path guards on ``verify_api_key``; an unknown key yields 401.
-INFERENCE_ENDPOINT = ("POST", "/v1/chat/completions")
+INFERENCE_ENDPOINT = ("POST", f"{API_ROOT}/chat/completions")
 INFERENCE_BODY = {"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}
 
 # One read endpoint on every standalone control-plane router, each guarded by
 # ``verify_master_key``. Pricing's GET also accepts an API key, so its
 # master-key-only POST stands in for the pricing surface.
 CONTROL_PLANE_ENDPOINTS = [
-    ("GET", "/v1/keys", None),
-    ("GET", "/v1/users", None),
-    ("GET", "/v1/budgets", None),
-    ("GET", "/v1/usage", None),
-    ("POST", "/v1/pricing", {"model_key": "openai:gpt-4o-mini", "input_cost_per_token": 0.0}),
+    ("GET", f"{API_ROOT}/keys", None),
+    ("GET", f"{API_ROOT}/users", None),
+    ("GET", f"{API_ROOT}/budgets", None),
+    ("GET", f"{API_ROOT}/usage", None),
+    ("POST", f"{API_ROOT}/pricing", {"model_key": "openai:gpt-4o-mini", "input_cost_per_token": 0.0}),
 ]
 
 

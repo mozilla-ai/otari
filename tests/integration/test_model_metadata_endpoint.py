@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services import model_catalog_service as mcs
 
 from .conftest import build_test_client
@@ -61,7 +61,7 @@ def test_metadata_enriches_configured_models(postgres_url: str, master_header: d
     client = next(client_gen)
     try:
         with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
-            resp = client.get("/v1/models/metadata", headers=master_header)
+            resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
         body = resp.json()
         assert body["available"] is True
@@ -81,7 +81,7 @@ def test_metadata_unavailable_when_fetch_fails(postgres_url: str, master_header:
     try:
         # A failed fetch degrades to available=false and an empty map.
         with patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)):
-            resp = client.get("/v1/models/metadata", headers=master_header)
+            resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
         body = resp.json()
         assert body["available"] is False
@@ -96,7 +96,7 @@ def test_metadata_disabled_makes_no_fetch(postgres_url: str, master_header: dict
     try:
         fetch_mock = AsyncMock(return_value=CATALOG)
         with patch.object(mcs, "_fetch", new=fetch_mock):
-            resp = client.get("/v1/models/metadata", headers=master_header)
+            resp = client.get(f"{API_ROOT}/models/metadata", headers=master_header)
         assert resp.status_code == 200
         assert resp.json()["available"] is False
         # The outbound call is never made when enrichment is disabled.
@@ -109,7 +109,7 @@ def test_metadata_requires_master_key(postgres_url: str) -> None:
     client_gen = _make_client(_config(postgres_url))
     client = next(client_gen)
     try:
-        resp = client.get("/v1/models/metadata")
+        resp = client.get(f"{API_ROOT}/models/metadata")
         assert resp.status_code in (401, 403)
     finally:
         client_gen.close()

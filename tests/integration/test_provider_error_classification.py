@@ -19,13 +19,14 @@ from gateway.api.routes._pipeline import (
     PROVIDER_ERROR_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
 )
+from gateway.core.config import API_ROOT
 
 _RAW = "raw upstream message SECRET-9f3a"
 
 # The upstream OpenAI rejection for function tools + a non-'none' reasoning_effort.
 _REASONING_TOOLS_MSG = (
     "Function tools with reasoning_effort are not supported for gpt-5.6-sol in "
-    "/v1/chat/completions. To use function tools, use /v1/responses or set "
+    f"{API_ROOT}/chat/completions. To use function tools, use /v1/responses or set "
     "reasoning_effort to 'none'."
 )
 
@@ -76,7 +77,7 @@ def test_chat_classifies_provider_error(
         side_effect=_StatusError(upstream),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -156,7 +157,7 @@ def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(
         side_effect=UnsupportedParameterError("prompt_cache_key", "anthropic"),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "anthropic:claude-3-5-sonnet",
                 "messages": [{"role": "user", "content": "Hi"}],
@@ -180,7 +181,7 @@ def test_chat_unknown_status_stays_generic_502(
         side_effect=_StatusError(500),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -203,7 +204,7 @@ def test_chat_surfaces_reasoning_effort_tools_conflict(
         side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:gpt-5.6-sol", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -227,7 +228,7 @@ def test_responses_surfaces_reasoning_effort_tools_conflict(
         new_callable=AsyncMock,
         side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
     ):
-        response = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert response.status_code == 400
     assert response.json()["detail"] == _REASONING_TOOLS_MSG
@@ -251,7 +252,7 @@ def test_messages_surfaces_reasoning_effort_tools_conflict(
         new_callable=AsyncMock,
         side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
     ):
-        response = client.post("/v1/messages", json=messages_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == 400
     detail = response.json()["detail"]
@@ -275,7 +276,7 @@ def test_responses_classifies_provider_error(
         new_callable=AsyncMock,
         side_effect=_StatusError(upstream),
     ):
-        response = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert response.status_code == expected_status
     assert response.json()["detail"] == expected_detail
@@ -310,7 +311,7 @@ def test_messages_classifies_provider_error(
         new_callable=AsyncMock,
         side_effect=_StatusError(upstream),
     ):
-        response = client.post("/v1/messages", json=messages_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == expected_status
     detail = response.json()["detail"]

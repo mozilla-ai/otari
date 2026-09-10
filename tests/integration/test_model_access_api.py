@@ -10,13 +10,15 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 DENIED = "gemini:gemini-2.5-flash"
 ALLOWED = "openai:gpt-4o"
 
 
 def _make_key(client: TestClient, headers: dict[str, str], allowed_models: Any) -> dict[str, str]:
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "scoped", "allowed_models": allowed_models},
         headers=headers,
     )
@@ -26,7 +28,7 @@ def _make_key(client: TestClient, headers: dict[str, str], allowed_models: Any) 
 
 def _seed_pricing(client: TestClient, headers: dict[str, str], model_key: str) -> None:
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": model_key, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
         headers=headers,
     )
@@ -40,7 +42,7 @@ def test_create_and_get_key_round_trips_allowed_models(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "k", "allowed_models": ["openai:*", "anthropic:claude-3*"]},
         headers=master_key_header,
     )
@@ -48,13 +50,13 @@ def test_create_and_get_key_round_trips_allowed_models(
     key_id = resp.json()["id"]
     assert resp.json()["allowed_models"] == ["openai:*", "anthropic:claude-3*"]
 
-    got = client.get(f"/v1/keys/{key_id}", headers=master_key_header)
+    got = client.get(f"{API_ROOT}/keys/{key_id}", headers=master_key_header)
     assert got.json()["allowed_models"] == ["openai:*", "anthropic:claude-3*"]
 
 
 def test_create_key_rejects_non_canonical_entry(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "bad", "allowed_models": ["gpt-4o"]},
         headers=master_key_header,
     )
@@ -64,22 +66,22 @@ def test_create_key_rejects_non_canonical_entry(client: TestClient, master_key_h
 
 def test_patch_tri_state(client: TestClient, master_key_header: dict[str, str]) -> None:
     key_id = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "t", "allowed_models": ["openai:*"]},
         headers=master_key_header,
     ).json()["id"]
 
     # Absent field: unchanged.
-    client.patch(f"/v1/keys/{key_id}", json={"key_name": "renamed"}, headers=master_key_header)
-    assert client.get(f"/v1/keys/{key_id}", headers=master_key_header).json()["allowed_models"] == ["openai:*"]
+    client.patch(f"{API_ROOT}/keys/{key_id}", json={"key_name": "renamed"}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/keys/{key_id}", headers=master_key_header).json()["allowed_models"] == ["openai:*"]
 
     # Explicit null: clear to unrestricted.
-    client.patch(f"/v1/keys/{key_id}", json={"allowed_models": None}, headers=master_key_header)
-    assert client.get(f"/v1/keys/{key_id}", headers=master_key_header).json()["allowed_models"] is None
+    client.patch(f"{API_ROOT}/keys/{key_id}", json={"allowed_models": None}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/keys/{key_id}", headers=master_key_header).json()["allowed_models"] is None
 
     # Empty list: deny all.
-    client.patch(f"/v1/keys/{key_id}", json={"allowed_models": []}, headers=master_key_header)
-    assert client.get(f"/v1/keys/{key_id}", headers=master_key_header).json()["allowed_models"] == []
+    client.patch(f"{API_ROOT}/keys/{key_id}", json={"allowed_models": []}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/keys/{key_id}", headers=master_key_header).json()["allowed_models"] == []
 
 
 # --- catalog filter --------------------------------------------------------
@@ -90,26 +92,26 @@ def test_list_models_filtered_by_key(client: TestClient, master_key_header: dict
     _seed_pricing(client, master_key_header, DENIED)
     scoped = _make_key(client, master_key_header, ["openai:*"])
 
-    ids = {m["id"] for m in client.get("/v1/models", headers=scoped).json()["data"]}
+    ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=scoped).json()["data"]}
     assert ALLOWED in ids
     assert DENIED not in ids
 
     # Master key sees everything.
-    master_ids = {m["id"] for m in client.get("/v1/models", headers=master_key_header).json()["data"]}
+    master_ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=master_key_header).json()["data"]}
     assert {ALLOWED, DENIED} <= master_ids
 
 
 def test_list_models_empty_for_deny_all(client: TestClient, master_key_header: dict[str, str]) -> None:
     _seed_pricing(client, master_key_header, ALLOWED)
     scoped = _make_key(client, master_key_header, [])
-    assert client.get("/v1/models", headers=scoped).json()["data"] == []
+    assert client.get(f"{API_ROOT}/models", headers=scoped).json()["data"] == []
 
 
 def test_get_model_404_for_denied(client: TestClient, master_key_header: dict[str, str]) -> None:
     _seed_pricing(client, master_key_header, DENIED)
     scoped = _make_key(client, master_key_header, ["openai:*"])
     # 404 (not 403): a denied model is indistinguishable from a missing one.
-    assert client.get(f"/v1/models/{DENIED}", headers=scoped).status_code == 404
+    assert client.get(f"{API_ROOT}/models/{DENIED}", headers=scoped).status_code == 404
 
 
 # --- inference gate --------------------------------------------------------
@@ -118,7 +120,7 @@ def test_get_model_404_for_denied(client: TestClient, master_key_header: dict[st
 def test_chat_403_for_denied_model(client: TestClient, master_key_header: dict[str, str]) -> None:
     scoped = _make_key(client, master_key_header, ["openai:*"])
     resp = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": DENIED, "messages": [{"role": "user", "content": "hi"}]},
         headers=scoped,
     )
@@ -138,7 +140,7 @@ def test_chat_allowed_model_passes_the_gate(client: TestClient, master_key_heade
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": DENIED, "messages": [{"role": "user", "content": "hi"}]},
             headers=scoped,
         )
@@ -149,7 +151,7 @@ def test_chat_allowed_model_passes_the_gate(client: TestClient, master_key_heade
 def test_batches_403_for_denied_model(client: TestClient, master_key_header: dict[str, str]) -> None:
     scoped = _make_key(client, master_key_header, ["openai:*"])
     resp = client.post(
-        "/v1/batches",
+        f"{API_ROOT}/batches",
         json={
             "model": DENIED,
             "requests": [{"custom_id": "1", "body": {"messages": [{"role": "user", "content": "hi"}]}}],
@@ -165,5 +167,5 @@ def test_master_key_never_restricted_on_catalog(
     client: TestClient, master_key_header: dict[str, str], model: str
 ) -> None:
     _seed_pricing(client, master_key_header, model)
-    ids = {m["id"] for m in client.get("/v1/models", headers=master_key_header).json()["data"]}
+    ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=master_key_header).json()["data"]}
     assert model in ids

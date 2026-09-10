@@ -17,6 +17,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import UsageLog, User
 
 
@@ -25,7 +26,7 @@ def _usd(tokens: int, rate_per_million: str) -> Decimal:
     return Decimal(tokens) * Decimal(rate_per_million) / Decimal(1_000_000)
 
 
-_PATH = "/v1/logs"
+_PATH = "/otlp/v1/logs"
 
 
 def _attr(key: str, value: Any) -> dict[str, Any]:
@@ -61,9 +62,9 @@ def _otlp(*records: dict[str, Any]) -> dict[str, Any]:
 
 
 def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: str = "alice") -> dict[str, str]:
-    client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "cc-otlp", "user_id": user_id, "exclude_from_budget": True},
         headers=master_key_header,
     )
@@ -73,7 +74,7 @@ def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: 
 
 def _seed_pricing(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-opus-4-8",
             "input_price_per_million": 15.0,
@@ -147,9 +148,9 @@ def test_otlp_idempotent(client: TestClient, master_key_header: dict[str, str], 
 
 
 def test_otlp_requires_exempt_key(client: TestClient, master_key_header: dict[str, str]) -> None:
-    client.post("/v1/users", json={"user_id": "bob"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "bob"}, headers=master_key_header)
     key = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
         headers=master_key_header,
     ).json()["key"]
@@ -200,7 +201,7 @@ def test_otlp_traces_gen_ai_is_ingested(
     """
     headers = _exempt_key(client, master_key_header)
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -210,7 +211,7 @@ def test_otlp_traces_gen_ai_is_ingested(
         },
         headers=master_key_header,
     )
-    resp = client.post("/v1/traces", json=_otlp_traces(_span_record()), headers=headers)
+    resp = client.post("/otlp/v1/traces", json=_otlp_traces(_span_record()), headers=headers)
     assert resp.status_code == 200, resp.text
 
     row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_gen_ai_1").one()
@@ -253,7 +254,7 @@ def _codex_sse_record(conv: str = "conv-abc", ts: str = "2026-07-23T20:04:22.609
 
 def _seed_codex_pricing(client: TestClient, master_key_header: dict[str, str]) -> None:
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o-mini",
             "input_price_per_million": 0.15,
@@ -400,7 +401,7 @@ def test_otlp_traces_protobuf_roundtrip(
         kv("gen_ai.usage.input_tokens", i=10),
         kv("gen_ai.usage.output_tokens", i=20),
     ])
-    resp = client.post("/v1/traces", content=req.SerializeToString(), headers=headers)
+    resp = client.post("/otlp/v1/traces", content=req.SerializeToString(), headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("application/x-protobuf")
     assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_pb_1").count() == 1
@@ -472,7 +473,7 @@ def test_otlp_gateway_client_name_falls_back_to_otel_source(
     """A client calling itself "gateway" must not masquerade as native traffic."""
     headers = _exempt_key(client, master_key_header)
     span = _span_record(**{"otari.client_name": "gateway", "gen_ai.response.id": "resp_reserved_1"})
-    resp = client.post("/v1/traces", json=_otlp_traces(span), headers=headers)
+    resp = client.post("/otlp/v1/traces", json=_otlp_traces(span), headers=headers)
     assert resp.status_code == 200, resp.text
     row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_reserved_1").one()
     assert row.source == "otel"
@@ -485,7 +486,7 @@ def test_otlp_otari_ai_client_name_falls_back_to_otel_source(
     downgraded to the default source instead of 422-ing the whole export."""
     headers = _exempt_key(client, master_key_header)
     span = _span_record(**{"otari.client_name": "otari-ai:gateway", "gen_ai.response.id": "resp_reserved_2"})
-    resp = client.post("/v1/traces", json=_otlp_traces(span), headers=headers)
+    resp = client.post("/otlp/v1/traces", json=_otlp_traces(span), headers=headers)
     assert resp.status_code == 200, resp.text
     row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_reserved_2").one()
     assert row.source == "otel"

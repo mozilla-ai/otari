@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 
@@ -37,14 +37,14 @@ def _client(tmp_path: Path, **overrides: Any) -> TestClient:
 
 
 def _tools(client: TestClient) -> dict[str, Any]:
-    body = client.get("/v1/tools", headers=AUTH).json()
+    body = client.get(f"{API_ROOT}/tools", headers=AUTH).json()
     assert body["object"] == "list"
     return {tool["id"]: tool for tool in body["data"]}
 
 
 def test_requires_auth(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.get("/v1/tools").status_code == 401
+        assert client.get(f"{API_ROOT}/tools").status_code == 401
 
 
 def test_lists_both_gateway_tools_with_schemas_and_examples(tmp_path: Path) -> None:
@@ -138,6 +138,6 @@ def test_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     this gateway's own configuration does not decide what the caller can call.
     """
     with _hybrid_client(monkeypatch, web_search_url="http://searxng:8080") as client:
-        response = client.get("/v1/tools", headers={"Authorization": "Bearer platform-user-token"})
+        response = client.get(f"{API_ROOT}/tools", headers={"Authorization": "Bearer platform-user-token"})
 
     assert response.status_code == 404, response.text

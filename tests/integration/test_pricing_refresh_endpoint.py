@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.routes import pricing as pricing_route
+from gateway.core.config import API_ROOT
 from gateway.services.pricing_refresh_service import PricingRefreshPreview
 
 
@@ -17,7 +18,7 @@ def test_preview_pricing_refresh_reports_protected_custom_prices(
     """Previewing defaults does not overwrite, and identifies, custom prices."""
 
     configured = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 0.123,
@@ -39,7 +40,7 @@ def test_preview_pricing_refresh_reports_protected_custom_prices(
 
     monkeypatch.setattr(pricing_route, "prepare_price_refresh", preview)
 
-    response = client.post("/v1/pricing/refresh", headers=master_key_header)
+    response = client.post(f"{API_ROOT}/pricing/refresh", headers=master_key_header)
 
     assert response.status_code == 200
     data = response.json()
@@ -57,7 +58,7 @@ def test_confirm_pricing_refresh_requires_pending_preview(
 ) -> None:
     """Confirmation cannot activate data that was never reviewed."""
 
-    response = client.post("/v1/pricing/refresh/confirm", headers=master_key_header)
+    response = client.post(f"{API_ROOT}/pricing/refresh/confirm", headers=master_key_header)
 
     assert response.status_code == 409
 
@@ -68,7 +69,7 @@ def test_reject_pricing_refresh_requires_pending_preview(
 ) -> None:
     """Rejecting cannot mutate state when there is no reviewed snapshot."""
 
-    response = client.post("/v1/pricing/refresh/reject", headers=master_key_header)
+    response = client.post(f"{API_ROOT}/pricing/refresh/reject", headers=master_key_header)
 
     assert response.status_code == 409
 
@@ -76,6 +77,6 @@ def test_reject_pricing_refresh_requires_pending_preview(
 def test_pricing_refresh_requires_master_key(client: TestClient) -> None:
     """Fetching operator-controlled pricing data is master-key-only."""
 
-    response = client.post("/v1/pricing/refresh")
+    response = client.post(f"{API_ROOT}/pricing/refresh")
 
     assert response.status_code == 401

@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+from gateway.core.config import API_ROOT
+
 
 class _RerankUsage(BaseModel):
     """Mock RerankUsage for testing until SDK ships rerank types."""
@@ -63,7 +65,7 @@ RERANK_PAYLOAD: dict[str, Any] = {
 
 def test_rerank_requires_auth(client: TestClient) -> None:
     """POST /v1/rerank requires authentication."""
-    resp = client.post("/v1/rerank", json=RERANK_PAYLOAD)
+    resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD)
     assert resp.status_code == 401
 
 
@@ -77,7 +79,7 @@ def test_rerank_with_api_key(
         new_callable=AsyncMock,
         return_value=_mock_rerank_response(),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 200
     data = resp.json()
     assert "results" in data
@@ -95,7 +97,7 @@ def test_rerank_master_key_requires_user(
         new_callable=AsyncMock,
         return_value=_mock_rerank_response(),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=master_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=master_key_header)
     assert resp.status_code == 400
     assert "user" in resp.json()["detail"].lower()
 
@@ -112,7 +114,7 @@ def test_rerank_master_key_with_user(
         new_callable=AsyncMock,
         return_value=_mock_rerank_response(),
     ):
-        resp = client.post("/v1/rerank", json=payload, headers=master_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=payload, headers=master_key_header)
     assert resp.status_code == 200
 
 
@@ -126,7 +128,7 @@ def test_rerank_provider_error(
         new_callable=AsyncMock,
         side_effect=RuntimeError("provider down"),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
 
@@ -145,10 +147,10 @@ def test_rerank_logs_usage(
         new_callable=AsyncMock,
         return_value=_mock_rerank_response(),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     rerank_logs = [log for log in logs if log["endpoint"] == "/v1/rerank"]
@@ -172,10 +174,10 @@ def test_rerank_logs_error_on_failure(
         new_callable=AsyncMock,
         side_effect=RuntimeError("provider down"),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 502
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     error_logs = [log for log in logs if log["endpoint"] == "/v1/rerank" and log["status"] == "error"]
@@ -189,7 +191,7 @@ def test_rerank_empty_documents_422(
 ) -> None:
     """POST /v1/rerank returns 422 when documents list is empty."""
     payload = {**RERANK_PAYLOAD, "documents": []}
-    resp = client.post("/v1/rerank", json=payload, headers=api_key_header)
+    resp = client.post(f"{API_ROOT}/rerank", json=payload, headers=api_key_header)
     assert resp.status_code == 422
 
 
@@ -199,7 +201,7 @@ def test_rerank_top_n_zero_422(
 ) -> None:
     """POST /v1/rerank returns 422 when top_n is 0."""
     payload = {**RERANK_PAYLOAD, "top_n": 0}
-    resp = client.post("/v1/rerank", json=payload, headers=api_key_header)
+    resp = client.post(f"{API_ROOT}/rerank", json=payload, headers=api_key_header)
     assert resp.status_code == 422
 
 
@@ -209,7 +211,7 @@ def test_rerank_top_n_negative_422(
 ) -> None:
     """POST /v1/rerank returns 422 when top_n is negative."""
     payload = {**RERANK_PAYLOAD, "top_n": -1}
-    resp = client.post("/v1/rerank", json=payload, headers=api_key_header)
+    resp = client.post(f"{API_ROOT}/rerank", json=payload, headers=api_key_header)
     assert resp.status_code == 422
 
 
@@ -224,7 +226,7 @@ def test_rerank_optional_fields_forwarded(
     mock = AsyncMock(return_value=_mock_rerank_response())
     payload = {**RERANK_PAYLOAD, extra_field: value}
     with patch("gateway.api.routes.rerank.arerank", mock):
-        resp = client.post("/v1/rerank", json=payload, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=payload, headers=api_key_header)
     assert resp.status_code == 200
     call_kwargs = mock.call_args.kwargs
     assert call_kwargs.get(extra_field) == value
@@ -238,7 +240,7 @@ def test_rerank_cost_tracked_with_pricing(
 ) -> None:
     """POST /v1/rerank calculates cost when model pricing exists."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "cohere:rerank-v3.5",
             "input_price_per_million": 2.0,
@@ -254,10 +256,10 @@ def test_rerank_cost_tracked_with_pricing(
         new_callable=AsyncMock,
         return_value=_mock_rerank_response(),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     logs = usage_resp.json()
     rerank_logs = [log for log in logs if log["endpoint"] == "/v1/rerank"]
     assert len(rerank_logs) >= 1
@@ -272,7 +274,7 @@ def test_rerank_billing_meters_tracked_with_pricing(
 ) -> None:
     """POST /v1/rerank records auditable charge lines alongside cost."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "cohere:rerank-v3.5",
             "input_price_per_million": 2.0,
@@ -286,10 +288,10 @@ def test_rerank_billing_meters_tracked_with_pricing(
         new_callable=AsyncMock,
         return_value=_mock_rerank_response(),
     ):
-        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 200
 
-    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/rerank"}, headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/usage", params={"endpoint": "/v1/rerank"}, headers=master_key_header)
     logs = usage_resp.json()
     assert len(logs) >= 1
     assert logs[0]["billing_meters"] == {"total_input_tokens": 100}

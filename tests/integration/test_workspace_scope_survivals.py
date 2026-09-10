@@ -22,10 +22,11 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
 from gateway.services.file_store import LocalDirFileStore
 
-ALIASES = "/v1/aliases"
-POLICIES = "/v1/routing/policies"
+ALIASES = f"{API_ROOT}/aliases"
+POLICIES = f"{API_ROOT}/routing/policies"
 NOWHERE = "00000000-0000-0000-0000-000000000000"
 
 
@@ -36,12 +37,12 @@ def tmp_file_store(client: TestClient, tmp_path: Path) -> None:
 
 
 def _default_workspace(client: TestClient, headers: dict[str, str]) -> str:
-    context = client.get("/v1/organizations/me", headers=headers).json()
+    context = client.get(f"{API_ROOT}/organizations/me", headers=headers).json()
     return str(context["workspace_memberships"][0]["workspace_id"])
 
 
 def _make_workspace(client: TestClient, headers: dict[str, str], name: str) -> str:
-    created = client.post("/v1/workspaces", json={"name": name}, headers=headers)
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": name}, headers=headers)
     assert created.status_code == status.HTTP_201_CREATED, created.text
     return str(created.json()["id"])
 
@@ -54,7 +55,7 @@ def _key_header(
     The gateway requires a "Bearer " prefix on every header form, so the header
     name is taken from the fixture's own rather than hardcoded.
     """
-    created = client.post("/v1/keys", json={"key_name": "k", **body}, headers=master)
+    created = client.post(f"{API_ROOT}/keys", json={"key_name": "k", **body}, headers=master)
     assert created.status_code == status.HTTP_200_OK, created.text
     return {next(iter(template)): f"Bearer {created.json()['key']}"}
 
@@ -107,11 +108,11 @@ def test_an_alias_resolves_only_for_a_key_in_its_own_workspace(
     in_platform = _key_header(client, master_key_header, api_key_header, workspace_id=platform)
     in_default = _key_header(client, master_key_header, api_key_header, key_name="elsewhere")
 
-    resolved = client.get("/v1/models/fast", headers=in_platform)
+    resolved = client.get(f"{API_ROOT}/models/fast", headers=in_platform)
     assert resolved.status_code == status.HTTP_200_OK, resolved.text
     assert resolved.json()["owned_by"] == "otari"
 
-    unresolved = client.get("/v1/models/fast", headers=in_default)
+    unresolved = client.get(f"{API_ROOT}/models/fast", headers=in_default)
     assert unresolved.status_code == status.HTTP_404_NOT_FOUND
 
 
@@ -280,10 +281,10 @@ def test_a_file_is_stamped_with_the_uploading_keys_workspace(
         client, master_key_header, api_key_header, workspace_id=platform, user_id="ada"
     )
 
-    uploaded = client.post("/v1/files", headers=scoped, files={"file": ("a.txt", b"hi", "text/plain")})
+    uploaded = client.post(f"{API_ROOT}/files", headers=scoped, files={"file": ("a.txt", b"hi", "text/plain")})
     assert uploaded.status_code == status.HTTP_200_OK, uploaded.text
 
-    listed = client.get(f"/v1/files?user=ada&workspace_id={platform}", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/files?user=ada&workspace_id={platform}", headers=master_key_header).json()
     assert [row["id"] for row in listed["data"]] == [uploaded.json()["id"]]
 
 
@@ -304,15 +305,15 @@ def test_the_same_user_cannot_reach_their_file_from_another_workspace(
     here = _key_header(client, master_key_header, api_key_header, user_id="ada", key_name="here")
 
     file_id = client.post(
-        "/v1/files", headers=there, files={"file": ("a.txt", b"hi", "text/plain")}
+        f"{API_ROOT}/files", headers=there, files={"file": ("a.txt", b"hi", "text/plain")}
     ).json()["id"]
 
-    assert client.get(f"/v1/files/{file_id}", headers=here).status_code == status.HTTP_404_NOT_FOUND
-    assert client.get(f"/v1/files/{file_id}/content", headers=here).status_code == status.HTTP_404_NOT_FOUND
-    assert client.delete(f"/v1/files/{file_id}", headers=here).status_code == status.HTTP_404_NOT_FOUND
-    assert client.get("/v1/files", headers=here).json()["data"] == []
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=here).status_code == status.HTTP_404_NOT_FOUND
+    assert client.get(f"{API_ROOT}/files/{file_id}/content", headers=here).status_code == status.HTTP_404_NOT_FOUND
+    assert client.delete(f"{API_ROOT}/files/{file_id}", headers=here).status_code == status.HTTP_404_NOT_FOUND
+    assert client.get(f"{API_ROOT}/files", headers=here).json()["data"] == []
     # The owning workspace still has it, so nothing was lost, only partitioned.
-    assert client.get(f"/v1/files/{file_id}", headers=there).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=there).status_code == status.HTTP_200_OK
 
 
 def test_the_master_key_still_sees_every_workspaces_files(
@@ -330,12 +331,12 @@ def test_the_master_key_still_sees_every_workspaces_files(
     there = _key_header(client, master_key_header, api_key_header, workspace_id=platform, user_id="ada")
     here = _key_header(client, master_key_header, api_key_header, user_id="ada", key_name="here")
     for header in (there, here):
-        client.post("/v1/files", headers=header, files={"file": ("a.txt", b"hi", "text/plain")})
+        client.post(f"{API_ROOT}/files", headers=header, files={"file": ("a.txt", b"hi", "text/plain")})
 
-    everything = client.get("/v1/files?user=ada", headers=master_key_header).json()
+    everything = client.get(f"{API_ROOT}/files?user=ada", headers=master_key_header).json()
     assert len(everything["data"]) == 2
 
-    narrowed = client.get(f"/v1/files?user=ada&workspace_id={platform}", headers=master_key_header).json()
+    narrowed = client.get(f"{API_ROOT}/files?user=ada&workspace_id={platform}", headers=master_key_header).json()
     assert len(narrowed["data"]) == 1
 
 
@@ -345,7 +346,7 @@ def test_the_master_key_still_sees_every_workspaces_files(
 
 
 def _rank(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
-    return client.post("/v1/routing/preferences/rank", json=body, headers=headers)
+    return client.post(f"{API_ROOT}/routing/preferences/rank", json=body, headers=headers)
 
 
 def test_routing_memory_is_counted_per_workspace(
@@ -365,7 +366,7 @@ def test_routing_memory_is_counted_per_workspace(
 
     monkeypatch.setattr(knn.KnnRoutingMemory, "_embed", _embed)
 
-    client.post("/v1/users", json={"user_id": "ada"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "ada"}, headers=master_key_header)
     platform = _make_workspace(client, master_key_header, "Platform team")
 
     written = _rank(
@@ -378,21 +379,21 @@ def test_routing_memory_is_counted_per_workspace(
     assert written.status_code == status.HTTP_200_OK, written.text
 
     there = client.get(
-        f"/v1/routing/status?user_id=ada&workspace_id={platform}", headers=master_key_header
+        f"{API_ROOT}/routing/status?user_id=ada&workspace_id={platform}", headers=master_key_header
     ).json()
     assert there["workspace_id"] == platform
     assert there["default_pool"]["records"] == 1
 
     # The default workspace was taught nothing, so its pool is empty even though
     # the same user has an example elsewhere.
-    here = client.get("/v1/routing/status?user_id=ada", headers=master_key_header).json()
+    here = client.get(f"{API_ROOT}/routing/status?user_id=ada", headers=master_key_header).json()
     assert here["default_pool"]["records"] == 0
 
 
 def test_teaching_a_workspace_that_does_not_exist_is_a_404(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    client.post("/v1/users", json={"user_id": "ada"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "ada"}, headers=master_key_header)
 
     refused = _rank(
         client,

@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.routes.hosted_mode import DATA_PLANE_PREFIXES
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
 
 from .conftest import build_test_client
@@ -26,22 +26,22 @@ from .conftest import build_test_client
 # Every data-plane path otari#822 found served on the control plane, plus the
 # sub-paths that ride the same catch-all.
 INFERENCE_PATHS = (
-    "/v1/chat/completions",
-    "/v1/messages",
-    "/v1/messages/count_tokens",
-    "/v1/responses",
-    "/v1/embeddings",
-    "/v1/images/generations",
-    "/v1/audio/transcriptions",
-    "/v1/audio/speech",
-    "/v1/rerank",
-    "/v1/batches",
-    "/v1/moderations",
-    "/v1/search",
-    "/v1/files",
+    f"{API_ROOT}/chat/completions",
+    f"{API_ROOT}/messages",
+    f"{API_ROOT}/messages/count_tokens",
+    f"{API_ROOT}/responses",
+    f"{API_ROOT}/embeddings",
+    f"{API_ROOT}/images/generations",
+    f"{API_ROOT}/audio/transcriptions",
+    f"{API_ROOT}/audio/speech",
+    f"{API_ROOT}/rerank",
+    f"{API_ROOT}/batches",
+    f"{API_ROOT}/moderations",
+    f"{API_ROOT}/search",
+    f"{API_ROOT}/files",
     # Discovery and execution both belong to the data plane: a hosted control
     # plane holds no MCP session and runs no tool.
-    "/v1/mcp/execute",
+    f"{API_ROOT}/mcp/execute",
 )
 
 EXPECTED_DETAIL = (
@@ -99,7 +99,7 @@ def test_hosted_mode_refuses_inference_on_every_verb(hosted_client: TestClient) 
     serves. See ``hosted_mode``'s module docstring.
     """
     for method in ("get", "put", "patch", "delete"):
-        response = getattr(hosted_client, method)("/v1/chat/completions")
+        response = getattr(hosted_client, method)(f"{API_ROOT}/chat/completions")
 
         assert response.status_code == 404, method
         assert response.json() == {"detail": EXPECTED_DETAIL}, method
@@ -109,16 +109,16 @@ def test_hosted_mode_refuses_inference_on_every_verb(hosted_client: TestClient) 
     # methods unspecified. They do not, so it is enumerated, and a regression
     # that dropped it would answer 405: the path is served here, only the verb
     # was wrong, which is the opposite of what the stub is for.
-    head = hosted_client.head("/v1/chat/completions")
+    head = hosted_client.head(f"{API_ROOT}/chat/completions")
     assert head.status_code == 404, "HEAD fell through to a 405"
 
     for method, path in (
-        ("get", "/v1/files"),
-        ("get", "/v1/files/file-abc"),
-        ("get", "/v1/files/file-abc/content"),
-        ("delete", "/v1/files/file-abc"),
-        ("get", "/v1/batches"),
-        ("get", "/v1/batches/batch-abc"),
+        ("get", f"{API_ROOT}/files"),
+        ("get", f"{API_ROOT}/files/file-abc"),
+        ("get", f"{API_ROOT}/files/file-abc/content"),
+        ("delete", f"{API_ROOT}/files/file-abc"),
+        ("get", f"{API_ROOT}/batches"),
+        ("get", f"{API_ROOT}/batches/batch-abc"),
     ):
         response = getattr(hosted_client, method)(path)
 
@@ -134,15 +134,15 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
     real router answered.
     """
     for path in (
-        "/v1/keys",
-        "/v1/usage",
-        "/v1/organizations/me/provider-keys",
+        f"{API_ROOT}/keys",
+        f"{API_ROOT}/usage",
+        f"{API_ROOT}/organizations/me/provider-keys",
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.
-        "/v1/models",
+        f"{API_ROOT}/models",
         # The catalog POST /v1/search dispatches against. Management, and the
         # one prefix a careless /v1/search stub could shadow.
-        "/v1/search-tools",
+        f"{API_ROOT}/search-tools",
     ):
         response = hosted_client.get(path)
 
@@ -150,7 +150,7 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
 
     # Unauthenticated and mounted in every mode: it is how a browser learns
     # which deployment it reached.
-    bootstrap = hosted_client.get("/v1/bootstrap")
+    bootstrap = hosted_client.get(f"{API_ROOT}/bootstrap")
     assert bootstrap.status_code == 200
     assert bootstrap.json()["deployment_type"] == "hosted"
 
@@ -176,7 +176,7 @@ def test_non_hosted_modes_keep_serving_inference(mode: str | None, postgres_url:
         assert path in served, path
     # And the refusal stubs are absent entirely, rather than mounted behind the
     # real routes where a path change could one day expose them.
-    assert "/v1/chat/{path:path}" not in served
+    assert f"{API_ROOT}/chat/{{path:path}}" not in served
 
 
 def test_every_gated_router_has_a_stub_standing_in_for_it(postgres_url: str) -> None:
@@ -201,7 +201,7 @@ def test_every_gated_router_has_a_stub_standing_in_for_it(postgres_url: str) -> 
     dropped = mounted("standalone") - mounted("hosted")
     assert dropped, "hosted mode dropped no routes at all, so the gate is not doing anything"
 
-    prefixes = [prefix for prefix, _why in DATA_PLANE_PREFIXES]
+    prefixes = [f"{API_ROOT}{prefix}" for prefix, _why in DATA_PLANE_PREFIXES]
     uncovered = {
         path for path in dropped if not any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
     }
@@ -217,7 +217,7 @@ def test_the_refusal_names_the_data_plane_when_the_deployment_knows_it(
     doing. Where ``data_plane_url`` is set, which is the same value
     ``GET /v1/bootstrap`` hands the dashboard, the refusal names the host.
     """
-    response = hosted_client_knowing_its_data_plane.post("/v1/chat/completions", json={})
+    response = hosted_client_knowing_its_data_plane.post(f"{API_ROOT}/chat/completions", json={})
 
     assert response.status_code == 404
     assert response.json() == {

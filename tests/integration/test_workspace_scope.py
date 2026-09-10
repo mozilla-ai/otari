@@ -13,22 +13,23 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import APIKey, UsageLog
 
 
 def _default_workspace(client: TestClient, headers: dict[str, str]) -> str:
-    context = client.get("/v1/organizations/me", headers=headers).json()
+    context = client.get(f"{API_ROOT}/organizations/me", headers=headers).json()
     return str(context["workspace_memberships"][0]["workspace_id"])
 
 
 def _make_workspace(client: TestClient, headers: dict[str, str], name: str) -> str:
-    created = client.post("/v1/workspaces", json={"name": name}, headers=headers)
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": name}, headers=headers)
     assert created.status_code == status.HTTP_201_CREATED, created.text
     return str(created.json()["id"])
 
 
 def _create_key(client: TestClient, headers: dict[str, str], **body: Any) -> dict[str, Any]:
-    response = client.post("/v1/keys", json={"key_name": "k", **body}, headers=headers)
+    response = client.post(f"{API_ROOT}/keys", json={"key_name": "k", **body}, headers=headers)
     assert response.status_code == status.HTTP_200_OK, response.text
     payload: dict[str, Any] = response.json()
     return payload
@@ -42,7 +43,7 @@ def test_a_key_created_without_a_workspace_lands_in_the_default_one(
 
     created = _create_key(client, master_key_header)
 
-    listed = client.get(f"/v1/keys/{created['id']}", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/keys/{created['id']}", headers=master_key_header).json()
     assert listed["workspace_id"] == default
 
 
@@ -54,7 +55,7 @@ def test_a_key_can_be_created_in_a_named_workspace(
 
     created = _create_key(client, master_key_header, workspace_id=platform)
 
-    listed = client.get(f"/v1/keys/{created['id']}", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/keys/{created['id']}", headers=master_key_header).json()
     assert listed["workspace_id"] == platform
 
 
@@ -67,15 +68,15 @@ def test_the_key_list_filters_by_workspace_and_covers_the_organization_without_o
     _create_key(client, master_key_header, key_name="in-default")
     _create_key(client, master_key_header, workspace_id=platform, key_name="in-platform")
 
-    scoped = client.get(f"/v1/keys?workspace_id={platform}", headers=master_key_header).json()
+    scoped = client.get(f"{API_ROOT}/keys?workspace_id={platform}", headers=master_key_header).json()
     assert [k["key_name"] for k in scoped] == ["in-platform"]
 
-    in_default = client.get(f"/v1/keys?workspace_id={default}", headers=master_key_header).json()
+    in_default = client.get(f"{API_ROOT}/keys?workspace_id={default}", headers=master_key_header).json()
     assert "in-platform" not in [k["key_name"] for k in in_default]
 
     # Unset means every key in the caller's organization, both of these
     # workspaces being in it.
-    everything = client.get("/v1/keys", headers=master_key_header).json()
+    everything = client.get(f"{API_ROOT}/keys", headers=master_key_header).json()
     names = [k["key_name"] for k in everything]
     assert "in-default" in names
     assert "in-platform" in names
@@ -91,7 +92,7 @@ def test_usage_is_recorded_in_the_workspace_of_the_key_that_authenticated_it(
     created = _create_key(client, master_key_header, workspace_id=platform, exclude_from_budget=True)
 
     recorded = client.post(
-        "/v1/usage/external-events",
+        f"{API_ROOT}/usage/external-events",
         json={
             "source": "claude_code",
             "events": [
@@ -148,10 +149,10 @@ def test_the_usage_list_filters_by_workspace(
     finally:
         session.close()
 
-    scoped = client.get(f"/v1/usage?workspace_id={platform}", headers=master_key_header).json()
+    scoped = client.get(f"{API_ROOT}/usage?workspace_id={platform}", headers=master_key_header).json()
     assert [row["model"] for row in scoped] == ["there"]
 
-    everything = client.get("/v1/usage", headers=master_key_header).json()
+    everything = client.get(f"{API_ROOT}/usage", headers=master_key_header).json()
     assert sorted(row["model"] for row in everything) == ["here", "there"]
 
 
@@ -166,17 +167,17 @@ def test_a_workspace_holding_request_plane_rows_cannot_be_deleted(
     so this is a real conflict with a real reason rather than a server error.
     """
     workspace = client.post(
-        "/v1/workspaces",
+        f"{API_ROOT}/workspaces",
         json={"name": "Holds a key"},
         headers=master_key_header,
     ).json()
     client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"user_id": "scoped-owner", "workspace_id": workspace["id"]},
         headers=master_key_header,
     )
 
-    response = client.delete(f"/v1/workspaces/{workspace['id']}", headers=master_key_header)
+    response = client.delete(f"{API_ROOT}/workspaces/{workspace['id']}", headers=master_key_header)
 
     assert response.status_code == 409, response.text
     assert "API keys" in response.json()["detail"]
@@ -192,7 +193,7 @@ def test_a_key_cannot_be_created_in_a_workspace_that_does_not_exist(
     caller supplied and could fix.
     """
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={
             "user_id": "no-such-workspace",
             "workspace_id": "00000000-0000-0000-0000-000000000000",
@@ -209,7 +210,7 @@ def _a_budget_id(client: Any, headers: dict[str, str], max_budget: float) -> str
     A ceiling names one rather than carrying a figure of its own, so a case that
     only cares about the ceiling still has to mint the budget behind it.
     """
-    made = client.post("/v1/budgets", json={"max_budget": max_budget}, headers=headers)
+    made = client.post(f"{API_ROOT}/budgets", json={"max_budget": max_budget}, headers=headers)
     assert made.status_code == 200, made.text
     return str(made.json()["budget_id"])
 
@@ -226,7 +227,7 @@ def test_deleting_a_workspace_takes_its_ceilings_with_it(
     """
     workspace = _make_workspace(client, master_key_header, "Departing")
     created = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": workspace,
@@ -237,10 +238,10 @@ def test_deleting_a_workspace_takes_its_ceilings_with_it(
     assert created.status_code == status.HTTP_200_OK, created.text
     budget_id = created.json()["id"]
 
-    deleted = client.delete(f"/v1/workspaces/{workspace}", headers=master_key_header)
+    deleted = client.delete(f"{API_ROOT}/workspaces/{workspace}", headers=master_key_header)
     assert deleted.status_code == status.HTTP_200_OK, deleted.text
 
-    orphan = client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header)
+    orphan = client.get(f"{API_ROOT}/scoped-budgets/{budget_id}", headers=master_key_header)
     assert orphan.status_code == status.HTTP_404_NOT_FOUND, orphan.text
 
 
@@ -252,11 +253,11 @@ def test_a_members_workspace_ceiling_goes_with_the_workspace(
     workspace = _make_workspace(client, master_key_header, "Departing with members")
     # Creating a workspace joins its creator to it, so the roster already has the
     # membership row this ceiling is hung on.
-    members = client.get(f"/v1/workspaces/{workspace}/members", headers=master_key_header)
+    members = client.get(f"{API_ROOT}/workspaces/{workspace}/members", headers=master_key_header)
     assert members.status_code == status.HTTP_200_OK, members.text
     membership_id = members.json()["data"][0]["id"]
     created = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace_member",
             "scope_id": membership_id,
@@ -267,10 +268,10 @@ def test_a_members_workspace_ceiling_goes_with_the_workspace(
     assert created.status_code == status.HTTP_200_OK, created.text
     budget_id = created.json()["id"]
 
-    deleted = client.delete(f"/v1/workspaces/{workspace}", headers=master_key_header)
+    deleted = client.delete(f"{API_ROOT}/workspaces/{workspace}", headers=master_key_header)
     assert deleted.status_code == status.HTTP_200_OK, deleted.text
 
-    orphan = client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header)
+    orphan = client.get(f"{API_ROOT}/scoped-budgets/{budget_id}", headers=master_key_header)
     assert orphan.status_code == status.HTTP_404_NOT_FOUND, orphan.text
 
 
@@ -293,14 +294,14 @@ def _second_organization(client: TestClient, headers: dict[str, str]) -> str:
     membership is the point: creating one makes the caller its owner, which is
     what lets the switch below succeed.
     """
-    created = client.post("/v1/organizations", json={"name": "Other Co"}, headers=headers)
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Other Co"}, headers=headers)
     assert created.status_code == status.HTTP_201_CREATED, created.text
     return str(created.json()["id"])
 
 
 def _switch_to(client: TestClient, headers: dict[str, str], organization_id: str) -> None:
     switched = client.post(
-        "/v1/organizations/me/switch",
+        f"{API_ROOT}/organizations/me/switch",
         json={"organization_id": organization_id},
         headers=headers,
     )
@@ -330,7 +331,7 @@ def test_a_key_created_without_a_workspace_follows_the_callers_active_organizati
 
     # Read back rather than off the 201: the create response does not carry the
     # workspace, which is why landing in the wrong one was silent.
-    listed = client.get(f"/v1/keys/{created['id']}", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/keys/{created['id']}", headers=master_key_header).json()
     assert listed["workspace_id"] == other_default
 
 
@@ -348,11 +349,13 @@ def test_a_key_cannot_be_minted_into_another_organizations_workspace(
     other = _second_organization(client, master_key_header)
     _switch_to(client, master_key_header, other)
 
-    response = client.post("/v1/keys", json={"key_name": "cross-org", "workspace_id": home}, headers=master_key_header)
+    response = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "cross-org", "workspace_id": home}, headers=master_key_header
+    )
 
     absent_id = "00000000-0000-0000-0000-000000000000"
     absent = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "no-such", "workspace_id": absent_id},
         headers=master_key_header,
     )
@@ -375,22 +378,25 @@ def test_another_organizations_key_is_neither_listed_nor_reachable_by_id(
     so an unscoped load by id was direct theft of any credential on the
     deployment rather than only a read of its metadata.
     """
-    home = str(client.get("/v1/organizations/me", headers=master_key_header).json()["organization"]["id"])
+    home = str(client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()["organization"]["id"])
     home_key = _create_key(client, master_key_header, key_name="at-home")["id"]
     other = _second_organization(client, master_key_header)
     _switch_to(client, master_key_header, other)
 
-    listed = client.get("/v1/keys", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/keys", headers=master_key_header)
     assert listed.status_code == status.HTTP_200_OK, listed.text
     assert home_key not in [key["id"] for key in listed.json()]
 
-    assert client.get(f"/v1/keys/{home_key}", headers=master_key_header).status_code == 404
-    assert client.patch(f"/v1/keys/{home_key}", json={"is_active": False}, headers=master_key_header).status_code == 404
-    assert client.post(f"/v1/keys/{home_key}/rotate", headers=master_key_header).status_code == 404
-    assert client.delete(f"/v1/keys/{home_key}", headers=master_key_header).status_code == 404
+    assert client.get(f"{API_ROOT}/keys/{home_key}", headers=master_key_header).status_code == 404
+    assert (
+        client.patch(f"{API_ROOT}/keys/{home_key}", json={"is_active": False}, headers=master_key_header).status_code
+        == 404
+    )
+    assert client.post(f"{API_ROOT}/keys/{home_key}/rotate", headers=master_key_header).status_code == 404
+    assert client.delete(f"{API_ROOT}/keys/{home_key}", headers=master_key_header).status_code == 404
 
     # ...and the key is untouched: the revoke and the rotation above did nothing.
     _switch_to(client, master_key_header, home)
-    still_there = client.get(f"/v1/keys/{home_key}", headers=master_key_header)
+    still_there = client.get(f"{API_ROOT}/keys/{home_key}", headers=master_key_header)
     assert still_there.status_code == status.HTTP_200_OK, still_there.text
     assert still_there.json()["is_active"] is True

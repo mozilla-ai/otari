@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
 from .conftest import build_test_client
 
@@ -52,7 +52,7 @@ def client(multi_instance_config: GatewayConfig) -> Generator[TestClient]:
 
 def _create_user(client: TestClient, headers: dict[str, str]) -> None:
     response = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=headers,
     )
@@ -68,7 +68,7 @@ def _post_chat(client: TestClient, headers: dict[str, str], model: str) -> dict[
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -130,7 +130,7 @@ async def test_pricing_round_trip_for_instance_key(client: TestClient) -> None:
     headers = {API_KEY_HEADER: "Bearer test-master-key"}
 
     set_resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "home_lab:deepseek-v4-flash",
             "input_price_per_million": 0.0,
@@ -141,11 +141,11 @@ async def test_pricing_round_trip_for_instance_key(client: TestClient) -> None:
     assert set_resp.status_code == 200
     assert set_resp.json()["model_key"] == "home_lab:deepseek-v4-flash"
 
-    get_resp = client.get("/v1/pricing/home_lab:deepseek-v4-flash", headers=headers)
+    get_resp = client.get(f"{API_ROOT}/pricing/home_lab:deepseek-v4-flash", headers=headers)
     assert get_resp.status_code == 200
     assert get_resp.json()["model_key"] == "home_lab:deepseek-v4-flash"
 
     # The legacy slash form resolves to the same stored colon key.
-    slash_resp = client.get("/v1/pricing/home_lab/deepseek-v4-flash/history", headers=headers)
+    slash_resp = client.get(f"{API_ROOT}/pricing/home_lab/deepseek-v4-flash/history", headers=headers)
     assert slash_resp.status_code == 200
     assert slash_resp.json()[0]["model_key"] == "home_lab:deepseek-v4-flash"

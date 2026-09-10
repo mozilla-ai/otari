@@ -19,6 +19,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
+from gateway.core.config import API_ROOT
 from gateway.models.money import MAX_USD_LIMIT
 
 _BEFORE_COUNTERS = "f3a5c7e9d1b4"
@@ -31,14 +32,19 @@ def test_a_budget_cap_above_the_column_ceiling_is_refused(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """422 from the schema, not a 500 from a numeric overflow two layers down."""
-    assert client.post("/v1/budgets", json={"max_budget": _TOO_LARGE}, headers=master_key_header).status_code == 422
-    created = client.post("/v1/budgets", json={"max_budget": MAX_USD_LIMIT}, headers=master_key_header)
+    assert (
+        client.post(f"{API_ROOT}/budgets", json={"max_budget": _TOO_LARGE}, headers=master_key_header).status_code
+        == 422
+    )
+    created = client.post(f"{API_ROOT}/budgets", json={"max_budget": MAX_USD_LIMIT}, headers=master_key_header)
     assert created.status_code == 200, created.text
     assert created.json()["max_budget"] == MAX_USD_LIMIT
 
     budget_id = created.json()["budget_id"]
     assert (
-        client.patch(f"/v1/budgets/{budget_id}", json={"max_budget": _TOO_LARGE}, headers=master_key_header).status_code
+        client.patch(
+            f"{API_ROOT}/budgets/{budget_id}", json={"max_budget": _TOO_LARGE}, headers=master_key_header
+        ).status_code
         == 422
     )
 
@@ -57,7 +63,7 @@ def test_the_only_cap_surface_is_the_one_that_is_bounded(
         "budget_id": "no-such-budget",
         "max_budget": _TOO_LARGE,
     }
-    response = client.post("/v1/scoped-budgets", json=body, headers=master_key_header)
+    response = client.post(f"{API_ROOT}/scoped-budgets", json=body, headers=master_key_header)
     # 404 for the unknown budget, never 200: the cap field is not a field here.
     assert response.status_code == 404, response.text
 

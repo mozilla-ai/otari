@@ -7,6 +7,8 @@ import pytest
 from any_llm.types.completion import CreateEmbeddingResponse, Embedding, Usage
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 
 def _mock_embedding_response(prompt_tokens: int = 10) -> CreateEmbeddingResponse:
     """Build a real CreateEmbeddingResponse for testing."""
@@ -20,7 +22,7 @@ def _mock_embedding_response(prompt_tokens: int = 10) -> CreateEmbeddingResponse
 
 def test_embeddings_requires_auth(client: TestClient) -> None:
     """POST /v1/embeddings requires authentication."""
-    resp = client.post("/v1/embeddings", json={"model": "openai:text-embedding-3-small", "input": "hello"})
+    resp = client.post(f"{API_ROOT}/embeddings", json={"model": "openai:text-embedding-3-small", "input": "hello"})
     assert resp.status_code == 401
 
 
@@ -32,7 +34,7 @@ def test_embeddings_with_api_key(
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
@@ -50,7 +52,7 @@ def test_embeddings_master_key_requires_user(
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=master_key_header,
         )
@@ -67,7 +69,7 @@ def test_embeddings_master_key_with_user(
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={
                 "model": "openai:text-embedding-3-small",
                 "input": "hello",
@@ -86,7 +88,7 @@ def test_embeddings_list_input(
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": ["hello", "world"]},
             headers=api_key_header,
         )
@@ -104,7 +106,7 @@ def test_embeddings_provider_error(
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
@@ -124,13 +126,13 @@ def test_embeddings_logs_usage(
 
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     embedding_logs = [log for log in logs if log["endpoint"] == "/v1/embeddings"]
@@ -155,13 +157,13 @@ def test_embeddings_logs_error_on_failure(
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 502
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     error_logs = [log for log in logs if log["endpoint"] == "/v1/embeddings" and log["status"] == "error"]
@@ -180,7 +182,7 @@ def test_embeddings_optional_fields(
     values = {"encoding_format": "float", "dimensions": 256}
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp) as mock:
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={
                 "model": "openai:text-embedding-3-small",
                 "input": "hello",
@@ -207,7 +209,7 @@ def test_embeddings_cost_tracked_with_pricing(
     cannot hold and rounds to zero.
     """
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:text-embedding-3-small",
             "input_price_per_million": 0.02,
@@ -221,13 +223,13 @@ def test_embeddings_cost_tracked_with_pricing(
 
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     logs = usage_resp.json()
     embedding_logs = [log for log in logs if log["endpoint"] == "/v1/embeddings"]
     assert len(embedding_logs) >= 1
@@ -248,7 +250,7 @@ def test_embeddings_charge_below_half_a_micro_dollar_settles_at_zero(
     though it was billed at nothing.
     """
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:text-embedding-3-small",
             "input_price_per_million": 0.02,
@@ -260,13 +262,13 @@ def test_embeddings_charge_below_half_a_micro_dollar_settles_at_zero(
     mock_resp = _mock_embedding_response(prompt_tokens=10)
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    logs = client.get("/v1/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header).json()
+    logs = client.get(f"{API_ROOT}/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header).json()
     assert logs[0]["cost"] == 0.0
     assert logs[0]["pricing_breakdown"] == [
         {"meter": "input", "units": 10, "rate_per_million": 0.02, "cost": pytest.approx(2e-7)}
@@ -280,7 +282,7 @@ def test_embeddings_billing_meters_tracked_with_pricing(
 ) -> None:
     """POST /v1/embeddings records auditable charge lines alongside cost."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:text-embedding-3-small",
             "input_price_per_million": 0.02,
@@ -293,13 +295,13 @@ def test_embeddings_billing_meters_tracked_with_pricing(
 
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header)
     logs = usage_resp.json()
     assert len(logs) >= 1
     assert logs[0]["billing_meters"] == {"total_input_tokens": 10}

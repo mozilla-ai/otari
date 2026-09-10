@@ -13,12 +13,13 @@ import pytest
 from fastapi import FastAPI
 
 from gateway.api.routes.files import _prime, router
+from gateway.core.config import API_ROOT
 
 
 def test_download_openapi_describes_binary_content() -> None:
     app = FastAPI()
-    app.include_router(router)
-    responses = app.openapi()["paths"]["/v1/files/{file_id}/content"]["get"]["responses"]
+    app.include_router(router, prefix=API_ROOT)
+    responses = app.openapi()["paths"][f"{API_ROOT}/files/{{file_id}}/content"]["get"]["responses"]
 
     assert responses["200"]["content"] == {
         "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},

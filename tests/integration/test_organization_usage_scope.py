@@ -36,6 +36,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import DashboardSession, UsageLog
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -44,10 +45,10 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 # a scope applied to the list and forgotten on the summary would leak an
 # organization's spend through its aggregates while the log looked correct.
 _SCOPED_PATHS = [
-    "/v1/organizations/me/usage",
-    "/v1/organizations/me/usage/count",
-    "/v1/organizations/me/usage/summary",
-    "/v1/organizations/me/usage/series?group_by=model",
+    f"{API_ROOT}/organizations/me/usage",
+    f"{API_ROOT}/organizations/me/usage/count",
+    f"{API_ROOT}/organizations/me/usage/summary",
+    f"{API_ROOT}/organizations/me/usage/series?group_by=model",
 ]
 
 
@@ -150,7 +151,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
     """Two tenants with traffic in both, and the identities that read them."""
     # One master-key call provisions the tenancy root, so the organizations built
     # below sit beside a real default rather than replacing it.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
 
     session = db_session_factory()
     try:
@@ -231,14 +232,14 @@ def _as(client: TestClient, world: _World, who: str, path: str) -> tuple[int, ob
 
 
 def _models_listed(client: TestClient, world: _World, who: str, query: str = "") -> set[str]:
-    code, body = _as(client, world, who, f"/v1/organizations/me/usage{query}")
+    code, body = _as(client, world, who, f"{API_ROOT}/organizations/me/usage{query}")
     assert code == status.HTTP_200_OK, body
     assert isinstance(body, list)
     return {row["model"] for row in body}
 
 
 def _models_summarized(client: TestClient, world: _World, who: str, query: str = "") -> set[str]:
-    code, body = _as(client, world, who, f"/v1/organizations/me/usage/summary{query}")
+    code, body = _as(client, world, who, f"{API_ROOT}/organizations/me/usage/summary{query}")
     assert code == status.HTTP_200_OK, body
     assert isinstance(body, dict)
     return {row["key"] for row in body["by_model"] if not row.get("is_other")}
@@ -291,11 +292,11 @@ def test_a_viewer_is_scoped_like_a_member_and_not_like_an_admin(client: TestClie
 
 def test_a_member_of_no_workspace_reads_an_empty_page_rather_than_a_refusal(client: TestClient, world: _World) -> None:
     """Nothing was refused; there is simply nothing here yet."""
-    code, body = _as(client, world, "alpha_newcomer", "/v1/organizations/me/usage")
+    code, body = _as(client, world, "alpha_newcomer", f"{API_ROOT}/organizations/me/usage")
     assert code == status.HTTP_200_OK, body
     assert body == []
 
-    code, body = _as(client, world, "alpha_newcomer", "/v1/organizations/me/usage/count")
+    code, body = _as(client, world, "alpha_newcomer", f"{API_ROOT}/organizations/me/usage/count")
     assert code == status.HTTP_200_OK, body
     assert body == {"total": 0}
 
@@ -307,7 +308,7 @@ def test_a_member_of_no_workspace_gets_empty_aggregates_rather_than_an_error(cli
     so a scope of "nothing" has to produce zeroed totals and empty groups rather
     than a division by zero or a fold over an empty top-N set.
     """
-    code, body = _as(client, world, "alpha_newcomer", "/v1/organizations/me/usage/summary")
+    code, body = _as(client, world, "alpha_newcomer", f"{API_ROOT}/organizations/me/usage/summary")
     assert code == status.HTTP_200_OK, body
     assert isinstance(body, dict)
     assert body["totals"]["request_count"] == 0
@@ -316,7 +317,9 @@ def test_a_member_of_no_workspace_gets_empty_aggregates_rather_than_an_error(cli
     assert body["series"] == []
 
     for group_by in ("model", "user_id", "api_key_id", "source"):
-        code, body = _as(client, world, "alpha_newcomer", f"/v1/organizations/me/usage/series?group_by={group_by}")
+        code, body = _as(
+            client, world, "alpha_newcomer", f"{API_ROOT}/organizations/me/usage/series?group_by={group_by}"
+        )
         assert code == status.HTTP_200_OK, (group_by, body)
         assert isinstance(body, dict)
         assert body["groups"] == [], group_by
@@ -350,7 +353,7 @@ def test_a_suspended_workspace_membership_stops_granting_the_workspace(
 
     assert _models_listed(client, world, "alpha_member") == set()
     # Still their organization: an empty page, not a refusal.
-    code, _ = _as(client, world, "alpha_member", "/v1/organizations/me/usage")
+    code, _ = _as(client, world, "alpha_member", f"{API_ROOT}/organizations/me/usage")
     assert code == status.HTTP_200_OK
 
 
@@ -412,10 +415,10 @@ def test_switching_organizations_is_what_moves_the_scope(client: TestClient, wor
     """And it refuses an organization the caller does not belong to, so it is not a way in."""
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
     try:
-        refused = client.post("/v1/organizations/me/switch", json={"organization_id": str(world.beta)})
+        refused = client.post(f"{API_ROOT}/organizations/me/switch", json={"organization_id": str(world.beta)})
         assert refused.status_code == status.HTTP_404_NOT_FOUND, refused.text
         # And the read is unmoved by the attempt.
-        listed = {row["model"] for row in client.get("/v1/organizations/me/usage").json()}
+        listed = {row["model"] for row in client.get(f"{API_ROOT}/organizations/me/usage").json()}
         assert listed.isdisjoint(_BETA_MODELS)
     finally:
         client.cookies.clear()
@@ -432,13 +435,13 @@ def test_the_count_never_describes_more_rows_than_the_list_returns(client: TestC
         ("alpha_member", len(_ALPHA_ONE_MODELS)),
         ("beta_owner", len(_BETA_MODELS)),
     ):
-        code, body = _as(client, world, who, "/v1/organizations/me/usage/count")
+        code, body = _as(client, world, who, f"{API_ROOT}/organizations/me/usage/count")
         assert code == status.HTTP_200_OK, body
         assert body == {"total": expected}, who
 
 
 def test_the_summary_totals_count_only_the_callers_own_rows(client: TestClient, world: _World) -> None:
-    code, body = _as(client, world, "alpha_member", "/v1/organizations/me/usage/summary")
+    code, body = _as(client, world, "alpha_member", f"{API_ROOT}/organizations/me/usage/summary")
     assert code == status.HTTP_200_OK, body
     assert isinstance(body, dict)
     assert body["totals"]["request_count"] == len(_ALPHA_ONE_MODELS)
@@ -446,7 +449,7 @@ def test_the_summary_totals_count_only_the_callers_own_rows(client: TestClient, 
 
 
 def test_the_series_splits_only_the_callers_own_rows(client: TestClient, world: _World) -> None:
-    code, body = _as(client, world, "alpha_member", "/v1/organizations/me/usage/series?group_by=model")
+    code, body = _as(client, world, "alpha_member", f"{API_ROOT}/organizations/me/usage/series?group_by=model")
     assert code == status.HTTP_200_OK, body
     assert isinstance(body, dict)
     keys = {group["key"] for group in body["groups"] if not group.get("is_other")}
@@ -462,14 +465,14 @@ def test_an_organization_owner_is_still_refused_by_the_deployment_wide_usage_rou
     client: TestClient, world: _World
 ) -> None:
     """The gate #821 added stays where it is. This is the regression that would matter most."""
-    code, _ = _as(client, world, "alpha_owner", "/v1/usage")
+    code, _ = _as(client, world, "alpha_owner", f"{API_ROOT}/usage")
     assert code == status.HTTP_403_FORBIDDEN
 
 
 def test_the_master_key_still_reads_every_tenant_through_the_deployment_wide_route(
     client: TestClient, world: _World, master_key_header: dict[str, str]
 ) -> None:
-    listed = {row["model"] for row in client.get("/v1/usage", headers=master_key_header).json()}
+    listed = {row["model"] for row in client.get(f"{API_ROOT}/usage", headers=master_key_header).json()}
     assert set(_ALPHA_ONE_MODELS) | set(_BETA_MODELS) <= listed
 
 
@@ -493,7 +496,7 @@ def test_the_context_reports_whether_the_caller_operates_the_deployment(client: 
     is always true is indistinguishable from one nothing computes.
     """
     for who, expected in (("alpha_owner", False), ("superuser", True)):
-        code, body = _as(client, world, who, "/v1/organizations/me")
+        code, body = _as(client, world, who, f"{API_ROOT}/organizations/me")
         assert code == status.HTTP_200_OK, body
         assert isinstance(body, dict)
         assert body["deployment_operator"] is expected, who
@@ -502,8 +505,8 @@ def test_the_context_reports_whether_the_caller_operates_the_deployment(client: 
 def test_the_context_agrees_with_the_admin_access_endpoint(client: TestClient, world: _World) -> None:
     """Two publishers of one predicate, which is only safe while they cannot disagree."""
     for who in ("alpha_owner", "superuser"):
-        _, context = _as(client, world, who, "/v1/organizations/me")
-        _, access = _as(client, world, who, "/v1/admin/access")
+        _, context = _as(client, world, who, f"{API_ROOT}/organizations/me")
+        _, access = _as(client, world, who, f"{API_ROOT}/admin/access")
         assert isinstance(context, dict)
         assert isinstance(access, dict)
         assert context["deployment_operator"] is access["granted"], who
@@ -532,10 +535,10 @@ def test_every_response_carrying_the_context_carries_the_operator_answer(
         client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
         try:
             switched = client.post(
-                "/v1/organizations/me/switch",
+                f"{API_ROOT}/organizations/me/switch",
                 json={"organization_id": str(organization)},
             )
-            renamed = client.patch("/v1/organizations/me", json={"name": f"Renamed by {who}"})
+            renamed = client.patch(f"{API_ROOT}/organizations/me", json={"name": f"Renamed by {who}"})
         finally:
             client.cookies.clear()
 
@@ -559,7 +562,7 @@ def test_the_context_names_the_caller_it_describes(client: TestClient, world: _W
         ("alpha_member", "member@alpha.test"),
         ("superuser", "root@beta.test"),
     ):
-        code, body = _as(client, world, who, "/v1/organizations/me")
+        code, body = _as(client, world, who, f"{API_ROOT}/organizations/me")
         assert code == status.HTTP_200_OK, body
         assert isinstance(body, dict)
         caller = body["caller"]
@@ -577,7 +580,7 @@ def test_the_context_names_an_identity_that_holds_no_address(
     It has a name and no email, so a shell that assumed an address would have
     nothing to draw for the one caller every standalone deployment has.
     """
-    response = client.get("/v1/organizations/me", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
     caller = response.json()["caller"]
     assert caller["email"] is None
@@ -592,7 +595,7 @@ def test_the_context_reports_whether_provider_keys_can_be_encrypted(client: Test
     environment variable that was already set (otari#839). Readable by a member
     here, which is the whole point.
     """
-    code, body = _as(client, world, "alpha_member", "/v1/organizations/me")
+    code, body = _as(client, world, "alpha_member", f"{API_ROOT}/organizations/me")
     assert code == status.HTTP_200_OK, body
     assert isinstance(body, dict)
     assert isinstance(body["provider_key_encryption_available"], bool)

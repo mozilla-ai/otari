@@ -19,7 +19,7 @@ from openai.types.responses import ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 
 from .conftest import app_for
@@ -105,7 +105,7 @@ def _response_object() -> Response:
 
 def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "openai:gpt-4o-mini", "input": "hi"},
     )
 
@@ -153,7 +153,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "gpt-4o-mini", "input": "hi"},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -225,7 +225,7 @@ def test_hybrid_mode_forwards_extra_params(
     monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "gpt-4o-mini", "input": "hi"},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -271,7 +271,7 @@ def test_hybrid_mode_rejects_caller_supplied_client_args(
     monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={
             "model": "gpt-4o-mini",
             "input": "hi",
@@ -322,7 +322,7 @@ def test_hybrid_mode_forwards_codex_metadata_only_to_openai(
         }
     ]
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={
             "model": "gpt-4o-mini",
             "client_metadata": {"session_id": "session_123"},
@@ -389,7 +389,7 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
     monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "gpt-4o-mini", "input": "hi"},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -441,7 +441,7 @@ def test_hybrid_mode_returns_502_when_all_attempts_fail(
     monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "gpt-4o-mini", "input": "hi"},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -484,7 +484,7 @@ def test_hybrid_mode_provider_without_responses_support_returns_400(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "claude-3-5-sonnet-20241022", "input": "hi"},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -581,7 +581,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop_responses.aresponses", fake_loop_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={
             "model": "gpt-4o-mini",
             "input": "hi",
@@ -661,7 +661,7 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop_responses.aresponses", fake_loop_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={
             "model": "gpt-4o-mini",
             "input": "hi",
@@ -734,7 +734,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     ):
         with platform_client.stream(
             "POST",
-            "/v1/responses",
+            f"{API_ROOT}/responses",
             json={
                 "model": "gpt-4o-mini",
                 "input": "hi",
@@ -783,7 +783,7 @@ def test_hybrid_mode_supports_responses_guard_checks_every_attempt(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "gpt-4o-mini", "input": "hi"},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -825,7 +825,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={"model": "gpt-4o-mini", "input": "hi", "stream": True},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -874,7 +874,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     monkeypatch.setattr("gateway.api.routes.responses.responses_tool_loop_stream", fake_loop_stream)
 
     response = platform_client.post(
-        "/v1/responses",
+        f"{API_ROOT}/responses",
         json={
             "model": "gpt-4o-mini",
             "input": "hi",

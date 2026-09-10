@@ -24,11 +24,12 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import DashboardSession, RoutingPolicy
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
-_SCOPED_PATH = "/v1/organizations/me/routing-policies"
+_SCOPED_PATH = f"{API_ROOT}/organizations/me/routing-policies"
 
 
 @dataclass
@@ -119,7 +120,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
     """Two tenants with stored policies in both, and the identities that read them."""
     # One master-key call provisions the tenancy root, so the organizations built
     # below sit beside a real default rather than replacing it.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
 
     session = db_session_factory()
     try:
@@ -246,7 +247,7 @@ def test_the_deployment_wide_route_still_refuses_a_tenant(client: TestClient, wo
     """The control: this route exists so that gate does not have to loosen."""
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
     try:
-        refused = client.get("/v1/routing/policies")
+        refused = client.get(f"{API_ROOT}/routing/policies")
         assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
     finally:
         client.cookies.clear()

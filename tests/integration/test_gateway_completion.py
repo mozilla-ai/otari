@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 from .conftest import MODEL_NAME
 
 if TYPE_CHECKING:
@@ -24,7 +26,7 @@ async def test_chat_completion_with_provider_model_format(
 ) -> None:
     """Test chat completion using provider:model format."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages,
@@ -50,7 +52,7 @@ async def test_chat_completion_streaming(
 ) -> None:
     """Test streaming chat completion."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages,
@@ -85,7 +87,7 @@ async def test_chat_completion_with_reasoning(
 ) -> None:
     """Test that reasoning content is preserved in responses."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": [{"role": "user", "content": "What is 2+2? Think step by step."}],
@@ -117,7 +119,7 @@ async def test_chat_completion_with_temperature(
 ) -> None:
     """Test chat completion with temperature parameter."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages,
@@ -141,7 +143,7 @@ async def test_chat_completion_without_auth_header_fails(
 ) -> None:
     """Test that completion without authorization header fails."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages,
@@ -158,7 +160,7 @@ async def test_chat_completion_with_invalid_api_key_fails(
 ) -> None:
     """Test that completion with invalid gateway API key fails."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages,
@@ -184,7 +186,7 @@ async def test_chat_completion_multi_turn_conversation(
     ]
 
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": messages,

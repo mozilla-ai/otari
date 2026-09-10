@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from gateway.core.config import API_ROOT
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "sdk_codegen"))
 
@@ -52,16 +54,16 @@ def test_parse_ignores_entries_before_any_section() -> None:
 def test_spec_endpoints_skips_meta_and_non_verbs() -> None:
     spec = {
         "paths": {
-            "/health": {"get": {}},
-            "/health/ready": {"get": {}},
-            "/healthz-not-meta": {"get": {}},
-            "/v1/keys": {"get": {}, "post": {}, "parameters": [], "summary": "x"},
+            f"{API_ROOT}/health": {"get": {}},
+            f"{API_ROOT}/health/ready": {"get": {}},
+            f"{API_ROOT}/healthz-not-meta": {"get": {}},
+            f"{API_ROOT}/keys": {"get": {}, "post": {}, "parameters": [], "summary": "x"},
         }
     }
     assert em.spec_endpoints(spec) == {
-        "GET /healthz-not-meta",
-        "GET /v1/keys",
-        "POST /v1/keys",
+        "GET /api/v1/healthz-not-meta",
+        "GET /api/v1/keys",
+        "POST /api/v1/keys",
     }
 
 

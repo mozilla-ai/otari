@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import API_ROOT
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,
     DOMAIN_VERIFICATION_TXT_PREFIX,
@@ -484,7 +485,7 @@ def test_the_claim_lifecycle_over_http(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created = client.post(
-        "/v1/organizations/me/domains",
+        f"{API_ROOT}/organizations/me/domains",
         json={"domain": "acme.example", "default_role": "viewer"},
         headers=master_key_header,
     )
@@ -497,35 +498,35 @@ def test_the_claim_lifecycle_over_http(
     # The raw token is never on the wire on its own.
     assert "verification_token" not in body
 
-    listed = client.get("/v1/organizations/me/domains", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/organizations/me/domains", headers=master_key_header)
     assert listed.status_code == 200
     assert [row["domain"] for row in listed.json()["data"]] == ["acme.example"]
     assert listed.json()["count"] == 1
 
     monkeypatch.setattr(f"{_SERVICE_MODULE}.resolve_txt_records", _resolver({"acme.example": [record]}))
     verified = client.post(
-        f"/v1/organizations/me/domains/{body['id']}/verify",
+        f"{API_ROOT}/organizations/me/domains/{body['id']}/verify",
         headers=master_key_header,
     )
     assert verified.status_code == 200, verified.text
     assert verified.json()["verified_at"] is not None
 
     patched = client.patch(
-        f"/v1/organizations/me/domains/{body['id']}",
+        f"{API_ROOT}/organizations/me/domains/{body['id']}",
         json={"enabled": False},
         headers=master_key_header,
     )
     assert patched.status_code == 200, patched.text
     assert patched.json()["enabled"] is False
 
-    removed = client.delete(f"/v1/organizations/me/domains/{body['id']}", headers=master_key_header)
+    removed = client.delete(f"{API_ROOT}/organizations/me/domains/{body['id']}", headers=master_key_header)
     assert removed.status_code == 200, removed.text
-    assert client.get("/v1/organizations/me/domains", headers=master_key_header).json()["count"] == 0
+    assert client.get(f"{API_ROOT}/organizations/me/domains", headers=master_key_header).json()["count"] == 0
 
 
 def test_a_public_provider_is_refused_over_http(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
-        "/v1/organizations/me/domains",
+        f"{API_ROOT}/organizations/me/domains",
         json={"domain": "gmail.com"},
         headers=master_key_header,
     )
@@ -539,14 +540,14 @@ def test_an_unverified_claim_cannot_be_verified_without_the_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created = client.post(
-        "/v1/organizations/me/domains",
+        f"{API_ROOT}/organizations/me/domains",
         json={"domain": "acme.example"},
         headers=master_key_header,
     ).json()
 
     monkeypatch.setattr(f"{_SERVICE_MODULE}.resolve_txt_records", _resolver({}))
     response = client.post(
-        f"/v1/organizations/me/domains/{created['id']}/verify",
+        f"{API_ROOT}/organizations/me/domains/{created['id']}/verify",
         headers=master_key_header,
     )
     assert response.status_code == 400, response.text
@@ -559,7 +560,7 @@ def test_a_management_role_a_domain_may_not_hand_out_is_refused_by_the_schema(
 ) -> None:
     """Owner and admin are absent from the request Literal, so this is a 422."""
     response = client.post(
-        "/v1/organizations/me/domains",
+        f"{API_ROOT}/organizations/me/domains",
         json={"domain": "acme.example", "default_role": "admin"},
         headers=master_key_header,
     )
@@ -568,7 +569,7 @@ def test_a_management_role_a_domain_may_not_hand_out_is_refused_by_the_schema(
 
 def test_an_unknown_claim_is_a_404(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.delete(
-        f"/v1/organizations/me/domains/{uuid.uuid4()}",
+        f"{API_ROOT}/organizations/me/domains/{uuid.uuid4()}",
         headers=master_key_header,
     )
     assert response.status_code == 404, response.text

@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from httpx2 import Response
 from sqlalchemy import create_engine, text
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 
@@ -44,7 +44,7 @@ def _client(tmp_path: Path, *, mail_ready: bool = True) -> TestClient:
 def _add_member(client: TestClient, *, email: str, role: str = "member") -> None:
     """Put a password-less, unclaimed identity on the roster, as an admin would."""
     response = client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": email, "role": role},
         headers={"Otari-Key": MASTER_KEY},
     )
@@ -52,7 +52,7 @@ def _add_member(client: TestClient, *, email: str, role: str = "member") -> None
 
 
 def _signup(client: TestClient, *, email: str, password: str = PASSWORD, **extra: object) -> Response:
-    return client.post("/v1/auth/signup", json={"email": email, "password": password, **extra})
+    return client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": password, **extra})
 
 
 def _deactivate(tmp_path: Path, *, email: str) -> None:
@@ -100,14 +100,14 @@ def test_signup_claims_a_roster_identity_and_sends_a_verification_link(
         )
 
         # Unverified: the hard-block refuses the very password just set.
-        response = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
         assert response.status_code == 403
 
-        verified = client.post("/v1/auth/verify-email", json={"token": token})
+        verified = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
         assert verified.status_code == 200, verified.text
         assert verified.json()["email"] == "ada@example.com"
 
-        response = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
         assert response.status_code == 200
 
 
@@ -119,7 +119,7 @@ def test_signup_preserves_the_existing_membership_and_organization(
         headers = {"Otari-Key": MASTER_KEY}
 
         def _roster_row() -> dict[str, object]:
-            members = client.get("/v1/organizations/me/members", headers=headers).json()["data"]
+            members = client.get(f"{API_ROOT}/organizations/me/members", headers=headers).json()["data"]
             return next(row for row in members if row["email"] == "grace@example.com")
 
         before = _roster_row()
@@ -162,7 +162,7 @@ def test_signup_on_an_already_completed_address_is_enumeration_safe(
         # Nothing was re-sent, and the original password is untouched.
         assert "mail:console" not in caplog.text
         assert client.post(
-            "/v1/auth/session", json={"email": "ada@example.com", "password": "a-different-password"}
+            f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": "a-different-password"}
         ).status_code == 401
 
 

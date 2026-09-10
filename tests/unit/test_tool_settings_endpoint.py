@@ -8,7 +8,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
@@ -29,13 +29,13 @@ def _fields(body: dict[str, Any]) -> dict[str, Any]:
 
 def test_requires_master_key(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.get("/v1/tool-settings").status_code == 401
-        assert client.get("/v1/tool-settings", headers={"Authorization": "Bearer nope"}).status_code == 401
+        assert client.get(f"{API_ROOT}/tool-settings").status_code == 401
+        assert client.get(f"{API_ROOT}/tool-settings", headers={"Authorization": "Bearer nope"}).status_code == 401
 
 
 def test_get_reports_effective_values(tmp_path: Path) -> None:
     with _client(tmp_path, sandbox_url="http://sandbox:8000", web_search_max_results=7) as client:
-        body = client.get("/v1/tool-settings", headers=AUTH).json()
+        body = client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json()
     fields = _fields(body)
     assert fields["sandbox_url"]["value"] == "http://sandbox:8000"
     assert fields["sandbox_url"]["service"] == "sandbox"
@@ -46,7 +46,7 @@ def test_get_reports_effective_values(tmp_path: Path) -> None:
 
 def test_get_redacts_url_password(tmp_path: Path) -> None:
     with _client(tmp_path, guardrails_url="https://user:secret@guardrails:8000") as client:
-        body = client.get("/v1/tool-settings", headers=AUTH).json()
+        body = client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json()
     value = _fields(body)["guardrails_url"]["value"]
     assert "secret" not in value
     assert "***" in value
@@ -55,7 +55,7 @@ def test_get_redacts_url_password(tmp_path: Path) -> None:
 def test_patch_persists_and_hot_applies(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         resp = client.patch(
-            "/v1/tool-settings",
+            f"{API_ROOT}/tool-settings",
             headers=AUTH,
             json={"web_search_url": "http://searxng:8080", "web_search_max_results": 10},
         )
@@ -64,7 +64,7 @@ def test_patch_persists_and_hot_applies(tmp_path: Path) -> None:
         app_config: GatewayConfig = client.app.state.config  # type: ignore[attr-defined]
         assert app_config.web_search_url == "http://searxng:8080"
         assert app_config.web_search_max_results == 10
-        fields = _fields(client.get("/v1/tool-settings", headers=AUTH).json())
+        fields = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
         assert fields["web_search_url"]["value"] == "http://searxng:8080"
 
 
@@ -73,7 +73,7 @@ def test_patch_accepts_bundled_sidecar_urls(tmp_path: Path) -> None:
     # a deny-private gate here would break the default docker-compose deployment.
     with _client(tmp_path) as client:
         resp = client.patch(
-            "/v1/tool-settings",
+            f"{API_ROOT}/tool-settings",
             headers=AUTH,
             json={
                 "web_search_url": "http://searxng:8080",
@@ -86,17 +86,20 @@ def test_patch_accepts_bundled_sidecar_urls(tmp_path: Path) -> None:
 
 def test_patch_rejects_non_web_scheme(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        resp = client.patch("/v1/tool-settings", headers=AUTH, json={"sandbox_url": "file:///etc/passwd"})
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"sandbox_url": "file:///etc/passwd"})
     assert resp.status_code == 422
     # Nothing was stored.
     with _client(tmp_path) as client:
-        assert _fields(client.get("/v1/tool-settings", headers=AUTH).json())["sandbox_url"]["value"] is None
+        assert _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())["sandbox_url"]["value"] is None
 
 
 def test_patch_rejects_out_of_bounds_max_results(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         # ge=1 is enforced by the request model (422) before it even reaches the service.
-        assert client.patch("/v1/tool-settings", headers=AUTH, json={"web_search_max_results": 0}).status_code == 422
+        assert (
+            client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_max_results": 0}).status_code
+            == 422
+        )
 
 
 def test_patch_clear_falls_back_and_survives_restart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,17 +111,17 @@ def test_patch_clear_falls_back_and_survives_restart(tmp_path: Path, monkeypatch
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://env-default:8080")
     with TestClient(create_app(GatewayConfig(database_url=db, master_key="sk-test-master"))) as client:
         # Override it, then clear it back to the configured default.
-        client.patch("/v1/tool-settings", headers=AUTH, json={"web_search_url": "http://override:9999"})
+        client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_url": "http://override:9999"})
         assert client.app.state.config.web_search_url == "http://override:9999"  # type: ignore[attr-defined]
-        client.patch("/v1/tool-settings", headers=AUTH, json={"web_search_url": None})
+        client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_url": None})
         # Cleared: the read path falls back to the configured env value, not "nothing".
-        fields = _fields(client.get("/v1/tool-settings", headers=AUTH).json())
+        fields = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
         assert fields["web_search_url"]["value"] == "http://env-default:8080"
 
     # Restart: the cleared override ("") is re-applied as None; the read path again
     # falls back to the configured env value.
     with TestClient(create_app(GatewayConfig(database_url=db, master_key="sk-test-master"))) as client2:
-        fields2 = _fields(client2.get("/v1/tool-settings", headers=AUTH).json())
+        fields2 = _fields(client2.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
         assert fields2["web_search_url"]["value"] == "http://env-default:8080"
 
 
@@ -132,7 +135,7 @@ def test_test_endpoint_reports_reachable(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     with _client(tmp_path) as client:
         resp = client.post(
-            "/v1/tool-settings/web_search/test", headers=AUTH, json={"url": "http://searxng:8080"}
+            f"{API_ROOT}/tool-settings/web_search/test", headers=AUTH, json={"url": "http://searxng:8080"}
         )
     assert resp.status_code == 200
     body = resp.json()
@@ -146,7 +149,7 @@ def test_test_endpoint_reports_unreachable(tmp_path: Path, monkeypatch: pytest.M
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     with _client(tmp_path) as client:
-        resp = client.post("/v1/tool-settings/sandbox/test", headers=AUTH, json={"url": "http://localhost:1"})
+        resp = client.post(f"{API_ROOT}/tool-settings/sandbox/test", headers=AUTH, json={"url": "http://localhost:1"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is False
@@ -155,13 +158,13 @@ def test_test_endpoint_reports_unreachable(tmp_path: Path, monkeypatch: pytest.M
 
 def test_test_endpoint_rejects_unsafe_url(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        resp = client.post("/v1/tool-settings/sandbox/test", headers=AUTH, json={"url": "file:///etc/passwd"})
+        resp = client.post(f"{API_ROOT}/tool-settings/sandbox/test", headers=AUTH, json={"url": "file:///etc/passwd"})
     assert resp.status_code == 422
 
 
 def test_test_endpoint_unknown_service(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        resp = client.post("/v1/tool-settings/bogus/test", headers=AUTH, json={"url": "http://x:8080"})
+        resp = client.post(f"{API_ROOT}/tool-settings/bogus/test", headers=AUTH, json={"url": "http://x:8080"})
     assert resp.status_code == 404
 
 
@@ -179,7 +182,7 @@ def test_tool_settings_not_mounted_in_hybrid_mode(tmp_path: Path, _hybrid_env: N
     )
     with TestClient(create_app(config)) as client:
         # Standalone-only: the management route is not registered in hybrid mode.
-        assert client.get("/v1/tool-settings", headers=AUTH).status_code == 404
+        assert client.get(f"{API_ROOT}/tool-settings", headers=AUTH).status_code == 404
 
 
 def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
@@ -191,12 +194,12 @@ def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
     """
     with _client(tmp_path) as client:
         patched = client.patch(
-            "/v1/tool-settings",
+            f"{API_ROOT}/tool-settings",
             json={"sandbox_session_image": "mzdotai/otari-sandbox-container:latest"},
             headers=AUTH,
         )
         assert patched.status_code == 200, patched.text
-        fields = _fields(client.get("/v1/tool-settings", headers=AUTH).json())
+        fields = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
 
     assert fields["sandbox_session_image"]["value"] == "mzdotai/otari-sandbox-container:latest"
     assert fields["sandbox_session_image"]["service"] == "sandbox"

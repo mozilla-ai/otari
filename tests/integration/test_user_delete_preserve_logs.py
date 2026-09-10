@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.entities import APIKey, BudgetResetLog, UsageLog, User
 
 from .conftest import MODEL_NAME
@@ -22,16 +22,16 @@ def test_delete_user_preserves_usage_logs(
     db_session: Session,
 ) -> None:
     """Soft-deleting a user preserves FK links in usage logs; API keys are deactivated, not deleted."""
-    client.post("/v1/users", json={"user_id": "del-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "del-user"}, headers=master_key_header)
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "del-key", "user_id": "del-user"},
         headers=master_key_header,
     )
     api_key = key_resp.json()["key"]
 
     client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "Hello"}], "user": "del-user"},
         headers={API_KEY_HEADER: f"Bearer {api_key}"},
     )
@@ -41,7 +41,7 @@ def test_delete_user_preserves_usage_logs(
     log_id = logs_before[0].id
     assert logs_before[0].api_key_id is not None
 
-    response = client.delete("/v1/users/del-user", headers=master_key_header)
+    response = client.delete(f"{API_ROOT}/users/del-user", headers=master_key_header)
     assert response.status_code == 204
 
     db_session.expire_all()
@@ -61,14 +61,14 @@ def test_delete_user_preserves_budget_reset_logs(
 ) -> None:
     """Soft-deleting a user preserves FK links in budget reset logs."""
     budget_resp = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 100.0, "budget_duration_sec": 60},
         headers=master_key_header,
     )
     budget_id = budget_resp.json()["budget_id"]
 
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": MODEL_NAME, "input_price_per_million": 2.5, "output_price_per_million": 10.0},
         headers=master_key_header,
     )
@@ -77,7 +77,7 @@ def test_delete_user_preserves_budget_reset_logs(
     with patch("gateway.api.routes.users.datetime") as mock_dt:
         mock_dt.now.return_value = initial_time
         client.post(
-            "/v1/users",
+            f"{API_ROOT}/users",
             json={"user_id": "reset-user", "budget_id": budget_id},
             headers=master_key_header,
         )
@@ -110,7 +110,7 @@ def test_delete_user_preserves_budget_reset_logs(
 
         mock_acompletion.side_effect = _mock_acompletion
         client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": MODEL_NAME, "messages": test_messages, "user": "reset-user"},
             headers=master_key_header,
         )
@@ -119,7 +119,7 @@ def test_delete_user_preserves_budget_reset_logs(
     assert len(reset_logs_before) > 0
     reset_log_id = reset_logs_before[0].id
 
-    response = client.delete("/v1/users/reset-user", headers=master_key_header)
+    response = client.delete(f"{API_ROOT}/users/reset-user", headers=master_key_header)
     assert response.status_code == 204
 
     db_session.expire_all()
@@ -134,10 +134,10 @@ def test_soft_deleted_user_not_in_list(
     master_key_header: dict[str, str],
 ) -> None:
     """Soft-deleted users should not appear in GET /v1/users."""
-    client.post("/v1/users", json={"user_id": "list-del-user"}, headers=master_key_header)
-    client.delete("/v1/users/list-del-user", headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "list-del-user"}, headers=master_key_header)
+    client.delete(f"{API_ROOT}/users/list-del-user", headers=master_key_header)
 
-    resp = client.get("/v1/users", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/users", headers=master_key_header)
     assert resp.status_code == 200
     user_ids = [u["user_id"] for u in resp.json()]
     assert "list-del-user" not in user_ids
@@ -148,14 +148,14 @@ def test_soft_deleted_user_returns_404(
     master_key_header: dict[str, str],
 ) -> None:
     """GET and PATCH on a soft-deleted user should return 404."""
-    client.post("/v1/users", json={"user_id": "ghost-user"}, headers=master_key_header)
-    client.delete("/v1/users/ghost-user", headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "ghost-user"}, headers=master_key_header)
+    client.delete(f"{API_ROOT}/users/ghost-user", headers=master_key_header)
 
-    get_resp = client.get("/v1/users/ghost-user", headers=master_key_header)
+    get_resp = client.get(f"{API_ROOT}/users/ghost-user", headers=master_key_header)
     assert get_resp.status_code == 404
 
     patch_resp = client.patch(
-        "/v1/users/ghost-user",
+        f"{API_ROOT}/users/ghost-user",
         json={"alias": "should-fail"},
         headers=master_key_header,
     )
@@ -168,14 +168,14 @@ def test_recreate_soft_deleted_user(
 ) -> None:
     """POST /v1/users with a previously soft-deleted user_id should restore the user with spend=0."""
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "revive-user", "alias": "Original"},
         headers=master_key_header,
     )
-    client.delete("/v1/users/revive-user", headers=master_key_header)
+    client.delete(f"{API_ROOT}/users/revive-user", headers=master_key_header)
 
     resp = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "revive-user", "alias": "Restored"},
         headers=master_key_header,
     )
@@ -185,7 +185,7 @@ def test_recreate_soft_deleted_user(
     assert data["alias"] == "Restored"
     assert data["spend"] == 0.0
 
-    get_resp = client.get("/v1/users/revive-user", headers=master_key_header)
+    get_resp = client.get(f"{API_ROOT}/users/revive-user", headers=master_key_header)
     assert get_resp.status_code == 200
 
 
@@ -195,15 +195,15 @@ def test_soft_delete_deactivates_api_keys(
     db_session: Session,
 ) -> None:
     """API keys should be deactivated (not deleted) when a user is soft-deleted."""
-    client.post("/v1/users", json={"user_id": "key-del-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "key-del-user"}, headers=master_key_header)
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "doomed-key", "user_id": "key-del-user"},
         headers=master_key_header,
     )
     key_id = key_resp.json()["id"]
 
-    client.delete("/v1/users/key-del-user", headers=master_key_header)
+    client.delete(f"{API_ROOT}/users/key-del-user", headers=master_key_header)
 
     db_session.expire_all()
     key = db_session.query(APIKey).filter(APIKey.id == key_id).first()
@@ -216,28 +216,28 @@ def test_get_user_usage_after_soft_delete(
     master_key_header: dict[str, str],
 ) -> None:
     """GET /v1/users/{user_id}/usage should still return logs after the user is soft-deleted."""
-    client.post("/v1/users", json={"user_id": "usage-del-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "usage-del-user"}, headers=master_key_header)
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "usage-key", "user_id": "usage-del-user"},
         headers=master_key_header,
     )
     api_key = key_resp.json()["key"]
 
     client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "Hello"}], "user": "usage-del-user"},
         headers={API_KEY_HEADER: f"Bearer {api_key}"},
     )
 
-    usage_before = client.get("/v1/users/usage-del-user/usage", headers=master_key_header)
+    usage_before = client.get(f"{API_ROOT}/users/usage-del-user/usage", headers=master_key_header)
     assert usage_before.status_code == 200
     assert len(usage_before.json()) > 0
 
-    resp = client.delete("/v1/users/usage-del-user", headers=master_key_header)
+    resp = client.delete(f"{API_ROOT}/users/usage-del-user", headers=master_key_header)
     assert resp.status_code == 204
 
-    usage_after = client.get("/v1/users/usage-del-user/usage", headers=master_key_header)
+    usage_after = client.get(f"{API_ROOT}/users/usage-del-user/usage", headers=master_key_header)
     assert usage_after.status_code == 200
     assert len(usage_after.json()) > 0
     assert usage_after.json()[0]["user_id"] == "usage-del-user"
@@ -249,9 +249,9 @@ def test_cascade_delete_api_keys_on_hard_delete(
     db_session: Session,
 ) -> None:
     """Raw SQL DELETE on users should cascade to api_keys via ondelete='CASCADE'."""
-    client.post("/v1/users", json={"user_id": "cascade-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "cascade-user"}, headers=master_key_header)
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "cascade-key", "user_id": "cascade-user"},
         headers=master_key_header,
     )
@@ -277,7 +277,7 @@ def test_delete_user_leaves_the_user_active_when_telemetry_erasure_fails(
     the other way round, the retry would meet a 404 (the user is no longer
     active) and nothing would ever erase what was left behind.
     """
-    client.post("/v1/users", json={"user_id": "erase-fail-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "erase-fail-user"}, headers=master_key_header)
 
     # Takes the instance: patched onto the class, this is called as a bound
     # method, so a keyword-only signature would fail on argument binding and
@@ -286,7 +286,7 @@ def test_delete_user_leaves_the_user_active_when_telemetry_erasure_fails(
         raise RuntimeError("telemetry store unreachable")
 
     with patch.object(DatabaseTelemetryStorageAdapter, "purge_user", _boom):
-        response = client.delete("/v1/users/erase-fail-user", headers=master_key_header)
+        response = client.delete(f"{API_ROOT}/users/erase-fail-user", headers=master_key_header)
 
     assert response.status_code == 500
     assert "telemetry" in response.json()["detail"].lower()
@@ -297,4 +297,4 @@ def test_delete_user_leaves_the_user_active_when_telemetry_erasure_fails(
     assert user.deleted_at is None, "the user must stay active so the erasure can be retried"
 
     # The retry succeeds once the store recovers, which is the point of the order.
-    assert client.delete("/v1/users/erase-fail-user", headers=master_key_header).status_code == 204
+    assert client.delete(f"{API_ROOT}/users/erase-fail-user", headers=master_key_header).status_code == 204

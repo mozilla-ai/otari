@@ -35,6 +35,7 @@ from any_llm.types.messages import (
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 
@@ -132,7 +133,7 @@ def test_no_tools_falls_through_to_plain_amessages(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -161,7 +162,7 @@ def test_container_reaches_plain_amessages_unchanged(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-sonnet-4-5",
                 "messages": [{"role": "user", "content": "Continue"}],
@@ -205,7 +206,7 @@ def test_container_is_dropped_when_the_gateway_runs_code_execution(
         ),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-sonnet-4-5",
                 "messages": [{"role": "user", "content": "compute"}],
@@ -234,7 +235,7 @@ def test_container_survives_provider_native_code_execution(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-sonnet-4-5",
                 "messages": [{"role": "user", "content": "compute"}],
@@ -275,7 +276,7 @@ def test_cache_control_and_non_stream_usage_round_trip(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "system": [system_block],
@@ -308,7 +309,7 @@ def test_context_management_non_stream_contract(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-opus-5",
                 "messages": [{"role": "user", "content": "Summarize when needed"}],
@@ -341,7 +342,7 @@ def test_mcp_client_beta_is_not_forwarded_to_provider(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages?beta=true",
+            f"{API_ROOT}/messages?beta=true",
             json={
                 "model": "anthropic:claude-opus-5",
                 "messages": [{"role": "user", "content": "Use the beta"}],
@@ -370,7 +371,7 @@ def test_mcp_client_beta_is_removed_for_translated_provider(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages?beta=true",
+            f"{API_ROOT}/messages?beta=true",
             json={
                 "model": "openai:gpt-4o",
                 "messages": [{"role": "user", "content": "Use the MCP beta"}],
@@ -399,7 +400,7 @@ def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -431,7 +432,7 @@ def test_user_supplied_openai_shape_tools_get_converted_to_anthropic(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "do it"}],
@@ -509,7 +510,7 @@ def test_cache_control_survives_route_level_purpose_hint_injection(
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "system": [system_block],
@@ -567,7 +568,7 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -625,7 +626,7 @@ def test_web_search_replay_is_stripped_when_interception_is_off(
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": replayed_messages,
@@ -673,7 +674,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
         ),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "compute"}],
@@ -717,7 +718,7 @@ def test_web_search_dispatches_through_web_search_backend(
         patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
@@ -755,7 +756,7 @@ def test_provider_code_execution_passes_through_to_upstream(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "compute"}],
@@ -789,7 +790,7 @@ def test_provider_web_search_passes_through_to_upstream(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
@@ -823,7 +824,7 @@ def test_code_execution_without_sandbox_env_returns_400_anthropic_body(
 ) -> None:
     monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
     resp = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -843,7 +844,7 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     resp = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -871,7 +872,7 @@ def test_code_execution_combined_with_a_provider_native_tool_returns_400(
     """Two sandboxes in one request have no single home for the caller's state."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     resp = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -916,7 +917,7 @@ def test_code_execution_allows_an_unrelated_caller_function(
         ),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -940,7 +941,7 @@ def test_web_search_combined_with_sandbox_returns_400(
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     resp = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -994,7 +995,7 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
         ),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "go"}],
@@ -1027,7 +1028,7 @@ def test_sandbox_unreachable_returns_502_anthropic_body(
         return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "go"}],
@@ -1175,7 +1176,7 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
         ),
     ):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": messages,
@@ -1214,7 +1215,7 @@ def test_stream_no_tools_returns_sse_response(
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -1245,7 +1246,7 @@ def test_stream_cache_control_and_usage_round_trip(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -1344,7 +1345,7 @@ def test_context_management_stream_contract(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-opus-5",
                 "messages": [{"role": "user", "content": "Summarize when needed"}],
@@ -1402,7 +1403,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -1532,7 +1533,7 @@ def test_stream_mcp_activity_requires_beta(
         ),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "look it up"}],
@@ -1592,7 +1593,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
         patch("gateway.api.routes._pipeline.SandboxBackend", return_value=fake_backend),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "compute"}],
@@ -1628,7 +1629,7 @@ def test_stream_sandbox_unreachable_returns_502_anthropic_body(
         return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "go"}],
@@ -1694,7 +1695,7 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
         patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
@@ -1750,7 +1751,7 @@ def test_intercept_emits_native_blocks_only_for_a_native_declaration(
             patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
         ):
             resp = client.post(
-                "/v1/messages",
+                f"{API_ROOT}/messages",
                 json={
                     "model": "anthropic:claude-3-5-sonnet-20241022",
                     "messages": [{"role": "user", "content": "search"}],
@@ -1784,7 +1785,7 @@ def test_intercept_off_still_forwards_provider_keywords(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
@@ -1815,7 +1816,7 @@ def test_intercept_without_a_backend_forwards_rather_than_400s(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
@@ -1845,7 +1846,7 @@ def test_intercept_never_claims_a_caller_function_named_web_search(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
@@ -1889,7 +1890,7 @@ def test_intercept_retargets_a_forced_tool_choice(
         patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],

@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from gateway.core.config import API_ROOT
+
 _GENERATE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "sdk_codegen" / "generate.py"
 
 
@@ -34,7 +36,7 @@ def _sample_spec() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {"title": "t", "version": "0"},
         "paths": {
-            "/v1/keys": {
+            f"{API_ROOT}/keys": {
                 "post": {
                     "tags": ["keys"],
                     "responses": {
@@ -46,7 +48,7 @@ def _sample_spec() -> dict[str, Any]:
                     },
                 }
             },
-            "/v1/chat/completions": {
+            f"{API_ROOT}/chat/completions": {
                 "post": {
                     "tags": ["chat"],
                     "requestBody": {
@@ -73,7 +75,7 @@ def _sample_spec() -> dict[str, Any]:
 
 def test_filter_keeps_control_plane_and_drops_inference() -> None:
     result = generate.filter_spec(_sample_spec(), frozenset({"keys"}))
-    assert set(result["paths"]) == {"/v1/keys"}
+    assert set(result["paths"]) == {f"{API_ROOT}/keys"}
 
 
 def test_filter_prunes_schemas_to_reachable_closure() -> None:
@@ -205,11 +207,11 @@ def _full_spec_stub() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {"title": "t", "version": "0"},
         "paths": {
-            "/v1/chat/completions": {"post": {"responses": {}}},
-            "/v1/messages": {"post": {"responses": {}}},
-            "/v1/rerank": {"post": {"responses": {}}},
-            "/v1/embeddings": {"post": {"responses": {}}},
-            "/v1/images/generations": {"post": {"responses": {}}},
+            f"{API_ROOT}/chat/completions": {"post": {"responses": {}}},
+            f"{API_ROOT}/messages": {"post": {"responses": {}}},
+            f"{API_ROOT}/rerank": {"post": {"responses": {}}},
+            f"{API_ROOT}/embeddings": {"post": {"responses": {}}},
+            f"{API_ROOT}/images/generations": {"post": {"responses": {}}},
         },
         "components": {"schemas": {"ChatCompletionRequest": {"type": "object", "properties": {}}}},
     }
@@ -233,17 +235,17 @@ def test_enrich_types_otari_owned_inference_endpoints() -> None:
         schema = spec["paths"][path]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
         return str(schema["$ref"])
 
-    assert ref("/v1/chat/completions").endswith("/ChatCompletion")
+    assert ref(f"{API_ROOT}/chat/completions").endswith("/ChatCompletion")
     # /messages is Anthropic-shaped and has no OpenAI-SDK equivalent; typing it
     # from any-llm's MessageResponse is the whole point of generating from the
     # otari spec rather than wrapping the OpenAI SDK.
-    assert ref("/v1/messages").endswith("/MessageResponse")
-    assert ref("/v1/rerank").endswith("/RerankResponse")
-    assert ref("/v1/embeddings").endswith("/CreateEmbeddingResponse")
+    assert ref(f"{API_ROOT}/messages").endswith("/MessageResponse")
+    assert ref(f"{API_ROOT}/rerank").endswith("/RerankResponse")
+    assert ref(f"{API_ROOT}/embeddings").endswith("/CreateEmbeddingResponse")
     # Image generation is plain JSON, so it is typed from any-llm's
     # ImagesResponse. Speech (binary response) and transcription (multipart
     # request) stay opaque in the codegen enrichment.
-    assert ref("/v1/images/generations").endswith("/ImagesResponse")
+    assert ref(f"{API_ROOT}/images/generations").endswith("/ImagesResponse")
 
     messages_field = schemas["ChatCompletionRequest"]["properties"]["messages"]
     assert messages_field["items"]["$ref"].endswith("/ChatMessageInput")

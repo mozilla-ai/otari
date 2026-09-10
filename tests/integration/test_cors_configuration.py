@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app
 
@@ -25,7 +25,7 @@ def test_cors_disabled_by_default(postgres_url: str, test_db: Session) -> None:
 
     try:
         with TestClient(app) as client:
-            response = client.get("/health", headers={"Origin": "https://evil.com"})
+            response = client.get(f"{API_ROOT}/health", headers={"Origin": "https://evil.com"})
             assert response.status_code == 200
             assert "access-control-allow-origin" not in response.headers
     finally:
@@ -49,13 +49,13 @@ def test_cors_with_specific_origins(postgres_url: str, test_db: Session) -> None
     try:
         with TestClient(app) as client:
             # Trusted origin should get CORS headers
-            response = client.get("/health", headers={"Origin": "https://trusted.com"})
+            response = client.get(f"{API_ROOT}/health", headers={"Origin": "https://trusted.com"})
             assert response.status_code == 200
             assert response.headers.get("access-control-allow-origin") == "https://trusted.com"
             assert response.headers.get("access-control-allow-credentials") == "true"
 
             # Untrusted origin should not get CORS headers
-            response = client.get("/health", headers={"Origin": "https://evil.com"})
+            response = client.get(f"{API_ROOT}/health", headers={"Origin": "https://evil.com"})
             assert response.status_code == 200
             assert response.headers.get("access-control-allow-origin") != "https://evil.com"
     finally:
@@ -78,7 +78,7 @@ def test_cors_wildcard_disables_credentials(postgres_url: str, test_db: Session)
 
     try:
         with TestClient(app) as client:
-            response = client.get("/health", headers={"Origin": "https://any-site.com"})
+            response = client.get(f"{API_ROOT}/health", headers={"Origin": "https://any-site.com"})
             assert response.status_code == 200
             assert response.headers.get("access-control-allow-origin") == "*"
             # Credentials should NOT be allowed with wildcard

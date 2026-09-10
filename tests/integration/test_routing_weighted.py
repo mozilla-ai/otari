@@ -41,7 +41,7 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.routing import RoutingConfig
 from gateway.services.routing.weighted import WeightedRouterBackend
 
@@ -127,7 +127,7 @@ def client(weighted_config: GatewayConfig) -> Generator[TestClient]:
         client_gen = build_test_client(weighted_config)
         test_client = next(client_gen)
         try:
-            resp = test_client.post("/v1/users", json={"user_id": USER}, headers=HEADERS)
+            resp = test_client.post(f"{API_ROOT}/users", json={"user_id": USER}, headers=HEADERS)
             assert resp.status_code == 200, resp.text
             yield test_client
         finally:
@@ -158,7 +158,7 @@ def _chat(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": model, "messages": [{"role": "user", "content": "hi"}], "user": USER, **extra},
             headers={**HEADERS, **(headers or {})},
         )
@@ -166,7 +166,7 @@ def _chat(
 
 
 def _usage_rows(client: TestClient) -> list[dict[str, Any]]:
-    resp = client.get("/v1/usage", params={"limit": 200}, headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/usage", params={"limit": 200}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
     payload: Any = resp.json()
     rows: list[dict[str, Any]] = payload["data"] if isinstance(payload, dict) and "data" in payload else payload
@@ -249,7 +249,7 @@ def test_otari_router_off_serves_the_default_target(client: TestClient) -> None:
 
 def test_the_split_never_dispatches_a_candidate_the_key_forbids(client: TestClient) -> None:
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"user_id": USER, "name": "anthropic-only", "allowed_models": ["anthropic:*"]},
         headers=HEADERS,
     )
@@ -268,7 +268,7 @@ def test_the_split_never_dispatches_a_candidate_the_key_forbids(client: TestClie
 
 
 def test_explain_reports_the_split_rather_than_the_decline_path(client: TestClient) -> None:
-    resp = client.post("/v1/routing/policies/explain", json={"name": "balanced"}, headers=HEADERS)
+    resp = client.post(f"{API_ROOT}/routing/policies/explain", json={"name": "balanced"}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["router_backend"] == "weighted"
@@ -286,7 +286,7 @@ def test_explain_renormalizes_the_split_over_an_allow_list(client: TestClient) -
     # A "balanced" policy that compiles to one provider for a given key is the
     # failure this surface exists to catch, so the share has to reflect filtering.
     resp = client.post(
-        "/v1/routing/policies/explain",
+        f"{API_ROOT}/routing/policies/explain",
         json={"name": "balanced", "allowed_models": ["anthropic:*"]},
         headers=HEADERS,
     )
@@ -303,7 +303,7 @@ def test_a_stored_weighted_policy_needs_no_pricing(client: TestClient) -> None:
     # because it scores by cost. The weighted router reads no prices, so the same
     # gate must not apply: nothing in this gateway has a pricing row.
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "stored-balanced",
             "spec": {
@@ -325,7 +325,7 @@ def test_a_stored_weighted_policy_needs_no_pricing(client: TestClient) -> None:
 
 def test_a_malformed_split_is_refused_with_field_level_errors(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "bad-split",
             "spec": {
@@ -342,7 +342,7 @@ def test_a_malformed_split_is_refused_with_field_level_errors(client: TestClient
 
 
 def test_a_weighted_policy_has_no_single_price_in_the_catalog(client: TestClient) -> None:
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200, resp.text
     entry = next(model for model in resp.json()["data"] if model["id"] == "balanced")
     # Quoting one candidate's rate would be wrong whenever the policy does its job.

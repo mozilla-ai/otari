@@ -31,7 +31,7 @@ if "gateway" in sys.modules:
 
 from gateway.api.deps import set_config
 from gateway.container import build_container
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app
 from gateway.rate_limit import RateLimiter
@@ -409,7 +409,7 @@ def master_key_header(test_config: GatewayConfig) -> dict[str, str]:
 def api_key_obj(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Create a test API key and return its details."""
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "test-key"},
         headers=master_key_header,
     )
@@ -429,7 +429,7 @@ def api_key_header(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> d
 def test_user(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Create a test user."""
     response = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -476,7 +476,7 @@ def test_messages_with_longer_response() -> list[dict[str, str]]:
 def model_pricing(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Create model pricing for gemini-2.5-flash."""
     response = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": MODEL_NAME,
             "input_price_per_million": 0.075,

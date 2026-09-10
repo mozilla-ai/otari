@@ -1,4 +1,4 @@
-"""Every route Otari serves is mounted through one aggregate router.
+"""Every route Otari serves is mounted through one aggregate router, or the OTLP sibling.
 
 The mount prefix therefore has a single owner, and setting it moves the whole
 API at once. A router mounted anywhere else would keep its old path and split
@@ -14,8 +14,9 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 
 from gateway.api.main import _register_contributed_routers, _register_core_routers, register_routers
+from gateway.api.routes import otlp
 from gateway.container import build_container
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 
 Operations = Counter[tuple[str, str]]
 
@@ -45,10 +46,12 @@ def test_a_prefix_on_the_aggregate_moves_every_route() -> None:
     assert prefixed == Counter({(f"/probe{path}", method): count for (path, method), count in plain.items()})
 
 
-def test_register_routers_hands_the_app_the_aggregate_and_nothing_else() -> None:
+def test_register_routers_hands_the_app_the_aggregate_and_the_otlp_sibling() -> None:
     app = FastAPI()
     app.state.container = build_container(None)
 
     register_routers(app, GatewayConfig())
 
-    assert _operations(app) == _mounted_on(APIRouter())
+    otlp_only = FastAPI()
+    otlp_only.include_router(otlp.router, prefix=OTLP_ROOT)
+    assert _operations(app) == _mounted_on(APIRouter(prefix=API_ROOT)) + _operations(otlp_only)

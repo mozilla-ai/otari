@@ -24,6 +24,8 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 from .conftest import MODEL_NAME
 
 
@@ -82,7 +84,7 @@ def test_intercepted_declaration_runs_the_gateway_search(
         ),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -114,7 +116,7 @@ def test_declaration_is_forwarded_when_interception_is_off(
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -153,7 +155,7 @@ def test_a_caller_function_named_web_search_is_never_intercepted(
         ),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -194,7 +196,7 @@ def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
         ),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -233,7 +235,7 @@ def test_max_uses_zero_refuses_the_first_search_rather_than_uncapping_it(
         ),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -263,7 +265,7 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
         ),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],

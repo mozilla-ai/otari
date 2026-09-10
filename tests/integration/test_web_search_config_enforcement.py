@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _REQUEST = {
@@ -52,7 +52,7 @@ def _text_response(text: str = "ok") -> MessageResponse:
 
 def _default_workspace_id(client: TestClient, master_key_header: dict[str, str]) -> str:
     """The workspace an API-key request bills to on a fresh deployment."""
-    listed = client.get("/v1/workspaces", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/workspaces", headers=master_key_header)
     assert listed.status_code == 200
     workspace_id: str = listed.json()["data"][0]["id"]
     return workspace_id
@@ -65,7 +65,7 @@ def _set_config(
     **config: Any,
 ) -> dict[str, Any]:
     response = client.put(
-        f"/v1/workspaces/{workspace_id}/web-search",
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search",
         json=config,
         headers=master_key_header,
     )
@@ -103,7 +103,7 @@ def _post_with_search_patched(
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch("gateway.api.routes._tools.WebSearchBackend", new=fake_backend),
     ):
-        response = client.post("/v1/messages", json=body, headers=headers)
+        response = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
     return response, seen
 
 
@@ -159,7 +159,7 @@ def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_search(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -363,7 +363,7 @@ def test_clearing_the_row_puts_the_request_back_where_it_started(
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=False)
 
-    cleared = client.delete(f"/v1/workspaces/{workspace_id}/web-search", headers=master_key_header)
+    cleared = client.delete(f"{API_ROOT}/workspaces/{workspace_id}/web-search", headers=master_key_header)
     assert cleared.status_code == 200
     assert cleared.json()["configured"] is False
 
@@ -415,7 +415,7 @@ def test_a_streaming_request_gets_the_same_narrowing(
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
         patch("gateway.api.routes._tools.WebSearchBackend", new=fake_backend),
     ):
-        response = client.post("/v1/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
+        response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
 
     assert response.status_code == 200, response.text
     assert seen.backend_kwargs["max_results"] == 2
@@ -455,11 +455,11 @@ def test_the_config_surface_needs_the_master_key(
 ) -> None:
     workspace_id = _default_workspace_id(client, master_key_header)
 
-    unauthenticated = client.get(f"/v1/workspaces/{workspace_id}/web-search")
+    unauthenticated = client.get(f"{API_ROOT}/workspaces/{workspace_id}/web-search")
     assert unauthenticated.status_code == 401
 
     # A working API key is not the master key, which is what this router gates on.
-    with_an_api_key = client.get(f"/v1/workspaces/{workspace_id}/web-search", headers=api_key_header)
+    with_an_api_key = client.get(f"{API_ROOT}/workspaces/{workspace_id}/web-search", headers=api_key_header)
     assert with_an_api_key.status_code == 401
 
 
@@ -470,7 +470,7 @@ def test_a_ceiling_the_backend_could_never_honor_is_refused(
     workspace_id = _default_workspace_id(client, master_key_header)
 
     response = client.put(
-        f"/v1/workspaces/{workspace_id}/web-search",
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search",
         json={"enabled": True, "max_results": 500},
         headers=master_key_header,
     )
@@ -497,7 +497,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
     """
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
     priced = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-3-5-sonnet-20241022",
             "input_price_per_million": 3.0,
@@ -508,11 +508,11 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
     assert priced.status_code == 200, priced.text
 
     def _user(name: str, max_budget: float) -> str:
-        budget_id = client.post("/v1/budgets", json={"max_budget": max_budget}, headers=master_key_header).json()[
-            "budget_id"
-        ]
+        budget_id = client.post(
+            f"{API_ROOT}/budgets", json={"max_budget": max_budget}, headers=master_key_header
+        ).json()["budget_id"]
         created = client.post(
-            "/v1/users",
+            f"{API_ROOT}/users",
             json={"user_id": name, "budget_id": budget_id},
             headers=master_key_header,
         )
@@ -521,7 +521,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
 
     def _post(user: str) -> Any:
         return client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={**_REQUEST, "metadata": {"user_id": user}},
             headers=master_key_header,
         )
@@ -598,7 +598,7 @@ def _stored_search_tool(client: TestClient, master_key_header: dict[str, str], n
     fixture needs no ``OTARI_SECRET_KEY``.
     """
     created = client.post(
-        "/v1/search-tools",
+        f"{API_ROOT}/search-tools",
         json={"name": name, "provider": "searxng", "api_base": _SEARCH_URL},
         headers=master_key_header,
     )
@@ -619,16 +619,16 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=False)
 
-    client.post("/v1/users", json={"user_id": "direct-search-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "direct-search-user"}, headers=master_key_header)
     key = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "direct-search-key", "user_id": "direct-search-user"},
         headers=master_key_header,
     ).json()
 
     with patch("gateway.api.routes.search.run_search", new=AsyncMock()) as ran:
         response = client.post(
-            "/v1/search/stub-search",
+            f"{API_ROOT}/search/stub-search",
             json={"query": "anything"},
             headers={API_KEY_HEADER: f"Bearer {key['key']}"},
         )
@@ -638,7 +638,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     assert ran.await_count == 0
 
     rows = client.get(
-        "/v1/usage",
+        f"{API_ROOT}/usage",
         params={"user_id": "direct-search-user", "endpoint": "/v1/search"},
         headers=master_key_header,
     ).json()
@@ -653,9 +653,9 @@ def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
 ) -> None:
     """The zero-rows requirement again, on this endpoint."""
     _stored_search_tool(client, master_key_header, "open-stub-search")
-    client.post("/v1/users", json={"user_id": "open-search-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "open-search-user"}, headers=master_key_header)
     key = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "open-search-key", "user_id": "open-search-user"},
         headers=master_key_header,
     ).json()
@@ -665,7 +665,7 @@ def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
     outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="t", snippet="s")], cost_usd=0.0)
     with patch("gateway.api.routes.search.run_search", new=AsyncMock(return_value=outcome)):
         response = client.post(
-            "/v1/search/open-stub-search",
+            f"{API_ROOT}/search/open-stub-search",
             json={"query": "anything"},
             headers={API_KEY_HEADER: f"Bearer {key['key']}"},
         )

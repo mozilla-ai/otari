@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.api.routes import auth_session
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DOMAIN_VERIFICATION_TXT_PREFIX, OrganizationMember
 from gateway.services.dashboard_session_service import create_dashboard_session
@@ -73,13 +73,13 @@ def claiming_organization(
     auto-join deleted.
     """
     home = _active_organization(client, master_key_header)
-    created = client.post("/v1/organizations", json={"name": "Beta"}, headers=master_key_header)
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Beta"}, headers=master_key_header)
     assert created.status_code == 201, created.text
     beta = str(created.json()["id"])
     assert beta != home
 
     _switch_to(client, master_key_header, beta)
-    claim = client.post("/v1/organizations/me/domains", json={"domain": DOMAIN}, headers=master_key_header)
+    claim = client.post(f"{API_ROOT}/organizations/me/domains", json={"domain": DOMAIN}, headers=master_key_header)
     assert claim.status_code == 201, claim.text
     record = claim.json()["verification_record"]
     assert record.startswith(DOMAIN_VERIFICATION_TXT_PREFIX)
@@ -89,7 +89,7 @@ def claiming_organization(
 
     monkeypatch.setattr(domain_service, "resolve_txt_records", _resolve)
     verified = client.post(
-        f"/v1/organizations/me/domains/{claim.json()['id']}/verify",
+        f"{API_ROOT}/organizations/me/domains/{claim.json()['id']}/verify",
         headers=master_key_header,
     )
     assert verified.status_code == 200, verified.text
@@ -101,14 +101,14 @@ def claiming_organization(
 
 
 def _active_organization(client: TestClient, master_key_header: dict[str, str]) -> str:
-    response = client.get("/v1/organizations/me", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header)
     assert response.status_code == 200, response.text
     return str(response.json()["organization"]["id"])
 
 
 def _switch_to(client: TestClient, master_key_header: dict[str, str], organization_id: str) -> None:
     response = client.post(
-        "/v1/organizations/me/switch",
+        f"{API_ROOT}/organizations/me/switch",
         json={"organization_id": organization_id},
         headers=master_key_header,
     )
@@ -125,7 +125,7 @@ def _rostered_identity(client: TestClient, master_key_header: dict[str, str], *,
     """
     assert _active_organization(client, master_key_header) != not_in
     added = client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": ADDRESS, "role": "member"},
         headers=master_key_header,
     )
@@ -141,18 +141,18 @@ def _claim_password(
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
-        signed_up = client.post("/v1/auth/signup", json={"email": ADDRESS, "password": PASSWORD})
+        signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": ADDRESS, "password": PASSWORD})
     finally:
         gateway_logger.removeHandler(caplog.handler)
     assert signed_up.status_code == 200, signed_up.text
     token = _TOKEN_IN_LINK.search(caplog.text)
     assert token, caplog.text
-    assert client.post("/v1/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
 
 
 def _memberships(client: TestClient) -> list[dict[str, Any]]:
     """The organizations the currently-signed-in caller belongs to."""
-    response = client.get("/v1/organizations/me/memberships")
+    response = client.get(f"{API_ROOT}/organizations/me/memberships")
     assert response.status_code == 200, response.text
     data: list[dict[str, Any]] = response.json()["data"]
     return data
@@ -187,7 +187,7 @@ def test_a_password_sign_in_joins_the_organization_that_proved_the_domain(
     _claim_password(client, caplog)
     client.cookies.clear()
 
-    signed_in = client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD})
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
 
     _assert_joined(client, signed_in, beta=claiming_organization, home=home)
 
@@ -215,7 +215,7 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     _rostered_identity(client, master_key_header, not_in=claiming_organization)
     client.cookies.clear()
 
-    signed_in = client.post("/v1/auth/oauth/google/callback", json={"code": "the-code", "state": "s"})
+    signed_in = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "the-code", "state": "s"})
 
     _assert_joined(client, signed_in, beta=claiming_organization, home=home)
 
@@ -234,21 +234,21 @@ def test_a_passkey_sign_in_joins_the_organization_that_proved_the_domain(
 
     # Ada registers a passkey against her own session, then signs in with it
     # alone: the passkey route is the one under test, not the password.
-    assert client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD}).status_code == 200
     authenticator = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN)
-    options = client.post("/v1/auth/webauthn/register/options")
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options")
     assert options.status_code == 200, options.text
     registered = client.post(
-        "/v1/auth/webauthn/register",
+        f"{API_ROOT}/auth/webauthn/register",
         json={"credential": authenticator.register(challenge_of(options.json()))},
     )
     assert registered.status_code == 201, registered.text
     client.cookies.clear()
 
-    challenge = client.post("/v1/auth/webauthn/authenticate/options")
+    challenge = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
     assert challenge.status_code == 200, challenge.text
     signed_in = client.post(
-        "/v1/auth/webauthn/authenticate",
+        f"{API_ROOT}/auth/webauthn/authenticate",
         json={"credential": authenticator.authenticate(challenge_of(challenge.json()))},
     )
 
@@ -287,7 +287,7 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
         return await create_dashboard_session(*args, **kwargs)
 
     monkeypatch.setattr(auth_session, "create_dashboard_session", _fails_once)
-    refused = client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD})
+    refused = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
     assert refused.status_code == 500, refused.text
 
     # Read on a connection of its own, so what is asserted is what committed
@@ -306,6 +306,6 @@ def test_a_membership_does_not_survive_a_sign_in_that_fails_after_it_is_staged(
 
     # And the same sign-in, once it can complete, does create it: the assertion
     # above is about the rollback, not about auto-join being broken here.
-    healthy = client.post("/v1/auth/session", json={"email": ADDRESS, "password": PASSWORD})
+    healthy = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
     assert healthy.status_code == 200, healthy.text
     assert claiming_organization in {row["organization"]["id"] for row in _memberships(client)}

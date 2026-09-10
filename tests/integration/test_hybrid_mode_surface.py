@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 
@@ -18,7 +18,7 @@ def test_hybrid_mode_starts_without_database(monkeypatch: pytest.MonkeyPatch) ->
     app = create_app(config)
 
     with TestClient(app) as client:
-        response = client.get("/health")
+        response = client.get(f"{API_ROOT}/health")
 
     assert response.status_code == 200
     payload = response.json()
@@ -40,20 +40,20 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
     app = create_app(config)
 
     with TestClient(app) as client:
-        users_response = client.post("/v1/users", json={"user_id": "u1"})
-        keys_response = client.get("/v1/keys")
-        budgets_response = client.get("/v1/budgets")
+        users_response = client.post(f"{API_ROOT}/users", json={"user_id": "u1"})
+        keys_response = client.get(f"{API_ROOT}/keys")
+        budgets_response = client.get(f"{API_ROOT}/budgets")
         # The tenancy-scoped ceilings are the second budget surface and are
         # standalone-only for the same reason as the first: a hybrid gateway
         # holds no local budget rows, so the router is never registered.
-        scoped_budgets_response = client.get("/v1/scoped-budgets")
-        usage_response = client.get("/v1/usage")
+        scoped_budgets_response = client.get(f"{API_ROOT}/scoped-budgets")
+        usage_response = client.get(f"{API_ROOT}/usage")
         # Invitations are tenancy too: a hybrid gateway holds no membership
         # state to accept one into, and the router is never registered.
         validate_response = client.post(
-            "/v1/invitations/validate", json={"token": "some-token"}
+            f"{API_ROOT}/invitations/validate", json={"token": "some-token"}
         )
-        accept_response = client.post("/v1/invitations/accept", json={"token": "some-token"})
+        accept_response = client.post(f"{API_ROOT}/invitations/accept", json={"token": "some-token"})
 
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
     assert users_response.status_code == 404
@@ -88,28 +88,28 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
     with TestClient(app) as client:
         for path in (
-            "/v1/settings",
+            f"{API_ROOT}/settings",
             # Covered by the /v1/settings/{path} stub: a hybrid gateway sends no
             # mail of its own, and the mail surface must 404 with the same hint
             # rather than reporting an unconfigured transport as if it were one
             # this deployment could configure.
-            "/v1/settings/mail",
-            "/v1/aliases",
-            "/v1/providers",
-            "/v1/pricing",
-            "/v1/organizations/me",
-            "/v1/workspaces",
+            f"{API_ROOT}/settings/mail",
+            f"{API_ROOT}/aliases",
+            f"{API_ROOT}/providers",
+            f"{API_ROOT}/pricing",
+            f"{API_ROOT}/organizations/me",
+            f"{API_ROOT}/workspaces",
             # A workspace's MCP servers are stored with a bearer token, and in
             # hybrid mode they live on the platform. Listed explicitly rather
             # than left to the `/v1/workspaces` entry above: this is a distinct
             # router, so re-mounting it would not show up in that check.
-            "/v1/workspaces/11111111-1111-1111-1111-111111111111/mcp-servers",
+            f"{API_ROOT}/workspaces/11111111-1111-1111-1111-111111111111/mcp-servers",
             # A workspace's web-search configuration lives on the platform in
             # hybrid mode, where `prepare_gateway_tools` resolves it from
             # otari.ai rather than from a local row. Listed for the same reason
             # as the servers above: its own router, so re-mounting it would not
             # show up in the `/v1/workspaces` check.
-            "/v1/workspaces/11111111-1111-1111-1111-111111111111/web-search",
+            f"{API_ROOT}/workspaces/11111111-1111-1111-1111-111111111111/web-search",
         ):
             response = client.get(path)
             assert response.status_code == 404, path
@@ -118,24 +118,24 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
         # State-changing verbs are stubbed too (every method in the stubs'
         # shared ``_METHODS``), so a write cannot slip past the hybrid gate and
         # reach a local handler.
-        patch_settings = client.patch("/v1/settings", json={"model_discovery": False})
+        patch_settings = client.patch(f"{API_ROOT}/settings", json={"model_discovery": False})
         assert patch_settings.status_code == 404
         assert patch_settings.json() == expected
         # The send route specifically, not just the status GET: a regression that
         # left POST mounted while GET was stubbed would expose the one mail route
         # that does something.
-        post_mail_test = client.post("/v1/settings/mail/test", json={"to": "ada@example.com"})
+        post_mail_test = client.post(f"{API_ROOT}/settings/mail/test", json={"to": "ada@example.com"})
         assert post_mail_test.status_code == 404
         assert post_mail_test.json() == expected
-        post_alias = client.post("/v1/aliases", json={"name": "x", "target": "anthropic:claude-opus-4"})
+        post_alias = client.post(f"{API_ROOT}/aliases", json={"name": "x", "target": "anthropic:claude-opus-4"})
         assert post_alias.status_code == 404
         assert post_alias.json() == expected
-        assert client.delete("/v1/aliases/x").status_code == 404
+        assert client.delete(f"{API_ROOT}/aliases/x").status_code == 404
         # HEAD is in that list rather than derived from GET, which FastAPI does
         # only for a route that leaves its methods unspecified. Dropping it
         # would answer 405, saying the path is served here and only the verb was
         # wrong. No body to compare on a HEAD, so the status is the assertion.
-        assert client.head("/v1/keys").status_code == 404
+        assert client.head(f"{API_ROOT}/keys").status_code == 404
 
     reset_config()
     reset_db()
@@ -155,7 +155,7 @@ def test_hybrid_mode_omits_model_management_endpoints(monkeypatch: pytest.Monkey
     app = create_app(config)
 
     with TestClient(app) as client:
-        for path in ("/v1/models/metadata", "/v1/models/discoverable"):
+        for path in (f"{API_ROOT}/models/metadata", f"{API_ROOT}/models/discoverable"):
             assert client.get(path).status_code == 404, path
 
     reset_config()
@@ -202,8 +202,8 @@ def test_hybrid_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPatch
     app = create_app(config)
 
     with TestClient(app) as client:
-        response = client.get("/health")
-        readiness_response = client.get("/health/readiness")
+        response = client.get(f"{API_ROOT}/health")
+        readiness_response = client.get(f"{API_ROOT}/health/readiness")
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy", "mode": "hybrid", "platform_reachable": "yes"}
@@ -229,7 +229,7 @@ def test_hybrid_mode_readiness_fails_when_platform_unreachable(monkeypatch: pyte
     app = create_app(config)
 
     with TestClient(app) as client:
-        response = client.get("/health/readiness")
+        response = client.get(f"{API_ROOT}/health/readiness")
 
     assert response.status_code == 503
     assert response.json()["detail"]["platform"] == "unavailable"

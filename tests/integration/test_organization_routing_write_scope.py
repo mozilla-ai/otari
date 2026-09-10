@@ -30,14 +30,15 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import DashboardSession
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-_POLICIES = "/v1/organizations/me/routing-policies"
-_ALIASES = "/v1/organizations/me/aliases"
+_POLICIES = f"{API_ROOT}/organizations/me/routing-policies"
+_ALIASES = f"{API_ROOT}/organizations/me/aliases"
 
 # Alpha holds an OpenAI key and Beta an Anthropic one, so each tenant has a
 # target the other cannot reach: that asymmetry is what the target guard is
@@ -99,7 +100,7 @@ def _identity(
 
 @pytest.fixture
 def world(client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]) -> _World:
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
     session = db_session_factory()
     try:
         alpha = Organization(name="Alpha", slug="alpha")
@@ -275,14 +276,14 @@ def test_an_alias_list_shows_no_other_tenants_rows(client: TestClient, world: _W
 
 def test_the_deployment_wide_writers_still_refuse_a_tenant(client: TestClient, world: _World) -> None:
     """The control: these routers exist so those gates do not have to loosen."""
-    assert _post(client, world, "alpha_admin", "/v1/routing/policies", _policy_body(world, name="x")).status_code == (
-        status.HTTP_403_FORBIDDEN
-    )
+    assert _post(
+        client, world, "alpha_admin", f"{API_ROOT}/routing/policies", _policy_body(world, name="x")
+    ).status_code == (status.HTTP_403_FORBIDDEN)
     assert _post(
         client,
         world,
         "alpha_admin",
-        "/v1/aliases",
+        f"{API_ROOT}/aliases",
         {"name": "x", "target": _ALPHA_TARGET},
     ).status_code == status.HTTP_403_FORBIDDEN
 
@@ -318,11 +319,11 @@ def test_a_user_scoped_row_is_neither_listed_nor_destroyed_by_a_tenant_delete(
     """
     operator_workspace = str(world.workspaces["alpha_one"])
     assert (
-        client.post("/v1/users", json={"user_id": "scoped-user"}, headers=master_key_header).status_code == 200
+        client.post(f"{API_ROOT}/users", json={"user_id": "scoped-user"}, headers=master_key_header).status_code == 200
     )
     for user_id in (None, "scoped-user"):
         stored = client.post(
-            "/v1/routing/policies",
+            f"{API_ROOT}/routing/policies",
             json={
                 "name": "shared",
                 "spec": {"select": [{"default": _ALPHA_TARGET}]},
@@ -345,7 +346,7 @@ def test_a_user_scoped_row_is_neither_listed_nor_destroyed_by_a_tenant_delete(
     # went; the user-scoped row it never saw is still there.
     survivors = {
         (row["name"], row["user_id"])
-        for row in client.get("/v1/routing/policies", headers=master_key_header).json()
+        for row in client.get(f"{API_ROOT}/routing/policies", headers=master_key_header).json()
         if row["source"] == "stored"
     }
     assert ("shared", "scoped-user") in survivors
@@ -357,10 +358,12 @@ def test_the_alias_list_omits_user_scoped_rows_too(
 ) -> None:
     """The sibling half of the rule above, over ``model_aliases``."""
     operator_workspace = str(world.workspaces["alpha_one"])
-    assert client.post("/v1/users", json={"user_id": "alias-user"}, headers=master_key_header).status_code == 200
+    assert (
+        client.post(f"{API_ROOT}/users", json={"user_id": "alias-user"}, headers=master_key_header).status_code == 200
+    )
     for user_id in (None, "alias-user"):
         stored = client.post(
-            "/v1/aliases",
+            f"{API_ROOT}/aliases",
             json={
                 "name": "shared-alias",
                 "target": _ALPHA_TARGET,

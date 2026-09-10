@@ -10,6 +10,7 @@ from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choi
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import UsageLog, User
 
 from .conftest import MODEL_NAME
@@ -38,7 +39,7 @@ async def test_completion_accuracy(
 
     # Make completion request
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages,
@@ -133,7 +134,7 @@ async def test_streaming_completion_accuracy(
 
     # Make streaming request
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": MODEL_NAME,
             "messages": test_messages_with_longer_response,
@@ -256,7 +257,7 @@ async def test_failed_request_logs_error(
 ) -> None:
     """Test that failed requests are logged with error status."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "gemini:invalid-model",
             "messages": test_messages,
@@ -284,9 +285,9 @@ def test_spend_incremented_via_reconciliation(
     """End-to-end: a successful billable request reserves then reconciles, so
     users.spend increases by the actual cost (the reconcile path is the sole
     spend authority now that the log writer no longer touches spend)."""
-    client.post("/v1/users", json={"user_id": "spend-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "spend-user"}, headers=master_key_header)
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": MODEL_NAME, "input_price_per_million": 2.5, "output_price_per_million": 10.0},
         headers=master_key_header,
     )
@@ -312,7 +313,7 @@ def test_spend_incremented_via_reconciliation(
     with patch("gateway.api.routes.chat.acompletion") as mock_acompletion:
         mock_acompletion.side_effect = _mock_acompletion
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": MODEL_NAME, "messages": test_messages, "user": "spend-user"},
             headers=master_key_header,
         )
@@ -333,7 +334,7 @@ def test_successful_request_records_latency(
 ) -> None:
     """A successful billable request records a non-negative latency_ms on its
     usage log (the activity viewer's "Total time" column)."""
-    client.post("/v1/users", json={"user_id": "latency-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "latency-user"}, headers=master_key_header)
 
     mock_response = ChatCompletion(
         id="chatcmpl-latency",
@@ -356,7 +357,7 @@ def test_successful_request_records_latency(
     with patch("gateway.api.routes.chat.acompletion") as mock_acompletion:
         mock_acompletion.side_effect = _mock_acompletion
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": MODEL_NAME, "messages": test_messages, "user": "latency-user"},
             headers=master_key_header,
         )
@@ -377,7 +378,7 @@ def test_failed_request_records_latency(
 ) -> None:
     """The failure path also records latency_ms (never negative)."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "gemini:invalid-model", "messages": test_messages},
         headers=api_key_header,
     )

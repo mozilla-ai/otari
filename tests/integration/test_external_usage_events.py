@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import OrganizationModelPricing, RuntimeSetting, UsageLog, User
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
@@ -23,7 +24,7 @@ _MODEL_KEY = "anthropic:claude-sonnet-4-6"
 
 
 def _seed_user(client: TestClient, master_key_header: dict[str, str], user_id: str = "cc-user") -> str:
-    resp = client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     assert resp.status_code == 200
     return user_id
 
@@ -50,7 +51,7 @@ def _seed_pricing(
     }
     if effective_at is not None:
         body["effective_at"] = effective_at
-    resp = client.post("/v1/pricing", json=body, headers=master_key_header)
+    resp = client.post(f"{API_ROOT}/pricing", json=body, headers=master_key_header)
     assert resp.status_code == 200, resp.text
 
 
@@ -98,7 +99,7 @@ def _post(
     body: dict[str, Any] = {"source": source, "events": events}
     if user_id is not None:
         body["user_id"] = user_id
-    return client.post("/v1/usage/external-events", json=body, headers=headers)
+    return client.post(f"{API_ROOT}/usage/external-events", json=body, headers=headers)
 
 
 def _act_in(client: TestClient, master_key_header: dict[str, str], db_session: Session, organization_id: Any) -> None:
@@ -117,7 +118,7 @@ def _act_in(client: TestClient, master_key_header: dict[str, str], db_session: S
     )
     db_session.commit()
     switched = client.post(
-        "/v1/organizations/me/switch",
+        f"{API_ROOT}/organizations/me/switch",
         json={"organization_id": str(organization_id)},
         headers=master_key_header,
     )
@@ -147,7 +148,7 @@ def _make_key(
     }
     if workspace_id is not None:
         body["workspace_id"] = workspace_id
-    resp = client.post("/v1/keys", json=body, headers=master_key_header)
+    resp = client.post(f"{API_ROOT}/keys", json=body, headers=master_key_header)
     assert resp.status_code == 200, resp.text
     return {"Otari-Key": f"Bearer {resp.json()['key']}"}
 
@@ -155,7 +156,7 @@ def _make_key(
 def test_requires_auth(client: TestClient) -> None:
     """No credential -> rejected, nothing ingested."""
     resp = client.post(
-        "/v1/usage/external-events",
+        f"{API_ROOT}/usage/external-events",
         json={"source": _SRC, "user_id": "cc-user", "events": [_event()]},
     )
     assert resp.status_code in (401, 403)
@@ -270,7 +271,7 @@ def test_no_pricing_lands_with_null_cost(
     assert row.counts_toward_budget is False
 
     # The summary reports the unpriced row so a $0 cost is not read as free.
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     assert summary["totals"]["unpriced_requests"] == 1
 
 
@@ -312,7 +313,7 @@ def test_unpriced_inclusive_import_reprices_under_the_convention_it_arrived_with
     assert row.cache_tokens_in_prompt is True
 
     priced = client.post(
-        "/v1/usage/set-price",
+        f"{API_ROOT}/usage/set-price",
         json={
             "ids": [row.id],
             "input_price_per_million": 3.0,
@@ -408,7 +409,7 @@ def test_rejects_content_fields_at_batch_level(client: TestClient, master_key_he
     """The batch envelope forbids extra fields too, not just the per-event schema."""
     _seed_user(client, master_key_header)
     resp = client.post(
-        "/v1/usage/external-events",
+        f"{API_ROOT}/usage/external-events",
         json={"source": _SRC, "user_id": "cc-user", "events": [_event()], "prompt": "secret user text"},
         headers=master_key_header,
     )
@@ -506,7 +507,7 @@ def test_organization_override_prices_imported_usage_at_the_event_timestamp(
     )
     override_from = now - timedelta(minutes=30)
     created = client.post(
-        "/v1/organizations/me/pricing",
+        f"{API_ROOT}/organizations/me/pricing",
         json={
             "model_key": _MODEL_KEY,
             "input_price_per_million": 5.0,
@@ -650,7 +651,7 @@ def test_a_keys_import_prices_at_its_own_organizations_rate(
     # The trap: an override on the default organization, which is where a
     # master-key import lands and where a regression would wrongly resolve to.
     default_override = client.post(
-        "/v1/organizations/me/pricing",
+        f"{API_ROOT}/organizations/me/pricing",
         json={
             "model_key": _MODEL_KEY,
             "input_price_per_million": 5.0,
@@ -708,7 +709,7 @@ def test_read_surface_source_filter_and_summary(
     _seed_pricing(client, master_key_header)
     assert _post(client, master_key_header, [_event("read_1")]).json()["accepted"] == 1
 
-    listed = client.get("/v1/usage", params={"source": _SRC}, headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/usage", params={"source": _SRC}, headers=master_key_header)
     assert listed.status_code == 200
     rows = listed.json()
     assert len(rows) == 1
@@ -716,7 +717,7 @@ def test_read_surface_source_filter_and_summary(
     assert rows[0]["source_label"] == "project:otari"
     assert rows[0]["counts_toward_budget"] is False
 
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     sources = {r["key"]: r for r in summary["by_source"]}
     assert _SRC in sources and sources[_SRC]["requests"] == 1
 

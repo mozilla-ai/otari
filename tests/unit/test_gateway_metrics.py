@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.metrics import (
     REGISTRY,
     MetricsMiddleware,
@@ -187,23 +187,23 @@ def test_middleware_labels_parameterized_route_with_template() -> None:
     """Different path params collapse to one series; unknown paths bucket as 'unmatched'."""
     app = FastAPI()
 
-    @app.get("/v1/files/{file_id}")
+    @app.get(f"{API_ROOT}/files/{{file_id}}")
     async def get_file(file_id: str) -> dict[str, str]:
         return {"id": file_id}
 
     app.add_middleware(MetricsMiddleware)
     client = TestClient(app, raise_server_exceptions=False)
 
-    template_labels = {"method": "GET", "endpoint": "/v1/files/{file_id}", "status": "200"}
-    raw_labels_a = {"method": "GET", "endpoint": "/v1/files/aaa", "status": "200"}
-    raw_labels_b = {"method": "GET", "endpoint": "/v1/files/bbb", "status": "200"}
+    template_labels = {"method": "GET", "endpoint": f"{API_ROOT}/files/{{file_id}}", "status": "200"}
+    raw_labels_a = {"method": "GET", "endpoint": f"{API_ROOT}/files/aaa", "status": "200"}
+    raw_labels_b = {"method": "GET", "endpoint": f"{API_ROOT}/files/bbb", "status": "200"}
     unmatched_labels = {"method": "GET", "endpoint": "unmatched", "status": "404"}
 
     before_template = _sample("gateway_requests_total", template_labels)
     before_unmatched = _sample("gateway_requests_total", unmatched_labels)
 
-    assert client.get("/v1/files/aaa").status_code == 200
-    assert client.get("/v1/files/bbb").status_code == 200
+    assert client.get(f"{API_ROOT}/files/aaa").status_code == 200
+    assert client.get(f"{API_ROOT}/files/bbb").status_code == 200
     assert client.get("/no/such/route").status_code == 404
 
     # Two distinct ids produce a single labeled series keyed by the route template.

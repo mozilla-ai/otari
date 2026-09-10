@@ -15,14 +15,14 @@ from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 from gateway.models.entities import AgentTelemetry, APIKey, UsageLog, User
 
-SUMMARY_PATH = "/v1/agent-telemetry/summary"
-COUNT_PATH = "/v1/agent-telemetry/count"
-SERIES_PATH = "/v1/agent-telemetry/series"
+SUMMARY_PATH = f"{API_ROOT}/agent-telemetry/summary"
+COUNT_PATH = f"{API_ROOT}/agent-telemetry/count"
+SERIES_PATH = f"{API_ROOT}/agent-telemetry/series"
 
 _NOW = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
 _T0 = _NOW - timedelta(days=2)

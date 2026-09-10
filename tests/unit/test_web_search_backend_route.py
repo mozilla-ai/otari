@@ -17,8 +17,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.api.routes.web_search_backend import _authorize
-from gateway.core.config import GatewayConfig
+from gateway.api.routes.web_search_backend import SEARCH_ENDPOINT, _authorize
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.inflight import InFlightRegistry
 from gateway.log_config import logger as gateway_logger
@@ -93,7 +93,7 @@ def _configured(tmp_path: Path, **overrides: Any) -> TestClient:
 
 def test_not_mounted_without_a_provider(tmp_path: Path) -> None:
     with _client(tmp_path, web_search_backend_token=BACKEND_TOKEN) as client:
-        assert client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 404
+        assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 404
 
 
 def test_not_mounted_without_a_backend_token(tmp_path: Path) -> None:
@@ -104,12 +104,12 @@ def test_not_mounted_without_a_backend_token(tmp_path: Path) -> None:
     version of the same thing.
     """
     with _client(tmp_path, web_search_provider="tavily", web_search_provider_api_key="tvly-x") as client:
-        assert client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 404
+        assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 404
 
 
 def test_serves_searxng_shaped_results(tmp_path: Path, upstream: _Recorder) -> None:
     with _configured(tmp_path) as client:
-        response = client.get("/v1/web-search/search", params={"q": "claude code"}, headers=AUTH)
+        response = client.get(f"{API_ROOT}/web-search/search", params={"q": "claude code"}, headers=AUTH)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -127,14 +127,14 @@ def test_serves_searxng_shaped_results(tmp_path: Path, upstream: _Recorder) -> N
 
 def test_refuses_a_missing_token(tmp_path: Path, upstream: _Recorder) -> None:
     with _configured(tmp_path) as client:
-        assert client.get("/v1/web-search/search", params={"q": "x"}).status_code == 401
+        assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}).status_code == 401
     assert upstream.requests == []
 
 
 def test_refuses_a_wrong_token(tmp_path: Path, upstream: _Recorder) -> None:
     with _configured(tmp_path) as client:
         response = client.get(
-            "/v1/web-search/search",
+            f"{API_ROOT}/web-search/search",
             params={"q": "x"},
             headers={"X-Gateway-Token": "gw-someone-elses"},
         )
@@ -145,7 +145,7 @@ def test_refuses_a_wrong_token(tmp_path: Path, upstream: _Recorder) -> None:
 def test_forwards_only_the_provider_options_it_declares(tmp_path: Path, upstream: _Recorder) -> None:
     with _configured(tmp_path) as client:
         response = client.get(
-            "/v1/web-search/search",
+            f"{API_ROOT}/web-search/search",
             params={"q": "x", "search_depth": "advanced", "format": "json", "engines": "google"},
             headers=AUTH,
         )
@@ -171,7 +171,7 @@ def test_the_recency_signal_survives_the_hop(tmp_path: Path, monkeypatch: pytest
         web_search_provider_api_key="brv-x",
         web_search_backend_token=BACKEND_TOKEN,
     ) as client:
-        response = client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH)
+        response = client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH)
 
     assert response.status_code == 200
     assert response.json()["results"][0]["published_date"] == "2026-08-30T00:00:00"
@@ -181,7 +181,7 @@ def test_max_results_is_bounded_by_the_server(tmp_path: Path, upstream: _Recorde
     """The caller is another gateway forwarding an opaque ``provider_options``
     bag, so the ceiling on upstream work and response size is enforced here."""
     with _configured(tmp_path) as client:
-        response = client.get("/v1/web-search/search", params={"q": "x", "max_results": 500}, headers=AUTH)
+        response = client.get(f"{API_ROOT}/web-search/search", params={"q": "x", "max_results": 500}, headers=AUTH)
 
     assert response.status_code == 422
     assert upstream.requests == []
@@ -207,9 +207,9 @@ def test_a_search_in_progress_is_registered_in_flight(tmp_path: Path, monkeypatc
     )
     with _configured(tmp_path) as client:
         registry.append(client.app.state.inflight)  # type: ignore[attr-defined]
-        assert client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 200
+        assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 200
 
-    assert in_flight == [("/v1/web-search/search", "tavily")]
+    assert in_flight == [(SEARCH_ENDPOINT, "tavily")]
 
 
 def test_an_upstream_failure_is_logged_for_the_operator(
@@ -226,7 +226,7 @@ def test_an_upstream_failure_is_logged_for_the_operator(
     caplog.set_level(logging.ERROR, logger="gateway")
     try:
         with _configured(tmp_path) as client:
-            assert client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 502
+            assert client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH).status_code == 502
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
@@ -242,7 +242,7 @@ def test_upstream_failure_does_not_leak_the_provider_body(tmp_path: Path, monkey
         lambda: httpx.AsyncClient(transport=recorder),
     )
     with _configured(tmp_path) as client:
-        response = client.get("/v1/web-search/search", params={"q": "x"}, headers=AUTH)
+        response = client.get(f"{API_ROOT}/web-search/search", params={"q": "x"}, headers=AUTH)
 
     assert response.status_code == 502
     assert "tvly-secret" not in response.text
@@ -270,9 +270,9 @@ def test_the_published_contract_names_the_token_it_actually_takes(tmp_path: Path
     """No API key and no session opens this route, so stamping it with the
     API-key schemes every other path carries would send a caller to a 401."""
     with _configured(tmp_path, enable_docs=True) as client:
-        spec = client.get("/openapi.json").json()
+        spec = client.get(f"{API_ROOT}/openapi.json").json()
 
-    operation = spec["paths"]["/v1/web-search/search"]["get"]
+    operation = spec["paths"][f"{API_ROOT}/web-search/search"]["get"]
     assert operation["security"] == [{"GatewayTokenAuth": []}]
     assert spec["components"]["securitySchemes"]["GatewayTokenAuth"]["name"] == "X-Gateway-Token"
 

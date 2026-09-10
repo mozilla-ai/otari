@@ -6,15 +6,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.api.routes.otlp import _MAX_EVENTS_PER_EXPORT
+from gateway.core.config import API_ROOT
 from gateway.models.entities import AgentTelemetry, UsageLog, User
 
 from .otlp_helpers import log_record, logs_export
 
 
 def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: str = "alice") -> dict[str, str]:
-    client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": f"logs-import-{user_id}", "user_id": user_id, "exclude_from_budget": True},
         headers=master_key_header,
     )
@@ -27,7 +28,7 @@ def test_otlp_logs_record_only_allowlisted_behavior(
 ) -> None:
     headers = _exempt_key(client, master_key_header)
     response = client.post(
-        "/v1/logs",
+        "/otlp/v1/logs",
         json=logs_export(
             log_record(
                 1784000000000000000,
@@ -63,7 +64,7 @@ def test_otlp_logs_read_string_encoded_tool_success(
     """Claude Code emits ``success`` as the string "true"/"false", not a boolValue."""
     headers = _exempt_key(client, master_key_header, "stringly")
     response = client.post(
-        "/v1/logs",
+        "/otlp/v1/logs",
         json=logs_export(
             log_record(
                 1784000010000000000,
@@ -97,7 +98,7 @@ def test_otlp_logs_reject_behavior_for_soft_deleted_user(
     db_session.commit()
 
     response = client.post(
-        "/v1/logs",
+        "/otlp/v1/logs",
         json=logs_export(
             log_record(1784000020000000000, **{"event.name": "user_prompt", "session.id": "s-gone", "prompt_length": 7})
         ),
@@ -143,7 +144,7 @@ def test_otlp_logs_export_limit_counts_usage_and_behavior_together(
     assert len(usage) <= _MAX_EVENTS_PER_EXPORT and len(behavior) <= _MAX_EVENTS_PER_EXPORT
     assert len(usage) + len(behavior) > _MAX_EVENTS_PER_EXPORT
 
-    response = client.post("/v1/logs", json=logs_export(*usage, *behavior), headers=headers)
+    response = client.post("/otlp/v1/logs", json=logs_export(*usage, *behavior), headers=headers)
 
     assert response.status_code == 413, response.text
     assert db_session.query(AgentTelemetry).filter(AgentTelemetry.session_label == "s-flood").count() == 0
@@ -155,7 +156,7 @@ def test_concurrent_tool_results_with_distinct_tool_use_id_both_persist(
 ) -> None:
     headers = _exempt_key(client, master_key_header)
     response = client.post(
-        "/v1/logs",
+        "/otlp/v1/logs",
         json=logs_export(
             log_record(
                 1784000000000000000,
@@ -203,7 +204,7 @@ def test_exact_duplicate_tool_result_export_is_not_double_stored(
             "event.sequence": 7,
         },
     )
-    response = client.post("/v1/logs", json=logs_export(record, record), headers=headers)
+    response = client.post("/otlp/v1/logs", json=logs_export(record, record), headers=headers)
 
     assert response.status_code == 200, response.text
     assert db_session.query(AgentTelemetry).count() == 1
@@ -212,7 +213,7 @@ def test_exact_duplicate_tool_result_export_is_not_double_stored(
 def _key_with_capture_override(
     client: TestClient, master_key_header: dict[str, str], user_id: str, *, capture: bool | None
 ) -> tuple[dict[str, str], str]:
-    client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     payload: dict[str, object] = {
         "key_name": f"logs-import-{user_id}",
         "user_id": user_id,
@@ -220,7 +221,7 @@ def _key_with_capture_override(
     }
     if capture is not None:
         payload["capture_agent_telemetry"] = capture
-    response = client.post("/v1/keys", json=payload, headers=master_key_header)
+    response = client.post(f"{API_ROOT}/keys", json=payload, headers=master_key_header)
     assert response.status_code == 200, response.text
     body = response.json()
     return {"Otari-Key": f"Bearer {body['key']}"}, str(body["id"])
@@ -231,7 +232,7 @@ def test_capture_toggle_off_blocks_behavioral_row_but_not_usage(
 ) -> None:
     headers, key_id = _key_with_capture_override(client, master_key_header, "bob", capture=False)
     response = client.post(
-        "/v1/logs",
+        "/otlp/v1/logs",
         json=logs_export(
             log_record(
                 1784000000000000000,
@@ -256,13 +257,13 @@ def test_capture_toggle_off_blocks_behavioral_row_but_not_usage(
     assert db_session.query(UsageLog).count() == 1
 
     patch = client.patch(
-        f"/v1/keys/{key_id}", json={"capture_agent_telemetry": None}, headers=master_key_header
+        f"{API_ROOT}/keys/{key_id}", json={"capture_agent_telemetry": None}, headers=master_key_header
     )
     assert patch.status_code == 200, patch.text
     assert patch.json()["capture_agent_telemetry"] is None
 
     response = client.post(
-        "/v1/logs",
+        "/otlp/v1/logs",
         json=logs_export(
             log_record(
                 1784000002000000000,

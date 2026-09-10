@@ -24,7 +24,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import gateway.api.routes as routes_package
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
@@ -45,7 +45,7 @@ def _client(tmp_path: Path) -> TestClient:
 
 def _freeze(client: TestClient, *, enabled: bool = True) -> None:
     response = client.patch(
-        "/v1/settings/maintenance-mode",
+        f"{API_ROOT}/settings/maintenance-mode",
         json={"enabled": enabled},
         headers=HEADER,
     )
@@ -56,7 +56,7 @@ def _freeze(client: TestClient, *, enabled: bool = True) -> None:
 def _claim(client: TestClient) -> None:
     """Claim the deployment, which retires the master key as the *sign-in*."""
     response = client.put(
-        "/v1/auth/password",
+        f"{API_ROOT}/auth/password",
         json={"email": EMAIL, "new_password": PASSWORD},
         headers=HEADER,
     )
@@ -71,15 +71,15 @@ def _claim(client: TestClient) -> None:
 def test_off_by_default_so_a_fresh_deployment_signs_in(tmp_path: Path) -> None:
     """Absent row means not frozen: nothing has to be turned off first."""
     with _client(tmp_path) as client:
-        assert client.get("/v1/settings/maintenance-mode", headers=HEADER).json() == {"enabled": False}
-        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
+        assert client.get(f"{API_ROOT}/settings/maintenance-mode", headers=HEADER).json() == {"enabled": False}
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
 
 
 def test_the_freeze_refuses_master_key_sign_in(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _freeze(client)
 
-        response = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        response = client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY})
 
         assert response.status_code == 503
         assert "maintenance mode" in response.json()["detail"]
@@ -92,7 +92,7 @@ def test_the_freeze_refuses_password_sign_in(tmp_path: Path) -> None:
         _claim(client)
         _freeze(client)
 
-        response = client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD})
 
         assert response.status_code == 503
         assert SESSION_COOKIE_NAME not in client.cookies
@@ -108,7 +108,7 @@ def test_a_wrong_credential_is_refused_as_maintenance_not_as_wrong(tmp_path: Pat
         _claim(client)
         _freeze(client)
 
-        wrong = client.post("/v1/auth/session", json={"email": EMAIL, "password": "not-the-password"})
+        wrong = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": "not-the-password"})
 
         assert wrong.status_code == 503
 
@@ -116,11 +116,11 @@ def test_a_wrong_credential_is_refused_as_maintenance_not_as_wrong(tmp_path: Pat
 def test_lifting_the_freeze_restores_sign_in(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _freeze(client)
-        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 503
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 503
 
         _freeze(client, enabled=False)
 
-        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
 
 
 # =============================================================================
@@ -131,11 +131,11 @@ def test_lifting_the_freeze_restores_sign_in(tmp_path: Path) -> None:
 def test_a_session_minted_before_the_freeze_keeps_working(tmp_path: Path) -> None:
     """New logins only. Booting the operator mid-redeploy is the failure mode."""
     with _client(tmp_path) as client:
-        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
         _freeze(client)
 
         # No header: this is the cookie the sign-in above set, on its own.
-        assert client.get("/v1/settings").status_code == 200
+        assert client.get(f"{API_ROOT}/settings").status_code == 200
 
 
 def test_the_master_key_in_the_header_is_never_frozen(tmp_path: Path) -> None:
@@ -151,11 +151,11 @@ def test_the_master_key_in_the_header_is_never_frozen(tmp_path: Path) -> None:
         _freeze(client)
         client.cookies.clear()
 
-        assert client.get("/v1/settings", headers=HEADER).status_code == 200
-        assert client.get("/v1/keys", headers=HEADER).status_code == 200
+        assert client.get(f"{API_ROOT}/settings", headers=HEADER).status_code == 200
+        assert client.get(f"{API_ROOT}/keys", headers=HEADER).status_code == 200
 
         _freeze(client, enabled=False)
-        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
 
 
 def test_the_freeze_survives_a_restart(tmp_path: Path) -> None:
@@ -170,8 +170,8 @@ def test_the_freeze_survives_a_restart(tmp_path: Path) -> None:
         _freeze(client)
 
     with _client(tmp_path) as restarted:
-        assert restarted.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 503
-        assert restarted.get("/v1/settings/maintenance-mode", headers=HEADER).json() == {"enabled": True}
+        assert restarted.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 503
+        assert restarted.get(f"{API_ROOT}/settings/maintenance-mode", headers=HEADER).json() == {"enabled": True}
 
 
 # =============================================================================
@@ -182,12 +182,12 @@ def test_the_freeze_survives_a_restart(tmp_path: Path) -> None:
 def test_the_bootstrap_publishes_the_freeze_unauthenticated(tmp_path: Path) -> None:
     """So the sign-in screen renders a notice instead of a doomed form."""
     with _client(tmp_path) as client:
-        assert client.get("/v1/bootstrap").json()["maintenance_mode"] is False
+        assert client.get(f"{API_ROOT}/bootstrap").json()["maintenance_mode"] is False
 
         _freeze(client)
         client.cookies.clear()
 
-        assert client.get("/v1/bootstrap").json()["maintenance_mode"] is True
+        assert client.get(f"{API_ROOT}/bootstrap").json()["maintenance_mode"] is True
 
 
 # =============================================================================
@@ -197,15 +197,15 @@ def test_the_bootstrap_publishes_the_freeze_unauthenticated(tmp_path: Path) -> N
 
 def test_the_switch_is_master_key_gated(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.get("/v1/settings/maintenance-mode").status_code == 401
-        assert client.patch("/v1/settings/maintenance-mode", json={"enabled": True}).status_code == 401
+        assert client.get(f"{API_ROOT}/settings/maintenance-mode").status_code == 401
+        assert client.patch(f"{API_ROOT}/settings/maintenance-mode", json={"enabled": True}).status_code == 401
         # And the refusal changed nothing.
-        assert client.get("/v1/settings/maintenance-mode", headers=HEADER).json() == {"enabled": False}
+        assert client.get(f"{API_ROOT}/settings/maintenance-mode", headers=HEADER).json() == {"enabled": False}
 
 
 def test_the_switch_refuses_a_body_that_names_no_state(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.patch("/v1/settings/maintenance-mode", json={}, headers=HEADER).status_code == 422
+        assert client.patch(f"{API_ROOT}/settings/maintenance-mode", json={}, headers=HEADER).status_code == 422
 
 
 # =============================================================================

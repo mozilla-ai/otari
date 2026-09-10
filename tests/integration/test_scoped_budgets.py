@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import APIKey, Budget, ScopedBudget, User
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
@@ -597,7 +598,7 @@ def _a_workspace_id(client: Any, headers: dict[str, str]) -> str:
     create refuses one that does not. The deployment provisions a default
     workspace on the first tenancy request, which is what this reads.
     """
-    listed = client.get("/v1/workspaces", headers=headers)
+    listed = client.get(f"{API_ROOT}/workspaces", headers=headers)
     assert listed.status_code == 200, listed.text
     return str(listed.json()["data"][0]["id"])
 
@@ -616,7 +617,7 @@ def _a_budget_id(
     ``max_budget`` in a scoped-budget body now names one of these.
     """
     made = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={
             "max_budget": max_budget,
             "budget_duration_sec": budget_duration_sec,
@@ -633,7 +634,7 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     workspace_id = _a_workspace_id(client, master_key_header)
     daily = _a_budget_id(client, master_key_header, max_budget=25.0, budget_duration_sec=86400)
     created = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": workspace_id,
@@ -650,14 +651,14 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     budget_id = body["id"]
 
     duplicate = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={"scope_type": "workspace", "scope_id": workspace_id, "budget_id": daily},
         headers=master_key_header,
     )
     assert duplicate.status_code == 409
 
     narrowed = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": workspace_id,
@@ -668,7 +669,9 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     )
     assert narrowed.status_code == 200
 
-    listed = client.get(f"/v1/scoped-budgets?scope_type=workspace&scope_id={workspace_id}", headers=master_key_header)
+    listed = client.get(
+        f"{API_ROOT}/scoped-budgets?scope_type=workspace&scope_id={workspace_id}", headers=master_key_header
+    )
     assert listed.status_code == 200
     assert len(listed.json()) == 2
 
@@ -676,7 +679,7 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     # figure is the budget's and not the ceiling's.
     bigger = _a_budget_id(client, master_key_header, max_budget=40.0, budget_duration_sec=86400)
     updated = client.patch(
-        f"/v1/scoped-budgets/{budget_id}",
+        f"{API_ROOT}/scoped-budgets/{budget_id}",
         json={"budget_id": bigger, "name": None},
         headers=master_key_header,
     )
@@ -685,8 +688,8 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     assert updated.json()["budget_id"] == bigger
     assert updated.json()["name"] is None
 
-    assert client.delete(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 204
-    assert client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 404
+    assert client.delete(f"{API_ROOT}/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 204
+    assert client.get(f"{API_ROOT}/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 404
 
 
 def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
@@ -705,13 +708,13 @@ def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
     creating a budget without one.
     """
     created = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 10.0, "budget_duration_sec": 86400},
         headers=master_key_header,
     ).json()
 
     cleared = client.patch(
-        f"/v1/budgets/{created['budget_id']}",
+        f"{API_ROOT}/budgets/{created['budget_id']}",
         json={"budget_duration_sec": None},
         headers=master_key_header,
     )
@@ -722,13 +725,13 @@ def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
     # Naming only the alignment is refused rather than silently clearing a
     # duration the caller did not mention.
     half_switched = client.patch(
-        f"/v1/budgets/{created['budget_id']}",
+        f"{API_ROOT}/budgets/{created['budget_id']}",
         json={"budget_duration_sec": 3600},
         headers=master_key_header,
     )
     assert half_switched.status_code == 200
     conflicting = client.patch(
-        f"/v1/budgets/{created['budget_id']}",
+        f"{API_ROOT}/budgets/{created['budget_id']}",
         json={"reset_alignment": "calendar_day"},
         headers=master_key_header,
     )
@@ -737,7 +740,7 @@ def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
     # An omitted field is still "leave it alone", which is the half that already
     # worked and must keep working.
     renamed = client.patch(
-        f"/v1/budgets/{created['budget_id']}",
+        f"{API_ROOT}/budgets/{created['budget_id']}",
         json={"name": "Metering only"},
         headers=master_key_header,
     )
@@ -758,7 +761,7 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
     workspace; this matches it.
     """
     missing = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": str(uuid.uuid4()),
@@ -772,7 +775,7 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
 
     # Not a UUID at all is the same answer, not a 500 and not a stored row.
     malformed = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "organization",
             "scope_id": "not-a-uuid-at-all",
@@ -782,7 +785,7 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
     )
 
     assert malformed.status_code == 404, malformed.text
-    assert client.get("/v1/scoped-budgets", headers=master_key_header).json() == []
+    assert client.get(f"{API_ROOT}/scoped-budgets", headers=master_key_header).json() == []
 
 
 def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
@@ -795,7 +798,7 @@ def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
     monthly = _a_budget_id(client, master_key_header, max_budget=500.0, reset_alignment="calendar_month")
     before = datetime.now(UTC)
     created = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={"scope_type": "workspace", "scope_id": workspace_id, "budget_id": monthly},
         headers=master_key_header,
     )
@@ -823,7 +826,7 @@ def test_pointing_a_ceiling_at_another_budget_retimes_it(
     workspace_id = _a_workspace_id(client, master_key_header)
     rolling = _a_budget_id(client, master_key_header, max_budget=10.0, budget_duration_sec=86400)
     created = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={"scope_type": "workspace", "scope_id": workspace_id, "budget_id": rolling},
         headers=master_key_header,
     ).json()
@@ -832,7 +835,7 @@ def test_pointing_a_ceiling_at_another_budget_retimes_it(
     aligned = _a_budget_id(client, master_key_header, max_budget=10.0, reset_alignment="calendar_day")
     before = datetime.now(UTC)
     switched = client.patch(
-        f"/v1/scoped-budgets/{created['id']}",
+        f"{API_ROOT}/scoped-budgets/{created['id']}",
         json={"budget_id": aligned},
         headers=master_key_header,
     )
@@ -847,7 +850,7 @@ def test_pointing_a_ceiling_at_another_budget_retimes_it(
     # A budget that does not exist is refused rather than leaving the ceiling
     # naming nothing.
     missing = client.patch(
-        f"/v1/scoped-budgets/{created['id']}",
+        f"{API_ROOT}/scoped-budgets/{created['id']}",
         json={"budget_id": str(uuid.uuid4())},
         headers=master_key_header,
     )
@@ -864,7 +867,7 @@ def test_a_budget_cannot_be_created_with_both_kinds_of_period(
     On ``/v1/budgets`` now, because that is where a period lives.
     """
     response = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 10.0, "budget_duration_sec": 86400, "reset_alignment": "calendar_month"},
         headers=master_key_header,
     )
@@ -878,7 +881,7 @@ def test_an_unknown_reset_alignment_is_refused(client: Any, master_key_header: d
     a 422 and never reaches a row nothing can roll."""
     workspace_id = _a_workspace_id(client, master_key_header)
     response = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={"scope_type": "workspace", "scope_id": workspace_id, "reset_alignment": "calendar_quarter"},
         headers=master_key_header,
     )
@@ -887,10 +890,10 @@ def test_an_unknown_reset_alignment_is_refused(client: Any, master_key_header: d
 
 def test_management_surface_requires_the_master_key(client: Any, api_key_header: dict[str, str]) -> None:
     """A plain API key may not read or write the ceilings that bind it."""
-    assert client.get("/v1/scoped-budgets", headers=api_key_header).status_code == 401
+    assert client.get(f"{API_ROOT}/scoped-budgets", headers=api_key_header).status_code == 401
     assert (
         client.post(
-            "/v1/scoped-budgets",
+            f"{API_ROOT}/scoped-budgets",
             json={"scope_type": "workspace", "scope_id": "ws-1", "max_budget": 1.0},
             headers=api_key_header,
         ).status_code
@@ -901,7 +904,7 @@ def test_management_surface_requires_the_master_key(client: Any, api_key_header:
 def test_unknown_scope_type_is_refused(client: Any, master_key_header: dict[str, str]) -> None:
     """The scope vocabulary is published in the schema, so an unknown one is a 422."""
     response = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "team",
             "scope_id": "ws-1",
@@ -931,7 +934,7 @@ def test_a_blank_provider_narrowing_is_refused(
     workspace_id = _a_workspace_id(client, master_key_header)
 
     refused = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": workspace_id,
@@ -951,7 +954,7 @@ def test_an_omitted_provider_narrowing_still_caps_every_provider(
     workspace_id = _a_workspace_id(client, master_key_header)
 
     created = client.post(
-        "/v1/scoped-budgets",
+        f"{API_ROOT}/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": workspace_id,

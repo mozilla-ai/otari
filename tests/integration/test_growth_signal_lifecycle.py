@@ -27,14 +27,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.entities import DashboardSession
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
-_KEYS = "/v1/organizations/me/keys"
+_KEYS = f"{API_ROOT}/organizations/me/keys"
 
 
 class RecordingGrowthAdapter:
@@ -107,7 +107,7 @@ def mail(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _add_member(client: TestClient, master_key_header: dict[str, str], *, email: str) -> None:
     response = client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": email, "role": "member"},
         headers=master_key_header,
     )
@@ -124,7 +124,7 @@ def test_claiming_a_roster_identity_notifies_the_signup(
     _add_member(client, master_key_header, email="ada@example.com")
 
     response = client.post(
-        "/v1/auth/signup",
+        f"{API_ROOT}/auth/signup",
         json={"email": "ada@example.com", "password": PASSWORD, "full_name": "Ada Lovelace"},
     )
     assert response.status_code == status.HTTP_200_OK, response.text
@@ -152,7 +152,7 @@ def test_signup_on_an_untouched_address_notifies_nothing(
     declines to tell the caller: that the address was on the roster.
     """
     response = client.post(
-        "/v1/auth/signup",
+        f"{API_ROOT}/auth/signup",
         json={"email": "nobody@example.com", "password": PASSWORD},
     )
     assert response.status_code == status.HTTP_200_OK, response.text
@@ -169,7 +169,7 @@ def test_a_second_signup_on_a_claimed_address_notifies_nothing(
     _add_member(client, master_key_header, email="grace@example.com")
     for _ in range(2):
         response = client.post(
-            "/v1/auth/signup",
+            f"{API_ROOT}/auth/signup",
             json={"email": "grace@example.com", "password": PASSWORD},
         )
         assert response.status_code == status.HTTP_200_OK, response.text
@@ -186,7 +186,7 @@ def member(
     """A member of the bootstrapped organization, and their session cookie."""
     # One master-key call provisions the tenancy root, so the identity below
     # joins a real organization and workspace rather than inventing them.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
 
     session = db_session_factory()
     try:
