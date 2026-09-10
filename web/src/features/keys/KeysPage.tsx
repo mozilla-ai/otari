@@ -28,6 +28,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -480,21 +481,25 @@ function CreateKeyDialog({
   const workspaceUnresolved = workspaceLoading
   const blocked = !scopeValid || ownerMissing || workspaceUnresolved
 
-  // What the form owns, in one place, because `resetForm` and `isDirty` are the
-  // same list read two ways and they drifted: the guard armed for three fields
-  // out of seven, and "Create another" left the rest behind. Reopening is a
-  // remount now (the page keys this on an open counter), so `resetForm` answers
-  // for "Create another" alone, which is a reset inside an open dialog.
-  // `showAdvanced` is in neither: it reveals fields rather than holding a
-  // value, and a disclosure left open is not unsaved work.
-  const isPristine =
-    keyName === "" &&
-    expiresAt === "" &&
-    userId === "" &&
-    allowedModels === null &&
-    excludeFromBudget === false &&
-    rejectUserMismatch === null &&
-    scopeValid
+  // What the form owns, handed to the guard whole rather than compared field by
+  // field: the two drifted apart once already, with the guard armed for three
+  // fields out of seven while "Create another" left the rest behind. Reopening
+  // is a remount now (the page keys this on an open counter), so `resetForm`
+  // answers for "Create another" alone, which is a reset inside an open dialog,
+  // and putting every field back to its seed reads clean again without telling
+  // the guard anything. `showAdvanced` is in neither: it reveals fields rather
+  // than holding a value, and a disclosure left open is not unsaved work.
+  // `scopeValid` is, though: a model scope typed to something invalid is work
+  // the operator would lose.
+  const { isDirty } = useDirtySnapshot({
+    keyName,
+    expiresAt,
+    userId,
+    allowedModels,
+    excludeFromBudget,
+    rejectUserMismatch,
+    scopeValid,
+  })
 
   const resetForm = () => {
     setKeyName("")
@@ -606,7 +611,7 @@ function CreateKeyDialog({
       isPending={create.isPending}
       isSubmitDisabled={blocked}
       error={create.error}
-      isDirty={!isPristine}
+      isDirty={isDirty}
     >
       <Field
         label="Name"

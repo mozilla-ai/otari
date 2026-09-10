@@ -1,6 +1,6 @@
 import { Button } from "@heroui/react"
 import type { ReactElement, ReactNode } from "react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { FiEye, FiEyeOff } from "react-icons/fi"
 import { CopyButton } from "@/design-system/actions/CopyButton"
 import { copyToClipboard } from "@/design-system/helpers/clipboard"
@@ -204,7 +204,12 @@ export function CopyField({
   // was asked for; uncontrolled mode keys on the value itself through
   // `revealedValue`.
   const latestValue = useRef(value)
-  useEffect(() => {
+  // `useLayoutEffect`, not `useEffect`: the reader is a rejected-promise
+  // handler, so it runs as a microtask, and a passive effect is scheduled
+  // rather than run at commit. A rejection landing after the render that
+  // carries the new credential but before that effect would read the old one
+  // here and pass the gate below, which is the case this exists to refuse.
+  useLayoutEffect(() => {
     latestValue.current = value
   }, [value])
   // The value a failed copy asked to have selected, once revealing it has put

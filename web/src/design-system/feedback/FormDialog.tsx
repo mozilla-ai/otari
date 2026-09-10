@@ -1,5 +1,5 @@
 import { Modal, Spinner } from "@heroui/react"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { FiX } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
@@ -91,6 +91,7 @@ export function FormDialog({
 }: FormDialogProps) {
   // The dirty guard lives in the footer rather than in a second dialog, because
   // a dialog never opens a dialog.
+  const descriptionId = useId()
   const [isGuarding, setIsGuarding] = useState(false)
   // Whether the body has been scrolled away from its top, which is what puts a
   // rule between the pinned header and the content passing under it. The footer
@@ -162,6 +163,12 @@ export function FormDialog({
               opaque control-border hairline, unlayered, and argues that tier by
               name, so a `border-border` here would lose to it. */}
           <Modal.Dialog
+            // The description is the dialog's accessible description rather
+            // than a paragraph that happens to sit under the title: what a
+            // screen reader announces on open is the dialog, and the object
+            // this form is about is in here. Verified in the DOM, because
+            // react-aria filters unrecognized ARIA off some components.
+            aria-describedby={description ? descriptionId : undefined}
             className={`otari-form-dialog otari-form-dialog--${size} flex flex-col p-0`}
           >
             <header
@@ -172,7 +179,9 @@ export function FormDialog({
               <div className="flex flex-col gap-1">
                 <Modal.Heading className="text-heading">{title}</Modal.Heading>
                 {description ? (
-                  <p className="text-body text-muted">{description}</p>
+                  <p id={descriptionId} className="text-body text-muted">
+                    {description}
+                  </p>
                 ) : null}
               </div>
               {/* `isIconOnly` at `sm` is what makes this a 32px square with no

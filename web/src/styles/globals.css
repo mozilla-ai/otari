@@ -2215,16 +2215,24 @@ main {
     max-height: none;
     border: 0;
   }
-  /* The footer stacks. Two 36px buttons and a caption sharing one row fit a
-   * desktop and not a 390px sheet: the routing dialog's caption wrapped to three
-   * lines beside them. Each control takes the sheet's full width at the 44px
-   * touch floor, in DOM order, so Cancel sits above the primary.
-   *
-   * Nothing reorders them, and that is the point: an earlier version moved
-   * Cancel with `order`, which left the visual order and the focus order
-   * disagreeing on a phone. DOM, visual and focus order now agree at both
-   * widths. It also puts the primary lowest, which is the control nearest the
-   * thumb on a sheet. */
+}
+/* The footer stacks, and on the narrow axis only. Two 36px buttons and a caption
+ * sharing one row fit a desktop and not a 390px sheet: the routing dialog's
+ * caption wrapped to three lines beside them. Each control takes the sheet's
+ * full width at the 44px touch floor, in DOM order, so Cancel sits above the
+ * primary.
+ *
+ * Width alone, unlike the geometry above: `(height <= 639px)` also matches an
+ * unmaximized 1280x600 desktop window, and stacking two full-width buttons
+ * across 1280px is not a sheet, it is a broken footer. A landscape phone
+ * (844x390) keeps the sheet from the block above and gets a row footer, which
+ * its 844px affords.
+ *
+ * Nothing reorders them, and that is the point: an earlier version moved Cancel
+ * with `order`, which left the visual order and the focus order disagreeing on
+ * a phone. DOM, visual and focus order now agree at both widths. It also puts
+ * the primary lowest, which is the control nearest the thumb on a sheet. */
+@media (width <= 639px) {
   .otari-form-dialog__footer {
     flex-direction: column;
     align-items: stretch;

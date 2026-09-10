@@ -279,10 +279,14 @@ function ManyFields() {
  */
 /**
  * The same sheet, landscape. `isRotated` puts the phone at 844x390, which is
- * wider than 640 and shorter than it: the sheet keys on either dimension, so a
- * viewport that cannot afford the 120px gap vertically gets the sheet rather
- * than a third layout. Without that this was a 150px dialog with 137px of
- * header and footer in it.
+ * wider than 640 and shorter than it: the sheet's geometry keys on either
+ * dimension, so a viewport that cannot afford the 120px gap vertically gets the
+ * sheet rather than a third layout. Without that this was a 150px dialog with
+ * 137px of header and footer in it.
+ *
+ * The footer stays a row here, unlike the portrait story below: stacking is
+ * keyed on width alone, because 844px affords a row and `(height <= 639px)`
+ * also matches an unmaximized desktop window.
  */
 export const PhoneSheetLandscape: Story = {
   globals: { viewport: { value: "mobile2", isRotated: true } },
