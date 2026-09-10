@@ -1,7 +1,8 @@
 # Catalog smoke
 
-A standalone gateway on your machine, reachable from the LAN, with the
-grouped catalog seeded and three people to sign in as.
+A standalone gateway on your machine, reachable from the LAN, with three
+people to sign in as. Bring your own provider keys; the catalog is empty
+until you do.
 
 ```sh
 demo/catalog-smoke/run.sh            # builds the dashboard, boots, seeds, prints who to sign in as
@@ -26,12 +27,12 @@ Signed out, `#/models` is the public catalog at the deployment's list rates.
 
 ## Provider keys
 
-Every key in `config.template.yml` is fake. To reach a real provider, either
-edit `.state/config.yml` and restart, or sign in as the platform admin and add
-the provider on Providers, which stores the key encrypted with the key in
-`.state/secret-key`. Discovery is on, so a real key lists that provider's
-models; a fake one fails its discovery and the catalog keeps the priced
-selectors from the config.
+The config ships with no providers. Either add a `providers:` block to
+`.state/config.yml` and restart, or sign in as the platform admin and add the
+provider on Providers, which stores the key encrypted with the key in
+`.state/secret-key`. Discovery is on, so a provider's models appear in the
+catalog as soon as its key works, priced from the genai-prices defaults until
+you set a rate on Model pricing.
 
 ## Mail
 

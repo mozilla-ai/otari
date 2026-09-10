@@ -26,19 +26,15 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 BASE = os.environ["OTARI_BASE"]
 MASTER_KEY = os.environ["OTARI_MASTER_KEY"]
 LOG = Path(os.environ["OTARI_LOG"])
-DB = Path(os.environ["OTARI_DB"])
 PASSWORD = os.environ.get("OTARI_SMOKE_PASSWORD", "smoke-test-1234")
 
 OPERATOR = "operator@otari.local"
@@ -156,72 +152,6 @@ def sign_in_works(email: str) -> bool:
     return status == 200
 
 
-def seed_usage(organization_id: str) -> int:
-    """Thirty days of pretend traffic for Acme, so its pages are not empty.
-
-    Straight into SQLite, since the usage ingest is for real requests.
-    """
-    db = sqlite3.connect(DB)
-    cur = db.cursor()
-    by_organization = "select id from workspace where organization_id = ? limit 1"
-    row = cur.execute(by_organization, (organization_id.replace("-", ""),)).fetchone()
-    if row is None:
-        row = cur.execute(by_organization, (organization_id,)).fetchone()
-    if row is None:
-        db.close()
-        return 0
-    workspace_id = row[0]
-    already = "select count(*) from usage_logs where workspace_id = ? and source = 'smoke'"
-    if cur.execute(already, (workspace_id,)).fetchone()[0]:
-        db.close()
-        return 0
-    columns = {name for (_, name, *_rest) in cur.execute("pragma table_info(usage_logs)")}
-    now = datetime.now(UTC)
-    offerings = [
-        ("groq", "openai/gpt-oss-120b", 0.15, 0.60),
-        ("deepinfra", "openai/gpt-oss-120b", 0.037, 0.17),
-        ("nebius", "zai-org/GLM-5.3", 0.5, 2.0),
-        ("anthropic", "claude-sonnet-4-6", 3.0, 15.0),
-    ]
-    inserted = 0
-    for index, (provider, model, rate_in, rate_out) in enumerate(offerings):
-        for i in range(30):
-            prompt = 900 + (i * 137 + index * 311) % 5000
-            completion = 120 + (i * 53) % 900
-            cached = int(prompt * (0.4 if i % 3 == 0 else 0.0))
-            cost = ((prompt - cached) * rate_in + cached * rate_in * 0.1 + completion * rate_out) / 1_000_000
-            row_values = {
-                "id": uuid.uuid4().hex,
-                "workspace_id": workspace_id,
-                "timestamp": (now - timedelta(hours=i * 23 + index)).isoformat(),
-                "provider": provider,
-                "model": model,
-                "prompt_tokens": prompt,
-                "completion_tokens": completion,
-                "total_tokens": prompt + completion,
-                "cache_read_tokens": cached,
-                "cache_write_tokens": 0,
-                "reasoning_tokens": 0,
-                "cost": cost,
-                "status": "success",
-                "request_type": "chat",
-                "endpoint": "/v1/chat/completions",
-                "source": "smoke",
-                "latency_ms": 700 + (i * 97) % 1500,
-                "budget_exempt": 0,
-                "rerouted": 0,
-            }
-            keys = [k for k in row_values if k in columns]
-            cur.execute(
-                f"insert into usage_logs ({','.join(keys)}) values ({','.join('?' * len(keys))})",
-                [row_values[k] for k in keys],
-            )
-            inserted += 1
-    db.commit()
-    db.close()
-    return inserted
-
-
 def main() -> None:
     claim_operator()
     acme, home = ensure_acme()
@@ -232,12 +162,10 @@ def main() -> None:
     call("POST", "/v1/organizations/me/switch", {"organization_id": home})
     for email in (ACME_ADMIN, ACME_MEMBER):
         signup_and_verify(email)
-    usage = seed_usage(acme)
-    call("POST", "/v1/catalog/selectors/refresh")
     for email in (OPERATOR, ACME_ADMIN, ACME_MEMBER):
         if not sign_in_works(email):
             sys.exit(f"seed: {email} cannot sign in; see {LOG}")
-    print(f"seed: operator, Acme admin and member can sign in; {usage} usage rows added for Acme")
+    print("seed: operator, Acme admin and member can sign in")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the gateway on this machine with the catalog seeded, for a smoke test on
-# the LAN.
+# Run the gateway on this machine with three people to sign in as, for a smoke
+# test on the LAN. Bring your own provider keys.
 #
 #   demo/catalog-smoke/run.sh [--port 8000] [--no-build] [--reset]
 #
@@ -87,7 +87,7 @@ done
 PASSWORD="${OTARI_SMOKE_PASSWORD:-smoke-test-1234}"
 if [ ! -f "$STATE/seeded" ]; then
   OTARI_BASE="http://127.0.0.1:$PORT" OTARI_MASTER_KEY="$MASTER_KEY" OTARI_LOG="$STATE/gateway.log" \
-    OTARI_DB="$STATE/otari.db" OTARI_SMOKE_PASSWORD="$PASSWORD" python3 "$HERE/seed.py"
+    OTARI_SMOKE_PASSWORD="$PASSWORD" python3 "$HERE/seed.py"
   date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/seeded"
 fi
 
@@ -98,7 +98,7 @@ cat <<EOF
   Dashboard   http://localhost:$PORT/            ${LAN_IP:+(LAN: http://$LAN_IP:$PORT/)}
   Public      http://localhost:$PORT/#/models    (signed out)
   Master key  $MASTER_KEY                        (the API credential; header Authorization: Bearer)
-  Config      $STATE/config.yml                  (put real provider keys here, or add them on Providers)
+  Config      $STATE/config.yml                  (put provider keys here and restart, or add them on Providers)
   Log         $STATE/gateway.log                 (invitation and verification links land here)
 
   Sign in as                      password: $PASSWORD
