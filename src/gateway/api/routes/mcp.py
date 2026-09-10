@@ -50,7 +50,7 @@ from gateway.api.routes._platform import (
 # resolves a route signature at import time to decide what each parameter is.
 # Left as strings it cannot resolve, it reads both dependencies as query
 # parameters and every request fails validation before the handler runs.
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import release_session
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -161,7 +161,7 @@ class _McpRoute(APIRoute):
     A route class rather than an application exception handler, for two reasons.
     The 422 has to be normalized too, and a ``RequestValidationError`` is raised
     inside the route handler where only this wrapper can see it; and the
-    contract is deliberately local to ``/v1/mcp``, so nothing else on the
+    contract is deliberately local to ``/api/v1/mcp``, so nothing else on the
     deployment picks up an error shape it never published.
     """
 
@@ -246,7 +246,7 @@ def _classify(exc: StarletteHTTPException) -> tuple[str, ExecutionState, int]:
     return CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502
 
 
-router = APIRouter(prefix="/v1/mcp", tags=["mcp"], route_class=_McpRoute)
+router = APIRouter(prefix="/mcp", tags=["mcp"], route_class=_McpRoute)
 
 
 class McpExecuteRequest(BaseModel):
@@ -435,7 +435,7 @@ class McpToolDefinition(BaseModel):
     cannot waive an application's approval gate by labeling itself read-only.
     """
 
-    name: str = Field(description="The remote MCP tool name to send back to /v1/mcp/execute.")
+    name: str = Field(description=f"The remote MCP tool name to send back to {API_ROOT}/mcp/execute.")
     description: str | None = Field(default=None, description="The server's own description, untrusted.")
     input_schema: dict[str, Any] = Field(description="The tool's MCP inputSchema, unmodified.")
     annotations: dict[str, Any] | None = Field(
@@ -457,7 +457,7 @@ class McpToolsResponse(BaseModel):
     Carries no server URL, no credential, and no allowlist entry that the live
     catalog did not return (R-DISC-2). ``server_revision`` is what an
     application persists with a proposed call and sends back to
-    ``/v1/mcp/execute``, so a stored-configuration change between the two is
+    ``/api/v1/mcp/execute``, so a stored-configuration change between the two is
     refused rather than executed.
     """
 
