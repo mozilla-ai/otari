@@ -208,7 +208,12 @@ test.describe("standalone tenancy", () => {
     // A workspace's members are a subset of the organization's, and a standalone
     // deployment has exactly one identity, which owns every workspace it made.
     await expect(page.getByText(/Members of /)).toBeVisible()
-    await expect(page.getByText(/already in this workspace/)).toBeVisible()
+    // Said inside the dialog now rather than by a form under the roster. The
+    // trigger stays either way, so this is the only place that sentence can be.
+    await page.getByRole("button", { name: "Add member" }).click()
+    const dialog = page.getByRole("dialog", { name: "New workspace member" })
+    await expect(dialog.getByText(/already in this workspace/)).toBeVisible()
+    await dialog.getByRole("button", { name: "Cancel" }).click()
   })
 
   test("leaves creating and switching to the scope switcher, and offers no delete", async ({

@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
@@ -55,11 +56,21 @@ function tokenChip(server: WorkspaceMcpServer) {
   )
 }
 
+/** The page's own opening line, which the `/tools` card does not carry. */
+const PAGE_DESCRIPTION =
+  "MCP endpoints a workspace's requests can reach by naming their ids, without carrying a URL or a bearer token of their own. Each is checked for SSRF safety when it is stored and again when a request uses it, and its token is encrypted at rest."
+
 export function WorkspaceMcpServersCard({
-  showHeading = true,
+  variant = "card",
 }: {
-  /** Suppressed on the page whose own title already says "MCP servers". */
-  showHeading?: boolean
+  /**
+   * Where this is rendering. As a `card` it is one section at the foot of
+   * `/tools`, with its own `h2` and the register control beside it. As a
+   * `page` it *is* `/tools/mcp-servers`, so it renders that page's opening
+   * instead and the control sits in the heading row there, which is where
+   * every other page in the dashboard keeps the one thing it creates.
+   */
+  variant?: "card" | "page"
 }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -79,14 +90,16 @@ export function WorkspaceMcpServersCard({
   const [editing, setEditing] = useState<WorkspaceMcpServer>()
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
-  const heading = showHeading ? (
-    <h2 className="text-title">MCP servers</h2>
-  ) : null
+  const isPage = variant === "page"
 
   if (!selected) {
     return (
       <section className="flex flex-col gap-2">
-        {heading}
+        {isPage ? (
+          <PageIntro title="MCP servers">{PAGE_DESCRIPTION}</PageIntro>
+        ) : (
+          <h2 className="text-title">MCP servers</h2>
+        )}
         <InfoBanner>
           {workspaceLoading
             ? "Reading the workspaces you belong to."
@@ -195,16 +208,24 @@ export function WorkspaceMcpServersCard({
     })
   }
 
+  const addButton = manages ? (
+    <Button variant="primary" onPress={openAdd}>
+      Add MCP server
+    </Button>
+  ) : null
+
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {heading}
-        {manages ? (
-          <Button size="sm" variant="primary" onPress={openAdd}>
-            Add MCP server
-          </Button>
-        ) : null}
-      </div>
+      {isPage ? (
+        <PageIntro title="MCP servers" action={addButton}>
+          {PAGE_DESCRIPTION}
+        </PageIntro>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-title">MCP servers</h2>
+          {addButton}
+        </div>
+      )}
 
       <p className="max-w-prose text-sm text-muted">
         Endpoints that requests billed to {selected.name} can use by naming

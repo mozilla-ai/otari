@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMembersPage } from "@/features/workspaces/WorkspaceMembersPage"
@@ -118,10 +118,15 @@ describe("WorkspaceMembersPage", () => {
     mockApi()
     await renderPage()
 
-    expect(
-      await screen.findByText(/already in this workspace/),
-    ).toBeInTheDocument()
-    expect(screen.queryByLabelText("Organization member")).toBeNull()
+    // Said inside the dialog the heading's trigger opens, rather than by a
+    // form that is not there: the trigger stays either way, because a page
+    // whose action disappears reads as a permissions problem.
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add member" }),
+    )
+    const dialog = within(await screen.findByRole("dialog"))
+    expect(dialog.getByText(/already in this workspace/)).toBeInTheDocument()
+    expect(dialog.queryByLabelText("Organization member")).toBeNull()
   })
 
   it("reports a roster that failed instead of calling the workspace full", async () => {
@@ -134,6 +139,44 @@ describe("WorkspaceMembersPage", () => {
       "Roster unavailable",
     )
     expect(screen.queryByText(/already in this workspace/)).toBeNull()
+  })
+
+  it("keeps the heading trigger on screen and opens on a blank draft", async () => {
+    mockApi({
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({
+          organization_member_id: "analyst-membership",
+          user_id: "77777777-7777-7777-7777-777777777777",
+          full_name: "Analyst",
+          role: "member",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    const trigger = await screen.findByRole("button", { name: "Add member" })
+    await user.click(trigger)
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(trigger).toBeVisible()
+
+    await pickOption(user, "Organization member", "Analyst")
+    // Cancel rather than Escape: focus is in the picker that was just used, and
+    // a react-aria Select consumes the key. A picked person is dirty either
+    // way, so the way out is through the guard.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(trigger)
+    // Nobody picked: the person chosen before the discard did not survive the
+    // close, because the form is remounted rather than reset.
+    expect(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: /Organization member/,
+      }),
+    ).not.toHaveTextContent("Analyst")
   })
 
   it("adds an organization member to a workspace with a chosen role", async () => {
@@ -151,9 +194,12 @@ describe("WorkspaceMembersPage", () => {
     const user = userEvent.setup()
     await renderPage()
 
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    const dialog = await screen.findByRole("dialog")
     await pickOption(user, "Organization member", "Analyst")
     await pickOption(user, "Role", "Admin")
-    await user.click(screen.getByRole("button", { name: "Add member" }))
+    // Scoped: the heading's trigger and the dialog's submit say the same words.
+    await user.click(within(dialog).getByRole("button", { name: "Add member" }))
 
     const post = requests.find(
       (request) =>
