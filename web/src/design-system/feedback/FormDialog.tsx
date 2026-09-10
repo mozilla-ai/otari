@@ -210,11 +210,12 @@ export function FormDialog({
               // fields where Enter is a newline.
               onSubmit={(event) => {
                 event.preventDefault()
-                // `isGuarding` as well as `isPending`: the guard has taken the
-                // footer, so the submit control is not on screen, and a
-                // keyboard submit under it runs the mutation from a footer
-                // offering only Keep editing and Discard.
-                if (!isPending && !isGuarding) onSubmit()
+                // Every reason the button is not pressable has to hold for the
+                // keyboard too. The guard has taken the footer, so the submit
+                // control is not even on screen; `isSubmitDisabled` renders it
+                // disabled, which stops a click and a plain Enter but is not
+                // consulted by `requestSubmit`.
+                if (!isPending && !isGuarding && !isSubmitDisabled) onSubmit()
               }}
               onKeyDown={(event) => {
                 if (event.key !== "Enter") return
@@ -224,11 +225,11 @@ export function FormDialog({
                 // constraint validation first, so the shortcut and the button
                 // are one path rather than two, and a required field left empty
                 // cannot reach the mutation through the keyboard alone.
-                // Guarded here too, and not only in `onSubmit` where every
-                // path funnels: `requestSubmit` runs the form's validation
-                // first, which would focus an invalid field to answer a
-                // shortcut the guard is refusing.
-                if (!isPending && !isGuarding)
+                //
+                // Gated here as well as in `onSubmit`, where every path funnels,
+                // because `requestSubmit` validates before it submits and would
+                // focus an invalid field to answer a gesture that is refused.
+                if (!isPending && !isGuarding && !isSubmitDisabled)
                   event.currentTarget.requestSubmit()
               }}
               aria-busy={isPending}

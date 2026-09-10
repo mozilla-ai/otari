@@ -645,6 +645,28 @@ describe("KeysPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
+  it("does not walk /v1/users until the create dialog is opened", async () => {
+    // The dialog stays mounted while closed so it can animate out, which left
+    // its owner picker's roster fetching on every visit to the page.
+    // `fetchAllUsers` walks up to 100 pages of 1000, so this is the page's
+    // cost, not the dialog's. The same shape is waiting on every other page
+    // this series migrates.
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    const usersCalls = () =>
+      fetchMock.mock.calls.filter(([u]) => String(u).includes("/v1/users"))
+    expect(usersCalls()).toHaveLength(0)
+
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await screen.findByRole("dialog")
+    await waitFor(() => expect(usersCalls().length).toBeGreaterThan(0))
+  })
+
   it("hands over the secret with no way for the form to skip it", async () => {
     // The one chance to read the key is not something the form can waive. The
     // only "Create another" is on the secret step, where it is reached by
