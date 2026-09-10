@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { MultiSelect } from "./MultiSelect"
 
@@ -33,7 +33,7 @@ const meta = {
     value: [],
     onChange: () => {},
     searchPlaceholder: "Search people…",
-    countNoun: "people assigned",
+    countNoun: { one: "person assigned", other: "people assigned" },
   },
 } satisfies Meta<typeof MultiSelect>
 
@@ -43,10 +43,32 @@ type Story = StoryObj<typeof meta>
 
 function Live({
   initial,
+  query,
   ...args
-}: React.ComponentProps<typeof MultiSelect> & { initial?: string[] }) {
+}: React.ComponentProps<typeof MultiSelect> & {
+  initial?: string[]
+  /** Typed into the field on mount, for the story that needs a query behind it. */
+  query?: string
+}) {
   const [value, setValue] = useState<string[]>(initial ?? [])
-  return <MultiSelect {...args} value={value} onChange={setValue} />
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!query) return
+    const input = ref.current?.querySelector("input")
+    if (!input) return
+    // Through the native setter, so React sees the change rather than only the
+    // DOM: the same reason the e2e helpers fill controlled inputs this way.
+    Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set?.call(input, query)
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  }, [query])
+  return (
+    <div ref={ref}>
+      <MultiSelect {...args} value={value} onChange={setValue} />
+    </div>
+  )
 }
 
 /** Nothing picked. The field reads as a search box, because that is all it is. */
@@ -75,17 +97,20 @@ export const WithSelection: Story = {
 }
 
 /**
- * The list open. A picked person stays listed with a check rather than
- * disappearing, so the list answers "who is in" and not only "who is left", and
- * the row order does not change on a pick.
+ * The list open, which `autoFocus` is what makes a static render able to show:
+ * the popover opens on focus. A picked person stays listed with a check rather
+ * than disappearing, so the list answers "who is in" and not only "who is
+ * left", and the row order does not change on a pick.
  *
- * Open it and type to see the footer count follow the query. Stories cannot
- * carry an open popover on their own: it opens on focus, which a static render
- * has not had.
+ * Type to see the footer count follow the query.
  */
 export const Open: Story = {
   render: (args) => (
-    <Live {...args} initial={["parity-heavy@example.com", "operator"]} />
+    <Live
+      {...args}
+      autoFocus
+      initial={["parity-heavy@example.com", "operator"]}
+    />
   ),
 }
 
@@ -108,14 +133,17 @@ export const Invalid: Story = {
 export const NoMatches: Story = {
   args: {
     noMatchesMessage: "Nobody matches what you typed.",
+    // The story is the popover saying it, so it has to be open and querying.
+    autoFocus: true,
   },
-  render: (args) => <Live {...args} />,
+  render: (args) => <Live {...args} query="zzz" />,
 }
 
 /** Nothing to offer, which is a different sentence from nothing matching. */
 export const NoOptions: Story = {
   args: {
     options: [],
+    autoFocus: true,
     emptyMessage:
       "Nobody to assign yet. Add people under Members & roles, or issue a key, and they can be assigned here.",
   },

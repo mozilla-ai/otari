@@ -67,6 +67,7 @@ for a component, not for those.
 | `forms/Field` · `/SecretField` · `/TextArea` · `/SearchField` · `/FieldAction` | one component each |
 | `forms/Select` | `Select`, and the `SelectOption` type |
 | `forms/ComboBoxField` | `ComboBoxField`, and the `ComboBoxOption` type |
+| `forms/MultiSelect` | `MultiSelect`, and the `MultiSelectOption` type |
 | `forms/ComboBoxEmpty` | `ComboBoxEmpty`. The two sentences an empty popover picks between |
 | `forms/RadioGroup` | `RadioGroup`, and the `RadioOption` type |
 | `forms/Toggle` | `Toggle` |

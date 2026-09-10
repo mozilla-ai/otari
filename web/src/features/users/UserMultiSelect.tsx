@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react"
+import type { ReactNode } from "react"
 
 import type { User } from "@/client"
 import { MultiSelect } from "@/design-system/forms/MultiSelect"
@@ -32,21 +32,17 @@ export function UserMultiSelect({
 }) {
   const memberLabels = useMemberAttributionLabels()
 
-  const options = useMemo(
-    () =>
-      users
-        .filter((user) => !user.user_id.startsWith("apikey-"))
-        .map((user) => {
-          const member = memberLabels.get(user.user_id)
-          return {
-            id: user.user_id,
-            label:
-              member ??
-              (user.alias ? `${user.user_id} (${user.alias})` : user.user_id),
-          }
-        }),
-    [users, memberLabels],
-  )
+  const options = users
+    .filter((user) => !user.user_id.startsWith("apikey-"))
+    .map((user) => {
+      const member = memberLabels.get(user.user_id)
+      return {
+        id: user.user_id,
+        label:
+          member ??
+          (user.alias ? `${user.user_id} (${user.alias})` : user.user_id),
+      }
+    })
 
   return (
     <MultiSelect
@@ -56,7 +52,7 @@ export function UserMultiSelect({
       value={value}
       onChange={onChange}
       searchPlaceholder="Search people…"
-      countNoun="people assigned"
+      countNoun={{ one: "person assigned", other: "people assigned" }}
       emptyMessage="Nobody to assign yet. Add people under Members & roles, or issue a key, and they can be assigned here."
       noMatchesMessage="Nobody matches what you typed."
     />

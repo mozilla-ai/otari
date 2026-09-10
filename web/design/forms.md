@@ -31,7 +31,8 @@ Is it one of a set too long to scroll, or open-ended?
  └── ComboBoxField                 (search as you type; `allowsCustomValue`
                                     for a list that is a shortcut, not a whitelist)
 Is it many of a set?
- └── FilterMultiComboBox
+ ├── In a form -> MultiSelect
+ └── In a toolbar -> FilterMultiComboBox
 ```
 
 `Select` and `FilterSelect` are two components rather than one with a mode, and
@@ -61,6 +62,10 @@ ComboBoxField: { label, value, onChange, onQueryChange?, options: ComboBoxOption
   description?, placeholder?, isRequired?, isDisabled?, isInvalid?, errorMessage?,
   reserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
   shouldSelectOnFocus?, isSourceEmpty?, emptyMessage?, noMatchesMessage? }
+MultiSelect: { label, value: readonly string[], onChange: (next: string[]) => void,
+  options: MultiSelectOption[], description?, isInvalid?, errorMessage?,
+  reserveMessage?, searchPlaceholder?, emptyMessage?, noMatchesMessage?,
+  countNoun?: { one, other }, maxVisible = 50, autoFocus? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
   className? }
@@ -150,6 +155,24 @@ one label apart.
 `FilterMultiComboBox` stays a separate component for the reason `FilterSelect`
 does: it is a filter, so its label is a caption beside the control and it never
 speaks a validation message.
+
+## MultiSelect
+
+**The form half of that pair.** It puts its label above the control, owns a
+description and an error announced on it, and is the one to reach for inside a
+`FormDialog`; `FilterMultiComboBox` is the toolbar one and stays.
+
+Two behaviors are its own, and both were the bug it was built for. **The search
+field never moves**: the chips render *below* it, so a growing selection pushes
+the block down rather than shoving the control out from under the pointer. And
+**a picked option stays in the list, checked**, so the list answers "who is in"
+rather than only "who is left"; pressing it again removes it, and the order
+never re-sorts on a pick.
+
+`countNoun` is a pair, `{ one, other }`, because one noun interpolated into both
+counts is how "1 people assigned" ships. `maxVisible` caps what is rendered,
+never what is searched: the filter runs over every option and the footer says
+when it is showing fewer.
 
 ## Field height is a property of the place, not of the field
 

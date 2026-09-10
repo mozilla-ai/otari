@@ -277,9 +277,21 @@ function BudgetForm({
   // a reason to paint the button as refused.
   const blocked = !parsed.valid || periodInvalid
   const canSubmit = !isPending && !blocked
-  // Everything the operator can change, against what the form was seeded with.
-  const draft = JSON.stringify({ name, limit, durationSec, userIds })
-  const seeded = useRef(draft)
+  // One predicate naming every field the operator can change, so "is there
+  // anything to lose" is answered in a single place rather than by a snapshot
+  // string whose contents have to be kept in step by hand.
+  const seeded = useRef({
+    name: initial.name ?? "",
+    limit: initial.max_budget === null ? "" : String(initial.max_budget),
+    durationSec: initial.budget_duration_sec,
+    userIds: assignedUserIds ?? [],
+  })
+  const isPristine =
+    name === seeded.current.name &&
+    limit === seeded.current.limit &&
+    durationSec === seeded.current.durationSec &&
+    userIds.length === seeded.current.userIds.length &&
+    userIds.every((id) => seeded.current.userIds.includes(id))
 
   const submit = () => {
     if (!canSubmit) return
@@ -307,7 +319,7 @@ function BudgetForm({
       onSubmit={submit}
       isPending={isPending}
       isSubmitDisabled={blocked}
-      isDirty={draft !== seeded.current}
+      isDirty={!isPristine}
       error={error}
     >
       <Field
@@ -509,12 +521,15 @@ function DeploymentBudgetsPage() {
     [workspaces.data],
   )
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
-  const createBudget = useCreateBudget()
   const updateBudget = useUpdateBudget()
   const deleteBudget = useDeleteBudget()
   const updateUser = useUpdateUser()
 
   const [addOpen, setAddOpen] = useState(false)
+  // Bumped on every open and used as the create dialog's key. The draft is
+  // cleared on the way in rather than on the way out, which lets the dialog
+  // animate away with its fields intact.
+  const [addOpenCount, setAddOpenCount] = useState(0)
   const [editing, setEditing] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Budget>()
@@ -757,29 +772,6 @@ function DeploymentBudgetsPage() {
     return true
   }
 
-  // Create the budget, then (optionally) attach it to the chosen users. The
-  // per-user PATCH sets each user's reset clock. Failed assignments stay in the
-  // form so a retry never creates a duplicate budget.
-  const createAndAssign = (body: CreateBudgetRequest, userIds: string[]) => {
-    if (pendingAssignments) {
-      void assignUsers(pendingAssignments.budgetId, pendingAssignments.userIds)
-      return
-    }
-
-    setAssignmentError(null)
-    createBudget.mutate(body, {
-      onSuccess: async (budget: Budget) => {
-        if (
-          userIds.length > 0 &&
-          !(await assignUsers(budget.budget_id, userIds))
-        ) {
-          return
-        }
-        setAddOpen(false)
-      },
-    })
-  }
-
   return (
     <div className="flex flex-col">
       <PageIntro
@@ -793,6 +785,7 @@ function DeploymentBudgetsPage() {
               setEditing(null)
               setAssignmentError(null)
               setPendingAssignments(null)
+              setAddOpenCount((count) => count + 1)
               setAddOpen(true)
             }}
           >
@@ -807,7 +800,6 @@ function DeploymentBudgetsPage() {
       <ErrorBanner
         error={
           budgets.error ??
-          createBudget.error ??
           updateBudget.error ??
           updateUser.error ??
           // Without this a failed roster silently withholds the assignment
@@ -833,21 +825,26 @@ function DeploymentBudgetsPage() {
             setEditing(null)
             setAssignmentError(null)
             setPendingAssignments(null)
+            setAddOpenCount((count) => count + 1)
             setAddOpen(true)
           }}
         />
       ) : null}
 
-      <BudgetForm
+      {/* Keyed on the open count, so each open remounts everything that should
+          start fresh: the draft, and the create mutation whose refusal would
+          otherwise greet the next open. The page keeps only what outlives an
+          open, which is whether it is open, how many times it has been, and
+          the list itself. */}
+      <CreateBudgetDialog
+        key={addOpenCount}
         isOpen={addOpen}
-        onOpenChange={setAddOpen}
-        title="New budget"
-        submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
-        initial={{ name: null, max_budget: null, budget_duration_sec: null }}
-        error={createBudget.error ?? assignmentError}
-        isPending={createBudget.isPending || assigningUsers}
-        assignUsers={users.data ?? []}
-        onSubmit={createAndAssign}
+        assignmentError={assignmentError}
+        assigningUsers={assigningUsers}
+        pendingAssignments={pendingAssignments}
+        assignUsers={assignUsers}
+        onAssignmentReset={() => setAssignmentError(null)}
+        users={users.data ?? []}
         onClose={() => {
           setAssignmentError(null)
           setPendingAssignments(null)
@@ -1020,6 +1017,80 @@ function DeploymentBudgetsPage() {
  * deployment-wide reads as an admin and paint their refusals; the shell already
  * waits on this query, so the cost is a spinner that is usually already over.
  */
+/**
+ * Create a budget, and attach it to the people chosen in the same form.
+ *
+ * A component of its own so the page can key it: the draft *and* the create
+ * mutation reset together on each open, which is what stops a refusal from the
+ * last attempt greeting the next one. The assignment retry state stays on the
+ * page, because a failed attach is shared with the edit form and outlives this.
+ */
+function CreateBudgetDialog({
+  isOpen,
+  onClose,
+  users,
+  assignUsers,
+  onAssignmentReset,
+  assignmentError,
+  assigningUsers,
+  pendingAssignments,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  users: User[]
+  assignUsers: (
+    budgetId: string,
+    userIds: string[],
+    previousUserIds?: string[],
+  ) => Promise<boolean>
+  onAssignmentReset: () => void
+  assignmentError: Error | null
+  assigningUsers: boolean
+  pendingAssignments: { budgetId: string; userIds: string[] } | null
+}) {
+  const createBudget = useCreateBudget()
+
+  // Create the budget, then (optionally) attach it to the chosen users. The
+  // per-user PATCH sets each user's reset clock. Failed assignments stay in the
+  // form so a retry never creates a duplicate budget.
+  const createAndAssign = (body: CreateBudgetRequest, userIds: string[]) => {
+    if (pendingAssignments) {
+      void assignUsers(pendingAssignments.budgetId, pendingAssignments.userIds)
+      return
+    }
+
+    onAssignmentReset()
+    createBudget.mutate(body, {
+      onSuccess: async (budget: Budget) => {
+        if (
+          userIds.length > 0 &&
+          !(await assignUsers(budget.budget_id, userIds))
+        ) {
+          return
+        }
+        onClose()
+      },
+    })
+  }
+
+  return (
+    <BudgetForm
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="New budget"
+      submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
+      initial={{ name: null, max_budget: null, budget_duration_sec: null }}
+      error={createBudget.error ?? assignmentError}
+      isPending={createBudget.isPending || assigningUsers}
+      assignUsers={users}
+      onSubmit={createAndAssign}
+      onClose={onClose}
+    />
+  )
+}
+
 export function BudgetsPage() {
   const organization = useOrganizationContext()
 

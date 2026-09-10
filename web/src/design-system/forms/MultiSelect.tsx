@@ -10,8 +10,8 @@ export interface MultiSelectOption {
   label: string
 }
 
-/** Six rows at 36px, which is where the list starts scrolling. */
-const MAX_VISIBLE_ROWS = 6
+/** How many matches are rendered at once, however many the query reaches. */
+const DEFAULT_MAX_VISIBLE = 50
 
 /**
  * Pick several from a searchable list, without the field moving.
@@ -43,7 +43,9 @@ export function MultiSelect({
   searchPlaceholder = "Search…",
   emptyMessage = "Nothing to choose from.",
   noMatchesMessage = "Nothing matches what you typed.",
-  countNoun = "selected",
+  countNoun = { one: "selected", other: "selected" },
+  maxVisible = DEFAULT_MAX_VISIBLE,
+  autoFocus,
 }: {
   label: string
   description?: ReactNode
@@ -59,8 +61,20 @@ export function MultiSelect({
   emptyMessage?: ReactNode
   /** Shown when the query matches none of the options. */
   noMatchesMessage?: ReactNode
-  /** Pluralized into the closed field and the footer: "6 people assigned". */
-  countNoun?: string
+  /**
+   * Pluralized into the closed field and the footer: "1 person assigned",
+   * "6 people assigned". A pair rather than one string, because interpolating
+   * one noun into both counts is how "1 people assigned" ships.
+   */
+  countNoun?: { one: string; other: string }
+  /**
+   * How many matches to render. The filter runs over every option; this caps
+   * what is mounted, because a deployment's roster is unbounded and the popover
+   * is inside a modal. The footer says when it is capping.
+   */
+  maxVisible?: number
+  /** A form's first field takes this; see feedback.md. */
+  autoFocus?: boolean
 }) {
   const [query, setQuery] = useState("")
   const [isOpen, setIsOpen] = useState(false)
@@ -68,32 +82,44 @@ export function MultiSelect({
   const inputRef = useRef<HTMLInputElement>(null)
   const listId = useId()
   const inputId = useId()
+  const descriptionId = useId()
+  const errorId = useId()
   const optionId = (index: number) => `${listId}-option-${index}`
 
   const needle = query.trim().toLowerCase()
   // Filtered, never re-ordered: a selected row keeps its place, so a second
   // press lands on the row the first one did.
-  const matches = options.filter(
+  const reached = options.filter(
     (option) =>
       needle === "" ||
       option.id.toLowerCase().includes(needle) ||
       option.label.toLowerCase().includes(needle),
   )
+  // Capped after the filter, never before: the query has to see every option,
+  // and only the rendering is bounded.
+  const matches = reached.slice(0, maxVisible)
+  const capped = reached.length > matches.length
   const selectedMatches = matches.filter((option) =>
     value.includes(option.id),
   ).length
   const labelOf = (id: string) =>
     options.find((option) => option.id === id)?.label ?? id
+  const counted = (n: number) =>
+    `${n} ${n === 1 ? countNoun.one : countNoun.other}`
 
+  // The query survives a pick. Clearing it would refill the list under the
+  // pointer, which is the same movement the chips were moved to avoid.
+  //
+  // No refocus here: a chip's Remove button calls this while the popover is
+  // closed, and focusing the input would reopen the list over the chip row. An
+  // option press keeps focus anyway, because its `onMouseDown` prevents the
+  // default that would have moved it.
   const toggle = (id: string) => {
     onChange(
       value.includes(id)
         ? value.filter((current) => current !== id)
         : [...value, id],
     )
-    // The query survives a pick. Clearing it would refill the list under the
-    // pointer, which is the same movement the chips were moved to avoid.
-    inputRef.current?.focus()
   }
 
   const open = () => {
@@ -120,10 +146,20 @@ export function MultiSelect({
       // somebody is typing into a name.
       if (event.key === " " && query !== "") return
       if (!isOpen) return
+      // Before the row lookup, not after: an open combo box owns Enter whether
+      // or not it has a row to give, and this input sits inside a real form, so
+      // falling through submits it.
+      event.preventDefault()
       const option = matches[activeIndex]
       if (!option) return
-      event.preventDefault()
       toggle(option.id)
+      return
+    }
+    if (event.key === "Tab" && isOpen) {
+      // Closed rather than trapped: the APG pattern dismisses the popup on Tab,
+      // and leaving it open puts the focus ring on a chip's Remove button drawn
+      // underneath the panel.
+      setIsOpen(false)
       return
     }
     if (event.key === "Escape" && isOpen) {
@@ -150,7 +186,11 @@ export function MultiSelect({
       <label htmlFor={inputId} className="text-body">
         {label}
       </label>
-      {description ? <p className="text-caption">{description}</p> : null}
+      {description ? (
+        <p id={descriptionId} className="text-caption">
+          {description}
+        </p>
+      ) : null}
       {/* `relative` so the popover hangs off the field rather than off the
           dialog, and the chips below it stay in flow. */}
       <div className="relative flex flex-col gap-1.5">
@@ -166,16 +206,27 @@ export function MultiSelect({
               isOpen && matches[activeIndex] ? optionId(activeIndex) : undefined
             }
             aria-invalid={isInvalid}
+            // Wired by hand, because this does not go through HeroUI's
+            // Description and FieldError slots: without it a screen reader
+            // says "invalid" and never says why.
+            aria-describedby={
+              [
+                description ? descriptionId : null,
+                isInvalid && errorMessage ? errorId : null,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
             className={`${INPUT_CLASS} w-full pr-9`}
             // The closed field says how many are in rather than staying blank,
             // because the chips below it can be scrolled past in a long form.
             placeholder={
-              value.length === 0
-                ? searchPlaceholder
-                : `${value.length} ${countNoun}`
+              value.length === 0 ? searchPlaceholder : counted(value.length)
             }
             value={query}
             autoComplete="off"
+            // biome-ignore lint/a11y/noAutofocus: a form's first field takes it; see feedback.md
+            autoFocus={autoFocus}
             onChange={(event) => {
               setQuery(event.target.value)
               setActiveIndex(0)
@@ -215,8 +266,11 @@ export function MultiSelect({
               // carrying one name is three things a screen reader cannot tell
               // apart, and it is what a query for the field then finds.
               aria-label={`${label}, options`}
-              className="overflow-y-auto"
-              style={{ maxHeight: `${MAX_VISIBLE_ROWS * 36}px` }}
+              // Six rows before it scrolls, each at the 44px touch floor
+              // (motion-and-access.md: "44px is the floor, everywhere"), so
+              // 6 x 44px = 264px = `max-h-66`. A class rather than an inline
+              // style: the arithmetic is a compile-time constant.
+              className="max-h-66 overflow-y-auto"
             >
               {matches.length === 0 ? (
                 <p className="text-caption px-2.5 py-2">
@@ -247,12 +301,19 @@ export function MultiSelect({
                         toggle(option.id)
                       }}
                       onMouseEnter={() => setActiveIndex(index)}
-                      className={`flex h-9 cursor-pointer items-center gap-2.5 border-border-subtle px-2.5 text-sm not-first:border-t ${
-                        // `surface-alt`, not `surface-muted`: the two resolve
-                        // to the same value, and only this one is registered in
-                        // @theme, so only this one emits a rule.
-                        isSelected ? "bg-surface-alt" : ""
-                      } ${index === activeIndex ? "bg-surface-subtle" : ""}`}
+                      // One background, picked here. Two classes on one element
+                      // are resolved by Tailwind's emitted order rather than by
+                      // the order they are written in, which `inputClass.ts`
+                      // documents as a hazard. `surface-alt` rather than
+                      // `surface-muted`: the two resolve to the same value and
+                      // only this one is registered in @theme.
+                      className={`flex min-h-11 cursor-pointer items-center gap-2.5 border-border-subtle px-2.5 text-sm not-first:border-t ${
+                        index === activeIndex
+                          ? "bg-surface-subtle"
+                          : isSelected
+                            ? "bg-surface-alt"
+                            : ""
+                      }`}
                     >
                       <span className="flex size-4 shrink-0 items-center justify-center">
                         {isSelected ? (
@@ -266,9 +327,10 @@ export function MultiSelect({
               )}
             </div>
             <div className="border-border text-mono-caption text-subtle flex h-8 items-center justify-between border-t px-2.5">
-              <span aria-live="polite">
-                {selectedMatches} of {matches.length} matches selected ·{" "}
-                {value.length} {countNoun}
+              <span>
+                {selectedMatches} of {matches.length} matches selected
+                {capped ? ` of ${reached.length}` : ""} ·{" "}
+                {counted(value.length)}
               </span>
               <span>ESC closes</span>
             </div>
@@ -293,9 +355,18 @@ export function MultiSelect({
           </ul>
         ) : null}
       </div>
+      {/* Mounted whatever the popover is doing. A live region inserted with
+          its content already in it announces nothing, so a region that only
+          exists while the list is open is silent on the first count and absent
+          when a chip is removed from the closed state. */}
+      <span aria-live="polite" className="sr-only">
+        {counted(value.length)}
+      </span>
       <FieldMessages reserve={reserveMessage}>
         {isInvalid && errorMessage ? (
-          <span className="text-danger">{errorMessage}</span>
+          <span id={errorId} className="text-danger">
+            {errorMessage}
+          </span>
         ) : null}
       </FieldMessages>
     </div>

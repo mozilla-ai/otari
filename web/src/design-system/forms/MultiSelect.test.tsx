@@ -24,7 +24,7 @@ function Live({ initial = [] }: { initial?: string[] }) {
       value={value}
       onChange={setValue}
       searchPlaceholder="Search people…"
-      countNoun="people assigned"
+      countNoun={{ one: "person assigned", other: "people assigned" }}
     />
   )
 }
@@ -112,6 +112,108 @@ describe("MultiSelect", () => {
     expect(onKeyDown).not.toHaveBeenCalled()
   })
 
+  it("swallows Enter while the list is open with nothing to toggle", async () => {
+    // The input sits inside a real form, so an Enter that falls through submits
+    // it: type a query that matches nobody, press Enter, and the enclosing
+    // dialog would create the object with none of this field's work in it.
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault())
+    const user = userEvent.setup()
+    render(
+      <form onSubmit={onSubmit}>
+        <Live />
+      </form>,
+    )
+
+    await user.click(field())
+    await user.type(field(), "zzz")
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
+    await user.keyboard("{Enter}")
+
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("leaves the list closed when a chip is removed", async () => {
+    // The chips sit outside the popover, so they are pressable while it is
+    // closed. Refocusing the input on every toggle sprang the list open over
+    // the chip row, one extra Escape per removal.
+    const user = userEvent.setup()
+    render(<Live initial={["operator", "alice"]} />)
+
+    await user.click(field())
+    await user.keyboard("{Escape}")
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Remove Operator" }))
+
+    expect(within(chips()).getAllByRole("listitem")).toHaveLength(1)
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  })
+
+  it("renders at most `maxVisible` matches and says so", async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      id: `user-${index}`,
+      label: `person-${index}@example.com`,
+    }))
+    const user = userEvent.setup()
+    render(
+      <MultiSelect
+        label={LABEL}
+        options={many}
+        value={[]}
+        onChange={() => {}}
+        maxVisible={3}
+        countNoun={{ one: "person assigned", other: "people assigned" }}
+      />,
+    )
+
+    await user.click(field())
+    expect(screen.getAllByRole("option")).toHaveLength(3)
+    expect(screen.getByText(/of 3 matches selected of 8/)).toBeInTheDocument()
+  })
+
+  it("names its description and its error on the control", async () => {
+    render(
+      <MultiSelect
+        label={LABEL}
+        description="Everyone selected is held to this budget."
+        options={PEOPLE}
+        value={[]}
+        onChange={() => {}}
+        isInvalid
+        errorMessage="Pick at least one person."
+      />,
+    )
+
+    const described = field().getAttribute("aria-describedby") ?? ""
+    const ids = described.split(" ").filter(Boolean)
+    expect(ids).toHaveLength(2)
+    const text = ids
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ")
+    expect(text).toContain("held to this budget")
+    expect(text).toContain("Pick at least one person")
+  })
+
+  it("keeps a live region mounted so a change is announced", () => {
+    // A region inserted with its content already in it announces nothing, so
+    // one that exists only while the popover is open is silent on the first
+    // count and absent when a chip is removed from the closed state.
+    render(<Live />)
+    const live = document.querySelector('[aria-live="polite"]')
+    expect(live).not.toBeNull()
+    expect(live?.textContent).toBe("0 people assigned")
+  })
+
+  it("pluralizes the count noun", async () => {
+    const user = userEvent.setup()
+    render(<Live />)
+
+    await user.click(field())
+    await user.click(screen.getByRole("option", { name: /Operator/ }))
+
+    expect(screen.getAllByText(/1 person assigned/).length).toBeGreaterThan(0)
+  })
+
   it("filters on the query and counts the matches against the whole selection", async () => {
     const user = userEvent.setup()
     render(<Live initial={["operator"]} />)
@@ -126,7 +228,8 @@ describe("MultiSelect", () => {
     ).toBeInTheDocument()
     // None of the two matches is selected, and one person is assigned overall.
     expect(screen.getByText(/0 of 2 matches selected/)).toBeInTheDocument()
-    expect(screen.getByText(/1 people assigned/)).toBeInTheDocument()
+    // Singular, which is the whole reason the noun is a pair.
+    expect(screen.getAllByText(/1 person assigned/).length).toBeGreaterThan(0)
   })
 
   it("removes the last chip on Backspace with an empty query", async () => {
