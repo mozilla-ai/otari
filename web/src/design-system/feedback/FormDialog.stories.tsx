@@ -279,6 +279,14 @@ function ManyFields() {
  */
 export const PhoneSheet: Story = {
   globals: { viewport: { value: "mobile2", isRotated: false } },
+  // With a `footerStart` caption, which is the case that does not fit a row:
+  // beside two buttons in a 390px sheet this wrapped to three lines, so below
+  // 640px the footer stacks and each control takes the full width.
+  args: {
+    footerStart: (
+      <p className="text-caption">In effect for new requests within 30s.</p>
+    ),
+  },
   render: (args) => (
     <FormDialog {...args}>
       <KeyFields />

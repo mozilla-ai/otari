@@ -252,11 +252,11 @@ export function FormDialog({
                 <ErrorBanner error={error} />
                 {children}
               </div>
-              <footer className="border-border flex shrink-0 items-center justify-between gap-2 border-t px-6 py-3">
+              <footer className="otari-form-dialog__footer border-border flex shrink-0 items-center justify-between gap-2 border-t px-6 py-3">
                 {isGuarding ? (
                   <>
                     <p className="text-caption">Unsaved changes</p>
-                    <div className="flex items-center gap-2">
+                    <div className="otari-form-dialog__actions flex items-center gap-2">
                       <Button onPress={() => setIsGuarding(false)}>
                         Keep editing
                       </Button>
@@ -274,12 +274,16 @@ export function FormDialog({
                 ) : (
                   <>
                     <div className="min-w-0">{footerStart}</div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="otari-form-dialog__actions flex shrink-0 items-center gap-2">
                       {/* Cancel IS the dismiss, so it goes with it: a dialog
                           that cannot be dismissed has one way out and the
                           primary is it. */}
                       {isDismissable ? (
-                        <Button isDisabled={isPending} onPress={requestClose}>
+                        <Button
+                          className="otari-form-dialog__cancel"
+                          isDisabled={isPending}
+                          onPress={requestClose}
+                        >
                           Cancel
                         </Button>
                       ) : null}
