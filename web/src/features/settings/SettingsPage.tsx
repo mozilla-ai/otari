@@ -10,6 +10,10 @@ import {
   useStoredProviders,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import {
+  CONCEALED_SECRET,
+  CopyField,
+} from "@/shared/components/actions/CopyField"
 import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { PageLoading } from "@/shared/components/feedback/PageLoading"
@@ -290,67 +294,6 @@ function ConfigRow({
   )
 }
 
-function CopyField({
-  value,
-  fieldRef,
-}: {
-  value: string
-  fieldRef?: React.RefObject<HTMLInputElement | null>
-}) {
-  const internalRef = useRef<HTMLInputElement>(null)
-  const ref = fieldRef ?? internalRef
-  const [copied, setCopied] = useState(false)
-  const [selectHint, setSelectHint] = useState(false)
-
-  const copy = async () => {
-    ref.current?.focus()
-    ref.current?.select()
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value)
-        setCopied(true)
-        setSelectHint(false)
-        window.setTimeout(() => setCopied(false), 2_000)
-        return
-      }
-    } catch {
-      // Fall through to the manual-copy hint.
-    }
-    setSelectHint(true)
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-caption">New master key</span>
-        <Button size="sm" variant="ghost" onPress={copy}>
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <input
-        ref={ref}
-        readOnly
-        value={value}
-        onFocus={(event) => event.currentTarget.select()}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        data-1p-ignore
-        data-lpignore="true"
-      />
-      <span aria-live="polite" className="text-xs text-success">
-        {copied ? "Copied to clipboard." : ""}
-      </span>
-      {selectHint ? (
-        <span className="text-caption">
-          Selected. Press Ctrl/Cmd-C to copy.
-        </span>
-      ) : null}
-    </div>
-  )
-}
-
 function MasterKeyRotationDialog({
   masterKey,
   error,
@@ -364,12 +307,13 @@ function MasterKeyRotationDialog({
   onRegenerate: () => void
   onClose: () => void
 }) {
-  const keyRef = useRef<HTMLInputElement>(null)
+  const keyRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     if (masterKey === undefined) return
+    // Focus without a selection: the key is concealed until it is asked for,
+    // and selecting the stand-in would invite a Ctrl/Cmd-C that copies bullets.
     keyRef.current?.focus()
-    keyRef.current?.select()
   }, [masterKey])
 
   return (
@@ -394,7 +338,12 @@ function MasterKeyRotationDialog({
                   The previous master key has stopped working. This browser tab
                   now uses the new key.
                 </p>
-                <CopyField value={masterKey} fieldRef={keyRef} />
+                <CopyField
+                  label="New master key"
+                  value={masterKey}
+                  concealed={CONCEALED_SECRET}
+                  fieldRef={keyRef}
+                />
               </>
             ) : (
               <>

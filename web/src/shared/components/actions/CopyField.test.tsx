@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { CopyableValue, CopyField } from "@/shared/components/actions/CopyField"
+import {
+  CONCEALED_SECRET,
+  CopyableValue,
+  CopyField,
+} from "@/shared/components/actions/CopyField"
 
 describe("CopyField", () => {
   // Scoped like CopyButton's above: the failure case spies on
@@ -190,6 +194,178 @@ describe("CopyField", () => {
       />,
     )
     expect(screen.getByLabelText("curl")).toBeInTheDocument()
+  })
+})
+
+describe("CopyField, concealed", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("shows the stand-in until the value is asked for, and hides it again", async () => {
+    const user = userEvent.setup()
+    render(
+      <CopyField
+        label="Secret key"
+        value="gw-real-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+
+    const field = screen.getByLabelText("Secret key")
+    expect(field).toHaveValue(CONCEALED_SECRET)
+    // The plaintext is not in the document at all, so it cannot be read off
+    // the screen, scraped out of a screenshot, or found in a DOM dump.
+    expect(document.body.textContent).not.toContain("gw-real-secret")
+
+    await user.click(screen.getByRole("button", { name: "Show Secret key" }))
+    expect(field).toHaveValue("gw-real-secret")
+
+    await user.click(screen.getByRole("button", { name: "Hide Secret key" }))
+    expect(field).toHaveValue(CONCEALED_SECRET)
+  })
+
+  it("copies the real value while it is concealed", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    render(
+      <CopyField
+        label="Secret key"
+        value="gw-real-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Copy" }))
+
+    // Handed over without being seen, which is the whole point: the clipboard
+    // gets the key and the field still shows the stand-in.
+    expect(writeText).toHaveBeenCalledWith("gw-real-secret")
+    expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+    expect(await screen.findByText("Copied to clipboard.")).toBeInTheDocument()
+  })
+
+  it("reveals and selects when no clipboard path will take it", async () => {
+    const user = userEvent.setup()
+    // Both paths refused, as on a plain-HTTP origin whose browser also has no
+    // `execCommand`: the async API is made to throw and jsdom defines no
+    // legacy fallback, so nothing wrote to the clipboard.
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(
+      new Error("not a secure context"),
+    )
+    render(
+      <CopyField
+        label="Secret key"
+        value="gw-real-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+    const field = screen.getByLabelText("Secret key") as HTMLInputElement
+
+    await user.click(screen.getByRole("button", { name: "Copy" }))
+
+    // Ctrl/Cmd-C is the only way left, and it can only reach the plaintext, so
+    // the field reveals it and selects that rather than the stand-in.
+    await waitFor(() => {
+      expect(field).toHaveValue("gw-real-secret")
+      expect(document.activeElement).toBe(field)
+      expect(field.selectionStart).toBe(0)
+      expect(field.selectionEnd).toBe("gw-real-secret".length)
+    })
+    expect(
+      screen.getByText("Revealed and selected. Press Ctrl/Cmd-C to copy."),
+    ).toBeInTheDocument()
+    // Never a claim it copied, which is the rule the whole component follows.
+    expect(screen.queryByText("Copied to clipboard.")).not.toBeInTheDocument()
+  })
+
+  it("leaves focus unselected while concealed, so no Ctrl/Cmd-C copies bullets", async () => {
+    const user = userEvent.setup()
+    render(
+      <CopyField
+        label="Secret key"
+        value="gw-real-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+    const field = screen.getByLabelText("Secret key") as HTMLInputElement
+
+    await user.click(field)
+    expect(field.selectionStart).toBe(field.selectionEnd)
+
+    // Revealed, the field selects on focus the way every other one does.
+    await user.click(screen.getByRole("button", { name: "Show Secret key" }))
+    await user.click(field)
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe("gw-real-secret".length)
+  })
+
+  it("conceals a snippet around the stand-in, with the toggle out of the field", async () => {
+    const user = userEvent.setup()
+    const snippet = `curl https://otari.test \\\n  -H "Otari-Key: gw-real-secret"`
+    render(
+      <CopyField
+        label="curl"
+        value={snippet}
+        concealed={snippet.replace("gw-real-secret", CONCEALED_SECRET)}
+        multiline
+      />,
+    )
+
+    const field = screen.getByLabelText("curl")
+    // The request is readable while the key inside it is not: the address is
+    // what the operator has to check, and the key is not.
+    expect(field).toHaveTextContent("https://otari.test")
+    expect((field as HTMLTextAreaElement).value).not.toContain("gw-real-secret")
+
+    await user.click(screen.getByRole("button", { name: "Show curl" }))
+    expect(field).toHaveValue(snippet)
+  })
+
+  it("conceals a second value, rather than inheriting the first one's reveal", async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <CopyField
+        label="Secret key"
+        value="gw-first-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Show Secret key" }))
+    expect(screen.getByLabelText("Secret key")).toHaveValue("gw-first-secret")
+
+    // A rotation with the previous key still on screen: the replacement is a
+    // credential nobody has asked to see yet.
+    rerender(
+      <CopyField
+        label="Secret key"
+        value="gw-second-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+
+    expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+    expect(document.body.textContent).not.toContain("gw-second-secret")
+  })
+
+  it("rejects concealing a field that carries an action, at the type level", () => {
+    render(
+      // @ts-expect-error nothing hands out a credential beside a
+      // domain-verification action, and the in-field arrangement has no room
+      // for a second control.
+      <CopyField
+        label="TXT record"
+        value="otari-verify=abc"
+        concealed={CONCEALED_SECRET}
+        action={<button type="button">Verify domain</button>}
+      />,
+    )
+    expect(screen.getByLabelText("TXT record")).toBeInTheDocument()
   })
 })
 

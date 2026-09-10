@@ -319,10 +319,18 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Regenerate key" }))
 
-    const revealedKey = await screen.findByDisplayValue("otari-mk-new")
-    expect(revealedKey).toHaveAttribute("autocomplete", "off")
-    expect(revealedKey).toHaveAttribute("data-1p-ignore")
-    expect(revealedKey).toHaveAttribute("data-lpignore", "true")
+    // Concealed until it is asked for, so the replacement key is not on screen
+    // for anyone who happens to be looking at it (otari-ai#2111).
+    const keyField = await screen.findByLabelText("New master key")
+    expect(keyField).not.toHaveValue("otari-mk-new")
+    expect(keyField).toHaveAttribute("autocomplete", "off")
+    expect(keyField).toHaveAttribute("data-1p-ignore")
+    expect(keyField).toHaveAttribute("data-lpignore", "true")
+
+    await user.click(
+      screen.getByRole("button", { name: "Show New master key" }),
+    )
+    expect(await screen.findByDisplayValue("otari-mk-new")).toBeInTheDocument()
     expect(
       screen.getByRole("alertdialog", { name: "Master key regenerated" }),
     ).toBeInTheDocument()

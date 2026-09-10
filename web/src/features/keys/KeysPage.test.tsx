@@ -249,11 +249,25 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
-    // The reveal shows the secret and a runnable curl snippet with the key injected.
+    // The strip offers the secret and a runnable curl snippet with the key
+    // injected, both concealed until asked for: a key nobody has asked to see
+    // is not on screen, and neither is the snippet that carries it (otari-ai#2111).
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
+    expect(within(reveal).getByLabelText("Secret key")).not.toHaveValue(
+      NEW_SECRET,
+    )
+    const concealedCurl = within(reveal).getByLabelText(
+      "curl",
+    ) as HTMLTextAreaElement
+    expect(concealedCurl.value).not.toContain(NEW_SECRET)
+
+    await user.click(
+      within(reveal).getByRole("button", { name: "Show Secret key" }),
+    )
     expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+    await user.click(within(reveal).getByRole("button", { name: "Show curl" }))
     const curl = within(reveal).getByDisplayValue(
       new RegExp(`Otari-Key: ${NEW_SECRET}`),
     )
@@ -309,11 +323,11 @@ describe("KeysPage", () => {
       }),
     )
 
-    const curl = dialog.getByDisplayValue(
-      new RegExp(`Otari-Key: ${NEW_SECRET}`),
-    ) as HTMLTextAreaElement
+    const curl = dialog.getByLabelText("curl") as HTMLTextAreaElement
     expect(curl.value).toContain("https://gateway.otari.ai/v1/chat/completions")
     expect(curl.value).not.toContain(window.location.origin)
+    // Concealed, so the address it names is readable while the key is not.
+    expect(curl.value).not.toContain(NEW_SECRET)
   })
 
   it("shows no snippet when a hosted deployment published no data plane", async () => {
@@ -323,10 +337,8 @@ describe("KeysPage", () => {
       bootstrap({ deployment_type: "hosted", data_plane_url: null }),
     )
 
-    expect(dialog.getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
-    expect(
-      dialog.queryByDisplayValue(new RegExp(`Otari-Key: ${NEW_SECRET}`)),
-    ).not.toBeInTheDocument()
+    expect(dialog.getByLabelText("Secret key")).toBeInTheDocument()
+    expect(dialog.queryByLabelText("curl")).not.toBeInTheDocument()
     expect(
       dialog.getByText(/has not published the gateway address/),
     ).toBeInTheDocument()
@@ -510,7 +522,12 @@ describe("KeysPage", () => {
     const copyButtons = within(reveal).getAllByRole("button", { name: "Copy" })
     await user.click(copyButtons[0])
 
+    // Copied without being read, which is the point of concealing it: the key
+    // reached the clipboard and never the screen (otari-ai#2111).
     expect(writeText).toHaveBeenCalledWith(NEW_SECRET)
+    expect(
+      within(reveal).queryByDisplayValue(NEW_SECRET),
+    ).not.toBeInTheDocument()
     expect(
       await within(reveal).findByText("Copied to clipboard."),
     ).toBeInTheDocument()
@@ -569,6 +586,9 @@ describe("KeysPage", () => {
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
+    await user.click(
+      within(reveal).getByRole("button", { name: "Show Secret key" }),
+    )
     expect(within(reveal).getByDisplayValue(REGEN_SECRET)).toBeInTheDocument()
   })
 
@@ -1116,6 +1136,9 @@ describe("KeysPage", () => {
       const reveal = await screen.findByRole("alert", {
         name: /API key created|New secret for/,
       })
+      await usr.click(
+        within(reveal).getByRole("button", { name: "Show Secret key" }),
+      )
       expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
 
       const post = fetchMock.mock.calls.find(

@@ -10,7 +10,8 @@ border is what makes it an object. HeroUI defaults `--field-border-width` to 0;
 ```
 Is it free text, a number, or a date?
  ├── Is the value a secret (a provider key, a password)?
- │    └── Yes -> SecretField        (masked, revealable, copyable, autofill off)
+ │    ├── Collecting one -> SecretField   (masked, never prefilled, autofill off)
+ │    └── Handing one out -> CopyField, `concealed` (see actions.md)
  └── No -> Field
 Is it a boolean?
  ├── Does it take effect on its own, without a Save?

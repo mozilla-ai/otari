@@ -1,7 +1,9 @@
 import { Button } from "@heroui/react"
 import type { ReactElement, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
+import { FiEye, FiEyeOff } from "react-icons/fi"
 import { CopyButton } from "@/shared/components/actions/CopyButton"
+import { copyToClipboard } from "@/shared/helpers/clipboard"
 
 // An identifier the operator needs verbatim (a model id, an alias target, a
 // request id), rendered so it can be taken either way: highlighted with the mouse
@@ -54,6 +56,15 @@ export function CopyableValue({
   )
 }
 
+/**
+ * What a concealed field shows in place of a credential.
+ *
+ * One fixed run rather than a bullet per character: the length of a key is
+ * itself something not to put on screen, and the same stand-in has to read as
+ * hidden inside a snippet built around it.
+ */
+export const CONCEALED_SECRET = "••••••••••••••••"
+
 // A readonly, always-selectable field with a copy button: how a value an
 // operator has to paste elsewhere is handed over. Shared by the Keys page's
 // one-time reveal and the setup guide, which hand out the same key and the same
@@ -68,6 +79,9 @@ export function CopyableValue({
 // values are handed over in pairs and threes (a key and two snippets), so
 // "which field is this" has to be answerable by a screen reader and by a test
 // that queries the way an operator reads.
+//
+// A value that is a credential is `concealed`: it is handed over without being
+// put on screen, and the operator reveals it only if they need to read it.
 type CopyFieldProps = {
   label: string
   value: string
@@ -75,6 +89,17 @@ type CopyFieldProps = {
 } & (
   | {
       multiline?: boolean
+      /**
+       * What the field shows until the operator asks for the value, for a value
+       * that carries a credential: the plaintext reaches the DOM only once it
+       * has been asked for, while Copy copies the real value either way, so a
+       * key can be handed over without being read off the screen (otari-ai#2111).
+       *
+       * A whole-value field passes `CONCEALED_SECRET`. A snippet passes the same
+       * snippet built around that stand-in, so what is hidden is the key rather
+       * than the request that explains it.
+       */
+      concealed?: string
       /**
        * Excluded here rather than guarded at runtime, so a call site that passes
        * both fails to compile. The multiline field is a `<textarea>`, where the
@@ -85,6 +110,8 @@ type CopyFieldProps = {
     }
   | {
       multiline?: false
+      /** Nothing hands out a credential beside a domain-verification action. */
+      concealed?: never
       /**
        * A control to sit beside the field, which moves the copy affordance
        * inside the field and drops the button from the label row. Absent, the
@@ -104,6 +131,7 @@ export function CopyField({
   multiline = false,
   fieldRef,
   action,
+  concealed,
 }: CopyFieldProps) {
   const internalRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(
     null,
@@ -112,25 +140,76 @@ export function CopyField({
   const fieldId = useId()
   const [copied, setCopied] = useState(false)
   const [selectHint, setSelectHint] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  // A second credential rendered into the same field arrives concealed rather
+  // than inheriting the reveal the operator asked for on the last one: a
+  // rotation with the previous key still on screen would otherwise publish the
+  // replacement without being asked. Reset in render rather than in an effect,
+  // which is React's own answer to a prop change that invalidates state, so the
+  // new value is never painted revealed.
+  const [concealedFor, setConcealedFor] = useState(value)
+  if (value !== concealedFor) {
+    setConcealedFor(value)
+    setRevealed(false)
+  }
   // Same shape as CopyButton's below: the acknowledgement clears itself on a
   // timer, so the timer has to die with the component (and be replaced rather
   // than stacked when a second copy lands inside the window).
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   )
+  // Set when a failed copy has to reveal the value before it can select it:
+  // `select()` in that same tick would span the stand-in, and the value React
+  // writes on the revealing render discards the selection anyway.
+  const selectOnReveal = useRef(false)
 
   useEffect(() => () => clearTimeout(resetTimer.current), [])
 
+  useEffect(() => {
+    if (!revealed || !selectOnReveal.current) return
+    selectOnReveal.current = false
+    ref.current?.focus()
+    ref.current?.select()
+  }, [revealed, ref])
+
+  const isConcealed = concealed !== undefined && !revealed
+  const shown = isConcealed ? concealed : value
+
+  const acknowledgeCopy = () => {
+    setCopied(true)
+    setSelectHint(false)
+    clearTimeout(resetTimer.current)
+    resetTimer.current = setTimeout(() => setCopied(false), 2_000)
+  }
+
   const copy = async () => {
+    // A concealed field cannot answer a refused copy with "it is selected,
+    // press Ctrl/Cmd-C": what is selected is the stand-in, so the hint would be
+    // an invitation to copy bullets. It takes the path with the `execCommand`
+    // fallback instead, which copies from an offscreen textarea and so needs
+    // nothing of the value on screen. Only when that refuses too does it reveal
+    // and select, which is the first moment Ctrl/Cmd-C could reach the key.
+    if (concealed !== undefined) {
+      if (await copyToClipboard(value)) {
+        acknowledgeCopy()
+        return
+      }
+      if (revealed) {
+        ref.current?.focus()
+        ref.current?.select()
+      } else {
+        selectOnReveal.current = true
+        setRevealed(true)
+      }
+      setSelectHint(true)
+      return
+    }
     ref.current?.focus()
     ref.current?.select()
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(value)
-        setCopied(true)
-        setSelectHint(false)
-        clearTimeout(resetTimer.current)
-        resetTimer.current = setTimeout(() => setCopied(false), 2_000)
+        acknowledgeCopy()
         return
       }
     } catch {
@@ -185,35 +264,99 @@ export function CopyField({
     )
   }
 
+  const selectUnlessConcealed = (
+    event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    // Selecting a stand-in would invite a Ctrl/Cmd-C that copies bullets.
+    if (isConcealed) return
+    event.currentTarget.select()
+  }
+
+  // A credential, so nothing here invites a password manager to remember the
+  // field or a spellchecker to underline it.
+  const credentialProps =
+    concealed === undefined
+      ? {}
+      : {
+          autoComplete: "off",
+          autoCorrect: "off",
+          autoCapitalize: "off",
+          spellCheck: false,
+          "data-1p-ignore": true,
+          "data-lpignore": "true",
+        }
+
+  const revealToggle = (
+    <Button
+      size="sm"
+      variant="ghost"
+      isIconOnly
+      aria-label={`${revealed ? "Hide" : "Show"} ${label}`}
+      onPress={() => setRevealed(!revealed)}
+    >
+      {revealed ? (
+        <FiEyeOff aria-hidden="true" className="h-3.5 w-3.5" />
+      ) : (
+        <FiEye aria-hidden="true" className="h-3.5 w-3.5" />
+      )}
+    </Button>
+  )
+
+  const field = multiline ? (
+    <textarea
+      id={fieldId}
+      ref={ref as React.RefObject<HTMLTextAreaElement>}
+      readOnly
+      rows={shown.split("\n").length}
+      value={shown}
+      onFocus={selectUnlessConcealed}
+      className={`${shared} resize-none whitespace-pre`}
+      {...credentialProps}
+    />
+  ) : (
+    <input
+      id={fieldId}
+      ref={ref as React.RefObject<HTMLInputElement>}
+      readOnly
+      value={shown}
+      onFocus={selectUnlessConcealed}
+      // Concealed, the right padding clears the toggle rather than the value
+      // running under it, and the field grows below `md` so the 44px touch
+      // floor fits between its borders.
+      className={
+        concealed === undefined
+          ? shared
+          : `${shared} min-h-[2.875rem] pr-14 md:min-h-0 md:pr-11`
+      }
+      {...credentialProps}
+    />
+  )
+
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <label htmlFor={fieldId} className="text-caption">
           {label}
         </label>
-        <Button size="sm" variant="ghost" onPress={copy}>
-          {copied ? "Copied" : "Copy"}
-        </Button>
+        <div className="flex items-center gap-1">
+          {/* A snippet's toggle sits in the label row rather than in the field,
+              for the reason `action` is barred from the multiline variant at
+              all: right padding on a textarea indents every line of it. */}
+          {concealed !== undefined && multiline ? revealToggle : null}
+          <Button size="sm" variant="ghost" onPress={copy}>
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
       </div>
-      {multiline ? (
-        <textarea
-          id={fieldId}
-          ref={ref as React.RefObject<HTMLTextAreaElement>}
-          readOnly
-          rows={value.split("\n").length}
-          value={value}
-          onFocus={(e) => e.currentTarget.select()}
-          className={`${shared} resize-none whitespace-pre`}
-        />
+      {concealed !== undefined && !multiline ? (
+        <div className="relative">
+          {field}
+          <span className="absolute top-1/2 right-1 -translate-y-1/2">
+            {revealToggle}
+          </span>
+        </div>
       ) : (
-        <input
-          id={fieldId}
-          ref={ref as React.RefObject<HTMLInputElement>}
-          readOnly
-          value={value}
-          onFocus={(e) => e.currentTarget.select()}
-          className={shared}
-        />
+        field
       )}
       {/* Announce only the "Copied" event, never the secret itself. */}
       <span aria-live="polite" className="text-xs text-success">
@@ -221,7 +364,9 @@ export function CopyField({
       </span>
       {selectHint ? (
         <span className="text-caption">
-          Selected. Press Ctrl/Cmd-C to copy.
+          {concealed === undefined
+            ? "Selected. Press Ctrl/Cmd-C to copy."
+            : "Revealed and selected. Press Ctrl/Cmd-C to copy."}
         </span>
       ) : null}
     </div>

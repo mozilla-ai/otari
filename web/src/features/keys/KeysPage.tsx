@@ -34,7 +34,10 @@ import {
 } from "@/shared/api/apiKeys"
 import { useUsers } from "@/shared/api/users"
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
-import { CopyField } from "@/shared/components/actions/CopyField"
+import {
+  CONCEALED_SECRET,
+  CopyField,
+} from "@/shared/components/actions/CopyField"
 import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
 import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
 import {
@@ -143,10 +146,11 @@ function RevealSecretStrip({
   useEffect(() => {
     // The strip is above the fold only if the page is at the top, and a reveal
     // can arrive after a scroll. Move there first, then take focus, so the
-    // secret is selected somewhere the operator can see it.
+    // keyboard lands on the key and its two controls rather than wherever the
+    // operator was. Focus without a selection: the field is concealed, and
+    // selecting the stand-in would invite a Ctrl/Cmd-C that copies bullets.
     window.scrollTo({ top: 0 })
     secretRef.current?.focus()
-    secretRef.current?.select()
   }, [])
 
   useEffect(
@@ -172,6 +176,18 @@ function RevealSecretStrip({
     ? {
         curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
         python: buildPythonSnippet({ baseUrl, apiKey: secret }),
+        // The same two commands around the stand-in, which is what the fields
+        // show until the operator asks for the key. Without them the snippets
+        // would print the plaintext key under a concealed key field and hand it
+        // to anyone reading the screen, which is what concealing it prevents.
+        concealedCurl: buildCurlSnippet({
+          baseUrl,
+          apiKey: CONCEALED_SECRET,
+        }),
+        concealedPython: buildPythonSnippet({
+          baseUrl,
+          apiKey: CONCEALED_SECRET,
+        }),
       }
     : undefined
 
@@ -197,7 +213,12 @@ function RevealSecretStrip({
           </p>
         </div>
       </div>
-      <CopyField label="Secret key" value={secret} fieldRef={secretRef} />
+      <CopyField
+        label="Secret key"
+        value={secret}
+        concealed={CONCEALED_SECRET}
+        fieldRef={secretRef}
+      />
       <div className="flex flex-col gap-2">
         <div>
           <div className="text-body">Make your first call</div>
@@ -212,10 +233,16 @@ function RevealSecretStrip({
         </div>
         {snippets !== undefined ? (
           <>
-            <CopyField label="curl" value={snippets.curl} multiline />
+            <CopyField
+              label="curl"
+              value={snippets.curl}
+              concealed={snippets.concealedCurl}
+              multiline
+            />
             <CopyField
               label="Python (OpenAI SDK)"
               value={snippets.python}
+              concealed={snippets.concealedPython}
               multiline
             />
           </>

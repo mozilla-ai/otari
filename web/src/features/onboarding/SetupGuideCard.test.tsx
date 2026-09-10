@@ -188,7 +188,16 @@ describe("SetupGuideCard", () => {
 
     await user.click(screen.getByRole("button", { name: "Create a setup key" }))
 
-    expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
+    // Concealed until it is asked for, and so is the snippet carrying it: a
+    // key nobody has asked to see is not on screen (otari-ai#2111).
+    expect(await screen.findByLabelText("API key")).not.toHaveValue(KEY)
+    expect(
+      (screen.getByLabelText("curl") as HTMLTextAreaElement).value,
+    ).not.toContain(KEY)
+
+    await user.click(screen.getByRole("button", { name: "Show API key" }))
+    expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Show curl" }))
     const curl = screen.getByDisplayValue(
       new RegExp(`Otari-Key: ${KEY}`),
     ) as HTMLTextAreaElement
@@ -217,14 +226,14 @@ describe("SetupGuideCard", () => {
       await screen.findByRole("button", { name: "Create a setup key" }),
     )
 
-    const curl = (await screen.findByDisplayValue(
-      new RegExp(`Otari-Key: ${KEY}`),
-    )) as HTMLTextAreaElement
+    const curl = (await screen.findByLabelText("curl")) as HTMLTextAreaElement
     expect(curl.value).toContain("https://gateway.otari.ai/v1/chat/completions")
     expect(curl.value).not.toContain(window.location.origin)
+    // Concealed, so the address it names is readable while the key is not.
+    expect(curl.value).not.toContain(KEY)
   })
 
-  it("shows the key but no snippet when a hosted deployment published no data plane", async () => {
+  it("offers the key but no snippet when a hosted deployment published no data plane", async () => {
     // Withheld rather than aimed at this host: a placeholder would be a URL
     // nobody reading it could replace, and the origin would be the bug itself.
     mockApi()
@@ -238,10 +247,8 @@ describe("SetupGuideCard", () => {
       await screen.findByRole("button", { name: "Create a setup key" }),
     )
 
-    expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
-    expect(
-      screen.queryByDisplayValue(new RegExp(`Otari-Key: ${KEY}`)),
-    ).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("API key")).toBeInTheDocument()
+    expect(screen.queryByLabelText("curl")).not.toBeInTheDocument()
     expect(
       screen.getByText(/has not published the gateway address/),
     ).toBeInTheDocument()
@@ -351,6 +358,9 @@ describe("SetupGuideCard", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create a setup key" }),
     )
+    await user.click(
+      await screen.findByRole("button", { name: "Show API key" }),
+    )
     expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "switch to Research" }))
@@ -358,6 +368,9 @@ describe("SetupGuideCard", () => {
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
     await user.click(
       await screen.findByRole("button", { name: "Create a setup key" }),
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Show API key" }),
     )
     expect(await screen.findByDisplayValue(OTHER_KEY)).toBeInTheDocument()
 
