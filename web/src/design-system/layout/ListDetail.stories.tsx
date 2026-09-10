@@ -170,8 +170,13 @@ export const Empty: Story = {
       isDetailShown={false}
       onShowList={() => {}}
       list={null}
+      isEmpty
       empty="Create your first policy"
-      onEmptyPress={() => {}}
+      emptyAction={
+        <Button size="sm" variant="primary" onPress={() => {}}>
+          Create policy
+        </Button>
+      }
       detail={
         <div className="flex flex-col gap-2 px-4 py-5">
           <h2 className="text-title">No policies yet</h2>
