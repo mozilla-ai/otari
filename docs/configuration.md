@@ -306,10 +306,63 @@ usage-report timeout and retries, and first-chunk fallback timeout. See
 ## Extending Otari with a bootstrap module
 
 `bootstrap` or `OTARI_BOOTSTRAP` names a trusted `module:callable` loaded
-inside the gateway process. The callable can rebind extension ports and
-contribute capability-gated routers. Most deployments should leave it unset.
+inside the gateway process. The callable can rebind extension ports,
+contribute capability-gated routers, and contribute an Alembic migration chain
+for tables of its own. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
+
+### Contributing a migration chain
+
+A module that owns tables records its own Alembic script directory and its own
+version table on the container:
+
+```python
+from gateway.container import Container, MigrationContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(
+            name="alerts",
+            script_location="/opt/alerts/alembic",
+            version_table="alerts_alembic_version",
+        )
+    )
+```
+
+When `auto_migrate` is on (the default), startup upgrades Otari's own chain to
+`head` first and then each contributed chain, on the same database URL. Each
+chain stamps only the version table it named, so the histories never share a
+row. `alembic_version` is Otari's and is refused, as is a version table or a
+name another contribution already claimed; the refusal happens while the
+container is built, before anything touches the database.
+
+The contract for the contributed `env.py` is that it reads the version table
+from the Alembic config and passes it on:
+
+```python
+from alembic import context
+
+config = context.config
+version_table = config.attributes.get("version_table")
+
+# ... build the engine from config.get_section(config.config_ini_section) ...
+context.configure(connection=connection, target_metadata=metadata, version_table=version_table)
+```
+
+Otari sets `sqlalchemy.url` on that config the same way it does for its own
+chain, so the script needs no URL handling of its own.
+
+Two cautions. A contributed chain must not reference a core table by foreign
+key in a way that would block a core migration: the core chain runs first and
+knows nothing about contributed tables, so a core revision that rebuilds a
+table (SQLite has no `ALTER` for constraints) fails on a constraint it did not
+create. Prefer plain indexed id columns over enforced foreign keys into core
+tables. And `otari migrate` runs the core chain only; a deployment that
+migrates with the CLI instead of on startup has to run each contributed chain
+itself for now. Hybrid mode skips database initialization entirely, contributed
+chains included, since it has no local database.

@@ -15,7 +15,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.container import build_container
+from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -352,7 +352,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
-            init_db(config)
+            # Contributed chains run after Otari's own, so a bootstrap's tables
+            # exist before the first request reaches its routers. create_app
+            # always attaches a container; an app assembled by hand (as some
+            # tests do) may not have one, and then only the core chain runs.
+            container: Container | None = getattr(app.state, "container", None)
+            init_db(config, migration_contributions=container.migration_contributions() if container else ())
             async with create_session() as session:
                 # Persisted dashboard overrides win over config/env; apply them
                 # before pricing init so default-pricing behavior is consistent.

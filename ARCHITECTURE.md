@@ -162,6 +162,17 @@ A contributed router is the additive half of the seam, and it is gated rather th
 
 Entitlement is not authentication either, and the mount point adds none. A capability names no caller, so on an entitled deployment a contributed route is reachable by anyone unless the router says otherwise. A contribution declares the credential each of its routes needs on the route, the way Otari's own routers do; there is no router-level default to mount, because the right answer differs per route, a contributed route may be deliberately public, and the header check resolves a database session a hybrid gateway does not have.
 
+A contributed **migration chain** is the other additive half, for a module that owns tables of its own. Its revisions cannot join Otari's chain without editing the repo, and a second `alembic upgrade` on the default `alembic_version` table would fight Otari's over one row, so a bootstrap records an Alembic script directory of its own together with a version table of its own:
+
+```python
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(name="alerts", script_location=str(ALERTS_ALEMBIC_DIR), version_table="alerts_alembic_version")
+    )
+```
+
+At startup, with `auto_migrate` on, `init_db` upgrades Otari's own chain to `head` and then each contribution's, on the same database URL, each stamping only the version table it named, so the two histories never interleave. `alembic_version` itself is refused at contribution time, as is a version table or a name another contribution already holds. Hybrid mode skips `init_db`, and therefore contributed chains too: there is no local database. `otari migrate` runs the core chain only; whether it should also run contributed chains is an open question. The `env.py` contract and the foreign-key caution are in [docs/configuration.md](docs/configuration.md#extending-otari-with-a-bootstrap-module).
+
 > **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps.py`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
 
 Not every service goes through a port. Most code has a single implementation and stays plain (see [when a capability earns a port](#cardinal-rules-for-contributors)); only capabilities with a real second implementation are resolved through the container.
