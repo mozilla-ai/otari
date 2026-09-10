@@ -59,6 +59,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceResponse,
 )
 from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
@@ -86,6 +87,67 @@ router = APIRouter(tags=["otel"])
 _JSON = "application/json"
 _PROTOBUF = ("application/x-protobuf", "application/octet-stream")
 _DEFAULT_SOURCE = "otel"
+
+_OTLP_RESPONSE_DESCRIPTION = (
+    "OTLP export response. A partial success still returns HTTP 200; the rejected count "
+    "is present only when the gateway rejected part of the export."
+)
+
+
+class _OTLPModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OTLPTracePartialSuccess(_OTLPModel):
+    rejected_spans: str | None = Field(
+        default=None,
+        alias="rejectedSpans",
+        description="Rejected span count, encoded as an int64 string by OTLP JSON.",
+    )
+    error_message: str | None = Field(default=None, alias="errorMessage")
+
+
+class OTLPTraceServiceResponse(_OTLPModel):
+    partial_success: OTLPTracePartialSuccess | None = Field(default=None, alias="partialSuccess")
+
+
+class OTLPLogsPartialSuccess(_OTLPModel):
+    rejected_log_records: str | None = Field(
+        default=None,
+        alias="rejectedLogRecords",
+        description="Rejected log record count, encoded as an int64 string by OTLP JSON.",
+    )
+    error_message: str | None = Field(default=None, alias="errorMessage")
+
+
+class OTLPLogsServiceResponse(_OTLPModel):
+    partial_success: OTLPLogsPartialSuccess | None = Field(default=None, alias="partialSuccess")
+
+
+class OTLPMetricsPartialSuccess(_OTLPModel):
+    rejected_data_points: str | None = Field(
+        default=None,
+        alias="rejectedDataPoints",
+        description="Rejected data point count, encoded as an int64 string by OTLP JSON.",
+    )
+    error_message: str | None = Field(default=None, alias="errorMessage")
+
+
+class OTLPMetricsServiceResponse(_OTLPModel):
+    partial_success: OTLPMetricsPartialSuccess | None = Field(default=None, alias="partialSuccess")
+
+
+def _otlp_response_docs(response_model: type[BaseModel]) -> dict[int | str, dict[str, Any]]:
+    """Add the protobuf representation beside FastAPI's JSON response schema."""
+    return {
+        200: {
+            "content": {
+                "application/x-protobuf": {
+                    "schema": {"$ref": f"#/components/schemas/{response_model.__name__}"}
+                }
+            }
+        }
+    }
 
 # Request bounds. OTLP exporters batch to a few MiB per export; the cap keeps one
 # request from expanding without bound in memory (gzip bombs decompress fully
@@ -433,7 +495,12 @@ def _otlp_response(content_type: str, response: Message) -> Response:
     return Response(content=response.SerializeToString(), media_type="application/x-protobuf")
 
 
-@router.post("/v1/traces")
+@router.post(
+    "/v1/traces",
+    response_model=OTLPTraceServiceResponse,
+    response_description=_OTLP_RESPONSE_DESCRIPTION,
+    responses=_otlp_response_docs(OTLPTraceServiceResponse),
+)
 async def receive_traces(
     request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -472,7 +539,12 @@ async def receive_traces(
     return _otlp_response(content_type, response)
 
 
-@router.post("/v1/logs")
+@router.post(
+    "/v1/logs",
+    response_model=OTLPLogsServiceResponse,
+    response_description=_OTLP_RESPONSE_DESCRIPTION,
+    responses=_otlp_response_docs(OTLPLogsServiceResponse),
+)
 async def receive_logs(
     request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -531,7 +603,12 @@ async def receive_logs(
     return _otlp_response(content_type, response)
 
 
-@router.post("/v1/metrics")
+@router.post(
+    "/v1/metrics",
+    response_model=OTLPMetricsServiceResponse,
+    response_description=_OTLP_RESPONSE_DESCRIPTION,
+    responses=_otlp_response_docs(OTLPMetricsServiceResponse),
+)
 async def receive_metrics(
     request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
