@@ -181,11 +181,11 @@ describe("OrganizationGeneralPage", () => {
     renderPage(<OrganizationGeneralPage />)
 
     expect(
-      await screen.findByRole("button", { name: "Change organization name" }),
-    ).toBeDisabled()
-    expect(
-      screen.getByText(/Only owners and admins can change it/),
+      await screen.findByText(/Only owners and admins can change it/),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Change organization name" }),
+    ).toBeNull()
   })
 
   it("reports a context that could not be read instead of an empty page", async () => {

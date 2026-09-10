@@ -69,12 +69,18 @@ function OrganizationDetails({
         </dd>
       </dl>
       {/* The action sits under a rule of its own, so the control that changes
-          the organization is divided from what the organization is. */}
-      <div className="flex items-center justify-end border-t border-border pt-4">
-        <Button variant="primary" isDisabled={!canEdit} onPress={onRename}>
-          Change organization name
-        </Button>
-      </div>
+          the organization is divided from what the organization is. Absent
+          rather than disabled for a member, the way Email domains and Provider
+          keys drop their own primary action: the banner above has already said
+          why, and a rule under the values with nothing beneath it is a band
+          that looks unfinished. */}
+      {canEdit ? (
+        <div className="flex items-center justify-end border-t border-border pt-4">
+          <Button variant="primary" onPress={onRename}>
+            Change organization name
+          </Button>
+        </div>
+      ) : null}
     </Section>
   )
 }
