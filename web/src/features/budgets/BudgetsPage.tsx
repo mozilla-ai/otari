@@ -3,7 +3,7 @@
 // took chips off everything it rebuilt, so this is an inconsistency rather than
 // a decision: see the note in the PR body.
 import { Button, Chip, Spinner } from "@heroui/react"
-import { useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import type {
   Budget,
   BudgetResetLog,
@@ -17,6 +17,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Field } from "@/design-system/forms/Field"
@@ -219,7 +220,10 @@ function PeriodPicker({
 // ---------- create / edit forms (inline cards, matching KeysPage) ----------
 
 function BudgetForm({
+  isOpen,
+  onOpenChange,
   title,
+  description,
   submitLabel,
   initial,
   error,
@@ -230,7 +234,11 @@ function BudgetForm({
   assignedUserIds,
   assignmentNote,
 }: {
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
   title: string
+  /** The object being edited, where the title alone does not name it. */
+  description?: ReactNode
   submitLabel: string
   initial: {
     name: string | null
@@ -263,7 +271,15 @@ function BudgetForm({
   const [userIds, setUserIds] = useState<string[]>(assignedUserIds ?? [])
 
   const parsed = parseLimit(limit)
-  const canSubmit = !isPending && parsed.valid && !periodInvalid
+  // Two readings of one rule, spelled once: the submit is shown disabled while
+  // the form cannot be sent, and `submit` refuses while that OR a save is in
+  // flight. Pending is not part of `blocked` because a request in flight is not
+  // a reason to paint the button as refused.
+  const blocked = !parsed.valid || periodInvalid
+  const canSubmit = !isPending && !blocked
+  // Everything the operator can change, against what the form was seeded with.
+  const draft = JSON.stringify({ name, limit, durationSec, userIds })
+  const seeded = useRef(draft)
 
   const submit = () => {
     if (!canSubmit) return
@@ -279,14 +295,21 @@ function BudgetForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (open) onOpenChange(true)
+        else onClose()
+      }}
+      title={title}
+      description={description}
+      submitLabel={submitLabel}
+      onSubmit={submit}
+      isPending={isPending}
+      isSubmitDisabled={blocked}
+      isDirty={draft !== seeded.current}
+      error={error}
     >
-      {/* A heading, not a styled div: this panel is a section of the page and
-          the type role is what it looks like, not what it is. */}
-      <h2 className="text-title">{title}</h2>
-      <ErrorBanner error={error} />
       <Field
         label="Name (optional)"
         value={name}
@@ -329,15 +352,7 @@ function BudgetForm({
         // without this branch it would be passed and never rendered.
         <p className="text-caption">{assignmentNote}</p>
       ) : null}
-      <div className="flex gap-2">
-        <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
-          {isPending ? "Saving…" : submitLabel}
-        </Button>
-        <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -770,19 +785,19 @@ function DeploymentBudgetsPage() {
       <PageIntro
         title="Budgets"
         action={
-          addOpen || showOnboarding ? null : (
-            <Button
-              variant="primary"
-              onPress={() => {
-                setEditing(null)
-                setAssignmentError(null)
-                setPendingAssignments(null)
-                setAddOpen(true)
-              }}
-            >
-              Create budget
-            </Button>
-          )
+          <Button
+            // Visible while the dialog is open, and beside the empty state's
+            // own copy of it: the dialog is over the page.
+            variant="primary"
+            onPress={() => {
+              setEditing(null)
+              setAssignmentError(null)
+              setPendingAssignments(null)
+              setAddOpen(true)
+            }}
+          >
+            Create budget
+          </Button>
         }
       >
         Define spending limits and reset schedules. Assign a budget to users to
@@ -823,31 +838,34 @@ function DeploymentBudgetsPage() {
         />
       ) : null}
 
-      {addOpen ? (
-        <BudgetForm
-          title="Create budget"
-          submitLabel={
-            pendingAssignments ? "Retry assignments" : "Create budget"
-          }
-          initial={{ name: null, max_budget: null, budget_duration_sec: null }}
-          error={createBudget.error ?? assignmentError}
-          isPending={createBudget.isPending || assigningUsers}
-          assignUsers={users.data ?? []}
-          onSubmit={createAndAssign}
-          onClose={() => {
-            setAssignmentError(null)
-            setPendingAssignments(null)
-            setAddOpen(false)
-          }}
-        />
-      ) : null}
+      <BudgetForm
+        isOpen={addOpen}
+        onOpenChange={setAddOpen}
+        title="New budget"
+        submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
+        initial={{ name: null, max_budget: null, budget_duration_sec: null }}
+        error={createBudget.error ?? assignmentError}
+        isPending={createBudget.isPending || assigningUsers}
+        assignUsers={users.data ?? []}
+        onSubmit={createAndAssign}
+        onClose={() => {
+          setAssignmentError(null)
+          setPendingAssignments(null)
+          setAddOpen(false)
+        }}
+      />
       {/* Key on the row id so switching which budget is edited remounts the form,
           its fields seed from `initial` on mount only. */}
       {editingBudget ? (
         <BudgetForm
           key={editingBudget.budget_id}
-          title={`Edit budget ${budgetLabel(editingBudget)}`}
-          submitLabel="Save changes"
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setEditing(null)
+          }}
+          title="Edit budget"
+          description={budgetLabel(editingBudget)}
+          submitLabel="Save"
           initial={{
             name: editingBudget.name,
             max_budget: editingBudget.max_budget,

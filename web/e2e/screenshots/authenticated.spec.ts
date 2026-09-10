@@ -404,3 +404,17 @@ test.describe("the routing policy dialog", () => {
     await captureScreenshot(page, "routing-create-dialog-fallback")
   })
 })
+
+test.describe("the budget dialog", () => {
+  test("the create dialog", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/budgets")
+    await expect(
+      page.getByRole("heading", { name: /budgets/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create budget" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog.getByLabel("Name (optional)")).toBeVisible()
+    await captureScreenshot(page, "budgets-create-dialog")
+  })
+})

@@ -193,11 +193,14 @@ test.describe("budgets", () => {
     await openPage(page, "Spend & budgets", "Budgets")
 
     await page.getByRole("button", { name: "Create budget" }).click()
-    await page.getByLabel("Name (optional)").fill(BUDGET)
-    await page.getByLabel("Spending limit (USD)").fill("25")
+    // Scoped: the heading's trigger and the dialog's submit both say "Create
+    // budget", so an unscoped press is ambiguous.
+    const dialog = page.getByRole("dialog")
+    await dialog.getByLabel("Name (optional)").fill(BUDGET)
+    await dialog.getByLabel("Spending limit (USD)").fill("25")
     // Assigning at creation is the path that makes a budget enforceable; a budget
     // with no users caps nothing.
-    const owner = page.getByRole("combobox", { name: "Add a person" })
+    const owner = dialog.getByRole("combobox", { name: "Add a person" })
     await owner.fill(PARITY.users.heavy)
     // Plain string, not a RegExp built from the id: an address is full of regex
     // metacharacters, so `.` would match any character and the pattern could pick
@@ -208,9 +211,9 @@ test.describe("budgets", () => {
     // The picked user becomes a removable chip, which is the form's own record of
     // who this budget will cap before it is submitted.
     await expect(
-      page.getByRole("button", { name: `Remove ${PARITY.users.heavy}` }),
+      dialog.getByRole("button", { name: `Remove ${PARITY.users.heavy}` }),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Create budget" }).click()
+    await dialog.getByRole("button", { name: "Create budget" }).click()
 
     const budget = row(page, "Budgets", BUDGET)
     await expect(budget).toContainText("$25.00")
@@ -219,8 +222,9 @@ test.describe("budgets", () => {
     await expect(budget).not.toContainText("No users assigned")
 
     await budget.getByRole("button", { name: "Edit" }).click()
-    await page.getByLabel("Spending limit (USD)").fill("50")
-    await page.getByRole("button", { name: "Save changes" }).click()
+    const editDialog = page.getByRole("dialog")
+    await editDialog.getByLabel("Spending limit (USD)").fill("50")
+    await editDialog.getByRole("button", { name: "Save" }).click()
     await expect(row(page, "Budgets", BUDGET)).toContainText("$50.00")
 
     // Reset history is a per-budget panel, not a page: it opens under the table

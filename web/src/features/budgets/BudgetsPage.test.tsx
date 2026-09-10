@@ -159,6 +159,32 @@ describe("BudgetsPage", () => {
     vi.restoreAllMocks()
   })
 
+  it("keeps the page's create action visible while the dialog is open", async () => {
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await screen.findByText("No budgets yet")
+    const trigger = screen.getByRole("button", { name: "Create budget" })
+    await user.click(trigger)
+    await screen.findByRole("dialog")
+    expect(trigger).toBeInTheDocument()
+  })
+
+  it("names the object in the title and the budget in the description when editing", async () => {
+    mockApi({ budgets: [budget({ name: "team-free-tier" })] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("team-free-tier")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    // A dialog title is a noun phrase, so the budget it names is in the
+    // description rather than folded into the title.
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveAccessibleName("Edit budget")
+    expect(dialog).toHaveTextContent("team-free-tier")
+  })
+
   it("shows onboarding when there are no budgets", async () => {
     mockApi({ budgets: [] })
     renderPage(<BudgetsPage />)
@@ -167,9 +193,12 @@ describe("BudgetsPage", () => {
     expect(
       screen.getByRole("button", { name: "Create your first budget" }),
     ).toBeInTheDocument()
+    // The heading keeps its action beside the empty state's, which offers the
+    // same thing in the operator's own words. A dialog is over the page, and
+    // the heading's action is where focus returns when one closes.
     expect(
-      screen.queryByRole("button", { name: "Create budget" }),
-    ).not.toBeInTheDocument()
+      screen.getByRole("button", { name: "Create budget" }),
+    ).toBeInTheDocument()
     // Only the onboarding panel shows: the table (and its own "no rows" fallback,
     // whose "cap spending" text is unique to it) is suppressed so the two empty
     // states are not stacked.
@@ -485,7 +514,7 @@ describe("BudgetsPage", () => {
     expect(
       screen.getByText("Enter a whole number of days."),
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 
   it("creates an unlimited budget when the limit is left blank", async () => {
@@ -523,7 +552,7 @@ describe("BudgetsPage", () => {
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
     expect(
-      await screen.findByRole("button", { name: "Save changes" }),
+      await screen.findByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText("Spending limit (USD)")).toHaveValue("42")
   })
@@ -547,7 +576,7 @@ describe("BudgetsPage", () => {
 
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     expect(
-      await screen.findByRole("button", { name: "Save changes" }),
+      await screen.findByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
     expect(screen.queryByText("Assign to people (optional)")).toBeNull()
     expect(screen.getByText(/belongs to an organization/)).toBeInTheDocument()
