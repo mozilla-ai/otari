@@ -324,12 +324,48 @@ function adminContext(): OrganizationContext {
   })
 }
 
+type User = ReturnType<typeof userEvent.setup>
+
+/**
+ * A policy's row in the list column.
+ *
+ * Reached through its name rather than by the row's own accessible name, which
+ * runs that name together with the line summarizing the policy.
+ */
+async function policyRow(name: string): Promise<HTMLElement> {
+  const row = (await screen.findAllByText(name))
+    .map((label) => label.closest("button"))
+    .find((button) => button !== null)
+  if (!row) throw new Error(`${name} has no row in the list column`)
+  return row
+}
+
+/** The detail column, which holds one policy's facts and its actions. */
+function detail(): HTMLElement {
+  return screen.getByRole("region", { name: "Policy detail" })
+}
+
+/** Open a policy, and hand back the column it opens in. */
+async function openPolicy(user: User, name: string): Promise<HTMLElement> {
+  await user.click(await policyRow(name))
+  return detail()
+}
+
+/** The confirm dialog a delete opens, and its confirming button. */
+async function confirmDelete(user: User, label: string): Promise<void> {
+  await user.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: label,
+    }),
+  )
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 /**
- * The page's own create action, resolved while the dialog is shut.
+ * The list column's create action, resolved while the dialog is shut.
  *
  * That is the only time it is unambiguous: the dialog's submit says "Create
  * policy" too, and both are on screen together once it is open, which is why
@@ -341,40 +377,55 @@ const createTrigger = () =>
 describe("RoutingPage", () => {
   it("lists policies with what they serve and where they come from", async () => {
     mockApi()
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const fastRow = (await screen.findByText("fast")).closest("tr")!
-    // The chain is summarised rather than hidden: an operator scanning the table
-    // needs to see that a fallback exists without opening the policy.
+    // The chain is summarized on the row rather than hidden: an operator
+    // scanning the list needs to see that a fallback exists without opening
+    // the policy.
+    const fastRow = await policyRow("fast")
     expect(within(fastRow).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
     expect(within(fastRow).getByText(/\+1 on failure/)).toBeInTheDocument()
-    expect(within(fastRow).getByText("STORED")).toBeInTheDocument()
+    // Where it came from is one of the facts a row has no room for, so it is in
+    // the column that shows one policy at a time.
+    expect(
+      within(await openPolicy(user, "fast")).getByText("STORED"),
+    ).toBeInTheDocument()
   })
 
   it("marks a policy that decides per request, since it has no single target", async () => {
     mockApi()
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const autoRow = (await screen.findByText("auto")).closest("tr")!
-    expect(within(autoRow).getByText("DYNAMIC")).toBeInTheDocument()
+    const autoRow = await policyRow("auto")
     expect(within(autoRow).getByText(/Chosen per request/)).toBeInTheDocument()
+    expect(
+      within(await openPolicy(user, "auto")).getByText("DYNAMIC"),
+    ).toBeInTheDocument()
   })
 
   it("does not offer to edit or delete a policy that lives in config.yml", async () => {
     mockApi()
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const autoRow = (await screen.findByText("auto")).closest("tr")!
-    expect(within(autoRow).getByText("set in config.yml")).toBeInTheDocument()
+    // The reason is stated in the column rather than a control offered there,
+    // since every one of them would be refused.
+    const panel = await openPolicy(user, "auto")
+    expect(within(panel).getByText(/Set in config.yml/)).toBeInTheDocument()
     expect(
-      within(autoRow).queryByRole("button", { name: "Delete" }),
+      within(panel).queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(panel).queryByRole("button", { name: "Delete" }),
     ).not.toBeInTheDocument()
   })
 
-  it("keeps the page's create action visible while the dialog is open", async () => {
+  it("keeps the create action visible while the dialog is open", async () => {
     // It used to hide itself while the inline form was on the page. The form is
     // over the page now, so hiding the control that opened it would take the
-    // heading's action away mid-task for no reason.
+    // list column's action away mid-task for no reason.
     mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
@@ -385,26 +436,47 @@ describe("RoutingPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
-  it("offers the same dialog from the empty state", async () => {
-    // The empty state's explanation is the page's onboarding and stays; what it
-    // gained is the action, so a first policy does not have to be started from
-    // the heading a reader has already scrolled past.
+  it("starts the first policy from the empty column, not only from its button", async () => {
+    // otari-ai#2109: with nothing in it, the only thing to do with the list
+    // column is start the first policy, so the whole column is a press target.
+    // A real button, because a whole-column click a keyboard cannot reach is
+    // not a control.
     mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    // Two of them on screen deliberately, the heading's and this one, so the
-    // press is scoped to the empty state rather than picked by position.
-    const empty = (
-      await screen.findByRole("heading", {
-        name: "No routing policies yet",
-      })
-    ).closest("div")!.parentElement!
     await user.click(
-      within(empty).getByRole("button", { name: "Create policy" }),
+      await screen.findByRole("button", { name: "Create your first policy" }),
     )
+
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveAccessibleName("New policy")
+  })
+
+  it("keeps the page's onboarding in the detail column while there is nothing to read", async () => {
+    // The steps are what the page is for before it has any policies, and the
+    // detail column is the half with room for them.
+    mockApi([])
+    renderPage(<RoutingPage />)
+
+    const heading = await screen.findByRole("heading", {
+      name: "No routing policies yet",
+    })
+    const panel = detail()
+    expect(panel).toContainElement(heading)
+    expect(
+      within(panel).getByText(/Have your callers send the policy name/),
+    ).toBeInTheDocument()
+  })
+
+  it("says what the detail column is for while nothing is open", async () => {
+    mockApi()
+    renderPage(<RoutingPage />)
+
+    await policyRow("fast")
+    expect(
+      within(detail()).getByText(/Pick a policy to see what it serves/),
+    ).toBeInTheDocument()
   })
 
   it("names the object in the title and the policy in the description when editing", async () => {
@@ -415,8 +487,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const fastRow = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(fastRow).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveAccessibleName("Edit policy")
     expect(dialog).toHaveTextContent("fast")
@@ -606,8 +678,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     const nameField = screen.getByRole("textbox", { name: /policy name/i })
     await user.clear(nameField)
@@ -642,8 +714,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
     )
@@ -661,8 +733,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     const nameField = screen.getByRole("textbox", { name: /policy name/i })
     await user.clear(nameField)
@@ -684,8 +756,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     const nameField = screen.getByRole("textbox", { name: /policy name/i })
     await user.clear(nameField)
@@ -710,8 +782,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("gpt")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "gpt")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     expect(
       screen.queryByRole("textbox", { name: /policy name/i }),
@@ -731,16 +803,17 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("api-authored")).closest("tr")!
+    const panel = await openPolicy(user, "api-authored")
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(panel).queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument()
-    expect(within(row).getByText(/cannot show yet/)).toBeInTheDocument()
+    expect(within(panel).getByText(/cannot show yet/)).toBeInTheDocument()
     // Delete stays available: removing a policy is never lossy.
     expect(
-      within(row).getByRole("button", { name: "Delete" }),
+      within(panel).getByRole("button", { name: "Delete" }),
     ).toBeInTheDocument()
   })
 
@@ -755,36 +828,39 @@ describe("RoutingPage", () => {
         user_id: null,
       },
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("legacy")).closest("tr")!
-    expect(within(row).getByText("openai:gpt-4o-mini")).toBeInTheDocument()
-    expect(within(row).getByText("alias")).toBeInTheDocument()
+    // An alias says so on its own row, because what a write to it can hold
+    // differs from a policy's.
+    const row = await policyRow("legacy")
+    expect(within(row).getByText(/openai:gpt-4o-mini/)).toBeInTheDocument()
+    expect(within(row).getByText(/alias/)).toBeInTheDocument()
     expect(
-      within(row).getByRole("button", { name: "Delete" }),
+      within(await openPolicy(user, "legacy")).getByRole("button", {
+        name: "Delete",
+      }),
     ).toBeInTheDocument()
   })
 
   it("names the policy in a confirm dialog before deleting it", async () => {
     // otari-ai#2110: the confirmation used to arm inside the row, where it read
-    // as part of the table rather than as a decision. It is a modal now, and
-    // the policy it is about has to be named in it: the row is behind the
-    // backdrop, so the name on the row is no longer the operator's reference.
+    // as part of the list rather than as a decision. It is a modal now, and the
+    // policy it is about has to be named in it: the column behind the backdrop
+    // is no longer the operator's reference.
     const { calls } = mockApi([policy("fast", CHAIN)])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
 
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/^fast stops resolving/)).toBeVisible()
     // Nothing is sent by opening it.
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
 
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete policy" }),
-    )
+    await confirmDelete(user, "Delete policy")
 
     const deletes = calls.filter((call) => call.method === "DELETE")
     expect(deletes).toHaveLength(1)
@@ -796,13 +872,13 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
     const dialog = await screen.findByRole("alertdialog")
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
 
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
-    expect(screen.getByText("fast")).toBeInTheDocument()
+    expect(await policyRow("fast")).toBeInTheDocument()
   })
 
   it("reports a refused delete inside the dialog, leaving the row", async () => {
@@ -814,20 +890,18 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
     const dialog = await screen.findByRole("alertdialog")
-    await user.click(
-      within(dialog).getByRole("button", { name: "Delete policy" }),
-    )
+    await confirmDelete(user, "Delete policy")
 
     expect(
       await within(dialog).findByText(/referenced by an alias/),
     ).toBeVisible()
     // Still open, so the operator can retry or back out rather than being
-    // returned to a table that looks unchanged for no stated reason.
+    // returned to a list that looks unchanged for no stated reason.
     expect(screen.getByRole("alertdialog")).toBeInTheDocument()
-    expect(screen.getByText("fast")).toBeInTheDocument()
+    expect(await policyRow("fast")).toBeInTheDocument()
   })
 
   it("does not greet the next row's confirm with the last row's refusal", async () => {
@@ -840,21 +914,35 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const fast = (await screen.findByText("fast")).closest("tr")!
+    const fast = await openPolicy(user, "fast")
     await user.click(within(fast).getByRole("button", { name: "Delete" }))
     const first = await screen.findByRole("alertdialog")
-    await user.click(
-      within(first).getByRole("button", { name: "Delete policy" }),
-    )
+    await confirmDelete(user, "Delete policy")
     await within(first).findByText(/referenced by an alias/)
     await user.click(within(first).getByRole("button", { name: "Cancel" }))
 
-    const smart = screen.getByText("smart").closest("tr")!
+    const smart = await openPolicy(user, "smart")
     await user.click(within(smart).getByRole("button", { name: "Delete" }))
 
     const second = await screen.findByRole("alertdialog")
     expect(within(second).getByText(/^smart stops resolving/)).toBeVisible()
     expect(within(second).queryByText(/referenced by an alias/)).toBeNull()
+  })
+
+  it("returns the detail column to the prompt when the policy it shows is deleted", async () => {
+    // The column cannot go on describing a policy that no longer resolves.
+    mockApi([policy("fast", CHAIN), policy("smart", LEARNED)])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const panel = await openPolicy(user, "fast")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
+    await confirmDelete(user, "Delete policy")
+
+    expect(
+      await within(detail()).findByText(/Pick a policy to see what it serves/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("fast")).not.toBeInTheDocument()
   })
 
   it("deletes an alias through the alias endpoint, not the policy one", async () => {
@@ -869,13 +957,9 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("legacy")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete alias",
-      }),
-    )
+    const panel = await openPolicy(user, "legacy")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
+    await confirmDelete(user, "Delete alias")
 
     const deletes = calls.filter((call) => call.method === "DELETE")
     expect(deletes).toHaveLength(1)
@@ -896,8 +980,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("legacy")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "legacy")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     await user.click(
       await screen.findByRole("button", { name: /Add a fallback chain/ }),
     )
@@ -910,14 +994,14 @@ describe("RoutingPage", () => {
     ).toBeDisabled()
   })
 
-  it("summarises a learned policy by its pool rather than as an opaque dynamic row", async () => {
+  it("summarizes a learned policy by its pool rather than as an opaque dynamic row", async () => {
     // "Chosen per request" is true of a tier-down too. What an operator needs to
     // see here is that a router picks between named models, and which one serves
     // when it declines.
     mockApi([policy("smart", LEARNED, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
+    const row = await policyRow("smart")
     expect(
       within(row).getByText(/Learned . 2 candidates, openai:gpt-5 by default/),
     ).toBeInTheDocument()
@@ -938,8 +1022,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     // Both models in one list, and the default target marked.
     expect(screen.getByRole("combobox", { name: /model 1/i })).toHaveValue(
@@ -961,8 +1045,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     await user.click(
       screen.getAllByRole("radio", { name: /serves when unsure/i })[0],
     )
@@ -991,8 +1075,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     expect(screen.getByRole("combobox", { name: /model 1/i })).toHaveValue(
       "openai:gpt-5-nano",
     )
@@ -1042,16 +1126,19 @@ describe("RoutingPage", () => {
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
-  it("summarises a weighted policy by its split, not by its pool size", async () => {
+  it("summarizes a weighted policy by its split, not by its pool size", async () => {
     // Two provider:model strings do not fit the cell, and the shares are what tells
     // one weighted policy from another at a glance.
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
+    const row = await policyRow("balanced")
     expect(
       within(row).getByText(/70% \/ 30% across 2 models/),
+    ).toBeInTheDocument()
+    expect(
+      within(await openPolicy(user, "balanced")).getByText("WEIGHTED"),
     ).toBeInTheDocument()
   })
 
@@ -1115,8 +1202,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "balanced")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     const shares = screen.getAllByRole("textbox", { name: /share/i })
     expect(shares[0]).toHaveValue("70")
@@ -1155,8 +1242,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "balanced")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     const shares = screen.getAllByRole("textbox", { name: /share/i })
     await user.clear(shares[0])
@@ -1213,9 +1300,9 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "balanced")
+    expect(within(panel).getByText("WEIGHTED")).toBeInTheDocument()
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
 
     // Loading it as weighted is half the claim; saving it back unchanged is the
     // other half. The spelling is normalized on the way out, which is what the
@@ -1248,8 +1335,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "balanced")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     for (const share of screen.getAllByRole("textbox", { name: /share/i })) {
       await user.clear(share)
       await user.type(share, "0")
@@ -1270,8 +1357,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "balanced")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     await user.click(screen.getByRole("button", { name: "+ Another model" }))
 
     const shares = screen.getAllByRole("textbox", { name: /share/i })
@@ -1287,8 +1374,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "balanced")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     const second = screen.getByRole("combobox", { name: /model 2/i })
     await user.clear(second)
     await user.type(second, "openai:gpt-5")
@@ -1302,8 +1389,8 @@ describe("RoutingPage", () => {
   })
 
   it("names a router backend it does not know without claiming it learns", async () => {
-    // Only "knn" learns. Labelling every other backend "Learned" would make the table
-    // lie about the first backend added after this line was written.
+    // Only "knn" learns. Labeling every other backend "Learned" would make the
+    // page lie about the first backend added after this line was written.
     mockApi([
       policy("future", {
         select: [
@@ -1315,23 +1402,27 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("future")).closest("tr")!
-    expect(within(row).getByText("ROUTED")).toBeInTheDocument()
-    expect(within(row).queryByText("Learned")).not.toBeInTheDocument()
+    const row = await policyRow("future")
+    expect(within(row).getByText(/Routed . 2 candidates/)).toBeInTheDocument()
+    const panel = await openPolicy(user, "future")
+    expect(within(panel).getByText("ROUTED")).toBeInTheDocument()
+    expect(within(panel).queryByText("Learned")).not.toBeInTheDocument()
   })
 
   it("does not offer the examples panel for a weighted policy, which learns nothing", async () => {
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("balanced")).closest("tr")!
+    const panel = await openPolicy(user, "balanced")
     expect(
-      within(row).queryByRole("button", { name: "Examples" }),
+      within(panel).queryByRole("button", { name: "Examples" }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).getByRole("button", { name: "Edit" }),
+      within(panel).getByRole("button", { name: "Edit" }),
     ).toBeInTheDocument()
   })
 
@@ -1349,11 +1440,13 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("legacy")).closest("tr")!
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(await openPolicy(user, "legacy")).queryByRole("button", {
+        name: "Edit",
+      }),
     ).not.toBeInTheDocument()
   })
 
@@ -1369,49 +1462,55 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("future")).closest("tr")!
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(await openPolicy(user, "future")).queryByRole("button", {
+        name: "Edit",
+      }),
     ).not.toBeInTheDocument()
   })
 
   it("offers the examples panel only on a policy that actually uses a router", async () => {
-    // Readiness is a per-policy question, so it belongs on the row like Edit does
-    // rather than in a panel that is always on the page.
+    // Readiness is a per-policy question, so it opens in the column showing
+    // that policy rather than in a panel that is always on the page.
     mockApi([
       policy("smart", LEARNED, { is_dynamic: true }),
       policy("fast", CHAIN),
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const learnedRow = (await screen.findByText("smart")).closest("tr")!
-    const plainRow = (await screen.findByText("fast")).closest("tr")!
     expect(
-      within(learnedRow).getByRole("button", { name: "Examples" }),
+      within(await openPolicy(user, "smart")).getByRole("button", {
+        name: "Examples",
+      }),
     ).toBeInTheDocument()
-    expect(
-      within(plainRow).queryByRole("button", { name: "Examples" }),
-    ).not.toBeInTheDocument()
     // Nothing about learned routing is on the page until asked for.
     expect(screen.queryByText(/Whose memory/)).not.toBeInTheDocument()
+    expect(
+      within(await openPolicy(user, "fast")).queryByRole("button", {
+        name: "Examples",
+      }),
+    ).not.toBeInTheDocument()
   })
 
   it("offers the examples panel for a config.yml policy, which cannot be edited", async () => {
     // Reading readiness is safe for a policy this page cannot change, and without it
     // a config-defined learned policy would be entirely opaque here.
     mockApi([policy("smart", LEARNED, { is_dynamic: true, source: "config" })])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
+    const panel = await openPolicy(user, "smart")
     expect(
-      within(row).getByRole("button", { name: "Examples" }),
+      within(panel).getByRole("button", { name: "Examples" }),
     ).toBeInTheDocument()
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(panel).queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument()
-    expect(within(row).getByText("set in config.yml")).toBeInTheDocument()
+    expect(within(panel).getByText(/Set in config.yml/)).toBeInTheDocument()
   })
 
   it("names the pool and what serves when the router declines", async () => {
@@ -1419,8 +1518,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Examples" }))
 
     expect(
       await screen.findByText(/ranks openai:gpt-5-nano, openai:gpt-5/),
@@ -1435,8 +1534,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Examples" }))
     await user.type(
       screen.getByRole("combobox", { name: /whose memory/i }),
       "alice",
@@ -1458,8 +1557,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Examples" }))
 
     expect(
       await screen.findByText(/POST \/api\/v1\/routing\/preferences\/rank/),
@@ -1481,8 +1580,8 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
+    const panel = await openPolicy(user, "smart")
+    await user.click(within(panel).getByRole("button", { name: "Examples" }))
 
     expect(
       screen.queryByRole("combobox", { name: /whose memory/i }),
@@ -1535,16 +1634,17 @@ describe("RoutingPage", () => {
         ],
       }),
     ])
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("api-authored")).closest("tr")!
+    const panel = await openPolicy(user, "api-authored")
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(panel).queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument()
-    expect(within(row).getByText(/cannot show yet/)).toBeInTheDocument()
+    expect(within(panel).getByText(/cannot show yet/)).toBeInTheDocument()
     // Reading its readiness is still fine.
     expect(
-      within(row).getByRole("button", { name: "Examples" }),
+      within(panel).getByRole("button", { name: "Examples" }),
     ).toBeInTheDocument()
   })
 
@@ -1558,27 +1658,29 @@ describe("RoutingPage", () => {
       }),
       memberPolicies: [policy("fast", CHAIN)],
     })
+    const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("fast")).closest("tr")!
+    const row = await policyRow("fast")
     expect(within(row).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "New policy" }),
+      screen.queryByRole("button", { name: "Create policy" }),
+    ).not.toBeInTheDocument()
+    // Opening it reads. It offers nothing that writes, and the Examples panel
+    // reads the operator-only /routing/status, so that goes too.
+    const panel = await openPolicy(user, "fast")
+    expect(
+      within(panel).queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
+      within(panel).queryByRole("button", { name: "Delete" }),
     ).not.toBeInTheDocument()
     expect(
-      within(row).queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
-    // The Examples panel reads the operator-only /v1/routing/status, so its
-    // opener goes with the rest of the actions column.
-    expect(
-      within(row).queryByRole("button", { name: "Examples" }),
+      within(panel).queryByRole("button", { name: "Examples" }),
     ).not.toBeInTheDocument()
   })
 
-  it("keeps cached operator rows out of a member's table", async () => {
+  it("keeps cached operator rows out of a member's list", async () => {
     // A disabled query still serves whatever sits under its key, so a caller
     // demoted mid-session would otherwise keep seeing the deployment-wide
     // policies and aliases they fetched as an operator. The pre-seeded client
@@ -1757,13 +1859,9 @@ describe("RoutingPage for an organization admin", () => {
     const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete policy",
-      }),
-    )
+    const panel = await openPolicy(user, "doomed")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
+    await confirmDelete(user, "Delete policy")
 
     const deleted = calls.find((call) => call.method === "DELETE")
     expect(deleted?.url).toContain(
@@ -1786,8 +1884,8 @@ describe("RoutingPage for an organization admin", () => {
     const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("elsewhere")
-    await user.click(screen.getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "elsewhere")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     await user.click(await screen.findByRole("button", { name: "Save" }))
 
     const written = calls.find(
@@ -1838,8 +1936,8 @@ describe("RoutingPage for an organization admin", () => {
     const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("elsewhere-alias")
-    await user.click(screen.getByRole("button", { name: "Edit" }))
+    const panel = await openPolicy(user, "elsewhere-alias")
+    await user.click(within(panel).getByRole("button", { name: "Edit" }))
     await user.click(await screen.findByRole("button", { name: "Save" }))
 
     const written = calls.find(
@@ -1868,13 +1966,9 @@ describe("RoutingPage for an organization admin", () => {
     const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("doomed-alias")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Delete alias",
-      }),
-    )
+    const panel = await openPolicy(user, "doomed-alias")
+    await user.click(within(panel).getByRole("button", { name: "Delete" }))
+    await confirmDelete(user, "Delete alias")
 
     const deleted = calls.find((call) => call.method === "DELETE")
     expect(deleted?.url).toContain(`${API_ROOT}/organizations/me/aliases/`)
@@ -1892,14 +1986,16 @@ describe("RoutingPage for an organization admin", () => {
       }),
       memberPolicies: [policy("mine", CHAIN)],
     })
+    const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("mine")
     expect(
-      screen.queryByRole("button", { name: "New policy" }),
+      within(await openPolicy(user, "mine")).queryByRole("button", {
+        name: "Delete",
+      }),
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Delete" }),
+      screen.queryByRole("button", { name: "Create policy" }),
     ).not.toBeInTheDocument()
   })
 
@@ -1914,14 +2010,16 @@ describe("RoutingPage for an organization admin", () => {
       }),
       memberPolicies: [policy("mine", CHAIN)],
     })
+    const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await screen.findByText("mine")
     expect(
-      screen.queryByRole("button", { name: "New policy" }),
+      within(await openPolicy(user, "mine")).queryByRole("button", {
+        name: "Delete",
+      }),
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Delete" }),
+      screen.queryByRole("button", { name: "Create policy" }),
     ).not.toBeInTheDocument()
   })
 })

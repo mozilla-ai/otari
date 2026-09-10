@@ -111,7 +111,7 @@ The lane does the aligning; see [layout.md](layout.md).
 tracks horizontal scroll so a first column can pin, and the per-page class is what
 `globals.css` hangs that page's column widths and pinning off. The list is closed:
 `otari-keys-table`, `otari-models-table`, `otari-providers-table`,
-`otari-routing-table`, `otari-domains-table`, `otari-members-table`,
+`otari-domains-table`, `otari-members-table`,
 `otari-provider-keys-table`, `otari-workspaces-table`, `otari-accounts-table`,
 `otari-activity-table`, `otari-budgets-table`, `otari-pricing-table`,
 `otari-mcp-table`, `otari-rate-overrides-table`. Inventing one at the call site

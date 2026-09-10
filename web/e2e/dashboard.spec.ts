@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 import {
+  detailColumn,
   dismissComboBox,
   dismissComboBoxInDialog,
+  listRow,
   login,
   MASTER_KEY,
   nav,
@@ -201,13 +203,14 @@ test.describe("dashboard core flows", () => {
   test("create a routing policy", async ({ page }) => {
     await login(page)
     await openNested(page, "Routing", "Policies")
-    // `.first()` is the heading's action. An empty routing list also offers
-    // the same words from its empty state, and a press has to name which.
-    await page.getByRole("button", { name: "Create policy" }).first().click()
+    // One "Create policy" on screen while the dialog is shut: the list column's
+    // action. The empty column's own CTA reads "Create your first policy", so
+    // neither shadows the other.
+    await page.getByRole("button", { name: "Create policy" }).click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
-    // Role-scoped for the same reason as the user form: policy rows carry a
-    // "Copy policy name" control.
+    // Role-scoped for the same reason as the user form: the detail column
+    // carries a "Copy policy name" control.
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("fast")
     // "Serves" is a model combobox (allows custom values); type the selector, then
     // close the popover so it does not aria-hide the submit button.
@@ -215,16 +218,13 @@ test.describe("dashboard core flows", () => {
     await page.keyboard.press("Escape")
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
-    // The policy name is the table's row-header cell (react-aria rowheader).
-    await expect(page.getByRole("rowheader", { name: "fast" })).toBeVisible()
+    await expect(listRow(page, "Policies", "fast")).toBeVisible()
   })
 
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
     await openNested(page, "Routing", "Policies")
-    // `.first()` is the heading's action. An empty routing list also offers
-    // the same words from its empty state, and a press has to name which.
-    await page.getByRole("button", { name: "Create policy" }).first().click()
+    await page.getByRole("button", { name: "Create policy" }).click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("chained")
@@ -244,9 +244,7 @@ test.describe("dashboard core flows", () => {
     // Scoped to the row this test created: "+1 on failure" anywhere on the page
     // would also be satisfied by another policy's chain, so a `chained` saved
     // without its fallback would still pass.
-    const chained = page
-      .getByRole("row")
-      .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
+    const chained = listRow(page, "Policies", "chained")
     await expect(chained).toBeVisible()
     await expect(chained).toContainText(/\+1 on failure/)
   })
@@ -266,10 +264,12 @@ test.describe("dashboard core flows", () => {
     await login(page)
     await openNested(page, "Routing", "Policies")
 
-    const chained = page
-      .getByRole("row")
-      .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
-    await chained.getByRole("button", { name: "Edit" }).click()
+    // Editing is a two-step press: the row opens the policy in the detail
+    // column, and Edit there opens the dialog (otari-ai#2109).
+    await listRow(page, "Policies", "chained").click()
+    await detailColumn(page, "Policy detail")
+      .getByRole("button", { name: "Edit" })
+      .click()
     // The edit opens the same dialog, so its fields are scoped the same way.
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("renamed")
@@ -277,12 +277,10 @@ test.describe("dashboard core flows", () => {
 
     // A rename moves the row rather than copying it, so the old name has to be
     // gone: two rows would mean callers could still reach the policy either way.
-    const renamed = page
-      .getByRole("row")
-      .filter({ has: page.getByRole("rowheader", { name: "renamed" }) })
+    const renamed = listRow(page, "Policies", "renamed")
     await expect(renamed).toBeVisible()
     await expect(renamed).toContainText(/\+1 on failure/)
-    await expect(page.getByRole("rowheader", { name: "chained" })).toBeHidden()
+    await expect(listRow(page, "Policies", "chained")).toHaveCount(0)
   })
 
   // The share card is the one flow whose output cannot be checked in jsdom: it

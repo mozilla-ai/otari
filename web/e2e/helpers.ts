@@ -250,6 +250,25 @@ export function tableRows(page: Page, ariaLabel: string): Locator {
     .filter({ has: page.getByRole("rowheader") })
 }
 
+// ---------- a list-and-detail page ----------
+
+// A row in a `ListDetail`'s list column. Found by the exact name the row
+// carries rather than by the row's own accessible name, which runs that name
+// together with the line summarizing it. A name is unique in these specs; a
+// page whose rows can repeat one (the same routing policy name global and
+// user-scoped) needs the summary line in the filter too.
+export function listRow(page: Page, column: string, name: string): Locator {
+  return page
+    .getByRole("region", { name: column })
+    .locator("button")
+    .filter({ has: page.getByText(name, { exact: true }) })
+}
+
+// The column a row opens in, which is where its facts and its actions are.
+export function detailColumn(page: Page, label: string): Locator {
+  return page.getByRole("region", { name: label })
+}
+
 // ---------- stat tiles ----------
 
 // A StatCard renders its label and its value as sibling spans with no

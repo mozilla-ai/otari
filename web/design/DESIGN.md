@@ -90,6 +90,7 @@ for a component, not for those.
 | `indicators/Dot` · `/Badge` · `/DismissChip` · `/Kbd` · `/Avatar` | one each |
 | `indicators/Chip` | `Chip`, and the `ChipTone` type |
 | `layout/Divider` | `Divider` |
+| `layout/ListDetail` | `ListDetail`, `ListDetailRow`. See [layout.md](layout.md) |
 | `content/Markdown` | `Markdown` |
 | `ProductMark` | `ProductMark`. At the top level: it belongs to no topic |
 | `@/shared/components/access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | one each |

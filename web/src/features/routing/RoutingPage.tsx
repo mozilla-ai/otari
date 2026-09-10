@@ -1,6 +1,5 @@
-import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 
 import type {
   AliasResponse,
@@ -8,19 +7,18 @@ import type {
   PolicySpec,
   RoutingPolicyResponse,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
+import { CopyButton } from "@/design-system/actions/CopyButton"
 import { CopyableValue } from "@/design-system/actions/CopyField"
-import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
-import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
-import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { Dot } from "@/design-system/indicators/Dot"
+import { ListDetail, ListDetailRow } from "@/design-system/layout/ListDetail"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
@@ -269,14 +267,14 @@ function conditionsOf(
     }))
 }
 
-/** One line summarising what a policy serves, for the table. */
+/** One line summarizing what a policy serves, for a row and the column it opens. */
 function servesSummary(policy: RoutingPolicyResponse): string {
   const chain = policy.spec.on_failure ?? []
   const pool = candidatesOf(policy.spec)
   if (pool.length > 0 && routerBackendOf(policy.spec) === WEIGHTED_BACKEND) {
-    // The split shape, not the model names: two provider:model strings do not fit a
-    // table cell, and the shares are what distinguishes one weighted policy from
-    // another. The pool is spelled out in the editor and in explain.
+    // The split shape, not the model names: two provider:model strings do not fit
+    // one line of a row, and the shares are what distinguishes one weighted
+    // policy from another. The pool is spelled out in the editor and in explain.
     const declared = weightsOf(policy.spec)
     const target = defaultTargetOf(policy.spec)
     const full = pool.includes(target) ? pool : [...pool, target]
@@ -1306,6 +1304,241 @@ function KindMark({ label }: { label: string }) {
   )
 }
 
+/** A `sm` control at the touch floor below `md`: 32px where there is a pointer,
+ *  44px where there is not. */
+const ACTION_CLASS = "min-h-11 md:min-h-0"
+
+/** A list row's second line: what it serves, then what changes what can be done
+ *  with it. One string rather than marks, so a narrow column ellipsizes it. */
+function rowSummary(row: RoutingRow): string {
+  return [
+    servesSummary(row),
+    row.user_id ? `for ${row.user_id}` : "",
+    row.kind === "alias" ? "alias" : "",
+    row.source === "config" ? "config" : "",
+  ]
+    .filter((part) => part !== "")
+    .join(" · ")
+}
+
+/** One policy read-only, in the column its row opens.
+ *
+ *  The list column holds a name and a line, so every fact the table spread
+ *  across lanes is here, and so are the controls that act on the row. Nothing
+ *  the table showed became unreachable.
+ */
+function PolicyDetail({
+  row,
+  canEdit,
+  isOperator,
+  isReadinessShown,
+  onToggleReadiness,
+  onEdit,
+  onDelete,
+}: {
+  row: RoutingRow
+  canEdit: boolean
+  isOperator: boolean
+  isReadinessShown: boolean
+  onToggleReadiness: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const chain = row.spec.on_failure ?? []
+  const guardrails = row.spec.guardrails ?? []
+  const pool = candidatesOf(row.spec)
+  const isConfig = row.source === "config"
+  const isEditable = isEditableInForm(row.spec)
+  // Teaching is data, not configuration, so the panel is offered even for a
+  // policy defined in config.yml: an operator can score examples for a policy
+  // they cannot edit here, and without this that policy could never route.
+  // Operator-only, because it reads `/routing/status`, which is
+  // deployment-wide: an admin has no readiness to be shown.
+  //
+  // "Examples" rather than "Router": on a Routing page full of routing
+  // policies, "Router" names the thing rather than what opens, and the count of
+  // scored examples is the one number in there that changes.
+  const hasReadiness = isOperator && routerBackendOf(row.spec) === KNN_BACKEND
+
+  return (
+    <div className="flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        {/* Copy beside the heading rather than inside it: nested in the `h2`
+            its name joins the heading's, which is then read as the policy name
+            plus "Copy policy name". */}
+        <div className="flex min-w-0 items-center gap-1">
+          <h2 className="truncate text-title">{row.name}</h2>
+          <CopyButton value={row.name} label="policy name" />
+        </div>
+        {/* No control at all for a caller who cannot act: each of these is
+            either a write or the operator-only Examples read. Dense on a desk
+            and at the touch floor on a phone, where they are the only controls
+            in the column that is on screen. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {hasReadiness ? (
+            <Button
+              size="sm"
+              className={ACTION_CLASS}
+              onPress={onToggleReadiness}
+            >
+              {isReadinessShown ? "Hide examples" : "Examples"}
+            </Button>
+          ) : null}
+          {canEdit && !isConfig && isEditable ? (
+            <Button size="sm" className={ACTION_CLASS} onPress={onEdit}>
+              Edit
+            </Button>
+          ) : null}
+          {canEdit && !isConfig ? (
+            <Button size="sm" className={ACTION_CLASS} onPress={onDelete}>
+              Delete
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 border-b border-border px-4 py-4">
+        <span className="text-overline">Serves</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-body">{servesSummary(row)}</span>
+          {/* The kind of routing, as an affirmative mark: a learned router or a
+              weighted split is a decision somebody made about this policy,
+              where a plain single-target policy is just the default shape. */}
+          {pool.length > 0 ? (
+            <KindMark label={routerLabelOf(row.spec)} />
+          ) : row.is_dynamic ? (
+            <KindMark label="Dynamic" />
+          ) : null}
+        </div>
+        {chain.length > 0 ? (
+          <span className="text-caption">If it fails: {chain.join(", ")}</span>
+        ) : null}
+      </div>
+
+      <div className="grid gap-4 border-b border-border px-4 py-4 sm:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-overline">Guards</span>
+          <span className="text-body">
+            {guardrails.length === 0
+              ? "None"
+              : guardrails
+                  .map(
+                    (guardrail) => `${guardrail.profile} (${guardrail.mode})`,
+                  )
+                  .join(", ")}
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-overline">Applies to</span>
+          <span className="text-body">
+            {(row.user_id ?? null) === null ? (
+              "Every caller"
+            ) : (
+              <CopyableValue value={row.user_id ?? ""} label="user id" />
+            )}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-overline">Source</span>
+          <span className="flex flex-wrap items-center gap-3 text-mono-caption text-muted">
+            <span className="flex items-center gap-2">
+              <Dot className={isConfig ? "bg-text-subtle" : "bg-accent"} />
+              {row.source.toUpperCase()}
+            </span>
+            {row.kind === "alias" ? (
+              <span className="text-mono-overline text-subtle">alias</span>
+            ) : null}
+          </span>
+        </div>
+      </div>
+
+      {isConfig ? (
+        <p className="max-w-prose px-4 py-3 text-caption">
+          Set in config.yml, so it cannot be edited or deleted here.
+        </p>
+      ) : isEditable ? null : (
+        <p className="max-w-prose px-4 py-3 text-caption">
+          Uses options this form cannot show yet. Edit it through the API so
+          nothing is lost.
+        </p>
+      )}
+
+      {isReadinessShown ? (
+        <div className="border-t border-border">
+          <RouterReadiness
+            policyName={row.name}
+            candidates={pool}
+            defaultTarget={defaultTargetOf(row.spec)}
+            backend={routerBackendOf(row.spec) ?? KNN_BACKEND}
+            scopedUserId={row.user_id ?? null}
+            onClose={onToggleReadiness}
+          />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** The detail column with nothing open, which is where a wide viewport lands
+ *  before the first click and where an empty page says what to do.
+ *
+ *  Three readings, the same three the page has: pick one, or the steps for a
+ *  caller who can write and has no policies, or who defines these for one who
+ *  cannot.
+ */
+function NothingOpen({
+  canEdit,
+  hasRows,
+  isLoading,
+}: {
+  canEdit: boolean
+  hasRows: boolean
+  isLoading: boolean
+}) {
+  // Nothing rather than a guess: until the lists answer, "no policies yet" and
+  // "pick one" are both claims about a page that has not loaded.
+  if (isLoading) return null
+  if (hasRows)
+    return (
+      <p className="px-4 py-10 text-center text-caption">
+        Pick a policy to see what it serves and what it applies to.
+      </p>
+    )
+  if (!canEdit)
+    return (
+      <div className="flex flex-col gap-2 px-4 py-5">
+        <h2 className="text-title">No routing policies yet</h2>
+        <p className="text-body">
+          Policies that apply in your workspaces will be listed here once your
+          organization&apos;s admins define them.
+        </p>
+      </div>
+    )
+  return (
+    <div className="flex flex-col gap-3 px-4 py-5">
+      <h2 className="text-title">No routing policies yet</h2>
+      <ol className="flex list-decimal flex-col gap-1 pl-5 text-body">
+        <li>
+          Create a policy and point it at the model that should normally serve.
+        </li>
+        <li>
+          Add a fallback chain so a provider outage does not become a failed
+          request.
+        </li>
+        <li>
+          Or split the traffic across two providers by weight, and move the
+          shares as you learn.
+        </li>
+        <li>
+          Or let a router choose per request between a cheap and a strong model,
+          then teach it with a few scored examples.
+        </li>
+        <li>Have your callers send the policy name as their `model`.</li>
+      </ol>
+    </div>
+  )
+}
+
 export function RoutingPage() {
   // Deliberately unscoped, unlike keys and usage. The gateway stores every
   // policy and alias in the default workspace on purpose, because resolution
@@ -1347,23 +1580,26 @@ export function RoutingPage() {
     isOperator || (canManage(organization.data) && writeWorkspaceId !== null)
   // An admin's list spans every workspace of the organization, not just the
   // selected one, so a write to an existing row goes back to the workspace that
-  // row lives in (`rowWorkspace` below, and the Edit form's `workspaceId`).
-  // Using the selection would create a second policy of the same name in the
-  // selected workspace and leave the edited one untouched.
-  // A deep link may pre-fill the add form with ?target=provider:model.
+  // row lives in (`deleteWorkspaceFor` below, and the Edit dialog's
+  // `workspaceId`). Using the selection would create a second policy of the
+  // same name in the selected workspace and leave the edited one untouched.
+  // A deep link may pre-fill the new-policy dialog with ?target=provider:model.
   const initialTarget = useUrlValue("target")
   const [adding, setAdding] = useState(initialTarget !== "")
   const [editing, setEditing] = useState<RoutingRow | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
-  // Readiness opens inline under its own row (DataTable's accordion), because it
-  // describes one policy and the operator clicked that policy. A card above the
-  // table would put the panel nowhere near the control that opened it.
-  const [expanded, setExpanded] = useState<string | null>(null)
+  // The open row, held as its key rather than as the row itself, so the detail
+  // column reads from the list rather than from a snapshot taken at the click.
+  const [openKey, setOpenKey] = useState<string | null>(null)
+  // Readiness opens under the control that opened it, in the column showing the
+  // policy it describes. It belongs to that policy, so opening another closes
+  // it.
+  const [isReadinessShown, setIsReadinessShown] = useState(false)
   // `adding` is seeded from ?target= before the membership context settles, so
   // the role is applied here rather than in the initializer: gating the
   // initializer would drop an operator's deep link, since `isOperator` is still
   // false at the moment it runs. A member arriving on that link gets the
-  // read-only empty state instead of a form whose only outcome is a refusal.
+  // read-only empty column instead of a form whose only outcome is a refusal.
   const isAdding = adding && canEdit
 
   // Aliases and policies are listed together: an alias is the one-target case,
@@ -1388,175 +1624,22 @@ export function RoutingPage() {
       (a.user_id ?? "").localeCompare(b.user_id ?? ""),
   )
   // The context counts as loading too: until it settles, neither list has been
-  // asked, and an empty table would read as "no policies" rather than "not yet".
+  // asked, and an empty column would read as "no policies" rather than "not
+  // yet".
   const isListLoading =
     !isContextSettled ||
     (isOperator
       ? policies.isLoading || aliases.isLoading
       : memberPolicies.isLoading || memberAliases.isLoading)
 
-  // Stable so DataTable's row cache holds; see its docstring.
-  const renderDetail = useCallback(
-    (row: RoutingRow) => (
-      <RouterReadiness
-        policyName={row.name}
-        candidates={candidatesOf(row.spec)}
-        defaultTarget={defaultTargetOf(row.spec)}
-        backend={routerBackendOf(row.spec) ?? KNN_BACKEND}
-        scopedUserId={row.user_id ?? null}
-        onClose={() => setExpanded(null)}
-      />
-    ),
-    [],
-  )
-
-  const columns = useMemo<DataTableColumn<RoutingRow>[]>(() => {
-    const base: DataTableColumn<RoutingRow>[] = [
-      {
-        id: "name",
-        header: "Policy",
-        isRowHeader: true,
-        cell: (policy) => (
-          <CopyableValue value={policy.name} label="policy name" />
-        ),
-      },
-      {
-        id: "serves",
-        header: "Serves",
-        cell: (policy) => (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground">
-              {servesSummary(policy)}
-            </span>
-            {/* The kind of routing, as an affirmative mark: a fallback chain or
-                a learned router is a decision somebody made about this policy,
-                where a plain single-target policy is just the default shape. */}
-            {candidatesOf(policy.spec).length > 0 ? (
-              <KindMark label={routerLabelOf(policy.spec)} />
-            ) : policy.is_dynamic ? (
-              <KindMark label="Dynamic" />
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        id: "guards",
-        header: "Guards",
-        cell: (policy) => {
-          const guardrails = policy.spec.guardrails ?? []
-          // An em dash: no guardrails is an absence, not a zero.
-          if (guardrails.length === 0)
-            return <span className="text-muted">—</span>
-          return (
-            <span className="text-body">
-              {guardrails
-                .map((guardrail) => `${guardrail.profile} (${guardrail.mode})`)
-                .join(", ")}
-            </span>
-          )
-        },
-      },
-      {
-        id: "scope",
-        header: "Applies to",
-        cell: (policy) =>
-          (policy.user_id ?? null) === null ? (
-            <span className="text-muted">Every caller</span>
-          ) : (
-            <CopyableValue value={policy.user_id ?? ""} label="user id" />
-          ),
-      },
-      {
-        id: "source",
-        header: "Source",
-        cell: (row) => (
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-2 text-mono-caption text-muted">
-              <Dot
-                className={
-                  row.source === "config" ? "bg-text-subtle" : "bg-accent"
-                }
-              />
-              {row.source.toUpperCase()}
-            </span>
-            {row.kind === "alias" ? (
-              <span className="text-mono-overline text-subtle">alias</span>
-            ) : null}
-          </div>
-        ),
-      },
-    ]
-    // No actions column for a caller who cannot act: every affordance in it is
-    // either a write or the Examples panel, whose read is operator-only.
-    if (!canEdit) return base
-    base.push({
-      id: "actions",
-      header: "",
-      cell: (policy) => {
-        // Teaching is data, not configuration, so it is offered even for a policy
-        // defined in config.yml: an operator can score examples for a policy they
-        // cannot edit here, and without this that policy could never route.
-        // "Examples" rather than "Router": on a Routing page full of routing
-        // policies, "Router" names the thing rather than what opens, and the count
-        // of scored examples is the one number in there that changes.
-        //
-        // Three outcomes, not two. Operator-only within an actions column an
-        // admin now also gets, because the panel reads `/routing/status`,
-        // which is deployment-wide: an admin sees no readiness at all. Then an
-        // em dash where a policy has no readiness to report, rather than an
-        // empty cell, since a fallback chain has nothing to learn and that
-        // absence is worth stating and is not the same as zero examples. Then
-        // the control, for a backend that learns.
-        const readiness = !isOperator ? null : routerBackendOf(policy.spec) !==
-          KNN_BACKEND ? (
-          <span className="text-muted">—</span>
-        ) : (
-          <RowAction
-            onPress={() =>
-              setExpanded((current) =>
-                current === rowKeyOf(policy) ? null : rowKeyOf(policy),
-              )
-            }
-          >
-            {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-          </RowAction>
-        )
-        return policy.source === "config" ? (
-          <RowActionRow>
-            {readiness}
-            <span className="text-xs text-subtle">set in config.yml</span>
-          </RowActionRow>
-        ) : (
-          <RowActionRow>
-            {readiness}
-            {isEditableInForm(policy.spec) ? (
-              <RowAction
-                onPress={() => {
-                  // The table stays mounted while the create form is open, so
-                  // Edit is still reachable from it. Closing the other panels
-                  // keeps this to one form: two stacked forms do not recover on
-                  // their own, since each only closes when cancelled.
-                  setAdding(false)
-                  setEditing(policy)
-                }}
-              >
-                Edit
-              </RowAction>
-            ) : (
-              <span className="max-w-xs text-xs text-muted">
-                Uses options this form cannot show yet. Edit it through the API
-                so nothing is lost.
-              </span>
-            )}
-            <RowAction onPress={() => setPendingDelete(policy)}>
-              Delete
-            </RowAction>
-          </RowActionRow>
-        )
-      },
-    })
-    return base
-  }, [canEdit, expanded, isOperator])
+  // A rename moves the row and a delete removes it, so the key can name a row
+  // the list no longer has. Resolving it every render rather than holding the
+  // row is what makes that a return to the prompt instead of a column
+  // describing something that does not resolve any more.
+  const openRow = rows.find((row) => rowKeyOf(row) === openKey)
+  // Read by both halves of the empty column, its message and its press target,
+  // so the two cannot disagree about whether the list has answered yet.
+  const isListEmpty = !isListLoading && rows.length === 0
 
   // Which of the four delete surfaces a row goes to. The tenant one names the
   // workspace and has no user scope; the deployment-wide one defaults the
@@ -1578,26 +1661,14 @@ export function RoutingPage() {
     ? deleteMutationFor(pendingDelete)
     : undefined
 
+  const startCreate = () => {
+    setEditing(null)
+    setAdding(true)
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <PageIntro
-        title="Routing"
-        action={
-          canEdit ? (
-            <Button
-              // Visible while the dialog is open: the dialog is over the page,
-              // so there is nothing for hiding this to prevent.
-              variant="primary"
-              onPress={() => {
-                setEditing(null)
-                setAdding(true)
-              }}
-            >
-              Create policy
-            </Button>
-          ) : undefined
-        }
-      >
+      <PageIntro title="Routing">
         {/* Three readings of the same page, because what a caller may do here
             differs: an operator sees the deployment-wide capabilities, an
             admin sees what their own workspace writes reach, and a member is
@@ -1610,14 +1681,85 @@ export function RoutingPage() {
             : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the ones in force in your workspaces; your organization's admins manage them."}
       </PageIntro>
 
-      {/* The reads only. Every delete on this page reports inside its own
-          confirm dialog, which is where the operator is looking. */}
+      {/* The reads only. A delete reports inside its own confirm dialog and a
+          write inside the form dialog that made it, which is where the operator
+          is looking in each case. */}
       <ErrorBanner
         error={
           policies.error ??
           memberPolicies.error ??
           aliases.error ??
           memberAliases.error
+        }
+      />
+
+      <ListDetail
+        listLabel="Policies"
+        backLabel="All policies"
+        detailLabel="Policy detail"
+        listAction={
+          canEdit ? (
+            // In the column it adds to rather than beside the page title: the
+            // dialog it opens sits over the page, so the control belongs to the
+            // list it lengthens.
+            <Button
+              size="sm"
+              variant="primary"
+              className={ACTION_CLASS}
+              onPress={startCreate}
+            >
+              Create policy
+            </Button>
+          ) : undefined
+        }
+        isDetailShown={openRow !== undefined}
+        onShowList={() => setOpenKey(null)}
+        empty={
+          isListLoading
+            ? "Loading…"
+            : !isListEmpty
+              ? undefined
+              : canEdit
+                ? "Create your first policy"
+                : "No routing policies yet."
+        }
+        // Only once the lists have answered, and only for a caller who can
+        // write: a press whose one outcome is a refusal is not an invitation.
+        onEmptyPress={canEdit && isListEmpty ? startCreate : undefined}
+        list={rows.map((row) => (
+          <ListDetailRow
+            key={rowKeyOf(row)}
+            label={row.name}
+            isSelected={rowKeyOf(row) === openKey}
+            onSelect={() => {
+              setIsReadinessShown(false)
+              setOpenKey(rowKeyOf(row))
+            }}
+          >
+            {rowSummary(row)}
+          </ListDetailRow>
+        ))}
+        detail={
+          openRow === undefined ? (
+            <NothingOpen
+              canEdit={canEdit}
+              hasRows={rows.length > 0}
+              isLoading={isListLoading}
+            />
+          ) : (
+            <PolicyDetail
+              row={openRow}
+              canEdit={canEdit}
+              isOperator={isOperator}
+              isReadinessShown={isReadinessShown}
+              onToggleReadiness={() => setIsReadinessShown((shown) => !shown)}
+              onEdit={() => {
+                setAdding(false)
+                setEditing(openRow)
+              }}
+              onDelete={() => setPendingDelete(openRow)}
+            />
+          )
         }
       />
 
@@ -1638,59 +1780,6 @@ export function RoutingPage() {
           onClose={() => setEditing(null)}
         />
       ) : null}
-
-      {rows.length === 0 && !isListLoading ? (
-        canEdit ? (
-          <EmptyState
-            title="No routing policies yet"
-            actionLabel="Create policy"
-            onAction={() => {
-              setEditing(null)
-              setAdding(true)
-            }}
-          >
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
-              <li>
-                Create a policy and point it at the model that should normally
-                serve.
-              </li>
-              <li>
-                Add a fallback chain so a provider outage does not become a
-                failed request.
-              </li>
-              <li>
-                Or split the traffic across two providers by weight, and move
-                the shares as you learn.
-              </li>
-              <li>
-                Or let a router choose per request between a cheap and a strong
-                model, then teach it with a few scored examples.
-              </li>
-              <li>Have your callers send the policy name as their `model`.</li>
-            </ol>
-          </EmptyState>
-        ) : (
-          <EmptyState title="No routing policies yet">
-            <p className="text-sm text-muted">
-              Policies that apply in your workspaces will be listed here once
-              your organization's admins define them.
-            </p>
-          </EmptyState>
-        )
-      ) : (
-        <TableScrollFrame className="otari-routing-table">
-          <DataTable
-            ariaLabel="Routing policies"
-            columns={columns}
-            rows={rows}
-            getRowKey={rowKeyOf}
-            detailKey={expanded}
-            renderDetail={renderDetail}
-            isLoading={isListLoading}
-            emptyContent="No routing policies yet."
-          />
-        </TableScrollFrame>
-      )}
 
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}

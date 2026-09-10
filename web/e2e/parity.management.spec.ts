@@ -1,9 +1,11 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 
 import {
+  detailColumn,
   dismissComboBox,
   dismissComboBoxInDialog,
   gotoRoute,
+  listRow,
   login,
   nav,
   openNested,
@@ -252,9 +254,9 @@ test.describe("fallback routing", () => {
     await openNested(page, "Routing", "Policies")
     await expect(pageHeading(page, "Routing")).toBeVisible()
 
-    // `.first()` is the heading's action. An empty routing list also offers
-    // the same words from its empty state, and a press has to name which.
-    await page.getByRole("button", { name: "Create policy" }).first().click()
+    // One "Create policy" on screen while the dialog is shut: the list column's
+    // action. The empty column's own CTA reads "Create your first policy".
+    await page.getByRole("button", { name: "Create policy" }).click()
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill(POLICY)
@@ -268,14 +270,17 @@ test.describe("fallback routing", () => {
     await fillModelBox(page, /Fallback 2/, "groq:llama-3.3-70b-versatile")
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
-    // The table summarises the chain by its length, so the count is the assertion
+    // The row summarizes the chain by its length, so the count is the assertion
     // that both fallbacks were saved and not just the first.
-    const policy = row(page, "Routing policies", POLICY)
+    const policy = listRow(page, "Policies", POLICY)
     await expect(policy).toContainText(/\+2 on failure/)
 
     // Shrinking has to be possible too: a chain that could only grow would strand
-    // an operator who added a candidate by mistake.
-    await policy.getByRole("button", { name: "Edit" }).click()
+    // an operator who added a candidate by mistake. The row opens the policy in
+    // the detail column, and Edit there opens the dialog (otari-ai#2109).
+    await policy.click()
+    const detail = detailColumn(page, "Policy detail")
+    await detail.getByRole("button", { name: "Edit" }).click()
     const fallbackTwo = page.getByRole("combobox", { name: /Fallback 2/ })
     await expect(fallbackTwo).toBeVisible()
     // Scoped to the row holding Fallback 2 rather than taken by index off the
@@ -296,17 +301,17 @@ test.describe("fallback routing", () => {
       page.getByRole("combobox", { name: /Fallback 2/ }),
     ).toHaveCount(0)
     await page.getByRole("button", { name: "Save" }).click()
-    await expect(row(page, "Routing policies", POLICY)).toContainText(
+    await expect(listRow(page, "Policies", POLICY)).toContainText(
       /\+1 on failure/,
     )
 
-    await row(page, "Routing policies", POLICY)
-      .getByRole("button", { name: "Delete" })
-      .click()
+    // Delete lives beside the facts it acts on, and names the policy in the
+    // confirm dialog: the column is behind the backdrop once it is open.
+    await detail.getByRole("button", { name: "Delete" }).click()
     const confirmPolicy = page.getByRole("alertdialog")
     await expect(confirmPolicy).toContainText(POLICY)
     await confirmPolicy.getByRole("button", { name: "Delete policy" }).click()
-    await expect(row(page, "Routing policies", POLICY)).toHaveCount(0)
+    await expect(listRow(page, "Policies", POLICY)).toHaveCount(0)
   })
 })
 

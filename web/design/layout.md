@@ -41,6 +41,7 @@ constants for these; `Section` is the one place the pair is named.
 | `SettingRow` | `label`, `configKey?`, `help?`, `control`, `nested?`, `error?` | One setting inside a group |
 | `KpiStrip` + `KpiCell` | see [metrics.md](metrics.md) | The metrics band |
 | `TableScrollFrame` | `className`, children | Around a wide table |
+| `ListDetail` + `ListDetailRow` | `listLabel`, `listAction?`, `list`, `empty?`, `onEmptyPress?`, `detail`, `detailLabel?`, `isDetailShown`, `onShowList`, `backLabel?` | A set of records where reading one is most of the work |
 
 **`PageIntro` renders its own `<h1 className="text-display">`**, so never put a
 heading inside it and never spell `text-display` on a page yourself. The sentence
@@ -101,6 +102,27 @@ No Save anywhere on that one: a text field commits on blur and on Enter, a
 select on change. Reach for it when the settings are independent of one another,
 so no single button could say what it is about to write.
 `features/tools/ToolsGuardrailsPage` is the worked example.
+
+A list-and-detail page, which is the shape for a set of records where reading
+one is most of the work (`features/routing/RoutingPage` is the worked example):
+
+```
+PageIntro          title, sentence. No action: the create control goes in the
+                   list column, because that is the column it lengthens
+ErrorBanner        only if a read failed
+ListDetail         the two columns, at 1:1.75, partitioned by a hairline
+  ListDetailRow    one record: its name, and a line summarizing it
+```
+
+The frame does not bleed: it is one framed object inside the page column, the
+way a `bounded` settings group is, rather than rules running to the scroll
+area's edges. Every fact a table would have put in a lane goes in the detail
+column, since the list column holds a name and a line, and so do the controls
+that act on the open record. **Nothing is edited in either column**: a record is
+created and changed in a `FormDialog` over the page, which is the one create
+surface (see [feedback.md](feedback.md)). **Below `md` one column shows at a
+time**, and which one is a prop: two columns at 390px give neither a readable
+measure, and stacking them puts every record above the one being read.
 
 **A save that worked says nothing.** The control disables while the write is in
 flight and that is the whole acknowledgement: a confirmation mark on every row

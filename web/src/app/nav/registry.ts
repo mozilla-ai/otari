@@ -124,7 +124,7 @@ const BASE_NAV_SECTIONS = [
         // Policies and Guardrails as the navigation prototype groups them. The
         // prototype's third entry, Aliases, is deliberately absent: this
         // dashboard lists an alias as the one-target policy it is, in the same
-        // table (see `RoutingPage`), so `/aliases` is a compatibility redirect
+        // list (see `RoutingPage`), so `/aliases` is a compatibility redirect
         // onto `/routing` rather than a destination. Linking it would give the
         // group two entries for one page, and the second could never highlight.
         // It comes back if and when Routing grows a separate alias view.
