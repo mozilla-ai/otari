@@ -2193,10 +2193,11 @@ main {
  * margins around it wastes the only axis a form needs, and the keyboard takes
  * half of what is left.
  *
- * The footer takes no rule of its own: `env(safe-area-inset-bottom)` is 0
- * without `viewport-fit=cover`, which `index.html` leaves off deliberately (the
- * shell has no insets to sit out of the way), so a safe-area pad here would
- * read as clearing the home indicator while adding nothing. */
+ * The footer's bottom padding is a plain 1rem and not a safe-area inset:
+ * `env(safe-area-inset-bottom)` is 0 without `viewport-fit=cover`, which
+ * `index.html` leaves off deliberately (the shell has no insets to sit out of
+ * the way), so adding it would read as clearing the home indicator while
+ * changing nothing. */
 @media (max-width: 639px) {
   .otari-form-dialog {
     width: 100%;
@@ -2217,7 +2218,7 @@ main {
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
-    padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    padding: 0.75rem 1rem 1rem;
   }
   .otari-form-dialog__actions {
     flex-direction: column;
