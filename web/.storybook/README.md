@@ -25,17 +25,34 @@ serves a project site under `/<repo>/`, and the merged `vite.config.ts` carries
 the app's own `base: "/"`. `main.ts` reads that variable and leaves the base
 alone when it is unset, so a local build and the dev server need nothing.
 
+A build made for one base and served at another is a build nobody serves, and
+the `render` job used to be exactly that: it built for the root while `publish`
+shipped a `/<repo>/` build, so a URL written from the origin root passed the
+sweep and 404'd on the site. Both jobs now build under the same base, and
+`render` serves it one directory up so it is reached at that path.
+
 ## Smoke test
 
     pnpm --dir web exec node .storybook/smoke.mjs   # with a catalog served on :6006
 
 Renders every story in headless Chromium, in both themes, and reports any that
-error, render nothing, or log an uncaught exception. Playwright is already a dev
-dependency here, so this needs nothing extra. Around ten seconds for the whole
-catalog against a static build.
+error, render nothing, log an uncaught exception, or put a full-bleed band off
+the left of the frame. Playwright is already a dev dependency here, so this needs
+nothing extra. Around ten seconds for the whole catalog against a static build.
 
-Two knobs, both with working defaults: `SMOKE_ORIGIN` points it at another port,
-and `SMOKE_CONCURRENCY` sets how many pages drain the work list (6). The pool is
+That last one is geometry rather than an error, which is why it is measured.
+`.otari-bleed` reaches the width of its container query, so a band inside a
+fixed-width wrapper overflows half the difference on each side and the left half
+lands where nothing can scroll it back. Seven stories shipped that way. The test
+is a negative left edge and not "left of the canvas", because a band bleeding out
+to the canvas edge is what it does on a page.
+
+Two knobs, both with working defaults. `SMOKE_ORIGIN` is a whole origin and path,
+not just a port, which is what lets the sweep walk a build served under its base
+path (as CI now does, `http://localhost:6006/otari`) or the live site itself.
+Pointing it at https://mozilla-ai.github.io/otari is how a `/favicon.svg` asked
+for from the origin root was found. `SMOKE_CONCURRENCY` sets how many pages drain
+the work list (6). The pool is
 what makes it quick, and the reason it exists is worth keeping: as two sequential
 loops over one page each, the same run took over 45 minutes on a CI runner and
 printed nothing until it finished, so a slow run and a hung one looked identical.

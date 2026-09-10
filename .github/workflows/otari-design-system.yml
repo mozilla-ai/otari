@@ -8,15 +8,20 @@ name: Otari Design System
 # `catalog` is the pull request gate: it builds the catalog, which is where a
 # story that stops compiling fails, and it takes about a minute.
 #
-# `render` walks all 327 stories in both themes in headless Chromium, and it is
+# `render` walks every story in both themes in headless Chromium, and it is
 # deliberately NOT a pull request gate. It takes seconds locally and more than
 # twenty minutes on a hosted runner, and the cause has not been pinned down (the
 # per-navigation cost is roughly 45 times the local one; a cold browser cache and
 # the default `raf` polling were both ruled out or fixed and neither accounts for
 # it). Six times the slowest existing job, on every `web/` change, is not a trade
-# worth making for a check that has never yet failed on anything the build did
-# not already catch. So it runs on main and on demand, which is exactly how
+# worth making. So it runs on main and on demand, which is exactly how
 # `otari-dashboard.yml` treats the screenshot suite and for the same reason.
+#
+# It does catch what the build cannot, and an earlier version of this comment
+# claimed otherwise. Two faults reached the published site before it was asked
+# the right question: seven stories with a full-bleed band cut off the left of
+# the frame, and an icon requested from the origin root rather than the base
+# path. Both compiled cleanly.
 #
 # The gap this leaves is real and worth stating: a story that compiles but throws
 # at render reaches main, and `render` is what reports it there. Reduce that by
