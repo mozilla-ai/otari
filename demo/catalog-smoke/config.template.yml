@@ -1,21 +1,33 @@
 # Seed for demo/catalog-smoke/run.sh. The placeholders are filled by the
-# script; everything else is a normal config.yml.
+# script; everything else is a normal config.yml, and the copy the script
+# writes to .state/config.yml is yours to edit between runs.
 #
-# Discovery is off and every key is fake, so nothing here dials a provider: the
-# catalog is the priced selectors below, and models.dev is fetched live for
-# descriptions, limits and capabilities. The selectors are real provider ids,
-# chosen so several providers serve one model and the spellings differ.
+# Every key below is fake, so nothing here reaches a provider until you put a
+# real key in: either replace `sk-fake` on the instances you hold keys for, or
+# add the provider on the dashboard's Providers page as the platform admin.
+# Discovery is on, so a real key lists that provider's models; a fake one
+# fails its discovery and the catalog falls back to the priced selectors below,
+# which are real provider ids chosen so several providers serve one model and
+# the spellings differ. models.dev is fetched live for descriptions, limits
+# and capabilities.
 
 master_key: __MASTER_KEY__
 database_url: sqlite:///__DB__
+# Where the links in mail point, and what passkeys bind to. The script fills
+# in the LAN address it found at first run; change it if the host moves.
+public_base_url: __PUBLIC_BASE_URL__
 
-model_discovery: false
+model_discovery: true
 models_dev_metadata: true
 require_pricing: false
 default_pricing: true
 # The catalog before sign-in, at #/models, for the smoke. Off by default in a
 # real deployment.
 public_catalog: true
+# Mail is logged rather than sent, so the seed can read the verification link
+# for the people it creates. An invitation you send from the dashboard lands
+# in .state/gateway.log the same way, link included.
+mail_transport: console
 
 providers:
   openai:
