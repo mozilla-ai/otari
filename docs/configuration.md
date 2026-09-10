@@ -359,10 +359,10 @@ chain, so the script needs no URL handling of its own.
 
 Two cautions. A contributed chain must not reference a core table by foreign
 key in a way that would block a core migration: the core chain runs first and
-knows nothing about contributed tables, so a core revision that rebuilds a
-table (SQLite has no `ALTER` for constraints) fails on a constraint it did not
-create. Prefer plain indexed id columns over enforced foreign keys into core
-tables. And `otari migrate` runs the core chain only; a deployment that
+knows nothing about contributed tables, so a core revision that drops or
+rebuilds a table the contribution points at fails on a constraint the core
+chain did not create. Prefer plain indexed id columns over enforced foreign
+keys into core tables. And `otari migrate` runs the core chain only; a deployment that
 migrates with the CLI instead of on startup has to run each contributed chain
 itself for now. Hybrid mode skips database initialization entirely, contributed
 chains included, since it has no local database.
