@@ -1,5 +1,5 @@
 import { Button, Chip } from "@heroui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import type {
   CreateOrganizationDomainRequest,
@@ -79,6 +79,12 @@ function ClaimForm({
   const create = useCreateOrganizationDomain()
   const [domain, setDomain] = useState("")
   const [role, setRole] = useState("member")
+  // One snapshot of everything the form owns, seeded on mount: dirty means
+  // "differs from what was seeded", and a field added to the form is added here
+  // or the guard cannot see it. A predicate of the fields had already forgotten
+  // `role`, so changing who joins and pressing Escape discarded it unguarded.
+  const draft = JSON.stringify({ domain, role })
+  const seededDraft = useRef(draft)
 
   const submit = () => {
     const body: CreateOrganizationDomainRequest = {
@@ -101,7 +107,7 @@ function ClaimForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={domain.trim() === ""}
-      isDirty={domain.trim() !== ""}
+      isDirty={draft !== seededDraft.current}
       error={create.error}
     >
       <Field

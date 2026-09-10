@@ -254,6 +254,35 @@ describe("OrganizationDomainsPage", () => {
     expect(await screen.findByLabelText(/Domain/)).toHaveValue("")
   })
 
+  it("guards a changed role on the way out, with nothing typed", async () => {
+    // The role is the other thing this form owns, and it is a choice the
+    // operator cannot retype: without it in `isDirty`, closing discards it
+    // silently. Dismissed through Cancel rather than Escape because in jsdom
+    // focus lands on `<body>` after picking from the Select, so a keystroke
+    // reaches nothing.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Claim domain" }),
+    )
+    await user.click(screen.getByRole("button", { name: /They join as/ }))
+    await user.click(await screen.findByRole("option", { name: "Viewer" }))
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+    // Still open behind the guard, so Keep editing returns to the choice
+    // rather than to an empty form.
+    await user.click(screen.getByRole("button", { name: "Keep editing" }))
+    expect(
+      screen.getByRole("button", { name: /They join as/ }),
+    ).toHaveTextContent("Viewer")
+  })
+
   it("never offers a management role, because a DNS record must not mint admins", async () => {
     mockApi()
     renderPage(<OrganizationDomainsPage />)

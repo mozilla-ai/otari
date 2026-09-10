@@ -464,6 +464,21 @@ test.describe("the provider dialog", () => {
   })
 })
 
+test.describe("the domain dialog", () => {
+  // The suite's only `sm` dialog, which is the width nothing else here covers.
+  test("the claim dialog", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/organization/domains")
+    await expect(
+      page.getByRole("heading", { name: /email domains/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Claim domain" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "New domain" })
+    await expect(dialog.getByLabel(/^Domain/)).toBeVisible()
+    await captureScreenshot(page, "domains-claim-dialog")
+  })
+})
+
 // No capture for the organization provider-key dialog. Its page is gated on the
 // `organization_providers` surface, which only a hosted deployment publishes
 // (bootstrap.py's HOSTED_SURFACES), and this suite boots a standalone gateway,
