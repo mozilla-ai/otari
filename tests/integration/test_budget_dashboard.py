@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
+from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, Workspace
 
 
@@ -84,9 +84,7 @@ def test_budget_rollup_aggregates_assigned_users(
     assert row["total_reserved"] == 2.0
 
 
-def test_budget_rollup_excludes_deleted_users(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_budget_rollup_excludes_deleted_users(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A soft-deleted user drops out of the budget's rollup."""
     budget_id = _make_budget(client, master_key_header)
     client.post("/v1/users", json={"user_id": "gone", "budget_id": budget_id}, headers=master_key_header)
@@ -174,6 +172,98 @@ def test_deleting_a_budget_a_workspace_hands_out_is_refused_by_name(
     db_session.execute(delete(WorkspaceBudgetDefault).where(WorkspaceBudgetDefault.budget_id == budget_id))
     db_session.commit()
     assert client.delete(f"/v1/budgets/{budget_id}", headers=master_key_header).status_code == 204
+
+
+def test_deleting_an_organization_owned_budget_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The deployment surface may not delete a tenant's organization-owned budget (otari#902, #898).
+
+    ``Budget.organization_id`` is the discriminator: ``None`` on the deployment's
+    own budgets, a uuid on a tenant's. The operator's Budgets page labels such a
+    row "Owned by an organization" and still offers Delete; the route refuses it
+    with a 409 so it is managed through the organization instead. ``PATCH`` still
+    reaches the same budget to retime its ceilings, so the refusal is delete-only.
+    """
+    budget_id = _make_budget(client, master_key_header)
+    organization = Organization(name="Acme", slug="acme-owned-budget")
+    db_session.add(organization)
+    db_session.flush()
+    budget = db_session.execute(select(Budget).where(Budget.budget_id == budget_id)).scalar_one()
+    budget.organization_id = organization.id
+    db_session.commit()
+
+    refused = client.delete(f"/v1/budgets/{budget_id}", headers=master_key_header)
+    assert refused.status_code == 409, refused.text
+    assert "organization" in refused.json()["detail"].lower()
+
+    # Untouched, and an edit still goes through.
+    assert client.get(f"/v1/budgets/{budget_id}", headers=master_key_header).status_code == 200
+    edited = client.patch(f"/v1/budgets/{budget_id}", json={"max_budget": 50.0}, headers=master_key_header)
+    assert edited.status_code == 200, edited.text
+
+
+def test_deleting_an_own_budget_with_reset_history_succeeds_without_500(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A deployment-own budget that has ever reset deletes cleanly (otari#902).
+
+    ``budget_reset_logs.budget_id`` is NOT NULL behind a plain relationship, so
+    the ORM's null-out would fail at the commit as an opaque 500. The route clears
+    those rows in the same transaction first, so the delete returns 204 and the
+    reset logs are gone with the budget.
+    """
+    budget_id = _make_budget(client, master_key_header)
+    db_session.add(
+        BudgetResetLog(
+            user_id=None,
+            budget_id=budget_id,
+            previous_spend=Decimal("1.00"),
+            reset_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+
+    deleted = client.delete(f"/v1/budgets/{budget_id}", headers=master_key_header)
+    assert deleted.status_code == 204, deleted.text
+
+    # Gone, and its reset history went with it rather than 500-ing.
+    assert client.get(f"/v1/budgets/{budget_id}", headers=master_key_header).status_code == 404
+    remaining = db_session.execute(
+        select(BudgetResetLog).where(BudgetResetLog.budget_id == budget_id)
+    ).scalars().all()
+    assert remaining == []
+
+
+def test_deleting_an_own_budget_with_an_assigned_user_succeeds(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A deployment-own budget with a user assigned to it deletes with 204 (otari#902).
+
+    Assigning a user at creation is the path that makes a deployment-own budget
+    enforceable, and it is the flow the e2e parity test exercises. Deleting the
+    budget nulls that cap by design (a deleted budget caps no one); the route does
+    not refuse on assigned users the way the organization-scoped delete does.
+    """
+    budget_id = _make_budget(client, master_key_header)
+    assert (
+        client.post(
+            "/v1/users", json={"user_id": "capped", "budget_id": budget_id}, headers=master_key_header
+        ).status_code
+        == 200
+    )
+
+    deleted = client.delete(f"/v1/budgets/{budget_id}", headers=master_key_header)
+    assert deleted.status_code == 204, deleted.text
+
+    # The budget is gone and the user is uncapped, not orphaned on a missing budget.
+    assert client.get(f"/v1/budgets/{budget_id}", headers=master_key_header).status_code == 404
+    assert client.get("/v1/users/capped", headers=master_key_header).json()["budget_id"] is None
 
 
 def test_an_explicit_null_budget_detaches_and_clears_the_reset_clock(

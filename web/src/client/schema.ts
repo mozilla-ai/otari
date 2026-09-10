@@ -974,13 +974,29 @@ export interface paths {
         post?: never;
         /**
          * Delete Budget
-         * @description Delete a budget.
+         * @description Delete a budget the deployment owns.
          *
-         *     Refused with 409 while anything still names this budget: a workspace handing
-         *     it to its members, or a scoped ceiling enforcing it. Both foreign keys are
-         *     ``RESTRICT``, so the database would refuse either anyway, but as an
-         *     ``IntegrityError`` reported as "Database error" with nothing naming what to
-         *     go and change. Checked here so the refusal can say which, and where.
+         *     Refused with 409 when the budget is organization-owned. ``organization_id``
+         *     is ``None`` for the deployment's own budgets and a uuid for a tenant's, so a
+         *     non-null value is one the operator may edit but not delete: ``PATCH`` still
+         *     reaches its rows to retime their ceilings, but removing it would take a
+         *     budget the tenant defined out from under them with no record on their side.
+         *     The operator manages it through the organization instead (otari#898).
+         *
+         *     Refused with 409, too, while anything still names the deployment's own
+         *     budget: a workspace handing it to its members, or a scoped ceiling enforcing
+         *     it. Both foreign keys are ``RESTRICT``, so the database would refuse either
+         *     anyway, but as an ``IntegrityError`` reported as "Database error" with
+         *     nothing naming what to go and change. Checked here so the refusal can say
+         *     which, and where.
+         *
+         *     ``users.budget_id`` is not guarded: assigning a user at creation is the path
+         *     that makes a deployment-own budget enforceable, so deleting one nulls those
+         *     caps by design (a deleted budget caps no one). ``budget_reset_logs.budget_id``
+         *     is NOT NULL behind a plain relationship, so a budget that has ever reset would
+         *     fail the null-out at the commit as an opaque 500; its rows are cleared in the
+         *     same transaction before the delete so an own budget that has reset can be
+         *     removed cleanly.
          */
         delete: operations["delete_budget_v1_budgets__budget_id__delete"];
         options?: never;
