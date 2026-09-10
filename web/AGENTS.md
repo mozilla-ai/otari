@@ -20,7 +20,7 @@ foundations, components with their states, and the page archetypes as artboards.
 
 ## Runtime contract
 
-`src/main.tsx` fetches unauthenticated `GET /v1/bootstrap` before mounting
+`src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
 React. Do not guess a deployment when that request fails.
 
 A gateway older than a bootstrap field does not send it, whatever the generated

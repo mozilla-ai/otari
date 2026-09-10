@@ -41,7 +41,7 @@ and streaming settlement in `streaming.py`. Pass-through endpoints use
 `run_passthrough`. Direct search has its own dispatch scaffold.
 
 A new provider-calling scaffold must register with `track_request` so
-`/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
+`/api/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
 which wraps the complete ASGI response and therefore outlives a streaming route
 handler.
 
@@ -64,7 +64,7 @@ dashboard session. It does not prove that the session may act deployment-wide.
 Tenant lookups include the tenant predicate and return 404 for a foreign ID.
 Client filters may narrow the server-derived scope and never widen it. A tenant
 that needs a deployment-wide route gets a separately scoped endpoint, as
-organization usage does for reads and `/v1/organizations/me/keys`
+organization usage does for reads and `/api/v1/organizations/me/keys`
 (`organization_keys.py`) does for writes; do not loosen the original route. A
 member's key surface derives its owner as well as its scope, so it takes no
 `user_id` and mints nothing budget-exempt.
@@ -220,7 +220,7 @@ Bulk mutation re-derives rows from the submitted filters. It never trusts a
 count calculated earlier by the dashboard. Imported-only guards do not replace
 tenant or filter predicates.
 
-One exception to the shared semantics: `GET /v1/usage/count` narrows
+One exception to the shared semantics: `GET /api/v1/usage/count` narrows
 `counts_toward_budget=false` to imported rows, because it sizes a mutation
 rather than a page. A count that sizes a mutation applies the mutation's fixed
 scope and not only its filter set. Nothing else narrows it, and
