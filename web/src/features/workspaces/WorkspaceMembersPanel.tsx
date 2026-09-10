@@ -1,5 +1,5 @@
 import { Button, Chip } from "@heroui/react"
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 
 import type {
   OrganizationMember,
@@ -66,7 +66,12 @@ export function AddWorkspaceMemberDialog({
   const add = useAddWorkspaceMember()
   const [userId, setUserId] = useState("")
   const [role, setRole] = useState<WorkspaceMemberRole>("member")
-  const nobodyLeft = rosterResolved && candidates.length === 0
+  const isNobodyLeft = rosterResolved && candidates.length === 0
+  // Every field the operator can change, against what the form was seeded
+  // with, rather than the one that gates the submit: a role picked on its own
+  // is work, and a guard that only watches the person loses it silently.
+  const seeded = useRef(JSON.stringify({ userId: "", role: "member" }))
+  const isPristine = JSON.stringify({ userId, role }) === seeded.current
 
   return (
     <FormDialog
@@ -82,10 +87,10 @@ export function AddWorkspaceMemberDialog({
       }
       isPending={add.isPending}
       isSubmitDisabled={userId === ""}
-      isDirty={userId !== ""}
+      isDirty={!isPristine}
       error={add.error}
     >
-      {nobodyLeft ? (
+      {isNobodyLeft ? (
         <InfoBanner>
           Every active member of this organization is already in this workspace.
           A workspace's members are always a subset of the organization's, so

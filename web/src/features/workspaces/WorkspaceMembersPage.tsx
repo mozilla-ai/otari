@@ -1,6 +1,6 @@
-import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { Button } from "@/design-system/actions/Button"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -39,7 +39,7 @@ export function WorkspaceMembersPage() {
   // the organization a candidate list, and the control that uses that list now
   // sits in the heading row.
   const members = useWorkspaceMembers(selected?.workspace_id ?? null)
-  const [adding, setAdding] = useState(false)
+  const [isAdding, setIsAdding] = useState(false)
   const [openCount, setOpenCount] = useState(0)
 
   // An organization's owners and admins manage every workspace in it, and so
@@ -58,9 +58,15 @@ export function WorkspaceMembersPage() {
   const hasOrganizationAnswered = !context.isLoading
   const canManageOrganization = canManage(context.data)
 
+  // Both reads, not just the organization's. The candidate list is the
+  // organization minus whoever is already in the workspace, so answering it
+  // from one read offers exactly the people the other one was about to
+  // exclude. Empty until both have landed, which is also what makes
+  // "everyone is already here" safe to say.
+  const bothRostersAnswered = orgMembers.isSuccess && members.isSuccess
   const present = new Set((members.data ?? []).map((member) => member.user_id))
-  const candidates = orgMembers.data
-    ? orgMembers.data.filter(
+  const candidates = bothRostersAnswered
+    ? (orgMembers.data ?? []).filter(
         (member) =>
           member.user_id &&
           member.status === "active" &&
@@ -78,7 +84,7 @@ export function WorkspaceMembersPage() {
               variant="primary"
               onPress={() => {
                 setOpenCount((count) => count + 1)
-                setAdding(true)
+                setIsAdding(true)
               }}
             >
               Add member
@@ -96,11 +102,11 @@ export function WorkspaceMembersPage() {
       {selected ? (
         <AddWorkspaceMemberDialog
           key={openCount}
-          isOpen={adding}
-          onClose={() => setAdding(false)}
+          isOpen={isAdding}
+          onClose={() => setIsAdding(false)}
           workspaceId={selected.workspace_id}
           candidates={candidates}
-          rosterResolved={orgMembers.isSuccess}
+          rosterResolved={bothRostersAnswered}
         />
       ) : null}
       {/* The organization roster is what the panel picks candidates from, and

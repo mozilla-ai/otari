@@ -211,7 +211,6 @@ not already in its list, naming what to use instead.
 
 | Do not use | Use instead | Still in |
 | --- | --- | --- |
-| `deprecated/PageHeader` | `layout/PageIntro` | 3 pages, one use each |
 | `deprecated/StatCard` | `metrics/KpiStrip` + `KpiCell` | **nothing. Dead code** |
 | `deprecated/RowActions` | `actions/RowActionRow` | 1 use, in `PasskeysCard` |
 | `deprecated/SettingsSection` | `layout/SettingsGroup` | **nothing. Dead code** |

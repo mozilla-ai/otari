@@ -62,8 +62,8 @@ under the title is `children`, not a `description` prop:
 **`Toolbar` already carries `.otari-toolbar`.** Do not pass the place class again;
 `className` is for layout only.
 
-`PageIntro`, not `PageHeader`. `PageHeader` is the pre-redesign card version still
-live on 4 pages; see [DESIGN.md](DESIGN.md).
+`PageIntro` opens every page. The pre-redesign `PageHeader` it replaced is gone:
+its last three call sites moved, and the component with them.
 
 ## Page recipes
 

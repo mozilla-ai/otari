@@ -16,7 +16,7 @@ export function EmptyState({
   children,
 }: {
   title: string
-  // A plain sentence, rendered in a <p>. Kept to a string (like PageHeader) so a
+  // A plain sentence, rendered in a <p>. Kept to a string so a
   // block element can't land inside that paragraph; richer/blockish content goes
   // through `children`, which renders as a sibling instead.
   description?: string

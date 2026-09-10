@@ -61,14 +61,14 @@ function mockApi({
   return calls
 }
 
-function renderCard() {
+function renderCard(variant?: "card" | "page") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <WorkspaceMcpServersCard />
+        <WorkspaceMcpServersCard variant={variant} />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
   )
@@ -94,6 +94,35 @@ describe("WorkspaceMcpServersCard", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
+  })
+
+  it("opens the page it is the whole of, heading and register control", async () => {
+    // `variant="page"` is what renders /tools/mcp-servers: its h1, the
+    // description under it, and the register control in that heading row. The
+    // page component is a one-line wrapper with no test of its own, so without
+    // this the page's only h1 could be dropped silently.
+    mockApi()
+    renderCard("page")
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "MCP servers" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/checked for SSRF safety when it is stored/),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: "Add MCP server" }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps its own heading where it is one card among several", async () => {
+    mockApi()
+    renderCard()
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "MCP servers" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
   })
 
   it("lists the workspace's servers with what the API says about each", async () => {
