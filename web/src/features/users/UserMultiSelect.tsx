@@ -50,7 +50,7 @@ export function UserMultiSelect({
       onChange={onChange}
       searchPlaceholder="Search people…"
       countNoun={{ one: "person assigned", other: "people assigned" }}
-      emptyMessage="Nobody to assign yet. Add people under Members & roles, or issue a key, and they can be assigned here."
+      emptyMessage="Nobody to assign yet. Add people under Members & roles and they can be assigned here."
       noMatchesMessage="Nobody matches what you typed."
     />
   )

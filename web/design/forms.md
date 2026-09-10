@@ -63,8 +63,8 @@ ComboBoxField: { label, value, onChange, onQueryChange?, options: ComboBoxOption
   reserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
   shouldSelectOnFocus?, isSourceEmpty?, emptyMessage?, noMatchesMessage? }
 MultiSelect: { label, value: readonly string[], onChange: (next: string[]) => void,
-  options: MultiSelectOption[] ({ id, label, hint? }), description?, isInvalid?,
-  errorMessage?, reserveMessage?, searchPlaceholder?, emptyMessage?,
+  options: readonly MultiSelectOption[] ({ id, label, hint? }), description?,
+  isInvalid?, errorMessage?, reserveMessage?, searchPlaceholder?, emptyMessage?,
   noMatchesMessage?, countNoun?: { one, other }, maxVisible = 50, autoFocus? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
@@ -178,6 +178,15 @@ An option's `hint` is the same thing it is on `ComboBoxField`: a second, muted
 line inside the row, folded into the row's accessible name because it is what
 tells two rows with one label apart. The query matches it too, so an operator
 who knows an id reaches the row named for a person.
+
+**Its description and its error are two rungs, which is the one place this
+control departs from the rule above.** Everywhere else an error replaces the
+description line. Here the description sits above the field and the error below
+it, because what lies between them is the field itself, its popover and its
+chip row: an error rendered up there would be separated from the control it is
+about by everything the operator is looking at, and one that replaced the
+description would move the field on the way in and out. `reserveMessage` holds
+the lower line open, so going invalid still moves nothing.
 
 ## Field height is a property of the place, not of the field
 

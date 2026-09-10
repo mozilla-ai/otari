@@ -154,7 +154,7 @@ test.describe("dashboard core flows", () => {
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
     await budgetRow.getByRole("button", { name: "Edit" }).click()
     // The field's visible label is its accessible name now: the picker used to
-    // carry a hidden "Add a person" beside a heading that labelled nothing, so
+    // carry a hidden "Add a person" beside a heading that labeled nothing, so
     // one control had two names.
     const editDialog = page.getByRole("dialog")
     const owners = editDialog.getByRole("combobox", {

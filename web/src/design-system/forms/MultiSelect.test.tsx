@@ -168,7 +168,10 @@ describe("MultiSelect", () => {
 
     await user.click(field())
     expect(screen.getAllByRole("option")).toHaveLength(3)
-    expect(screen.getByText(/of 3 matches selected of 8/)).toBeInTheDocument()
+    // Two clauses, not one nested sentence: what is shown, then what is
+    // picked among it.
+    expect(screen.getByText(/Showing 3 of 8/)).toBeInTheDocument()
+    expect(screen.getByText(/0 of 3 selected here/)).toBeInTheDocument()
   })
 
   it("names its description and its error on the control", async () => {
@@ -227,7 +230,7 @@ describe("MultiSelect", () => {
       within(screen.getByRole("listbox")).getByText(/Pat Okafor/),
     ).toBeInTheDocument()
     // None of the two matches is selected, and one person is assigned overall.
-    expect(screen.getByText(/0 of 2 matches selected/)).toBeInTheDocument()
+    expect(screen.getByText(/0 of 2 selected here/)).toBeInTheDocument()
     // Singular, which is the whole reason the noun is a pair.
     expect(screen.getAllByText(/1 person assigned/).length).toBeGreaterThan(0)
   })

@@ -521,7 +521,6 @@ function DeploymentBudgetsPage() {
     [workspaces.data],
   )
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
-  const updateBudget = useUpdateBudget()
   const deleteBudget = useDeleteBudget()
   const updateUser = useUpdateUser()
 
@@ -583,7 +582,11 @@ function DeploymentBudgetsPage() {
   }, [workspaces.data, workspaceDefaults.data])
   const editingBudget = rows.find((b) => b.budget_id === editing) ?? null
   const historyBudget = rows.find((b) => b.budget_id === historyOpen) ?? null
-  const showOnboarding = !loading && rows.length === 0 && !addOpen
+  // Not gated on the dialog being closed: react-aria returns focus to the
+  // element that opened the dialog, and an empty-state CTA that unmounts on
+  // open leaves it nothing to return to, so focus lands on body and Tab
+  // restarts at the top of the document.
+  const showOnboarding = !loading && rows.length === 0
   const selectableKeys = rows.map((b) => b.budget_id)
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
 
@@ -800,7 +803,6 @@ function DeploymentBudgetsPage() {
       <ErrorBanner
         error={
           budgets.error ??
-          updateBudget.error ??
           updateUser.error ??
           // Without this a failed roster silently withholds the assignment
           // control and the "Default for" column, with nothing saying why.
@@ -854,53 +856,23 @@ function DeploymentBudgetsPage() {
       {/* Key on the row id so switching which budget is edited remounts the form,
           its fields seed from `initial` on mount only. */}
       {editingBudget ? (
-        <BudgetForm
+        <EditBudgetDialog
           key={editingBudget.budget_id}
-          isOpen
-          onOpenChange={(open) => {
-            if (!open) setEditing(null)
+          budget={editingBudget}
+          users={users.data ?? []}
+          rosterReady={rosterReady}
+          assignUsers={assignUsers}
+          onAssignmentReset={() => {
+            setAssignmentError(null)
+            setPendingAssignments(null)
           }}
-          title="Edit budget"
-          description={budgetLabel(editingBudget)}
-          submitLabel="Save"
-          initial={{
-            name: editingBudget.name,
-            max_budget: editingBudget.max_budget,
-            budget_duration_sec: editingBudget.budget_duration_sec,
+          assignmentError={assignmentError}
+          assigningUsers={assigningUsers}
+          onClose={() => {
+            setAssignmentError(null)
+            setPendingAssignments(null)
+            setEditing(null)
           }}
-          error={updateBudget.error ?? assignmentError}
-          isPending={updateBudget.isPending || assigningUsers}
-          assignUsers={
-            rosterReady && !isOrganizationOwned(editingBudget)
-              ? (users.data ?? [])
-              : undefined
-          }
-          assignmentNote={
-            isOrganizationOwned(editingBudget)
-              ? "This budget belongs to an organization, so people here cannot be held to it. Its limit and reset are still the deployment's to change."
-              : undefined
-          }
-          assignedUserIds={(users.data ?? [])
-            .filter((u) => u.budget_id === editingBudget.budget_id)
-            .map((u) => u.user_id)}
-          onSubmit={(body, userIds) =>
-            updateBudget.mutate(
-              { id: editingBudget.budget_id, body },
-              {
-                onSuccess: async () => {
-                  const held = (users.data ?? [])
-                    .filter((u) => u.budget_id === editingBudget.budget_id)
-                    .map((u) => u.user_id)
-                  if (
-                    await assignUsers(editingBudget.budget_id, userIds, held)
-                  ) {
-                    setEditing(null)
-                  }
-                },
-              },
-            )
-          }
-          onClose={() => setEditing(null)}
         />
       ) : null}
 
@@ -1003,20 +975,81 @@ function DeploymentBudgetsPage() {
 }
 
 /**
- * Spend & budgets, picking the page for whoever is asking.
+ * Edit one budget, and reconcile who holds it.
  *
- * One route with two pages behind it, the way Routing does since otari#867: an
- * operator gets the deployment's budgets, and an organization owner or admin
- * gets their own organization's, which is the surface otari-ai#1943 added. Not
- * two rail rows, because it is one destination in the design and one row in the
- * roles matrix; and not one merged page, because the two read different tables
- * and every deployment-wide read here answers 403 to a tenant.
- *
- * Held until the context lands rather than defaulting to one of them. Guessing
- * would either flash the operator page at an admin and swap it, or fire the
- * deployment-wide reads as an admin and paint their refusals; the shell already
- * waits on this query, so the cost is a spinner that is usually already over.
+ * A component of its own for the reason the create one is: the update mutation
+ * resets with the form on each open, so a refusal on one row cannot greet the
+ * next row's dialog with a message about a budget it is not editing. The page
+ * keys it on the row, which is what makes "switching which budget is open"
+ * reseed the fields.
  */
+function EditBudgetDialog({
+  budget: row,
+  users,
+  rosterReady,
+  assignUsers,
+  onAssignmentReset,
+  assignmentError,
+  assigningUsers,
+  onClose,
+}: {
+  budget: Budget
+  users: User[]
+  rosterReady: boolean
+  assignUsers: (
+    budgetId: string,
+    userIds: string[],
+    previousUserIds?: string[],
+  ) => Promise<boolean>
+  onAssignmentReset: () => void
+  assignmentError: Error | null
+  assigningUsers: boolean
+  onClose: () => void
+}) {
+  const updateBudget = useUpdateBudget()
+  const held = users
+    .filter((user) => user.budget_id === row.budget_id)
+    .map((user) => user.user_id)
+
+  return (
+    <BudgetForm
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="Edit budget"
+      description={budgetLabel(row)}
+      submitLabel="Save"
+      initial={{
+        name: row.name,
+        max_budget: row.max_budget,
+        budget_duration_sec: row.budget_duration_sec,
+      }}
+      error={updateBudget.error ?? assignmentError}
+      isPending={updateBudget.isPending || assigningUsers}
+      assignUsers={rosterReady && !isOrganizationOwned(row) ? users : undefined}
+      assignmentNote={
+        isOrganizationOwned(row)
+          ? "This budget belongs to an organization, so people here cannot be held to it. Its limit and reset are still the deployment's to change."
+          : undefined
+      }
+      assignedUserIds={held}
+      onSubmit={(body, userIds) => {
+        onAssignmentReset()
+        updateBudget.mutate(
+          { id: row.budget_id, body },
+          {
+            onSuccess: async () => {
+              if (await assignUsers(row.budget_id, userIds, held)) onClose()
+            },
+          },
+        )
+      }}
+      onClose={onClose}
+    />
+  )
+}
+
 /**
  * Create a budget, and attach it to the people chosen in the same form.
  *
@@ -1058,15 +1091,19 @@ function CreateBudgetDialog({
     userIds: string[],
   ) => {
     if (pendingAssignments) {
+      // Against the form as it stands, not against the set that failed. The
+      // retry is the operator's chance to fix the selection, and the fields
+      // stay editable while it is offered: replaying the original ids would
+      // drop whoever they just added. `held` is what the roster says already
+      // carries this budget, which is what makes the reconcile
+      // two-directional.
+      const held = users
+        .filter((user) => user.budget_id === pendingAssignments.budgetId)
+        .map((user) => user.user_id)
       // Awaited, because the retry's success is what closes the form. Left
       // open, the label reverts to "Create budget" the moment the assignments
       // land and the next press creates a second budget.
-      if (
-        await assignUsers(
-          pendingAssignments.budgetId,
-          pendingAssignments.userIds,
-        )
-      ) {
+      if (await assignUsers(pendingAssignments.budgetId, userIds, held)) {
         onClose()
       }
       return
@@ -1104,6 +1141,21 @@ function CreateBudgetDialog({
   )
 }
 
+/**
+ * Spend & budgets, picking the page for whoever is asking.
+ *
+ * One route with two pages behind it, the way Routing does since otari#867: an
+ * operator gets the deployment's budgets, and an organization owner or admin
+ * gets their own organization's, which is the surface otari-ai#1943 added. Not
+ * two rail rows, because it is one destination in the design and one row in the
+ * roles matrix; and not one merged page, because the two read different tables
+ * and every deployment-wide read here answers 403 to a tenant.
+ *
+ * Held until the context lands rather than defaulting to one of them. Guessing
+ * would either flash the operator page at an admin and swap it, or fire the
+ * deployment-wide reads as an admin and paint their refusals; the shell already
+ * waits on this query, so the cost is a spinner that is usually already over.
+ */
 export function BudgetsPage() {
   const organization = useOrganizationContext()
 

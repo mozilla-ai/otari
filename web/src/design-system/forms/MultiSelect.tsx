@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { FiCheck, FiChevronDown } from "react-icons/fi"
 
 import { DismissChip } from "../indicators/DismissChip"
@@ -86,12 +86,38 @@ export function MultiSelect({
   const [query, setQuery] = useState("")
   const [isOpen, setIsOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
+  // The control's own box, which is what "focus left this control" means. Held
+  // as a ref rather than walked up from the input, so wrapping the input in one
+  // more div cannot silently close the popover before an option press lands.
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  // The list, so the active option can be scrolled into view: the popover shows
+  // six rows and the cap renders fifty, so the highlight walks off the bottom.
+  const listRef = useRef<HTMLDivElement>(null)
   const listId = useId()
   const inputId = useId()
   const descriptionId = useId()
   const errorId = useId()
   const optionId = (index: number) => `${listId}-option-${index}`
+
+  // The popover shows six rows and renders up to `maxVisible`, so the active
+  // row walks past the fold on its own. Scrolled here rather than by the row,
+  // because only the list knows which one is active.
+  useEffect(() => {
+    if (!isOpen) return
+    // The id is spelled here rather than through `optionId`, which is a fresh
+    // arrow every render and so cannot be a dependency.
+    const active = listRef.current?.querySelector(
+      `[id="${listId}-option-${activeIndex}"]`,
+    )
+    // Guarded because jsdom implements no layout and so no `scrollIntoView`;
+    // the tests below drive the arrows and would throw on the first press.
+    if (
+      active instanceof HTMLElement &&
+      typeof active.scrollIntoView === "function"
+    ) {
+      active.scrollIntoView({ block: "nearest" })
+    }
+  }, [isOpen, activeIndex, listId])
 
   const needle = query.trim().toLowerCase()
   // Filtered, never re-ordered: a selected row keeps its place, so a second
@@ -156,8 +182,12 @@ export function MultiSelect({
       if (!isOpen) return
       // Before the row lookup, not after: an open combo box owns Enter whether
       // or not it has a row to give, and this input sits inside a real form, so
-      // falling through submits it.
+      // falling through submits it. Stopped as well as prevented, because
+      // `FormDialog` submits on Cmd/Ctrl+Enter from anywhere inside the form:
+      // without this, one gesture toggles a row and posts the selection from
+      // before that toggle.
       event.preventDefault()
+      event.stopPropagation()
       const option = matches[activeIndex]
       if (!option) return
       toggle(option.id)
@@ -201,10 +231,9 @@ export function MultiSelect({
       ) : null}
       {/* `relative` so the popover hangs off the field rather than off the
           dialog, and the chips below it stay in flow. */}
-      <div className="relative flex flex-col gap-1.5">
+      <div ref={wrapperRef} className="relative flex flex-col gap-1.5">
         <div className="relative">
           <input
-            ref={inputRef}
             id={inputId}
             role="combobox"
             aria-expanded={isOpen}
@@ -245,11 +274,7 @@ export function MultiSelect({
               // Only when focus actually left the control: a press on an option
               // blurs the input and must not close the list before the press
               // lands.
-              if (
-                !event.currentTarget.parentElement?.parentElement?.contains(
-                  event.relatedTarget,
-                )
-              ) {
+              if (!wrapperRef.current?.contains(event.relatedTarget)) {
                 setIsOpen(false)
               }
             }}
@@ -267,6 +292,7 @@ export function MultiSelect({
                 both a lint error and a second, conflicting announcement. The
                 chip row below IS a real list, because that one is a list. */}
             <div
+              ref={listRef}
               id={listId}
               role="listbox"
               aria-multiselectable
@@ -274,11 +300,13 @@ export function MultiSelect({
               // carrying one name is three things a screen reader cannot tell
               // apart, and it is what a query for the field then finds.
               aria-label={`${label}, options`}
-              // Six rows before it scrolls, each at the 44px touch floor
-              // (motion-and-access.md: "44px is the floor, everywhere"), so
-              // 6 x 44px = 264px = `max-h-66`. A class rather than an inline
-              // style: the arithmetic is a compile-time constant.
-              className="max-h-66 overflow-y-auto"
+              // Six rows before it scrolls. Each is 44px, the touch floor
+              // (motion-and-access.md: "44px is the floor, everywhere"), and
+              // all but the first carry a 1px rule, so six of them are
+              // 6 x 44 + 5 = 269px. `max-h-[16.8125rem]` rather than the 264px
+              // the rows alone would suggest, which clipped the sixth by 5px.
+              // A class rather than an inline style: it is a constant.
+              className="max-h-[16.8125rem] overflow-y-auto"
             >
               {matches.length === 0 ? (
                 <p className="text-caption px-2.5 py-2">
@@ -353,9 +381,13 @@ export function MultiSelect({
               )}
             </div>
             <div className="border-border text-mono-caption text-subtle flex h-8 items-center justify-between border-t px-2.5">
+              {/* Two facts, two clauses. Nested, they read as one garbled
+                  sentence: "0 of 3 matches selected of 8". */}
               <span>
-                {selectedMatches} of {matches.length} matches selected
-                {capped ? ` of ${reached.length}` : ""} ·{" "}
+                {capped
+                  ? `Showing ${matches.length} of ${reached.length} · `
+                  : ""}
+                {selectedMatches} of {matches.length} selected here ·{" "}
                 {counted(value.length)}
               </span>
               <span>ESC closes</span>
