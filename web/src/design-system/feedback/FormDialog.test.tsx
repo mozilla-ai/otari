@@ -219,6 +219,29 @@ describe("FormDialog", () => {
     })
   })
 
+  it("keeps Cancel before the submit in the DOM, which is the stacking order", async () => {
+    // The footer stacks below 640px and nothing reorders it, so DOM order *is*
+    // the visual order and the focus order: Cancel above, the primary lowest,
+    // which is the control nearest the thumb on a sheet. An earlier version
+    // moved Cancel with CSS `order`, which left the visual and focus orders
+    // disagreeing.
+    //
+    // DOM order is the half jsdom can see. The stacking itself is a media query
+    // and is measured on a build, not here.
+    render(
+      <FormDialog {...base} isOpen>
+        {withField}
+      </FormDialog>,
+    )
+
+    const footer = screen.getByRole("dialog").querySelector("footer")
+    if (!footer) throw new Error("the footer is gone")
+    const buttons = [...footer.querySelectorAll("button")].map(
+      (b) => b.textContent,
+    )
+    expect(buttons).toEqual(["Cancel", "Create key"])
+  })
+
   describe("isSubmitDisabled", () => {
     it("blocks the button, plain Enter, and Cmd/Ctrl+Enter alike", async () => {
       // `requestSubmit` does not consult the submit button's `disabled` state,

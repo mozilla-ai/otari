@@ -280,11 +280,7 @@ export function FormDialog({
                           that cannot be dismissed has one way out and the
                           primary is it. */}
                       {isDismissable ? (
-                        <Button
-                          className="otari-form-dialog__cancel"
-                          isDisabled={isPending}
-                          onPress={requestClose}
-                        >
+                        <Button isDisabled={isPending} onPress={requestClose}>
                           Cancel
                         </Button>
                       ) : null}

@@ -2217,12 +2217,14 @@ main {
   }
   /* The footer stacks. Two 36px buttons and a caption sharing one row fit a
    * desktop and not a 390px sheet: the routing dialog's caption wrapped to three
-   * lines beside them. Primary on top, Cancel under it, each the sheet's full
-   * width at the 44px touch floor. Drawn on artboard 07.
+   * lines beside them. Each control takes the sheet's full width at the 44px
+   * touch floor, in DOM order, so Cancel sits above the primary.
    *
-   * Cancel is first in the DOM, where it belongs beside the primary on a
-   * desktop, so `order` moves it rather than the markup: reading order on a
-   * desktop and stacking order on a phone are different questions. */
+   * Nothing reorders them, and that is the point: an earlier version moved
+   * Cancel with `order`, which left the visual order and the focus order
+   * disagreeing on a phone. DOM, visual and focus order now agree at both
+   * widths. It also puts the primary lowest, which is the control nearest the
+   * thumb on a sheet. */
   .otari-form-dialog__footer {
     flex-direction: column;
     align-items: stretch;
@@ -2246,9 +2248,6 @@ main {
    * button by 7.07px, and this one spans the sheet. */
   .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]) {
     transform: none;
-  }
-  .otari-form-dialog__cancel {
-    order: 1;
   }
   .otari-form-dialog__footer button {
     min-height: 2.75rem;
