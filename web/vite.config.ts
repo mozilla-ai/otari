@@ -27,7 +27,7 @@ const webRoot = fileURLToPath(new URL("./", import.meta.url))
 const docsDir = fileURLToPath(new URL("../docs", import.meta.url))
 
 // The gateway serves the dashboard and the API from one origin, so the app
-// fetches "/v1/..." and "/health" as same-origin paths. `pnpm run dev` serves
+// fetches "/api/v1/..." as same-origin paths. `pnpm run dev` serves
 // only the SPA, so proxy those to a running gateway. Override the target to
 // develop against a deployed gateway instead of a local one:
 //   OTARI_DEV_API=https://your-app.up.railway.app pnpm run dev
@@ -98,8 +98,7 @@ export default defineConfig({
     // web/ stays listed because an explicit allow list replaces the default.
     fs: { allow: [webRoot, docsDir] },
     proxy: {
-      "/v1": apiProxy,
-      "/health": apiProxy,
+      "/api/v1": apiProxy,
     },
     // Edits written through a bind mount (e.g. by an agent in a container) do
     // not always reach a watcher on the host as filesystem events. Set
