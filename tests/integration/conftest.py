@@ -330,9 +330,13 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
 
     The lifespan does not touch these, so on a reused app they would carry one
     test's state into the next: the login limiter counts calls per client IP
-    and the test client always has the same one, and a fixture may rebind a
-    port on the container.
+    and the test client always has the same one, a fixture may rebind a port on
+    the container, and a test that registers an in-flight entry by hand and
+    fails before finishing it would leave it for the next one. The registry is
+    cleared in place rather than replaced, because the middleware holds the one
+    ``create_app`` built and finishes entries on it.
     """
+    app.state.inflight.clear()
     app.state.rate_limiter = RateLimiter(config.rate_limit_rpm) if config.rate_limit_rpm is not None else None
     app.state.login_rate_limiter = (
         RateLimiter(config.dashboard_login_rate_limit_per_minute)
@@ -371,7 +375,9 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
         async with async_session_factory() as session:
             yield session
 
-    app.dependency_overrides[get_db] = override_get_db
+    # Assigned rather than updated: the app outlives the test, so an override
+    # left by an earlier boot would otherwise stay registered.
+    app.dependency_overrides = {get_db: override_get_db}
 
     try:
         with TestClient(app) as test_client:
@@ -382,7 +388,13 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
 
 @pytest.fixture
 def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
-    """Create a test client for the FastAPI app."""
+    """A client on a freshly booted app for the shared config.
+
+    Freshly booted, not freshly built: the app object is shared for the worker's
+    lifetime (``app_for``), and only the lifespan runs per test. Whatever the
+    lifespan sets on ``app.state`` is per test; anything else put on the app
+    outlives the test unless ``_refresh_process_state`` redoes it.
+    """
     yield from build_test_client(test_config)
 
 

@@ -127,6 +127,10 @@ class InFlightRegistry:
     def __len__(self) -> int:
         return len(self._entries)
 
+    def clear(self) -> None:
+        """Forget every entry. For a test boot on a registry that outlives the boot."""
+        self._entries.clear()
+
 
 def get_registry(request: Request) -> InFlightRegistry | None:
     """The app's registry, or None when there is nowhere to record anything.

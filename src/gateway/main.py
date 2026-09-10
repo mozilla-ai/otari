@@ -641,7 +641,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
             dashboard rather than to the origin's root.
             """
             return RedirectResponse(
-                url=callback_landing_target(config, provider, request.url.query),
+                url=callback_landing_target(request.app.state.config, provider, request.url.query),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 
