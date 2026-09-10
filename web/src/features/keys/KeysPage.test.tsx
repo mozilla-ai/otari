@@ -636,10 +636,11 @@ describe("KeysPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
-  it("clears the form instead of showing the secret when Create another is checked", async () => {
-    // The row lands in the table either way. What is given up is the one chance
-    // to read this key, which is why the checkbox is a deliberate press.
-    const fetchMock = mockApi({ keys: [] })
+  it("hands over the secret with no way for the form to skip it", async () => {
+    // The one chance to read the key is not something the form can waive. The
+    // only "Create another" is on the secret step, where it is reached by
+    // having been shown the key first.
+    mockApi({ keys: [] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
 
@@ -648,26 +649,20 @@ describe("KeysPage", () => {
       screen.getByRole("button", { name: "Create your first key" }),
     )
     const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).queryByLabelText("Create another"),
+    ).not.toBeInTheDocument()
     await user.type(screen.getByLabelText("Name"), "first-key")
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(within(dialog).getByLabelText("Create another"))
     await submitTheCreateDialog(user)
 
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.filter(
-          ([u, init]) =>
-            String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
-        ),
-      ).toHaveLength(1),
-    )
-    // No secret step, and the name is cleared for the next one.
     expect(
-      screen.queryByRole("alert", { name: /API key created/ }),
-    ).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue(""))
-    expect(document.body.textContent).not.toContain(NEW_SECRET)
+      await screen.findByRole("alert", { name: /API key created/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /I.?ve saved this key/ }),
+    ).toBeInTheDocument()
   })
 
   it("shows a regenerated secret in the same dialog a created one arrives in", async () => {
@@ -693,7 +688,7 @@ describe("KeysPage", () => {
     ).toBeInTheDocument()
     // No form step and nothing to create again: the key already exists.
     expect(
-      within(dialog).queryByLabelText("Create another"),
+      within(dialog).queryByRole("button", { name: "Create another" }),
     ).not.toBeInTheDocument()
     expect(
       within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),

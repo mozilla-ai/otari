@@ -436,7 +436,6 @@ function CreateKeyDialog({
   const [scopeValid, setScopeValid] = useState(true)
   // The secret, once there is one. Its presence is the step: null is the form.
   const [created, setCreated] = useState<CreateKeyResponse | null>(null)
-  const [createAnother, setCreateAnother] = useState(false)
   const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
@@ -490,7 +489,6 @@ function CreateKeyDialog({
     // The frame keeps its content while it animates out, so the reset waits for
     // the next open rather than blanking the dialog as it goes.
     setCreated(null)
-    setCreateAnother(false)
     resetForm()
   }
 
@@ -517,13 +515,6 @@ function CreateKeyDialog({
       : shared
     create.mutate(body, {
       onSuccess: (result) => {
-        // "Create another" trades the secret step for a cleared form. The row is
-        // already in the table either way; what is given up is the one chance to
-        // read this key, which is why the checkbox says so.
-        if (createAnother) {
-          resetForm()
-          return
-        }
         setCreated(result)
       },
     })
@@ -540,7 +531,6 @@ function CreateKeyDialog({
         // Cancel to match.
         isDismissable={false}
         title="Key created"
-        description="Copy it now. Otari stores a hash and cannot show it again."
         // The strip's own words, not "Done": this control is an
         // acknowledgement rather than a dismissal, and it is the only way out.
         submitLabel="I’ve saved this key"
@@ -582,11 +572,6 @@ function CreateKeyDialog({
       error={create.error}
       isDirty={
         keyName.trim() !== "" || expiresAt !== "" || userId.trim() !== ""
-      }
-      footerStart={
-        <Checkbox isSelected={createAnother} onChange={setCreateAnother}>
-          Create another
-        </Checkbox>
       }
     >
       <Field
@@ -702,7 +687,6 @@ function RegeneratedSecretDialog({
       size="lg"
       isDismissable={false}
       title={title}
-      description="Copy it now. Otari stores a hash and cannot show it again."
       submitLabel="I’ve saved this key"
       onSubmit={onClose}
       isPending={false}
