@@ -18,64 +18,6 @@
     {
       "item": [
         {
-          "name": "Health Check",
-          "request": {
-            "description": "General health check endpoint.\n\nReturns basic health status. For infrastructure monitoring,\nuse /health/readiness or /health/liveness instead.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health"
-              ],
-              "raw": "{{baseUrl}}/health"
-            }
-          }
-        },
-        {
-          "name": "Health Liveness",
-          "request": {
-            "description": "Liveness probe endpoint.\n\nSimple check to verify the process is alive and responding.\nUsed by Kubernetes/container orchestrators for liveness probes.\n\nReturns:\n    Plain text \"I'm alive!\" message",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health",
-                "liveness"
-              ],
-              "raw": "{{baseUrl}}/health/liveness"
-            }
-          }
-        },
-        {
-          "name": "Health Readiness",
-          "request": {
-            "description": "Readiness probe endpoint.\n\nChecks if the gateway is ready to serve requests by validating:\n- Database connectivity\n- Service availability\n\nUsed by Kubernetes/container orchestrators for readiness probes.\nReturns HTTP 503 if any dependency is unavailable.\n\nReturns:\n    dict: Status object with health details\n\nRaises:\n    HTTPException: 503 if service is not ready",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health",
-                "readiness"
-              ],
-              "raw": "{{baseUrl}}/health/readiness"
-            }
-          }
-        }
-      ],
-      "name": "health"
-    },
-    {
-      "item": [
-        {
           "name": "Get Administration Access",
           "request": {
             "description": "Report whether the caller may use the deployment administration surface.\n\nThe one endpoint here that answers 200 for everybody. The rest refuse a\nnon-operator with 404 so they do not confirm they exist, which leaves a\ndashboard nothing to gate its navigation on but a failed request; this says\nthe same thing without one. It publishes only the caller's own standing,\nwhich they could establish by trying an endpoint anyway.",
@@ -86,11 +28,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "admin",
                 "access"
               ],
-              "raw": "{{baseUrl}}/v1/admin/access"
+              "raw": "{{baseUrl}}/api/v1/admin/access"
             }
           }
         },
@@ -105,6 +48,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "admin",
                 "users"
@@ -123,7 +67,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/admin/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/admin/users?skip=&limit="
             }
           }
         },
@@ -137,7 +81,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"is_active\": false\n}"
+              "raw": "{\n  \"is_active\": false,\n  \"is_superuser\": false\n}"
             },
             "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
             "header": [
@@ -152,12 +96,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "admin",
                 "users",
                 ":user_id"
               ],
-              "raw": "{{baseUrl}}/v1/admin/users/:user_id",
+              "raw": "{{baseUrl}}/api/v1/admin/users/:user_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -184,10 +129,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "agent-telemetry"
               ],
-              "raw": "{{baseUrl}}/v1/agent-telemetry"
+              "raw": "{{baseUrl}}/api/v1/agent-telemetry"
             }
           }
         },
@@ -202,6 +148,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "agent-telemetry",
                 "count"
@@ -238,7 +185,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/agent-telemetry/count?start_date=&end_date=&user_id=&api_key_id=&name="
+              "raw": "{{baseUrl}}/api/v1/agent-telemetry/count?start_date=&end_date=&user_id=&api_key_id=&name="
             }
           }
         },
@@ -253,6 +200,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "agent-telemetry",
                 "series"
@@ -301,7 +249,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/agent-telemetry/series?group_by=user_id&start_date=&end_date=&user_id=&api_key_id=&name=&bucket="
+              "raw": "{{baseUrl}}/api/v1/agent-telemetry/series?group_by=user_id&start_date=&end_date=&user_id=&api_key_id=&name=&bucket="
             }
           }
         },
@@ -316,6 +264,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "agent-telemetry",
                 "summary"
@@ -358,7 +307,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/agent-telemetry/summary?start_date=&end_date=&user_id=&api_key_id=&session_label=&bucket="
+              "raw": "{{baseUrl}}/api/v1/agent-telemetry/summary?start_date=&end_date=&user_id=&api_key_id=&session_label=&bucket="
             }
           }
         }
@@ -378,6 +327,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "aliases"
               ],
@@ -389,7 +339,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/aliases?workspace_id="
+              "raw": "{{baseUrl}}/api/v1/aliases?workspace_id="
             }
           }
         },
@@ -418,10 +368,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "aliases"
               ],
-              "raw": "{{baseUrl}}/v1/aliases"
+              "raw": "{{baseUrl}}/api/v1/aliases"
             }
           }
         },
@@ -436,6 +387,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "aliases",
                 ":name"
@@ -454,7 +406,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/aliases/:name?user_id=&workspace_id=",
+              "raw": "{{baseUrl}}/api/v1/aliases/:name?user_id=&workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -476,6 +428,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -489,7 +442,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/aliases?limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/aliases?limit="
             }
           }
         },
@@ -518,12 +471,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "aliases"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/aliases"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/aliases"
             }
           }
         },
@@ -538,6 +492,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -552,7 +507,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/aliases/:name?workspace_id=",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/aliases/:name?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -593,11 +548,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "audio",
                 "speech"
               ],
-              "raw": "{{baseUrl}}/v1/audio/speech"
+              "raw": "{{baseUrl}}/api/v1/audio/speech"
             }
           }
         },
@@ -612,11 +568,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "audio",
                 "transcriptions"
               ],
-              "raw": "{{baseUrl}}/v1/audio/transcriptions"
+              "raw": "{{baseUrl}}/api/v1/audio/transcriptions"
             }
           }
         }
@@ -636,13 +593,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "oauth",
                 ":provider",
                 "authorize"
               ],
-              "raw": "{{baseUrl}}/v1/auth/oauth/:provider/authorize",
+              "raw": "{{baseUrl}}/api/v1/auth/oauth/:provider/authorize",
               "variable": [
                 {
                   "description": "path parameter",
@@ -678,13 +636,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "oauth",
                 ":provider",
                 "callback"
               ],
-              "raw": "{{baseUrl}}/v1/auth/oauth/:provider/callback",
+              "raw": "{{baseUrl}}/api/v1/auth/oauth/:provider/callback",
               "variable": [
                 {
                   "description": "path parameter",
@@ -720,11 +679,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "password"
               ],
-              "raw": "{{baseUrl}}/v1/auth/password"
+              "raw": "{{baseUrl}}/api/v1/auth/password"
             }
           }
         },
@@ -753,12 +713,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "password",
                 "reset"
               ],
-              "raw": "{{baseUrl}}/v1/auth/password/reset"
+              "raw": "{{baseUrl}}/api/v1/auth/password/reset"
             }
           }
         },
@@ -787,13 +748,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "password",
                 "reset",
                 "confirm"
               ],
-              "raw": "{{baseUrl}}/v1/auth/password/reset/confirm"
+              "raw": "{{baseUrl}}/api/v1/auth/password/reset/confirm"
             }
           }
         },
@@ -822,11 +784,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "resend-verification"
               ],
-              "raw": "{{baseUrl}}/v1/auth/resend-verification"
+              "raw": "{{baseUrl}}/api/v1/auth/resend-verification"
             }
           }
         },
@@ -855,11 +818,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "session"
               ],
-              "raw": "{{baseUrl}}/v1/auth/session"
+              "raw": "{{baseUrl}}/api/v1/auth/session"
             }
           }
         },
@@ -874,11 +838,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "session"
               ],
-              "raw": "{{baseUrl}}/v1/auth/session"
+              "raw": "{{baseUrl}}/api/v1/auth/session"
             }
           }
         },
@@ -907,11 +872,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "signup"
               ],
-              "raw": "{{baseUrl}}/v1/auth/signup"
+              "raw": "{{baseUrl}}/api/v1/auth/signup"
             }
           }
         },
@@ -940,11 +906,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "verify-email"
               ],
-              "raw": "{{baseUrl}}/v1/auth/verify-email"
+              "raw": "{{baseUrl}}/api/v1/auth/verify-email"
             }
           }
         },
@@ -973,12 +940,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "authenticate"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/authenticate"
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/authenticate"
             }
           }
         },
@@ -993,13 +961,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "authenticate",
                 "options"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/authenticate/options"
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/authenticate/options"
             }
           }
         },
@@ -1014,12 +983,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "credentials"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/credentials"
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/credentials"
             }
           }
         },
@@ -1048,13 +1018,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "credentials",
                 ":credential_id"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/credentials/:credential_id",
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/credentials/:credential_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1076,13 +1047,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "credentials",
                 ":credential_id"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/credentials/:credential_id",
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/credentials/:credential_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1118,12 +1090,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "register"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/register"
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/register"
             }
           }
         },
@@ -1138,13 +1111,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "auth",
                 "webauthn",
                 "register",
                 "options"
               ],
-              "raw": "{{baseUrl}}/v1/auth/webauthn/register/options"
+              "raw": "{{baseUrl}}/api/v1/auth/webauthn/register/options"
             }
           }
         }
@@ -1164,6 +1138,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "batches"
               ],
@@ -1187,7 +1162,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/batches?provider=&after=&limit="
+              "raw": "{{baseUrl}}/api/v1/batches?provider=&after=&limit="
             }
           }
         },
@@ -1216,10 +1191,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "batches"
               ],
-              "raw": "{{baseUrl}}/v1/batches"
+              "raw": "{{baseUrl}}/api/v1/batches"
             }
           }
         },
@@ -1234,6 +1210,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "batches",
                 ":batch_id"
@@ -1246,7 +1223,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/batches/:batch_id?provider=",
+              "raw": "{{baseUrl}}/api/v1/batches/:batch_id?provider=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1268,6 +1245,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "batches",
                 ":batch_id",
@@ -1281,7 +1259,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/batches/:batch_id/cancel?provider=",
+              "raw": "{{baseUrl}}/api/v1/batches/:batch_id/cancel?provider=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1303,6 +1281,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "batches",
                 ":batch_id",
@@ -1316,7 +1295,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/batches/:batch_id/results?provider=",
+              "raw": "{{baseUrl}}/api/v1/batches/:batch_id/results?provider=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1343,10 +1322,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "bootstrap"
               ],
-              "raw": "{{baseUrl}}/v1/bootstrap"
+              "raw": "{{baseUrl}}/api/v1/bootstrap"
             }
           }
         }
@@ -1366,6 +1346,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "budgets"
               ],
@@ -1383,7 +1364,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/budgets?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/budgets?skip=&limit="
             }
           }
         },
@@ -1412,10 +1393,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "budgets"
               ],
-              "raw": "{{baseUrl}}/v1/budgets"
+              "raw": "{{baseUrl}}/api/v1/budgets"
             }
           }
         },
@@ -1430,11 +1412,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1470,11 +1453,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1496,11 +1480,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1522,6 +1507,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "budgets",
                 ":budget_id",
@@ -1541,7 +1527,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/budgets/:budget_id/reset-logs?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/budgets/:budget_id/reset-logs?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1567,7 +1553,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model\": \"openai:gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello from Otari!\"\n    }\n  ]\n}"
+              "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
             },
             "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
@@ -1582,11 +1568,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "chat",
                 "completions"
               ],
-              "raw": "{{baseUrl}}/v1/chat/completions"
+              "raw": "{{baseUrl}}/api/v1/chat/completions"
             }
           }
         }
@@ -1620,10 +1607,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "embeddings"
               ],
-              "raw": "{{baseUrl}}/v1/embeddings"
+              "raw": "{{baseUrl}}/api/v1/embeddings"
             }
           }
         }
@@ -1643,6 +1631,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "files"
               ],
@@ -1666,7 +1655,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/files?user=&purpose=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id="
             }
           }
         },
@@ -1681,10 +1670,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "files"
               ],
-              "raw": "{{baseUrl}}/v1/files"
+              "raw": "{{baseUrl}}/api/v1/files"
             }
           }
         },
@@ -1699,6 +1689,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "files",
                 ":file_id"
@@ -1711,7 +1702,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/files/:file_id?user=",
+              "raw": "{{baseUrl}}/api/v1/files/:file_id?user=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1733,6 +1724,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "files",
                 ":file_id"
@@ -1745,7 +1737,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/files/:file_id?user=",
+              "raw": "{{baseUrl}}/api/v1/files/:file_id?user=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1767,6 +1759,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "files",
                 ":file_id",
@@ -1780,7 +1773,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/files/:file_id/content?user=",
+              "raw": "{{baseUrl}}/api/v1/files/:file_id/content?user=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1793,6 +1786,70 @@
         }
       ],
       "name": "files"
+    },
+    {
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "description": "General health check endpoint.\n\nReturns basic health status. For infrastructure monitoring,\nuse /health/readiness or /health/liveness instead.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health"
+            }
+          }
+        },
+        {
+          "name": "Health Liveness",
+          "request": {
+            "description": "Liveness probe endpoint.\n\nSimple check to verify the process is alive and responding.\nUsed by Kubernetes/container orchestrators for liveness probes.\n\nReturns:\n    Plain text \"I'm alive!\" message",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health",
+                "liveness"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health/liveness"
+            }
+          }
+        },
+        {
+          "name": "Health Readiness",
+          "request": {
+            "description": "Readiness probe endpoint.\n\nChecks if the gateway is ready to serve requests by validating:\n- Database connectivity\n- Service availability\n\nUsed by Kubernetes/container orchestrators for readiness probes.\nReturns HTTP 503 if any dependency is unavailable.\n\nReturns:\n    dict: Status object with health details\n\nRaises:\n    HTTPException: 503 if service is not ready",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health",
+                "readiness"
+              ],
+              "raw": "{{baseUrl}}/api/v1/health/readiness"
+            }
+          }
+        }
+      ],
+      "name": "health"
     },
     {
       "item": [
@@ -1821,11 +1878,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "images",
                 "generations"
               ],
-              "raw": "{{baseUrl}}/v1/images/generations"
+              "raw": "{{baseUrl}}/api/v1/images/generations"
             }
           }
         }
@@ -1859,11 +1917,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "invitations",
                 "accept"
               ],
-              "raw": "{{baseUrl}}/v1/invitations/accept"
+              "raw": "{{baseUrl}}/api/v1/invitations/accept"
             }
           }
         },
@@ -1892,11 +1951,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "invitations",
                 "validate"
               ],
-              "raw": "{{baseUrl}}/v1/invitations/validate"
+              "raw": "{{baseUrl}}/api/v1/invitations/validate"
             }
           }
         }
@@ -1916,6 +1976,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "keys"
               ],
@@ -1939,7 +2000,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/keys?skip=&limit=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/keys?skip=&limit=&workspace_id="
             }
           }
         },
@@ -1968,10 +2029,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "keys"
               ],
-              "raw": "{{baseUrl}}/v1/keys"
+              "raw": "{{baseUrl}}/api/v1/keys"
             }
           }
         },
@@ -1986,11 +2048,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2026,11 +2089,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2052,11 +2116,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2078,12 +2143,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "keys",
                 ":key_id",
                 "rotate"
               ],
-              "raw": "{{baseUrl}}/v1/keys/:key_id/rotate",
+              "raw": "{{baseUrl}}/api/v1/keys/:key_id/rotate",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2096,65 +2162,6 @@
         }
       ],
       "name": "keys"
-    },
-    {
-      "item": [
-        {
-          "name": "Receive Logs",
-          "request": {
-            "description": "Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs).",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "logs"
-              ],
-              "raw": "{{baseUrl}}/v1/logs"
-            }
-          }
-        },
-        {
-          "name": "Receive Metrics",
-          "request": {
-            "description": "Ingest content-free coding-agent outcome metrics from OTLP metric points.\n\nRecords the outcome counters a coding agent reports on the metrics signal and\nthat Otari has no other source for: lines of code changed, commits, pull\nrequests, and active time. Points are stored exactly as reported, with their\nOTLP series identity, so a cumulative counter is turned into an increment at\nread time rather than re-counted on every export. Metrics that duplicate an\nalready-recorded signal (token/cost usage, already billed; edit decisions,\nalready captured as behavioral events) are skipped, as is any metric name this\ngateway does not know, so a newer agent version never breaks reception.\n\nOutcome metrics are never billable: they touch no budget and no spend. Capture\nanswers to the same ``capture_agent_telemetry`` toggle as behavioral events;\nwith it off, the export still succeeds and simply stores nothing.",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "metrics"
-              ],
-              "raw": "{{baseUrl}}/v1/metrics"
-            }
-          }
-        },
-        {
-          "name": "Receive Traces",
-          "request": {
-            "description": "Ingest LLM usage from OTLP spans (GenAI semantic conventions).",
-            "header": [],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "traces"
-              ],
-              "raw": "{{baseUrl}}/v1/traces"
-            }
-          }
-        }
-      ],
-      "name": "otel"
     },
     {
       "item": [
@@ -2183,11 +2190,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "mcp",
                 "execute"
               ],
-              "raw": "{{baseUrl}}/v1/mcp/execute"
+              "raw": "{{baseUrl}}/api/v1/mcp/execute"
             }
           }
         },
@@ -2202,13 +2210,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "mcp",
                 "servers",
                 ":mcp_server_id",
                 "tools"
               ],
-              "raw": "{{baseUrl}}/v1/mcp/servers/:mcp_server_id/tools",
+              "raw": "{{baseUrl}}/api/v1/mcp/servers/:mcp_server_id/tools",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2234,7 +2243,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model\": \"anthropic:claude-haiku-4-5\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello from Otari!\"\n    }\n  ]\n}"
+              "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ],\n  \"max_tokens\": 0\n}"
             },
             "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
             "header": [
@@ -2249,10 +2258,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "messages"
               ],
-              "raw": "{{baseUrl}}/v1/messages"
+              "raw": "{{baseUrl}}/api/v1/messages"
             }
           }
         },
@@ -2281,11 +2291,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "messages",
                 "count_tokens"
               ],
-              "raw": "{{baseUrl}}/v1/messages/count_tokens"
+              "raw": "{{baseUrl}}/api/v1/messages/count_tokens"
             }
           }
         }
@@ -2305,6 +2316,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "models"
               ],
@@ -2316,7 +2328,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/models?provider="
+              "raw": "{{baseUrl}}/api/v1/models?provider="
             }
           }
         },
@@ -2331,6 +2343,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "models",
                 "discoverable"
@@ -2343,7 +2356,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/models/discoverable?refresh="
+              "raw": "{{baseUrl}}/api/v1/models/discoverable?refresh="
             }
           }
         },
@@ -2358,11 +2371,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "models",
                 "metadata"
               ],
-              "raw": "{{baseUrl}}/v1/models/metadata"
+              "raw": "{{baseUrl}}/api/v1/models/metadata"
             }
           }
         },
@@ -2377,11 +2391,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "models",
                 ":model_id"
               ],
-              "raw": "{{baseUrl}}/v1/models/:model_id",
+              "raw": "{{baseUrl}}/api/v1/models/:model_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2422,6 +2437,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "moderations"
               ],
@@ -2433,7 +2449,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/moderations?include_raw="
+              "raw": "{{baseUrl}}/api/v1/moderations?include_raw="
             }
           }
         }
@@ -2467,10 +2483,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations"
               ],
-              "raw": "{{baseUrl}}/v1/organizations"
+              "raw": "{{baseUrl}}/api/v1/organizations"
             }
           }
         },
@@ -2485,11 +2502,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me"
+              "raw": "{{baseUrl}}/api/v1/organizations/me"
             }
           }
         },
@@ -2518,11 +2536,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me"
+              "raw": "{{baseUrl}}/api/v1/organizations/me"
             }
           }
         },
@@ -2537,12 +2556,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "domains"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/domains"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/domains"
             }
           }
         },
@@ -2571,12 +2591,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "domains"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/domains"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/domains"
             }
           }
         },
@@ -2605,13 +2626,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "domains",
                 ":organization_domain_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/domains/:organization_domain_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2633,13 +2655,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "domains",
                 ":organization_domain_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/domains/:organization_domain_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2661,6 +2684,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -2668,7 +2692,7 @@
                 ":organization_domain_id",
                 "verify"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/domains/:organization_domain_id/verify",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/domains/:organization_domain_id/verify",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2704,12 +2728,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "member-invitations"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/member-invitations"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/member-invitations"
             }
           }
         },
@@ -2724,13 +2749,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "member-invitations",
                 ":invitation_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/member-invitations/:invitation_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/member-invitations/:invitation_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2752,6 +2778,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -2771,7 +2798,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/members?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/members?skip=&limit="
             }
           }
         },
@@ -2800,12 +2827,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "members"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/members"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/members"
             }
           }
         },
@@ -2834,13 +2862,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "members",
                 ":organization_member_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/members/:organization_member_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/members/:organization_member_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2862,13 +2891,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "members",
                 ":organization_member_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/members/:organization_member_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/members/:organization_member_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2890,6 +2920,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -2909,7 +2940,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/memberships?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/memberships?skip=&limit="
             }
           }
         },
@@ -2924,6 +2955,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -2943,7 +2975,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pending-memberships?skip=&limit="
             }
           }
         },
@@ -2958,6 +2990,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -2965,7 +2998,7 @@
                 ":organization_member_id",
                 "accept"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships/:organization_member_id/accept",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pending-memberships/:organization_member_id/accept",
               "variable": [
                 {
                   "description": "path parameter",
@@ -2987,6 +3020,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -2994,7 +3028,7 @@
                 ":organization_member_id",
                 "decline"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pending-memberships/:organization_member_id/decline",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pending-memberships/:organization_member_id/decline",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3030,12 +3064,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "switch"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/switch"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/switch"
             }
           }
         }
@@ -3055,6 +3090,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3074,7 +3110,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/budgets?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/budgets?skip=&limit="
             }
           }
         },
@@ -3103,12 +3139,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "budgets"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/budgets"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/budgets"
             }
           }
         },
@@ -3137,13 +3174,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3165,13 +3203,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3193,6 +3232,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3212,7 +3252,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/spend-ceilings?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/spend-ceilings?skip=&limit="
             }
           }
         },
@@ -3241,12 +3281,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "spend-ceilings"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/spend-ceilings"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/spend-ceilings"
             }
           }
         },
@@ -3275,13 +3316,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "spend-ceilings",
                 ":ceiling_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/spend-ceilings/:ceiling_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/spend-ceilings/:ceiling_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3303,13 +3345,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "spend-ceilings",
                 ":ceiling_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/spend-ceilings/:ceiling_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/spend-ceilings/:ceiling_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3336,6 +3379,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3355,7 +3399,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/guardrails?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails?skip=&limit="
             }
           }
         },
@@ -3384,12 +3428,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "guardrails"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/guardrails"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails"
             }
           }
         },
@@ -3418,13 +3463,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "guardrails",
                 ":guardrail_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/guardrails/:guardrail_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails/:guardrail_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3446,13 +3492,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "guardrails",
                 ":guardrail_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/guardrails/:guardrail_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails/:guardrail_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3479,6 +3526,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3504,7 +3552,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/keys?skip=&limit=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys?skip=&limit=&workspace_id="
             }
           }
         },
@@ -3533,12 +3581,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "keys"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/keys"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys"
             }
           }
         },
@@ -3567,13 +3616,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3595,13 +3645,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3623,6 +3674,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3630,7 +3682,7 @@
                 ":key_id",
                 "rotate"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/keys/:key_id/rotate",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/keys/:key_id/rotate",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3657,6 +3709,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3676,7 +3729,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pricing?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing?skip=&limit="
             }
           }
         },
@@ -3705,12 +3758,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "pricing"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pricing"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing"
             }
           }
         },
@@ -3739,13 +3793,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "pricing",
                 ":pricing_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pricing/:pricing_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing/:pricing_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3767,13 +3822,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "pricing",
                 ":pricing_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pricing/:pricing_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/pricing/:pricing_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3800,6 +3856,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3825,7 +3882,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys?include_archived=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys?include_archived=&skip=&limit="
             }
           }
         },
@@ -3854,12 +3911,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "provider-keys"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys"
             }
           }
         },
@@ -3888,13 +3946,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "provider-keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3916,13 +3975,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "provider-keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3944,6 +4004,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3951,7 +4012,7 @@
                 ":key_id",
                 "archive"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id/archive",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/archive",
               "variable": [
                 {
                   "description": "path parameter",
@@ -3973,6 +4034,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -3980,7 +4042,7 @@
                 ":key_id",
                 "default"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id/default",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/default",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4002,6 +4064,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -4009,7 +4072,7 @@
                 ":key_id",
                 "restore"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id/restore",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/restore",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4031,12 +4094,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "provider-keys"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-keys",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4072,13 +4136,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "provider-keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4105,13 +4170,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "provider-keys",
                 ":key_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-keys/:key_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4138,6 +4204,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -4145,7 +4212,7 @@
                 ":key_id",
                 "models"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id/models",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-keys/:key_id/models",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4186,6 +4253,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -4193,7 +4261,7 @@
                 ":key_id",
                 "models"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id/models",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-keys/:key_id/models",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4220,6 +4288,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -4228,7 +4297,7 @@
                 "models",
                 ":model"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id/models/:model",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/provider-keys/:key_id/models/:model",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4265,6 +4334,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -4278,7 +4348,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/routing-policies?limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/routing-policies?limit="
             }
           }
         },
@@ -4307,12 +4377,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
                 "routing-policies"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/routing-policies"
+              "raw": "{{baseUrl}}/api/v1/organizations/me/routing-policies"
             }
           }
         },
@@ -4327,6 +4398,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -4341,7 +4413,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/routing-policies/:name?workspace_id=",
+              "raw": "{{baseUrl}}/api/v1/organizations/me/routing-policies/:name?workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4363,6 +4435,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "routing",
                 "policies"
@@ -4375,7 +4448,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/routing/policies?workspace_id="
+              "raw": "{{baseUrl}}/api/v1/routing/policies?workspace_id="
             }
           }
         },
@@ -4404,11 +4477,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "routing",
                 "policies"
               ],
-              "raw": "{{baseUrl}}/v1/routing/policies"
+              "raw": "{{baseUrl}}/api/v1/routing/policies"
             }
           }
         },
@@ -4437,12 +4511,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "routing",
                 "policies",
                 "explain"
               ],
-              "raw": "{{baseUrl}}/v1/routing/policies/explain"
+              "raw": "{{baseUrl}}/api/v1/routing/policies/explain"
             }
           }
         },
@@ -4457,6 +4532,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "routing",
                 "policies",
@@ -4476,7 +4552,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/routing/policies/:name?user_id=&workspace_id=",
+              "raw": "{{baseUrl}}/api/v1/routing/policies/:name?user_id=&workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4512,12 +4588,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "routing",
                 "preferences",
                 "rank"
               ],
-              "raw": "{{baseUrl}}/v1/routing/preferences/rank"
+              "raw": "{{baseUrl}}/api/v1/routing/preferences/rank"
             }
           }
         },
@@ -4532,6 +4609,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "routing",
                 "status"
@@ -4550,7 +4628,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/routing/status?user_id=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/routing/status?user_id=&workspace_id="
             }
           }
         }
@@ -4570,6 +4648,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -4685,7 +4764,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
             }
           }
         },
@@ -4700,6 +4779,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -4804,7 +4884,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
             }
           }
         },
@@ -4819,6 +4899,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -4929,7 +5010,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -4944,6 +5025,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "organizations",
                 "me",
@@ -5054,7 +5136,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
             }
           }
         }
@@ -5074,6 +5156,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing"
               ],
@@ -5091,7 +5174,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/pricing?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/pricing?skip=&limit="
             }
           }
         },
@@ -5120,10 +5203,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing"
               ],
-              "raw": "{{baseUrl}}/v1/pricing"
+              "raw": "{{baseUrl}}/api/v1/pricing"
             }
           }
         },
@@ -5138,11 +5222,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing",
                 "refresh"
               ],
-              "raw": "{{baseUrl}}/v1/pricing/refresh"
+              "raw": "{{baseUrl}}/api/v1/pricing/refresh"
             }
           }
         },
@@ -5157,12 +5242,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing",
                 "refresh",
                 "confirm"
               ],
-              "raw": "{{baseUrl}}/v1/pricing/refresh/confirm"
+              "raw": "{{baseUrl}}/api/v1/pricing/refresh/confirm"
             }
           }
         },
@@ -5177,12 +5263,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing",
                 "refresh",
                 "reject"
               ],
-              "raw": "{{baseUrl}}/v1/pricing/refresh/reject"
+              "raw": "{{baseUrl}}/api/v1/pricing/refresh/reject"
             }
           }
         },
@@ -5197,6 +5284,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing",
                 ":model_key"
@@ -5209,7 +5297,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/pricing/:model_key?as_of=",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?as_of=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5231,6 +5319,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing",
                 ":model_key"
@@ -5243,7 +5332,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/pricing/:model_key?effective_at=",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key?effective_at=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5265,12 +5354,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "pricing",
                 ":model_key",
                 "history"
               ],
-              "raw": "{{baseUrl}}/v1/pricing/:model_key/history",
+              "raw": "{{baseUrl}}/api/v1/pricing/:model_key/history",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5297,10 +5387,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials"
+              "raw": "{{baseUrl}}/api/v1/provider-credentials"
             }
           }
         },
@@ -5329,10 +5420,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials"
+              "raw": "{{baseUrl}}/api/v1/provider-credentials"
             }
           }
         },
@@ -5347,11 +5439,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials",
                 "reencrypt"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials/reencrypt"
+              "raw": "{{baseUrl}}/api/v1/provider-credentials/reencrypt"
             }
           }
         },
@@ -5380,11 +5473,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials",
                 "test"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials/test"
+              "raw": "{{baseUrl}}/api/v1/provider-credentials/test"
             }
           }
         },
@@ -5413,11 +5507,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials",
                 ":instance"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials/:instance",
+              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5439,11 +5534,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials",
                 ":instance"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials/:instance",
+              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5465,12 +5561,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "provider-credentials",
                 ":instance",
                 "test"
               ],
-              "raw": "{{baseUrl}}/v1/provider-credentials/:instance/test",
+              "raw": "{{baseUrl}}/api/v1/provider-credentials/:instance/test",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5492,10 +5589,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "providers"
               ],
-              "raw": "{{baseUrl}}/v1/providers"
+              "raw": "{{baseUrl}}/api/v1/providers"
             }
           }
         },
@@ -5510,11 +5608,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "providers",
                 "catalog"
               ],
-              "raw": "{{baseUrl}}/v1/providers/catalog"
+              "raw": "{{baseUrl}}/api/v1/providers/catalog"
             }
           }
         },
@@ -5529,12 +5628,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "providers",
                 "catalog",
                 ":provider_id"
               ],
-              "raw": "{{baseUrl}}/v1/providers/catalog/:provider_id",
+              "raw": "{{baseUrl}}/api/v1/providers/catalog/:provider_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5556,6 +5656,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "providers",
                 "health"
@@ -5568,7 +5669,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/providers/health?refresh="
+              "raw": "{{baseUrl}}/api/v1/providers/health?refresh="
             }
           }
         }
@@ -5602,10 +5703,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "rerank"
               ],
-              "raw": "{{baseUrl}}/v1/rerank"
+              "raw": "{{baseUrl}}/api/v1/rerank"
             }
           }
         }
@@ -5624,7 +5726,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model\": \"openai:gpt-4o-mini\",\n  \"input\": \"Hello from Otari!\"\n}"
+              "raw": "{\n  \"model\": \"string\",\n  \"input\": null\n}"
             },
             "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
             "header": [
@@ -5639,10 +5741,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "responses"
               ],
-              "raw": "{{baseUrl}}/v1/responses"
+              "raw": "{{baseUrl}}/api/v1/responses"
             }
           }
         }
@@ -5662,6 +5765,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "scoped-budgets"
               ],
@@ -5691,7 +5795,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/scoped-budgets?scope_type=&scope_id=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/scoped-budgets?scope_type=&scope_id=&skip=&limit="
             }
           }
         },
@@ -5720,10 +5824,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "scoped-budgets"
               ],
-              "raw": "{{baseUrl}}/v1/scoped-budgets"
+              "raw": "{{baseUrl}}/api/v1/scoped-budgets"
             }
           }
         },
@@ -5738,11 +5843,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "scoped-budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/scoped-budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/scoped-budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5778,11 +5884,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "scoped-budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/scoped-budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/scoped-budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5804,11 +5911,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "scoped-budgets",
                 ":budget_id"
               ],
-              "raw": "{{baseUrl}}/v1/scoped-budgets/:budget_id",
+              "raw": "{{baseUrl}}/api/v1/scoped-budgets/:budget_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5849,10 +5957,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search"
               ],
-              "raw": "{{baseUrl}}/v1/search"
+              "raw": "{{baseUrl}}/api/v1/search"
             }
           }
         },
@@ -5881,11 +5990,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search",
                 ":search_tool_name"
               ],
-              "raw": "{{baseUrl}}/v1/search/:search_tool_name",
+              "raw": "{{baseUrl}}/api/v1/search/:search_tool_name",
               "variable": [
                 {
                   "description": "path parameter",
@@ -5912,10 +6022,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search-tools"
               ],
-              "raw": "{{baseUrl}}/v1/search-tools"
+              "raw": "{{baseUrl}}/api/v1/search-tools"
             }
           }
         },
@@ -5944,10 +6055,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search-tools"
               ],
-              "raw": "{{baseUrl}}/v1/search-tools"
+              "raw": "{{baseUrl}}/api/v1/search-tools"
             }
           }
         },
@@ -5962,11 +6074,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search-tools",
                 "providers"
               ],
-              "raw": "{{baseUrl}}/v1/search-tools/providers"
+              "raw": "{{baseUrl}}/api/v1/search-tools/providers"
             }
           }
         },
@@ -5981,11 +6094,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search-tools",
                 "reencrypt"
               ],
-              "raw": "{{baseUrl}}/v1/search-tools/reencrypt"
+              "raw": "{{baseUrl}}/api/v1/search-tools/reencrypt"
             }
           }
         },
@@ -6014,11 +6128,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search-tools",
                 ":name"
               ],
-              "raw": "{{baseUrl}}/v1/search-tools/:name",
+              "raw": "{{baseUrl}}/api/v1/search-tools/:name",
               "variable": [
                 {
                   "description": "path parameter",
@@ -6040,11 +6155,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "search-tools",
                 ":name"
               ],
-              "raw": "{{baseUrl}}/v1/search-tools/:name",
+              "raw": "{{baseUrl}}/api/v1/search-tools/:name",
               "variable": [
                 {
                   "description": "path parameter",
@@ -6071,10 +6187,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings"
               ],
-              "raw": "{{baseUrl}}/v1/settings"
+              "raw": "{{baseUrl}}/api/v1/settings"
             }
           }
         },
@@ -6103,10 +6220,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings"
               ],
-              "raw": "{{baseUrl}}/v1/settings"
+              "raw": "{{baseUrl}}/api/v1/settings"
             }
           }
         },
@@ -6121,11 +6239,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings",
                 "mail"
               ],
-              "raw": "{{baseUrl}}/v1/settings/mail"
+              "raw": "{{baseUrl}}/api/v1/settings/mail"
             }
           }
         },
@@ -6154,12 +6273,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings",
                 "mail",
                 "test"
               ],
-              "raw": "{{baseUrl}}/v1/settings/mail/test"
+              "raw": "{{baseUrl}}/api/v1/settings/mail/test"
             }
           }
         },
@@ -6174,11 +6294,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings",
                 "maintenance-mode"
               ],
-              "raw": "{{baseUrl}}/v1/settings/maintenance-mode"
+              "raw": "{{baseUrl}}/api/v1/settings/maintenance-mode"
             }
           }
         },
@@ -6207,11 +6328,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings",
                 "maintenance-mode"
               ],
-              "raw": "{{baseUrl}}/v1/settings/maintenance-mode"
+              "raw": "{{baseUrl}}/api/v1/settings/maintenance-mode"
             }
           }
         },
@@ -6226,12 +6348,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "settings",
                 "master-key",
                 "rotate"
               ],
-              "raw": "{{baseUrl}}/v1/settings/master-key/rotate"
+              "raw": "{{baseUrl}}/api/v1/settings/master-key/rotate"
             }
           }
         }
@@ -6251,10 +6374,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "tool-settings"
               ],
-              "raw": "{{baseUrl}}/v1/tool-settings"
+              "raw": "{{baseUrl}}/api/v1/tool-settings"
             }
           }
         },
@@ -6283,10 +6407,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "tool-settings"
               ],
-              "raw": "{{baseUrl}}/v1/tool-settings"
+              "raw": "{{baseUrl}}/api/v1/tool-settings"
             }
           }
         },
@@ -6315,12 +6440,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "tool-settings",
                 ":service",
                 "test"
               ],
-              "raw": "{{baseUrl}}/v1/tool-settings/:service/test",
+              "raw": "{{baseUrl}}/api/v1/tool-settings/:service/test",
               "variable": [
                 {
                   "description": "path parameter",
@@ -6347,10 +6473,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "tools"
               ],
-              "raw": "{{baseUrl}}/v1/tools"
+              "raw": "{{baseUrl}}/api/v1/tools"
             }
           }
         }
@@ -6370,6 +6497,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage"
               ],
@@ -6483,7 +6611,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
             }
           }
         },
@@ -6498,10 +6626,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage"
               ],
-              "raw": "{{baseUrl}}/v1/usage"
+              "raw": "{{baseUrl}}/api/v1/usage"
             }
           }
         },
@@ -6516,6 +6645,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage",
                 "count"
@@ -6618,7 +6748,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
             }
           }
         },
@@ -6647,11 +6777,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage",
                 "external-events"
               ],
-              "raw": "{{baseUrl}}/v1/usage/external-events"
+              "raw": "{{baseUrl}}/api/v1/usage/external-events"
             }
           }
         },
@@ -6666,11 +6797,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage",
                 "in-flight"
               ],
-              "raw": "{{baseUrl}}/v1/usage/in-flight"
+              "raw": "{{baseUrl}}/api/v1/usage/in-flight"
             }
           }
         },
@@ -6685,6 +6817,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage",
                 "series"
@@ -6793,7 +6926,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
+              "raw": "{{baseUrl}}/api/v1/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -6822,11 +6955,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage",
                 "set-price"
               ],
-              "raw": "{{baseUrl}}/v1/usage/set-price"
+              "raw": "{{baseUrl}}/api/v1/usage/set-price"
             }
           }
         },
@@ -6841,6 +6975,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "usage",
                 "summary"
@@ -6949,7 +7084,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/api/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
             }
           }
         }
@@ -6969,6 +7104,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "users"
               ],
@@ -6986,7 +7122,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/users?skip=&limit="
             }
           }
         },
@@ -7015,10 +7151,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "users"
               ],
-              "raw": "{{baseUrl}}/v1/users"
+              "raw": "{{baseUrl}}/api/v1/users"
             }
           }
         },
@@ -7033,11 +7170,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "users",
                 ":user_id"
               ],
-              "raw": "{{baseUrl}}/v1/users/:user_id",
+              "raw": "{{baseUrl}}/api/v1/users/:user_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7073,11 +7211,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "users",
                 ":user_id"
               ],
-              "raw": "{{baseUrl}}/v1/users/:user_id",
+              "raw": "{{baseUrl}}/api/v1/users/:user_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7099,11 +7238,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "users",
                 ":user_id"
               ],
-              "raw": "{{baseUrl}}/v1/users/:user_id",
+              "raw": "{{baseUrl}}/api/v1/users/:user_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7125,6 +7265,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "users",
                 ":user_id",
@@ -7144,7 +7285,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/users/:user_id/usage?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/users/:user_id/usage?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7176,6 +7317,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "web-search",
                 "search"
@@ -7218,7 +7360,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/web-search/search?q=&max_results=&search_depth=&topic=&time_range=&include_answer="
+              "raw": "{{baseUrl}}/api/v1/web-search/search?q=&max_results=&search_depth=&topic=&time_range=&include_answer="
             }
           }
         }
@@ -7238,6 +7380,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces"
               ],
@@ -7255,7 +7398,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/workspaces?skip=&limit="
             }
           }
         },
@@ -7284,10 +7427,11 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces"
+              "raw": "{{baseUrl}}/api/v1/workspaces"
             }
           }
         },
@@ -7302,11 +7446,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7342,11 +7487,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7368,11 +7514,12 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7394,6 +7541,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -7413,7 +7561,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/members?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7435,6 +7583,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -7449,7 +7598,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id?role=",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/members/:user_id?role=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7476,6 +7625,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -7490,7 +7640,7 @@
                   "value": "owner"
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id?role=owner",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/members/:user_id?role=owner",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7517,13 +7667,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "members",
                 ":user_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/members/:user_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7555,12 +7706,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "activation"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/activation",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7582,13 +7734,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "activation",
                 "dismiss"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation/dismiss",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/activation/dismiss",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7610,13 +7763,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "activation",
                 "key"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation/key",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/activation/key",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7643,12 +7797,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "code-execution-policy"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/code-execution-policy",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/code-execution-policy",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7684,12 +7839,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "code-execution-policy"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/code-execution-policy",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/code-execution-policy",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7711,12 +7867,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "code-execution-policy"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/code-execution-policy",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/code-execution-policy",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7743,6 +7900,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -7762,7 +7920,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/mcp-servers?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7798,12 +7956,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "mcp-servers"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/mcp-servers",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7839,13 +7998,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "mcp-servers",
                 ":server_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/mcp-servers/:server_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7872,13 +8032,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "mcp-servers",
                 ":server_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/mcp-servers/:server_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/mcp-servers/:server_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7910,6 +8071,7 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
@@ -7929,7 +8091,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies?skip=&limit=",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/member-budget-policies?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -7965,12 +8127,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "member-budget-policies"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/member-budget-policies",
               "variable": [
                 {
                   "description": "path parameter",
@@ -8006,13 +8169,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "member-budget-policies",
                 ":default_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies/:default_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/member-budget-policies/:default_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -8039,13 +8203,14 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "member-budget-policies",
                 ":default_id"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies/:default_id",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/member-budget-policies/:default_id",
               "variable": [
                 {
                   "description": "path parameter",
@@ -8077,12 +8242,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "web-search"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/web-search",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search",
               "variable": [
                 {
                   "description": "path parameter",
@@ -8118,12 +8284,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "web-search"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/web-search",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search",
               "variable": [
                 {
                   "description": "path parameter",
@@ -8145,12 +8312,13 @@
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "v1",
                 "workspaces",
                 ":workspace_id",
                 "web-search"
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/web-search",
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search",
               "variable": [
                 {
                   "description": "path parameter",
@@ -8163,6 +8331,68 @@
         }
       ],
       "name": "workspace-web-search"
+    },
+    {
+      "item": [
+        {
+          "name": "Receive Logs",
+          "request": {
+            "description": "Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs).",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "otlp",
+                "v1",
+                "logs"
+              ],
+              "raw": "{{baseUrl}}/otlp/v1/logs"
+            }
+          }
+        },
+        {
+          "name": "Receive Metrics",
+          "request": {
+            "description": "Ingest content-free coding-agent outcome metrics from OTLP metric points.\n\nRecords the outcome counters a coding agent reports on the metrics signal and\nthat Otari has no other source for: lines of code changed, commits, pull\nrequests, and active time. Points are stored exactly as reported, with their\nOTLP series identity, so a cumulative counter is turned into an increment at\nread time rather than re-counted on every export. Metrics that duplicate an\nalready-recorded signal (token/cost usage, already billed; edit decisions,\nalready captured as behavioral events) are skipped, as is any metric name this\ngateway does not know, so a newer agent version never breaks reception.\n\nOutcome metrics are never billable: they touch no budget and no spend. Capture\nanswers to the same ``capture_agent_telemetry`` toggle as behavioral events;\nwith it off, the export still succeeds and simply stores nothing.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "otlp",
+                "v1",
+                "metrics"
+              ],
+              "raw": "{{baseUrl}}/otlp/v1/metrics"
+            }
+          }
+        },
+        {
+          "name": "Receive Traces",
+          "request": {
+            "description": "Ingest LLM usage from OTLP spans (GenAI semantic conventions).",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "otlp",
+                "v1",
+                "traces"
+              ],
+              "raw": "{{baseUrl}}/otlp/v1/traces"
+            }
+          }
+        }
+      ],
+      "name": "otel"
     }
   ],
   "variable": [
