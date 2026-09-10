@@ -91,7 +91,7 @@ def test_metrics_endpoint_not_available_when_disabled(no_metrics_client: TestCli
 
 
 def test_request_counter_increments_on_health_check(metrics_client: TestClient) -> None:
-    labels = {"method": "GET", "endpoint": f"{API_ROOT}/health", "status": "200"}
+    labels = {"method": "GET", "endpoint": "/health", "api_version": "v1", "status": "200"}
     before = _sample("gateway_requests_total", labels)
 
     metrics_client.get(f"{API_ROOT}/health")
@@ -101,7 +101,7 @@ def test_request_counter_increments_on_health_check(metrics_client: TestClient) 
 
 
 def test_request_duration_recorded(metrics_client: TestClient) -> None:
-    labels = {"method": "GET", "endpoint": f"{API_ROOT}/health"}
+    labels = {"method": "GET", "endpoint": "/health", "api_version": "v1"}
     before = _sample("gateway_request_duration_seconds_count", labels)
 
     metrics_client.get(f"{API_ROOT}/health")
@@ -283,7 +283,7 @@ def test_auth_failure_metric_invalid_key(metrics_client: TestClient) -> None:
 
 def test_metrics_not_self_instrumented(metrics_client: TestClient) -> None:
     """The /metrics endpoint should not increment request counters for itself."""
-    labels = {"method": "GET", "endpoint": "/metrics", "status": "200"}
+    labels = {"method": "GET", "endpoint": "/metrics", "api_version": "", "status": "200"}
     before = _sample("gateway_requests_total", labels)
 
     metrics_client.get("/metrics")
@@ -294,7 +294,7 @@ def test_metrics_not_self_instrumented(metrics_client: TestClient) -> None:
 
 
 def test_request_counter_tracks_error_status(metrics_client: TestClient) -> None:
-    labels = {"method": "POST", "endpoint": f"{API_ROOT}/chat/completions", "status": "401"}
+    labels = {"method": "POST", "endpoint": "/chat/completions", "api_version": "v1", "status": "401"}
     before = _sample("gateway_requests_total", labels)
 
     metrics_client.post(
