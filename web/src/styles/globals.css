@@ -1345,11 +1345,16 @@ textarea.input {
   min-height: var(--field-height);
   padding-block: var(--field-padding-block);
 }
-/* The three dense places. `input[type="search"]` needs its own rule because it is
-   a native element carrying none of HeroUI's classes, and it stays scoped to
-   the toolbar: the only two in the tree are toolbar search boxes, and pulling a
-   bare search input into the family would restyle a control nothing here
-   renders. */
+/* The three dense places. A toolbar and a pagination strip are dense because
+   their controls sit on a table's own header row; a settings row is dense
+   because its control sits in a lane beside the label it explains, and at the
+   form height every row comes out taller than its own sentence, so a column of
+   them reads as a stack of boxes.
+
+   `input[type="search"]` needs its own rule because it is a native element
+   carrying none of HeroUI's classes, and it stays scoped to the toolbar: the
+   only two in the tree are toolbar search boxes, and pulling a bare search
+   input into the family would restyle a control nothing here renders. */
 .otari-toolbar,
 .otari-pagination,
 .otari-settings {
@@ -2005,26 +2010,11 @@ main {
     gap: 8px;
   }
 }
-/* A settings row is the third dense place, after the pagination strip and the
-   toolbar. Its control sits in a lane beside the label it belongs to, and at
-   the form height each row comes out taller than the sentence explaining it, so
-   a column of them reads as a stack of boxes.
-
-   On a phone the control stops sharing the row and stacks full width, and it
-   comes up to 44px with the two places above rather than stopping at the form
-   height: 44px is the floor everywhere, and a dense place that keeps its
-   desktop height there is the one thing `design/motion-and-access.md` says
-   needs an argument in writing. Same 767px boundary as those, so a settings
-   row's fields and the button floor arrive together.
-
-   It takes 16px with it, which is a separate rule from the height: iOS zooms
-   the page when a field under 16px takes focus, and a full-width field is the
-   one shape where that zoom has nowhere to go. */
-/* The dense height and its phone override are declared on the place itself,
-   with the other two, further up this file. What is left here is the one part
-   that is not a height: 16px on the phone, because iOS zooms the page when a
-   field under 16px takes focus and a full-width field is the one shape where
-   that zoom has nowhere to go. */
+/* A settings row's phone size, the one part of it that is not a height: 16px,
+   because iOS zooms the page when a field under 16px takes focus and a
+   full-width field is the one shape where that zoom has nowhere to go. The
+   height and its phone override are declared on the place itself, with the
+   other two, further up this file. */
 @media (max-width: 767px) {
   .otari-settings .input {
     font-size: var(--text-base);
@@ -2060,12 +2050,16 @@ main {
   font-size: var(--text-xs);
 }
 
-/* The dense height above is a desktop size, so the phone viewport takes it
-   back off. The `[data-slot="button"]` floor further down cannot reach these:
-   a native `input[type="search"]` and a HeroUI select trigger are not buttons,
-   so without this the toolbar is the one place on the phone layout still
-   handing a finger a 32px target. Same 767px boundary as that floor, so the
-   toolbar's fields and its buttons come up to 44px together. */
+/* The dense height is a desktop size, so the phone viewport takes it back off.
+   44px is the floor everywhere, and `design/motion-and-access.md` makes a place
+   that keeps its desktop height here the one thing needing an argument in
+   writing, so all three take it rather than two of them.
+
+   The `[data-slot="button"]` floor further down cannot reach these: a native
+   `input[type="search"]` and a HeroUI select trigger are not buttons, so
+   without this a toolbar or a settings row is the one place on the phone
+   layout still handing a finger a 32px target. Same 767px boundary as that
+   floor, so a place's fields and its buttons come up together. */
 @media (max-width: 767px) {
   .otari-toolbar,
   .otari-settings {
