@@ -32,7 +32,6 @@ from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.web_search_backend import web_search_tool_definition
 
 router = APIRouter(
-    prefix="",
     tags=["tools"],
     dependencies=[Depends(verify_catalog_reader)],
 )

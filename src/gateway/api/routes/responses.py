@@ -56,7 +56,7 @@ from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
-router = APIRouter(prefix="", tags=["responses"])
+router = APIRouter(tags=["responses"])
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/responses"

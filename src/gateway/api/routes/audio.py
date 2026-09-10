@@ -19,7 +19,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import flat_request_cost, per_request_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
-router = APIRouter(prefix="", tags=["audio"])
+router = APIRouter(tags=["audio"])
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT_TRANSCRIPTIONS = "/v1/audio/transcriptions"

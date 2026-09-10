@@ -36,7 +36,7 @@ from gateway.services.file_service import fetch_file
 from gateway.services.file_store import FileStore
 from gateway.services.workspace_scope import default_workspace_id
 
-router = APIRouter(prefix="", tags=["files"])
+router = APIRouter(tags=["files"])
 
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".

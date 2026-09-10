@@ -84,7 +84,7 @@ from gateway.services.search_backend import (
 from gateway.services.tenancy.workspace_web_search_service import resolve_workspace_web_search_config
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
-router = APIRouter(prefix="", tags=["search"])
+router = APIRouter(tags=["search"])
 
 SEARCH_ENDPOINT = "/v1/search"
 

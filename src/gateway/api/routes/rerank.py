@@ -18,7 +18,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import input_token_cost
 from gateway.services.provider_kwargs import ResolvedProvider
 
-router = APIRouter(prefix="", tags=["rerank"])
+router = APIRouter(tags=["rerank"])
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/rerank"
