@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import type {
   ConfigSearchTool,
   SearchProviderInfo,
@@ -242,6 +242,12 @@ function AddToolDialog({
   const baseRequired =
     Boolean(selected?.requires_api_base) && inherited === null
   const keyRequired = Boolean(selected?.requires_api_key)
+  // One snapshot rather than a hand-listed predicate: the provider is a field
+  // like the others, and a guard that forgot it discarded a changed provider
+  // with no question asked.
+  const draft = JSON.stringify({ name, provider, apiBase, apiKey })
+  const seed = useRef(draft)
+
   const ready =
     name.trim() !== "" &&
     (!baseRequired || apiBase.trim() !== "") &&
@@ -271,7 +277,7 @@ function AddToolDialog({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!ready}
-      isDirty={name.trim() !== "" || apiBase.trim() !== "" || apiKey !== ""}
+      isDirty={draft !== seed.current}
       error={create.error}
     >
       <Field

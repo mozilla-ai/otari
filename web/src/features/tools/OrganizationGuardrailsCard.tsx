@@ -1,12 +1,11 @@
-import { Button } from "@heroui/react"
-import { useEffect, useState } from "react"
-
+import { useEffect, useRef, useState } from "react"
 import type {
   GuardrailCatalog,
   GuardrailParameterSpec,
   OrganizationGuardrail,
   Workspace,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
@@ -208,18 +207,6 @@ function useParameterForm(
       return raw === undefined && Object.keys(found).length === 0
     },
     build: () => buildValidateKwargs(specs, state.values, state.extraJson),
-    /**
-     * Put the form back to what a fresh profile seeds, for the caller that
-     * clears the rest of its fields itself. The effect above cannot do it: it
-     * re-seeds on the serialized specs and stored values, and a cleared profile
-     * whose predecessor also took no typed parameters leaves both unchanged, so
-     * a raw entry would survive into the next guardrail this form adds.
-     */
-    reset: () => {
-      setState(seedParameters(specs, undefined))
-      setIssues({})
-      setRawError(undefined)
-    },
   }
 }
 
@@ -508,20 +495,20 @@ function AddGuardrailDialog({
   // moves to a profile with a different schema.
   const parameters = useParameterForm(specs, undefined)
 
-  // One predicate naming every field, the parameters included: a form whose
-  // only edits are parameter values is still a form with something to lose.
-  const isPristine =
-    profile === "" &&
-    mode === "monitor" &&
-    url === "" &&
-    credential === "" &&
-    !everywhere &&
-    scope.length === 0 &&
-    Object.keys(parameters.values).every(
-      (name) =>
-        parameters.values[name] === "" || parameters.values[name] === false,
-    ) &&
-    parameters.extraJson === ""
+  // One snapshot rather than a hand-listed predicate: a field added to this
+  // form would otherwise have to be remembered in a second place, and the
+  // parameters are the half most easily forgotten.
+  const draft = JSON.stringify({
+    profile,
+    mode,
+    url,
+    credential,
+    everywhere,
+    scope,
+    values: parameters.values,
+    extraJson: parameters.extraJson,
+  })
+  const seed = useRef(draft)
 
   const submit = () => {
     const named = profile.trim()
@@ -560,7 +547,7 @@ function AddGuardrailDialog({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={profile.trim() === ""}
-      isDirty={!isPristine}
+      isDirty={draft !== seed.current}
       error={create.error}
     >
       <GuardrailProfileField
@@ -575,7 +562,6 @@ function AddGuardrailDialog({
         value={mode}
         onChange={(next) => setMode(next as Mode)}
         options={MODE_OPTIONS}
-        reserveMessage={false}
         description="A caller can tighten a mandated guardrail but never weaken it."
       />
       <Field
@@ -584,6 +570,7 @@ function AddGuardrailDialog({
         onChange={setUrl}
         isDisabled={create.isPending}
         placeholder="blank uses the guardrails URL above"
+        reserveMessage={false}
       />
       <SecretField
         label="Credential"
@@ -675,6 +662,27 @@ export function OrganizationGuardrailsCard({
       {manages ? (
         <>
           <ErrorBanner error={guardrails.error ?? workspaces.error} />
+          {/* Ahead of the rows, not after them. `FormDialog` renders its
+              trigger slot in place as a real element, so a dialog mounted last
+              inside a `divide-y` container takes `:last-child` off the final
+              row and draws a divider right above the container's own bottom
+              edge. `display: none` does not exempt an element from that.
+
+              Keyed on the open count, so each open remounts a blank form:
+              clearing the draft on close would blank the fields while the
+              dialog is still animating away. */}
+          <AddGuardrailDialog
+            key={openCount}
+            isOpen={adding}
+            onClose={() => setAdding(false)}
+            catalog={catalog.data}
+            // `isFetched` rather than `isPending`: an errored query returns to
+            // pending when its observers remount, which would leave the picker
+            // stuck reading a service that already answered.
+            catalogPending={!catalog.isFetched}
+            workspaces={known}
+            onSaved={onSaved}
+          />
           {entries.map((guardrail) => (
             <GuardrailRow
               key={guardrail.id}
@@ -690,21 +698,6 @@ export function OrganizationGuardrailsCard({
               for run.
             </p>
           ) : null}
-          {/* Keyed on the open count, so each open remounts a blank form.
-              Clearing the draft on close instead would blank the fields while
-              the dialog is still animating away. */}
-          <AddGuardrailDialog
-            key={openCount}
-            isOpen={adding}
-            onClose={() => setAdding(false)}
-            catalog={catalog.data}
-            // `isFetched` rather than `isPending`: an errored query returns to
-            // pending when its observers remount, which would leave the picker
-            // stuck reading a service that already answered.
-            catalogPending={!catalog.isFetched}
-            workspaces={known}
-            onSaved={onSaved}
-          />
         </>
       ) : null}
     </SettingsGroup>

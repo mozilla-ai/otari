@@ -511,33 +511,32 @@ describe("OrganizationGuardrailsCard", () => {
   })
 
   it("refuses to add an entry whose guardrail needs a parameter it has not got", async () => {
+    // Inside a `FormDialog` the submit is a real form submission, so a
+    // parameter the profile declares required and the operator left blank is
+    // stopped by the browser's own constraint validation before
+    // `parameters.check()` runs. That is a change from the always-open form,
+    // where the Add button called the check directly and the field's own
+    // message spoke; asserted here as what the operator now meets, which is a
+    // required field, a refusal, and a dialog still open on their work.
     const calls = mockApi()
+    const user = userEvent.setup()
     renderCard()
 
     await settledPicker()
-    await pickOption(userEvent.setup(), "Guardrail profile", "house-policy")
-    await userEvent.click(
+    await pickOption(user, "Guardrail profile", "house-policy")
+    const required = inDialog()
+      .getAllByRole("textbox")
+      .filter((box) => box.hasAttribute("required"))
+    expect(required.length).toBeGreaterThan(0)
+    expect(
+      required.every((box) => (box as HTMLInputElement).value === ""),
+    ).toBe(true)
+
+    await user.click(
       inDialog().getByRole("button", { name: "Mandate a guardrail" }),
     )
 
-    // Inside a real form the browser refuses first: the field carries
-    // `required`, so the submit never reaches the mutation and the app's own
-    // "This guardrail needs a value here." never gets to speak. Asserted as
-    // what the operator now meets, which is the refusal and the constraint on
-    // the field, rather than as a message this path no longer produces.
-    // eslint-disable-next-line
-    console.log(
-      "FORMS",
-      document.querySelectorAll("form").length,
-      "IN DIALOG",
-      screen.getByRole("dialog").querySelectorAll("form").length,
-      "BTNFORM",
-      (
-        inDialog().getByRole("button", {
-          name: "Mandate a guardrail",
-        }) as HTMLButtonElement
-      ).form?.tagName,
-    )
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
