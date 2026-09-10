@@ -16,6 +16,7 @@ On the worker's PostgreSQL like the rest of ``tests/integration``, because
 ``create_app`` is the honest way to get a routing table.
 """
 
+import re
 from typing import Any
 
 import pytest
@@ -147,3 +148,46 @@ def test_generated_document_stamps_security_as_the_allowlists_say(standalone: Fa
                 assert operation.get("security") == [{"GatewayTokenAuth": []}], (
                     f"{method.upper()} {path} must be stamped GatewayTokenAuth only"
                 )
+
+
+# Paths that may appear in published prose without being ours to move. The usage
+# filters quote the frozen label a row carries, not a route; the rest belong to
+# somebody else's contract.
+PROSE_EXEMPT_PATHS = frozenset(
+    {
+        "/v1/chat/completions",
+        "/v1/messages/count_tokens",
+        "/v1/search",
+    }
+)
+
+
+def _described_paths(document: dict[str, Any]) -> set[str]:
+    """Every ``/v1`` path named in a description anywhere in the document."""
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "description" and isinstance(value, str):
+                    found.update(re.findall(r"(?<!/api)(?<!/otlp)/v1/[\w/{}.-]*", value))
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(document)
+    return {path.rstrip(".,)`") for path in found}
+
+
+def test_no_published_description_names_a_moved_path(standalone: FastAPI) -> None:
+    """Published prose is API documentation, so a stale path in it misleads a caller.
+
+    A docstring cannot interpolate, so these paths are written out by hand and
+    nothing but this stops them drifting when the routes move. The exemptions
+    are paths that did not move: a frozen usage label a caller filters on, and
+    two foreign contracts Otari mirrors rather than owns.
+    """
+    stray = _described_paths(standalone.openapi()) - PROSE_EXEMPT_PATHS
+    assert not stray, f"published prose still names paths that moved: {sorted(stray)}"
