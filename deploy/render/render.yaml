@@ -23,7 +23,7 @@ projects:
             image:
               url: docker.io/mzdotai/otari:0.3.0
             # Readiness verifies both the process and its Postgres connection.
-            healthCheckPath: /health/readiness
+            healthCheckPath: /api/v1/health/readiness
             envVars:
               # Otari binds OTARI_PORT (default 8000), not Render's PORT.
               # Pin both so Render's port scanner and the process agree.
