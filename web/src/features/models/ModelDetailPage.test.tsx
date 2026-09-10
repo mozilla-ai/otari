@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -228,26 +228,36 @@ describe("ModelDetailPage", () => {
     expect(screen.getByText(/Also served by Groq/)).toBeInTheDocument()
   })
 
-  it("opens an offering's selector and request under its row", async () => {
+  it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
     const user = userEvent.setup()
 
-    const grid = await screen.findByRole("grid", {
-      name: "Offerings of GLM-5.3",
-    })
-    await user.click(within(grid).getByText("nebius"))
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
 
-    // The short spelling leads, the full selector is still named, and the
-    // request sends the short one.
-    expect(await within(grid).findByText("nebius:glm-5.3")).toBeInTheDocument()
-    expect(within(grid).getByText("nebius:zai-org/GLM-5.3")).toBeInTheDocument()
-    expect(within(grid).getByText("zai-org/GLM-5.3")).toBeInTheDocument()
-    const curl = within(grid).getByLabelText("cURL") as HTMLTextAreaElement
-    expect(curl.value).toContain('"model": "nebius:glm-5.3"')
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+    // The model id first: the gateway picks the cheapest offering.
+    expect(
+      within(drawer).getByText(/cheapest offering it serves/),
+    ).toBeInTheDocument()
+    const curl = within(drawer).getByLabelText("cURL") as HTMLTextAreaElement
+    expect(curl.value).toContain('"model": "z-ai/glm-5.3"')
+    expect(
+      within(drawer).getByRole("link", { name: "API keys" }),
+    ).toHaveAttribute("href", "/keys")
 
-    await user.click(within(grid).getByRole("button", { name: "Close" }))
-    expect(within(grid).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
+    // Pinning a provider swaps in that offering's short selector.
+    await user.click(
+      within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+    )
+    await user.click(screen.getByRole("option", { name: /^fireworks/ }))
+    await waitFor(() =>
+      expect(
+        (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
+      ).toContain('"model": "fireworks:glm-5p3"'),
+    )
   })
 
   it("links an operator to Model pricing to edit a rate, and nobody else", async () => {

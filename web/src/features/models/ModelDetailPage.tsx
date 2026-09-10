@@ -1,7 +1,7 @@
 import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useCallback, useState } from "react"
+import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
@@ -12,10 +12,11 @@ import {
   priceSourceLabel,
 } from "@/features/models/catalog"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
+import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { useCatalog, useCatalogModel } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { CopyableValue, CopyField } from "@/shared/components/actions/CopyField"
+import { CopyableValue } from "@/shared/components/actions/CopyField"
 import {
   DataTable,
   type DataTableColumn,
@@ -27,23 +28,16 @@ import { Badge } from "@/shared/components/indicators/Badge"
 import { Dot } from "@/shared/components/indicators/Dot"
 import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
-import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import {
   formatContext,
   formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
-import {
-  buildCurlSnippet,
-  buildPythonSnippet,
-  resolveSnippetBaseUrl,
-} from "@/shared/helpers/requestSnippets"
-import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // One model, on a page of its own: the header with its facts, then every
 // offering of the model this viewer may call, cheapest first, with the price
-// they would be charged and where it came from. A row opens for the selector
-// to send and the request that sends it.
+// they would be charged and where it came from. "Use this model" opens a
+// drawer beside the table with the request to send.
 //
 // Read-only for everyone (otari-ai#2095, #2096): a rate is edited on Model
 // pricing, which the operator's link here points at, so the page that compares
@@ -340,102 +334,6 @@ function offeringColumns({
   return columns
 }
 
-/**
- * What opens under an offering's row: the string to send and the request that
- * sends it. The table stays a comparison; the row a reader picks becomes the
- * integration.
- */
-function OfferingDetail({
-  offering,
-  publicView,
-  onClose,
-}: {
-  offering: CatalogOffering
-  publicView: boolean
-  onClose: () => void
-}) {
-  const deployment = useDeployment()
-  const baseUrl = resolveSnippetBaseUrl(deployment)
-  const [language, setLanguage] = useState("curl")
-  const modelId = offering.selector.startsWith(`${offering.provider}:`)
-    ? offering.selector.slice(offering.provider.length + 1)
-    : offering.selector
-  // The short spelling where the gateway has one: it is what the catalog
-  // shows, and the full selector is still accepted.
-  const sendAs = offering.short_selector ?? offering.selector
-  const input = {
-    baseUrl: baseUrl ?? "",
-    apiKey: "$OTARI_API_KEY",
-    model: sendAs,
-  }
-  return (
-    <div className="flex flex-col gap-4 px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-          <dt className="text-caption">Selector</dt>
-          <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <CopyableValue value={sendAs} label="selector">
-              <code className="text-mono-caption break-all">{sendAs}</code>
-            </CopyableValue>
-            {offering.short_selector ? (
-              <span className="text-caption">
-                also{" "}
-                <code className="text-mono-caption break-all">
-                  {offering.selector}
-                </code>
-              </span>
-            ) : null}
-          </dd>
-          <dt className="text-caption">Provider's id</dt>
-          <dd>
-            <code className="text-mono-caption break-all">{modelId}</code>
-          </dd>
-        </dl>
-        <Button size="sm" variant="ghost" onPress={onClose}>
-          Close
-        </Button>
-      </div>
-      {baseUrl === undefined ? (
-        <p className="text-sm text-muted">
-          This deployment has not published its gateway address, so there is no
-          request to copy yet.
-        </p>
-      ) : (
-        <div className="flex max-w-3xl flex-col gap-2">
-          <TabRow>
-            <Tab
-              isActive={language === "curl"}
-              onPress={() => setLanguage("curl")}
-            >
-              cURL
-            </Tab>
-            <Tab
-              isActive={language === "python"}
-              onPress={() => setLanguage("python")}
-            >
-              Python (OpenAI SDK)
-            </Tab>
-          </TabRow>
-          <CopyField
-            label={language === "curl" ? "cURL" : "Python"}
-            value={
-              language === "curl"
-                ? buildCurlSnippet(input)
-                : buildPythonSnippet(input)
-            }
-            multiline
-          />
-          {publicView ? (
-            <p className="text-caption">
-              Sign in and create a key on API keys to send this.
-            </p>
-          ) : null}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export function ModelDetailView({
   modelId,
   publicView = false,
@@ -450,23 +348,11 @@ export function ModelDetailView({
   const catalog = useCatalog()
   const selected = useCatalogModel(modelId)
   const [quantization, setQuantization] = useState("all")
-  const [opened, setOpened] = useState<string | null>(null)
+  const [useModel, setUseModel] = useState(false)
   const [sort, setSort] = useState<{
     column: OfferingSortColumn
     direction: "asc" | "desc"
   }>({ column: "input", direction: "asc" })
-  // Stable, as the DataTable asks: it depends on nothing that changes after
-  // the first render, so the row cache holds for the life of the page.
-  const renderDetail = useCallback(
-    (row: OfferingRow) => (
-      <OfferingDetail
-        offering={row.offering}
-        publicView={publicView}
-        onClose={() => setOpened(null)}
-      />
-    ),
-    [publicView],
-  )
 
   if (selected.error) return <ErrorBanner error={selected.error} />
   const model = selected.data
@@ -574,6 +460,11 @@ export function ModelDetailView({
                 Model pricing
               </Link>
             ) : null}
+            {model.offerings.length > 0 ? (
+              <Button variant="primary" onPress={() => setUseModel(true)}>
+                Use this model
+              </Button>
+            ) : null}
           </div>
         </div>
         {model.description ? (
@@ -643,9 +534,9 @@ export function ModelDetailView({
             <p className="max-w-prose text-sm text-muted">
               Several providers serve the same model. Each row is one offering:
               what {publicView ? "this deployment lists it at" : "you pay"} and
-              where that price comes from; open a row for the selector to send
-              and the request that sends it. {model.offering_count} on{" "}
-              {model.provider_count}{" "}
+              where that price comes from. "Use this model" has the request to
+              send, to the gateway's pick or a provider you pin.{" "}
+              {model.offering_count} on {model.provider_count}{" "}
               {model.provider_count === 1 ? "provider" : "providers"}, cheapest
               first.
             </p>
@@ -674,11 +565,6 @@ export function ModelDetailView({
                 })}
                 rows={rows}
                 getRowKey={(row) => row.offering.selector}
-                onRowAction={(key) =>
-                  setOpened((current) => (current === key ? null : key))
-                }
-                detailKey={opened}
-                renderDetail={renderDetail}
                 sortDescriptor={sortDescriptor}
                 onSortChange={(descriptor) =>
                   setSort({
@@ -726,6 +612,12 @@ export function ModelDetailView({
           ) : null}
         </section>
       </div>
+      <UseModelDrawer
+        model={model}
+        isOpen={useModel}
+        onOpenChange={setUseModel}
+        publicView={publicView}
+      />
     </div>
   )
 }

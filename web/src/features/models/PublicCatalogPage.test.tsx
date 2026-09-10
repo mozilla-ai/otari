@@ -179,18 +179,18 @@ describe("PublicCatalogPage", () => {
     )
   })
 
-  it("tells a visitor to sign in before the request an offering opens", async () => {
+  it("tells a visitor to sign in before the request to copy", async () => {
     mockApi()
     renderPage("z-ai/glm-5.3")
     const user = userEvent.setup()
 
-    const grid = await screen.findByRole("grid", {
-      name: "Offerings of GLM-5.3",
-    })
-    await user.click(within(grid).getByText("nebius"))
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
 
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
     expect(
-      await within(grid).findByText(/Sign in and create a key/),
-    ).toBeInTheDocument()
+      within(drawer).getByRole("link", { name: "Sign in" }),
+    ).toHaveAttribute("href", "#/")
   })
 })

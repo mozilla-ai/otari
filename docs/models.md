@@ -221,9 +221,10 @@ rebuilt every minute from the deployment's catalog view and on
 force.
 
 The dashboard's Models page is this catalog: one card per model, with a rail
-of filters beside it, and a page per model with its facts, every offering
-compared in a table, what the organization paid for it, and the request to
-copy. It is read-only; a deployment rate is set on Model pricing, which the
+of filters beside it, and a page per model with its facts and every offering
+compared in a table. "Use this model" opens a drawer beside the table with
+the request to copy, sent to the gateway's pick or to a provider pinned by
+its selector. It is read-only; a deployment rate is set on Model pricing, which the
 offering rows link to for an operator, and an organization admin is linked to
 its own rate override instead. A metered rate that differs from the provider's
 list price is marked with the list price.
