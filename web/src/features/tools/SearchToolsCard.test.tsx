@@ -162,19 +162,46 @@ describe("SearchToolsCard", () => {
     expect(screen.queryByText("0 tools")).toBeNull()
   })
 
+  it("keeps the heading trigger on screen and opens on a blank draft", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderOpened(user)
+    await screen.findByText("local")
+
+    const trigger = screen.getByRole("button", { name: "Add search tool" })
+    await user.click(trigger)
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(trigger).toBeVisible()
+
+    await user.type(
+      within(screen.getByRole("dialog")).getByLabelText(/^Name/),
+      "second",
+    )
+    // A draft this far along is dirty, so the way out is through the guard.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(trigger)
+    expect(
+      within(await screen.findByRole("dialog")).getByLabelText(/^Name/),
+    ).toHaveValue("")
+  })
+
   it("adds a tool with the chosen provider", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderOpened(user)
     await screen.findByText("local")
 
-    await user.type(screen.getByLabelText("Search tool name"), "second")
-    await pickOption(user, "Search provider", "searxng")
-    await user.type(
-      screen.getByLabelText("Search backend URL"),
-      "http://other:8080",
-    )
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("button", { name: "Add search tool" }))
+    // Scoped to the dialog: the heading's trigger and the submit say the same
+    // words, and every row behind it has a backend-URL box of its own.
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.type(dialog.getByLabelText(/^Name/), "second")
+    await pickOption(user, "Provider", "searxng")
+    await user.type(dialog.getByLabelText(/^Backend URL/), "http://other:8080")
+    await user.click(dialog.getByRole("button", { name: "Add search tool" }))
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -196,11 +223,14 @@ describe("SearchToolsCard", () => {
     await renderOpened(user)
     await screen.findByText("local")
 
-    await user.type(screen.getByLabelText("Search tool name"), "keyless-exa")
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Add search tool" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.type(dialog.getByLabelText(/^Name/), "keyless-exa")
+    const submit = dialog.getByRole("button", { name: "Add search tool" })
+    expect(submit).toBeDisabled()
 
-    await user.type(screen.getByLabelText("Search API key"), "exa-live")
-    expect(screen.getByRole("button", { name: "Add" })).toBeEnabled()
+    await user.type(dialog.getByLabelText(/^API key/), "exa-live")
+    expect(submit).toBeEnabled()
   })
 
   it("omits api_key from a save that only changes the backend URL", async () => {
