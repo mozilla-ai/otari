@@ -23,7 +23,7 @@ from mcp.types import Tool as MCPTool
 from gateway.api.deps import reset_config
 from gateway.api.routes import _platform as platform_module
 from gateway.api.routes import mcp as mcp_route
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 from gateway.models.mcp import ResolvedMcpServer
@@ -32,7 +32,7 @@ from gateway.services import mcp_stateless
 SERVER_ID = uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e")
 PUBLIC_URL = "https://93.184.216.34/mcp"
 USER_AUTH = {"Authorization": "Bearer platform-user-token"}
-TOOLS_PATH = f"/v1/mcp/servers/{SERVER_ID}/tools"
+TOOLS_PATH = f"{API_ROOT}/mcp/servers/{SERVER_ID}/tools"
 
 
 @pytest.fixture(autouse=True)
@@ -402,7 +402,7 @@ def test_a_non_uuid_server_id_is_refused(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    response = client.get("/v1/mcp/servers/not-a-uuid/tools", headers=USER_AUTH)
+    response = client.get(f"{API_ROOT}/mcp/servers/not-a-uuid/tools", headers=USER_AUTH)
 
     assert response.status_code == 422, response.text
     assert response.json()["code"] == "invalid_request"

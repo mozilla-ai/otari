@@ -27,6 +27,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from gateway.api.routes import mcp as mcp_route
+from gateway.core.config import API_ROOT
 from gateway.core.database import release_session
 from gateway.inflight import InFlightRegistry
 from gateway.models.entities import APIKey, User, WorkspaceMcpServer
@@ -173,7 +174,7 @@ def test_a_workspace_key_executes_against_its_own_stored_server(
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), allowed_tools=["create_issue"])
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 200, response.text
     assert response.json()["content"] == [{"type": "text", "text": "Created issue #42"}]
@@ -189,8 +190,8 @@ def test_the_stored_credential_is_decrypted_and_never_returned(
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    tools = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header)
-    executed = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    tools = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
+    executed = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert tools.status_code == 200, tools.text
     assert executed.status_code == 200, executed.text
@@ -210,7 +211,7 @@ def test_the_database_session_is_released_before_the_mcp_session_opens(
     """Execution step 5: a pooled connection must not be pinned across a remote call."""
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 200, response.text
     assert _events == ["session_released", "mcp_session_opened"]
@@ -226,7 +227,7 @@ def test_discovery_also_releases_the_session_before_connecting(
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    response = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header)
+    response = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
 
     assert response.status_code == 200, response.text
     assert _events == ["session_released", "mcp_session_opened"]
@@ -245,7 +246,7 @@ def test_the_call_appears_in_the_in_flight_registry_while_it_runs(
     session.on_call = lambda: seen.append([entry.endpoint for entry in registry.snapshot()])
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 200, response.text
     assert seen == [["/v1/mcp/execute"]]
@@ -272,7 +273,7 @@ def test_discovery_registers_under_its_own_endpoint_while_it_runs(
     monkeypatch.setattr(session, "list_tools", watched)
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    response = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header)
+    response = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
 
     assert response.status_code == 200, response.text
     assert seen == [["/v1/mcp/servers/{mcp_server_id}/tools"]]
@@ -289,14 +290,14 @@ def test_the_authenticated_principal_is_rate_limited_before_any_outbound_access(
     config = test_config.model_copy(update={"rate_limit_rpm": 1})
     for rate_limited_client in build_test_client(config):
         master = {"Otari-Key": f"Bearer {config.master_key}"}
-        key = rate_limited_client.post("/v1/keys", json={"key_name": "rl"}, headers=master).json()
+        key = rate_limited_client.post(f"{API_ROOT}/keys", json={"key_name": "rl"}, headers=master).json()
         header = {"Otari-Key": f"Bearer {key['key']}"}
         with Session(create_engine(postgres_url)) as db:
             row = _store_server(db, _workspace_id(db, key["id"]))
             body = _execute_body(row)
 
-        first = rate_limited_client.post("/v1/mcp/execute", headers=header, json=body)
-        second = rate_limited_client.post("/v1/mcp/execute", headers=header, json=body)
+        first = rate_limited_client.post(f"{API_ROOT}/mcp/execute", headers=header, json=body)
+        second = rate_limited_client.post(f"{API_ROOT}/mcp/execute", headers=header, json=body)
 
         assert first.status_code == 200, first.text
         assert second.status_code == 429, second.text
@@ -328,8 +329,8 @@ def test_a_blocked_user_cannot_drive_an_outbound_mcp_call(
     test_db.add(user)
     test_db.commit()
 
-    executed = client.post("/v1/mcp/execute", headers=api_key_header, json=body)
-    tools = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header)
+    executed = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=body)
+    tools = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
 
     for response in (executed, tools):
         assert response.status_code == 401, response.text
@@ -351,7 +352,7 @@ def test_an_unblocked_user_is_unaffected(
     user = test_db.get(User, api_key_obj["user_id"])
     assert user is not None and user.blocked is False
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 200, response.text
 
@@ -373,7 +374,7 @@ def test_a_stored_token_is_never_sent_over_cleartext_http(
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=CLEARTEXT_URL, token="ghp_token")
 
     response = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=api_key_header,
         json=_execute_body(row, server_revision=_revision(row)),
     )
@@ -395,7 +396,7 @@ def test_the_same_cleartext_url_is_allowed_when_there_is_no_token_to_leak(
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=CLEARTEXT_URL, token=None)
 
     response = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=api_key_header,
         json=_execute_body(row, server_revision=_revision(row, token=None)),
     )
@@ -414,8 +415,8 @@ def test_a_master_key_cannot_reach_a_workspaces_stored_server(
     """Operator credentials hold no workspace, so no stored server is theirs to run."""
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    executed = client.post("/v1/mcp/execute", headers=master_key_header, json=_execute_body(row))
-    tools = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=master_key_header)
+    executed = client.post(f"{API_ROOT}/mcp/execute", headers=master_key_header, json=_execute_body(row))
+    tools = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=master_key_header)
 
     for response in (executed, tools):
         assert response.status_code == 404, response.text
@@ -433,7 +434,7 @@ def test_a_server_stored_in_another_workspace_is_not_found(
 ) -> None:
     row = _store_server(test_db, _other_workspace(test_db))
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "mcp_server_not_found"
@@ -449,7 +450,7 @@ def test_a_disabled_stored_server_is_not_found(
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), enabled=False)
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 404, response.text
     assert session.calls == []
@@ -467,7 +468,7 @@ def test_a_credential_that_will_not_decrypt_is_a_sanitized_five_hundred(
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
-    response = client.post("/v1/mcp/execute", headers=api_key_header, json=_execute_body(row))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 500, response.text
     assert response.json()["code"] == "mcp_credentials_unavailable"
@@ -485,9 +486,9 @@ def test_the_stored_allowlist_narrows_discovery_and_execution_alike(
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), allowed_tools=["create_issue"])
     session.tools.append(MCPTool(name="delete_repo", description="danger", inputSchema={"type": "object"}))
 
-    tools = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header)
+    tools = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
     refused = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=api_key_header,
         json=_execute_body(row, tool_name="delete_repo"),
     )
@@ -508,9 +509,9 @@ def test_the_discovered_revision_is_what_execution_accepts(
     """The two endpoints agree on the revision, which is the whole point of it."""
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
-    discovered = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header).json()
+    discovered = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header).json()
     executed = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=api_key_header,
         json=_execute_body(row, server_revision=discovered["server_revision"]),
     )
@@ -526,14 +527,14 @@ def test_a_configuration_change_after_discovery_is_refused_without_contacting_th
     session: _FakeSession,
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
-    discovered = client.get(f"/v1/mcp/servers/{row.id}/tools", headers=api_key_header).json()
+    discovered = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header).json()
 
     row.url = "https://93.184.216.35/mcp"
     test_db.add(row)
     test_db.commit()
 
     response = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=api_key_header,
         json=_execute_body(row, server_revision=discovered["server_revision"]),
     )

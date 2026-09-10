@@ -678,7 +678,7 @@ describe("RoutingPage", () => {
 
     const deletes = calls.filter((call) => call.method === "DELETE")
     expect(deletes).toHaveLength(1)
-    expect(deletes[0].url).toContain("/v1/routing/policies/fast")
+    expect(deletes[0].url).toContain(`${API_ROOT}/routing/policies/fast`)
   })
 
   it("deletes nothing when the confirm dialog is cancelled", async () => {

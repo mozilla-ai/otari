@@ -29,7 +29,7 @@ from mcp.types import CallToolResult, TextContent
 from gateway import log_config
 from gateway.api.deps import reset_config
 from gateway.api.routes import _platform as platform_module
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
 from gateway.models.mcp import ResolvedMcpServer
@@ -167,7 +167,7 @@ def test_the_exact_authorized_call_runs_and_the_native_result_comes_back(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 200, response.text
     assert response.json() == {
@@ -190,7 +190,7 @@ def test_the_legacy_resolver_shape_executes_the_authorized_call(
     del stored["enabled"]
     platform.servers = [stored]
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 200, response.text
     assert session.calls == [("create_issue", {"title": "Approved title", "body": "Approved body"})]
@@ -202,7 +202,7 @@ def test_the_request_id_is_returned_on_success_without_touching_the_result(
     session: _FakeSession,
 ) -> None:
     """The successful body stays the native MCP result, so the id rides a header."""
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.headers["X-Otari-Request-ID"]
     assert "request_id" not in response.json()
@@ -218,7 +218,7 @@ def test_execution_timings_include_server_resolution(
     monkeypatch.setattr(log_config.logger, "info", info)
     platform.delay_s = 0.02
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 200, response.text
     info.assert_called_once()
@@ -236,7 +236,7 @@ def test_a_server_reported_error_is_a_definitive_two_hundred(
 ) -> None:
     session.result = CallToolResult(content=[TextContent(type="text", text="denied")], isError=True)
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 200, response.text
     assert response.json()["isError"] is True
@@ -252,7 +252,7 @@ def test_an_absent_allowlist_admits_any_live_tool(
     platform.servers = [stored.model_dump(mode="json")]
 
     response = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=USER_AUTH,
         json=_body(tool_name="anything_at_all", server_revision=stored.revision),
     )
@@ -271,7 +271,7 @@ def test_an_unauthenticated_request_reaches_neither_platform_nor_server(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    response = client.post("/v1/mcp/execute", json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", json=_body())
 
     assert response.status_code == 401
     assert _error(response) == {
@@ -293,7 +293,7 @@ def test_a_tool_outside_the_stored_allowlist_is_refused_before_connecting(
     stored = _stored(allowed_tools=allowed_tools)
     platform.servers = [stored.model_dump(mode="json")]
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
 
     assert response.status_code == 403, response.text
     assert _error(response)["code"] == "mcp_tool_not_allowed"
@@ -307,7 +307,7 @@ def test_a_stale_revision_is_refused_without_a_second_resolver_call(
     session: _FakeSession,
 ) -> None:
     """R-RES-2: the comparison is in memory, over the resolution already needed."""
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body(server_revision="stale-revision"))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision="stale-revision"))
 
     assert response.status_code == 409, response.text
     assert _error(response)["code"] == "mcp_server_changed"
@@ -323,7 +323,7 @@ def test_a_disabled_server_is_not_found(
     stored = _stored(enabled=False)
     platform.servers = [stored.model_dump(mode="json")]
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
 
     assert response.status_code == 404, response.text
     assert _error(response)["code"] == "mcp_server_not_found"
@@ -337,7 +337,7 @@ def test_a_server_the_platform_refuses_is_not_found(
 ) -> None:
     platform.status_code = 404
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 404, response.text
     assert _error(response) == {
@@ -355,7 +355,7 @@ def test_a_legacy_empty_resolver_answer_is_not_found(
 ) -> None:
     platform.servers = []
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 404, response.text
     assert _error(response)["code"] == "mcp_server_not_found"
@@ -369,7 +369,7 @@ def test_multiple_resolver_entries_are_a_resolution_failure(
 ) -> None:
     platform.servers = [_stored().model_dump(mode="json")] * 2
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502, response.text
     assert _error(response)["code"] == "mcp_resolution_failed"
@@ -383,7 +383,7 @@ def test_a_malformed_successful_resolver_response_is_a_resolution_failure(
 ) -> None:
     platform.malformed_json = True
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502, response.text
     assert _error(response)["code"] == "mcp_resolution_failed"
@@ -407,7 +407,7 @@ def test_platform_payment_and_authorization_refusals_keep_their_status(
 ) -> None:
     platform.status_code = platform_status
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == platform_status, response.text
     assert _error(response) == {
@@ -426,7 +426,7 @@ def test_the_platforms_rate_limit_is_preserved(
     platform.status_code = 429
     platform.retry_after = "7"
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 429, response.text
     assert response.headers["Retry-After"] == "7"
@@ -442,7 +442,7 @@ def test_an_unsafe_resolved_url_is_refused_before_connecting(
     stored = _stored(url="http://169.254.169.254/mcp")
     platform.servers = [stored.model_dump(mode="json")]
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision=stored.revision))
 
     assert response.status_code == 400, response.text
     assert _error(response) == {
@@ -479,7 +479,7 @@ def test_an_invalid_request_is_refused_before_resolution_or_logging(
     overrides: dict[str, Any],
 ) -> None:
     """R-REQ-3: arbitrary caller text must not reach a resolver, a log, or telemetry."""
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body(**overrides))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(**overrides))
 
     assert response.status_code == 422, response.text
     assert _error(response) == {
@@ -503,7 +503,7 @@ def test_a_non_json_parse_failure_uses_the_shared_invalid_request_error(
     monkeypatch.setattr(Request, "json", fail_to_parse)
 
     response = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers={**USER_AUTH, "Content-Type": "application/json"},
         content=b"{}",
     )
@@ -529,7 +529,7 @@ def test_a_local_service_unavailability_keeps_its_status(
 
     monkeypatch.setattr("gateway.api.routes.mcp._authenticate", unavailable)
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 503, response.text
     assert _error(response) == {
@@ -550,7 +550,7 @@ def test_an_inline_server_configuration_is_not_accepted(
     body = _body()
     body["server"] = {"name": "github", "url": "https://attacker.example.com/mcp"}
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=body)
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=body)
 
     assert response.status_code == 422, response.text
     assert _error(response)["code"] == "invalid_request"
@@ -563,7 +563,7 @@ def test_oversized_arguments_are_refused(
     session: _FakeSession,
 ) -> None:
     response = client.post(
-        "/v1/mcp/execute",
+        f"{API_ROOT}/mcp/execute",
         headers=USER_AUTH,
         json=_body(arguments={"body": "x" * (mcp_stateless.ARGUMENTS_MAX_BYTES + 1)}),
     )
@@ -582,7 +582,7 @@ def test_too_deeply_nested_arguments_are_refused(
     for _ in range(mcp_stateless.ARGUMENTS_MAX_DEPTH + 2):
         nested = {"next": nested}
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body(arguments=nested))
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(arguments=nested))
 
     assert response.status_code == 422, response.text
     assert _error(response)["code"] == "invalid_request"
@@ -601,7 +601,7 @@ def test_a_failure_after_dispatch_is_an_unknown_outcome(
 ) -> None:
     session.call_error = RuntimeError("server-secret connection reset")
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502, response.text
     assert _error(response) == {
@@ -626,7 +626,7 @@ def test_a_deadline_after_dispatch_is_an_unknown_outcome(
 
     monkeypatch.setattr(session, "call_tool", never_answer)
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 504, response.text
     assert _error(response)["execution_state"] == "outcome_unknown"
@@ -643,7 +643,7 @@ def test_the_total_deadline_includes_platform_resolution_and_logs_the_outcome(
     monkeypatch.setattr(mcp_stateless, "EXECUTION_TOTAL_TIMEOUT_S", 0.01)
     platform.delay_s = 10
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502, response.text
     assert _error(response) == {
@@ -665,7 +665,7 @@ def test_an_oversized_result_is_an_unknown_outcome(
         content=[TextContent(type="text", text="x" * (mcp_stateless.RESULT_MAX_BYTES + 1))]
     )
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502, response.text
     assert _error(response)["code"] == "mcp_result_too_large"
@@ -683,7 +683,7 @@ def test_no_error_body_carries_a_url_credential_argument_or_exception_text(
     monkeypatch.setattr(log_config.logger, "warning", warning)
     session.call_error = RuntimeError(f"{PUBLIC_URL} server-secret title=Approved title")
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     for secret in ("93.184.216.34", "server-secret", "Approved title", "RuntimeError"):
         assert secret not in response.text, secret
@@ -692,7 +692,7 @@ def test_no_error_body_carries_a_url_credential_argument_or_exception_text(
         assert secret not in logged, secret
 
 
-@pytest.mark.parametrize("path", ["/v1/mcp/execute", f"/v1/mcp/servers/{SERVER_ID}/tools"])
+@pytest.mark.parametrize("path", [f"{API_ROOT}/mcp/execute", f"{API_ROOT}/mcp/servers/{SERVER_ID}/tools"])
 def test_a_capacity_refusal_is_the_only_failure_that_invites_a_retry(
     client: TestClient,
     platform: _Platform,
@@ -728,7 +728,7 @@ def test_a_failure_after_dispatch_advertises_no_retry(
 ) -> None:
     session.call_error = RuntimeError("connection reset")
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502
     assert "Retry-After" not in response.headers
@@ -763,7 +763,7 @@ def test_a_real_transport_failure_shape_still_gets_the_error_contract(
 
     monkeypatch.setattr(mcp_stateless, "open_session", refuse)
 
-    response = client.post("/v1/mcp/execute", headers=USER_AUTH, json=_body())
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
     assert response.status_code == 502, response.text
     assert _error(response) == {
