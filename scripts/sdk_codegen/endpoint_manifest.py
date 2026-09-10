@@ -20,6 +20,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from gateway.core.config import API_ROOT
+
 MANIFEST_PATH = Path(__file__).resolve().parent / "sdk-endpoints.txt"
 
 # Verbs that denote an API operation; OpenAPI path items also carry keys like
@@ -28,7 +30,7 @@ HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
 
 # Liveness/readiness routes are gateway plumbing, not an SDK surface, so they
 # are filtered out rather than needing an [excluded] entry apiece.
-_META_PREFIX = "/health"
+_META_PREFIX = f"{API_ROOT}/health"
 
 
 def parse_manifest(text: str) -> tuple[set[str], set[str]]:
