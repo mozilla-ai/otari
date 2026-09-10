@@ -1,16 +1,16 @@
 import { Description, Label, TextArea, TextField } from "@heroui/react"
 
 import type { GuardrailParameterSpec } from "@/client"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   type ParameterErrors,
   type ParameterValues,
   parameterLabel,
 } from "@/features/tools/guardrailParameters"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { Field } from "@/shared/components/forms/Field"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
-import { SecretField } from "@/shared/components/forms/SecretField"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // One control per parameter the chosen profile accepts, picked by the type the
 // catalog reports. The whole point of the catalog is that this file names no

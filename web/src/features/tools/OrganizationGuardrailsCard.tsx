@@ -204,6 +204,18 @@ function useParameterForm(
       return raw === undefined && Object.keys(found).length === 0
     },
     build: () => buildValidateKwargs(specs, state.values, state.extraJson),
+    /**
+     * Put the form back to what a fresh profile seeds, for the caller that
+     * clears the rest of its fields itself. The effect above cannot do it: it
+     * re-seeds on the serialized specs and stored values, and a cleared profile
+     * whose predecessor also took no typed parameters leaves both unchanged, so
+     * a raw entry would survive into the next guardrail this form adds.
+     */
+    reset: () => {
+      setState(seedParameters(specs, undefined))
+      setIssues({})
+      setRawError(undefined)
+    },
   }
 }
 
@@ -509,6 +521,7 @@ function AddGuardrailForm({
           setUrl("")
           setCredential("")
           setScope([])
+          parameters.reset()
           onSaved(`${named} added`)
         },
         onError: (err) => setError(errorMessage(err)),

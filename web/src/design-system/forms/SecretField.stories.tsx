@@ -79,3 +79,31 @@ export const Invalid: Story = {
     )
   },
 }
+
+/**
+ * `isRequired` for a secret a guardrail profile declares it cannot run without.
+ * The marker is the label's, so a form of mixed optional and required fields
+ * says which is which before anything is typed rather than on submit.
+ */
+export const Required: Story = {
+  args: {
+    label: "Patronus API key",
+    value: "",
+    isRequired: true,
+    description: "This profile refuses to run without it.",
+  },
+}
+
+/**
+ * `isDisabled` for a secret the operator may see the shape of but not set:
+ * a profile whose credential the deployment supplies, where the form still
+ * names the field so its absence is not read as an oversight.
+ */
+export const Disabled: Story = {
+  args: {
+    label: "Alinia API key",
+    value: "",
+    isDisabled: true,
+    description: "Supplied by the deployment; not editable here.",
+  },
+}

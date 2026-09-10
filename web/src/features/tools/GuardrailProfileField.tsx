@@ -2,10 +2,10 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { GuardrailCatalog } from "@/client"
+import { Field } from "@/design-system/forms/Field"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { findProfile } from "@/features/tools/guardrailParameters"
-import { Field } from "@/shared/components/forms/Field"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // Which profile a new entry mandates.
 //

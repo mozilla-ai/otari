@@ -3,12 +3,12 @@ import { useState } from "react"
 import { FiChevronDown } from "react-icons/fi"
 
 import type { GuardrailParameterSpec } from "@/client"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { GuardrailParameterFields } from "@/features/tools/GuardrailParameterFields"
 import type {
   ParameterErrors,
   ParameterValues,
 } from "@/features/tools/guardrailParameters"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
 
 // The `validate_kwargs` half of a guardrail entry: the fields the chosen
 // profile's schema describes, plus the raw editor for everything it does not.
