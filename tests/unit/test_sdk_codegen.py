@@ -1,6 +1,7 @@
 """Unit tests for the control-plane SDK codegen spec filter."""
 
 import importlib.util
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -210,6 +211,10 @@ def _full_spec_stub() -> dict[str, Any]:
             "/v1/rerank": {"post": {"responses": {}}},
             "/v1/embeddings": {"post": {"responses": {}}},
             "/v1/images/generations": {"post": {"responses": {}}},
+            "/v1/batches": {"post": {"responses": {}}, "get": {"responses": {}}},
+            "/v1/batches/{batch_id}": {"get": {"responses": {}}},
+            "/v1/batches/{batch_id}/cancel": {"post": {"responses": {}}},
+            "/v1/batches/{batch_id}/results": {"get": {"responses": {}}},
         },
         "components": {"schemas": {"ChatCompletionRequest": {"type": "object", "properties": {}}}},
     }
@@ -247,6 +252,76 @@ def test_enrich_types_otari_owned_inference_endpoints() -> None:
 
     messages_field = schemas["ChatCompletionRequest"]["properties"]["messages"]
     assert messages_field["items"]["$ref"].endswith("/ChatMessageInput")
+
+
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/v1/batches", "post"),
+        ("/v1/batches", "get"),
+        ("/v1/batches/{batch_id}", "get"),
+        ("/v1/batches/{batch_id}/cancel", "post"),
+        ("/v1/batches/{batch_id}/results", "get"),
+    ],
+)
+def test_enrich_types_batch_operations(path: str, method: str) -> None:
+    source = json.loads(generate.DEFAULT_SPEC.read_text())
+    original_errors = {
+        code: response for code, response in source["paths"][path][method]["responses"].items() if code != "200"
+    }
+    spec = generate.enrich_spec(source)
+    responses = spec["paths"][path][method]["responses"]
+    schema = responses["200"]["content"]["application/json"]["schema"]
+    assert schema.get("$ref")
+    schemas = spec["components"]["schemas"]
+    assert schemas[schema["$ref"].rsplit("/", 1)[-1]]["properties"]
+    refs: set[str] = set()
+    generate._collect_schema_refs(spec, refs)
+    assert not (refs - schemas.keys())
+    assert {code: response for code, response in responses.items() if code != "200"} == original_errors
+
+
+def test_enriched_batch_schemas_match_serialized_responses() -> None:
+    from any_llm.types.batch import Batch
+    from jsonschema import Draft202012Validator
+
+    spec = generate.enrich_spec(json.loads(generate.DEFAULT_SPEC.read_text()))
+    batch = Batch(
+        id="batch_123",
+        completion_window="24h",
+        created_at=1,
+        endpoint="/v1/chat/completions",
+        input_file_id="file_123",
+        object="batch",
+        status="completed",
+    ).model_dump(mode="json")
+    batch["provider"] = "openai"
+
+    def validator(name: str) -> Draft202012Validator:
+        return Draft202012Validator({"$ref": f"#/components/schemas/{name}", "components": spec["components"]})
+
+    validator("BatchResponse").validate(batch)
+    validator("BatchListResponse").validate({"data": [batch]})
+    validator("BatchListResponse").validate({"data": []})
+    assert not validator("BatchResponse").is_valid({key: value for key, value in batch.items() if key != "provider"})
+    assert not validator("BatchResponse").is_valid({**batch, "provider": 42})
+
+    results = validator("BatchResultsResponse")
+    results.validate({"results": []})
+    results.validate(
+        {
+            "results": [
+                {"custom_id": "ok", "result": {"id": "chat_123", "provider_extension": {}}, "error": None},
+                {
+                    "custom_id": "failed",
+                    "result": None,
+                    "error": {"code": "invalid_request", "message": "Invalid input"},
+                },
+            ]
+        }
+    )
+    assert not results.is_valid({"results": [{"custom_id": "failed", "result": None, "error": {"code": "invalid"}}]})
+    assert not results.is_valid({"results": [{"custom_id": "bad", "result": "not an object", "error": None}]})
 
 
 def test_enrich_types_reasoning_as_string_matching_wire_format() -> None:
