@@ -220,17 +220,29 @@ function offeringColumns({
       isRowHeader: true,
       allowsSorting: true,
       cell: ({ offering: row }) => (
-        <div className="flex max-w-[17rem] flex-col gap-0.5">
-          <span className="text-body">{row.provider}</span>
-          <span className="text-caption">
-            {row.provider_type !== row.provider
-              ? `${row.provider_type} · `
-              : ""}
-            {credentialLabel(row.credential)}
-            {row.quantization ? ` · ${row.quantization}` : ""}
+        // Two lines, whatever the selector's length: a Fireworks id would
+        // otherwise wrap to three and set the height of every row. The
+        // selector is cut to the lane with the whole of it on hover and on
+        // the copy.
+        <div className="flex max-w-[16rem] flex-col gap-0.5">
+          <span className="text-body">
+            {row.provider}
+            <span className="text-caption">
+              {" · "}
+              {row.provider_type !== row.provider
+                ? `${row.provider_type} · `
+                : ""}
+              {credentialLabel(row.credential)}
+              {row.quantization ? ` · ${row.quantization}` : ""}
+            </span>
           </span>
           <CopyableValue value={row.selector} label="selector">
-            <code className="text-mono-caption break-all">{row.selector}</code>
+            <code
+              title={row.selector}
+              className="block max-w-[13rem] truncate text-mono-caption"
+            >
+              {row.selector}
+            </code>
           </CopyableValue>
         </div>
       ),
@@ -302,7 +314,7 @@ function offeringColumns({
             <span className="text-mono-caption">
               {rate(row.usage_30d.effective_price_per_million)}
             </span>
-            <span className="text-caption text-subtle">
+            <span className="whitespace-nowrap text-caption text-subtle">
               {row.usage_30d.requests} req · cache{" "}
               {percent(row.usage_30d.cache_hit_rate)}
             </span>
