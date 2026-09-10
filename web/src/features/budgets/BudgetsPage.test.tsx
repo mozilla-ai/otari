@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -350,6 +350,39 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(patch[1]?.body))).toEqual({
       budget_id: "new-budget-id-0000-0000-000000000000",
     })
+  })
+
+  it("seeds a fresh draft from either opener, header or empty state", async () => {
+    // Keying the create dialog on an open counter is only correct while every
+    // opener bumps it, and this page has two: the heading's Create budget and
+    // the empty state's Create your first budget. A missed one opens on the
+    // last draft, which here is a duplicate budget one press away.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create your first budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "team-a")
+    // A typed draft is dirty, so leaving goes through the guard.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+    expect(screen.getByLabelText("Name (optional)")).toHaveValue("")
+
+    // And back the other way, so neither opener is the only one asserted.
+    await user.type(screen.getByLabelText("Name (optional)"), "team-b")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(
+      screen.getByRole("button", { name: "Create your first budget" }),
+    )
+    expect(screen.getByLabelText("Name (optional)")).toHaveValue("")
   })
 
   it("keeps failed initial assignments retryable without creating another budget", async () => {
