@@ -27,12 +27,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.core.config import API_ROOT
 from gateway.models.entities import APIKey, DashboardSession
 from gateway.models.entities import User as BillingUser
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
-_PREFIX = "/v1/organizations/me/keys"
+_PREFIX = f"{API_ROOT}/organizations/me/keys"
 
 
 @dataclass
@@ -102,7 +103,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
     """Two tenants and the identities that act in them."""
     # One master-key call provisions the tenancy root, so the organizations built
     # below sit beside a real default rather than replacing it.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
 
     session = db_session_factory()
     try:
@@ -288,7 +289,7 @@ def test_a_revoked_spend_identity_cannot_mint_its_way_back(
     code, first = _create(client, world, "alpha_member", {"key_name": "before", "workspace_id": workspace})
     assert code == status.HTTP_200_OK, first
 
-    revoke = client.delete(f"/v1/users/{owner_id}", headers=master_key_header)
+    revoke = client.delete(f"{API_ROOT}/users/{owner_id}", headers=master_key_header)
     assert revoke.status_code == status.HTTP_204_NO_CONTENT, revoke.text
 
     code, body = _create(client, world, "alpha_member", {"key_name": "after", "workspace_id": workspace})
@@ -297,7 +298,7 @@ def test_a_revoked_spend_identity_cannot_mint_its_way_back(
     # The revocation still stands afterwards, which is what the operator surface
     # refusing the same owner reports.
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         headers=master_key_header,
         json={"key_name": "operator", "user_id": owner_id, "workspace_id": workspace},
     )
@@ -372,7 +373,7 @@ def test_an_operator_minted_key_outside_the_organization_stays_invisible(
     before = {row["id"] for row in listed}
 
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         headers=master_key_header,
         json={"key_name": "handed-over", "user_id": str(world.users["alpha_member"])},
     )
@@ -576,9 +577,9 @@ def test_a_create_cannot_name_an_owner_or_exempt_itself(client: TestClient, worl
 
 def test_the_deployment_wide_router_still_refuses_a_member(client: TestClient, world: _World) -> None:
     """The gate otari-ai#1880 added stays; this surface is a sibling, not a loosening."""
-    code, body = _request(client, world, "alpha_member", "GET", "/v1/keys")
+    code, body = _request(client, world, "alpha_member", "GET", f"{API_ROOT}/keys")
     assert code == status.HTTP_403_FORBIDDEN, body
-    code, body = _request(client, world, "alpha_member", "POST", "/v1/keys", json={"key_name": "nope"})
+    code, body = _request(client, world, "alpha_member", "POST", f"{API_ROOT}/keys", json={"key_name": "nope"})
     assert code == status.HTTP_403_FORBIDDEN, body
 
 
@@ -593,7 +594,7 @@ def test_a_member_minted_key_authenticates_on_the_data_plane(client: TestClient,
     assert code == status.HTTP_200_OK
 
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         headers={"Authorization": f"Bearer {created['key']}"},
         json={"model": "does-not-exist:nope", "messages": [{"role": "user", "content": "hi"}]},
     )

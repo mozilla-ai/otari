@@ -1,10 +1,11 @@
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Generator
 from typing import Any
 
 import httpx
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
+    ChatCompletionChunk,
     ChatCompletionMessage,
     Choice,
     CompletionUsage,
@@ -13,15 +14,16 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
-from gateway.main import create_app
+
+from .conftest import app_for
 
 
 @pytest.fixture
 def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = create_app(
+    app = app_for(
         GatewayConfig(
             mode="hybrid",
             platform={"base_url": "http://platform.test/api/v1"},
@@ -37,7 +39,7 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
 
 def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
     )
 
@@ -60,7 +62,7 @@ def test_hybrid_mode_maps_resolve_unauthorized(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -142,7 +144,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -254,7 +256,7 @@ def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json=_bedrock_chat_request(),
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -300,7 +302,7 @@ def test_hybrid_mode_forwards_bedrock_bearer_token_via_client_args(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json=_bedrock_chat_request(),
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -367,7 +369,7 @@ def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": "hi"}],
@@ -441,7 +443,7 @@ def test_hybrid_mode_accepts_legacy_resolve_shape(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -493,7 +495,7 @@ def test_hybrid_mode_maps_provider_timeout(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -579,7 +581,7 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "anything", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -687,7 +689,7 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "anything", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -717,7 +719,7 @@ def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -784,7 +786,7 @@ def test_hybrid_mode_usage_retries_only_transient_failures(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -807,7 +809,7 @@ def test_hybrid_mode_maps_resolve_validation_error_to_bad_gateway(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -839,7 +841,7 @@ def test_hybrid_mode_forwards_resolve_400_detail(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "bedrock:anthropic.claude-haiku-4-5", "messages": [{"role": "user", "content": "hi"}]},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -920,7 +922,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
 
     with platform_client.stream(
         "POST",
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1031,7 +1033,7 @@ def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1112,7 +1114,7 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1180,7 +1182,7 @@ def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1191,6 +1193,87 @@ def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
 
     assert response.status_code == 504
     assert response.json() == {"detail": "All upstream providers timed out"}
+
+
+def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A route exhausted by rate limits keeps the 429. Flattening it into the
+    generic 502 would tell a client that has just been asked to back off that it
+    hit an outage and may retry now, which is the opposite instruction. Covers
+    ``raise_all_streaming_attempts_failed``'s rate-limit branch."""
+
+    upstream_calls: list[str] = []
+
+    class _RateLimited(Exception):
+        def __init__(self, retry_after: str) -> None:
+            super().__init__("Quota exceeded. Please retry in 34.6s.")
+            self.status_code = 429
+            self.response = httpx.Response(429, headers={"Retry-After": retry_after})
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-429",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "gemini",
+                            "model": "gemini-2.5-pro",
+                            "api_key": "gemini-key",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "att-b",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-busy",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        upstream_calls.append(str(kwargs.get("model", "")))
+        # A different window per attempt, so the header assertion pins which
+        # failure's window an exhausted route forwards.
+        raise _RateLimited("12" if len(upstream_calls) == 1 else "34")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 429
+    assert response.json() == {"detail": "All upstream providers rate-limited this request"}
+    # A 429 advances the plan, so both attempts really ran: the aggregate is
+    # reached by exhausting the route, not by one attempt failing outright.
+    assert len(upstream_calls) == 2
+    # The final failure's window, not the first attempt's.
+    assert response.headers["Retry-After"] == "34"
 
 
 def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
@@ -1252,7 +1335,7 @@ def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1400,7 +1483,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1476,7 +1559,7 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1489,6 +1572,147 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     # Both calls were to attempt 1 (rounds 1 and 2 of the tool loop). The
     # second attempt (openai) is never tried because lock-in fired on round 1.
     assert calls == ["anthropic:claude-haiku-4-5", "anthropic:claude-haiku-4-5"]
+
+
+class _CappedSearchBackend:
+    """WebSearchBackend duck-type that counts searches and looks gateway-owned.
+
+    ``take_last_results`` is what marks a pool as the gateway's own search backend
+    rather than an MCP server exposing a tool of the same name.
+    """
+
+    calls = 0
+
+    def __init__(self, **_kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "_CappedSearchBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "web_search", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "web_search"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        return [{"url": "https://a", "title": "A"}]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        type(self).calls += 1
+        return "results"
+
+
+def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``max_uses`` bounds the request, not each attempt of it.
+
+    A tool-loop stream whose swallowed first round runs a search and whose second
+    round dies is still pre-first-chunk, so the plan falls over. Both runs are
+    billed (``ToolUsageTally`` accumulates across attempts), so a cap the next
+    attempt started over on would bill up to ``max_uses`` per candidate.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    _CappedSearchBackend.calls = 0
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="ws-cap-req")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    class _FakeAuthError(Exception):
+        status_code = 401
+
+    def _chunk(payload: dict[str, Any]) -> Any:
+        return ChatCompletionChunk.model_validate(
+            {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "m", **payload}
+        )
+
+    async def fake_loop_acompletion(**kwargs: Any) -> Any:
+        calls.append(kwargs.get("model", ""))
+        # Round 2 of attempt 1 dies. The round-1 tool-call chunks were swallowed,
+        # so nothing has reached the client and the plan may still fall over.
+        if len(calls) == 2:
+            raise _FakeAuthError("simulated upstream 401 on round 2")
+        wants_search = len(calls) in (1, 3)
+
+        async def _stream() -> AsyncIterator[Any]:
+            if wants_search:
+                yield _chunk(
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "role": "assistant",
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "web_search",
+                                                "arguments": '{"query": "otari"}',
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    }
+                )
+                yield _chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            else:
+                yield _chunk({"choices": [{"index": 0, "delta": {"content": "answered"}, "finish_reason": None}]})
+                yield _chunk(
+                    {
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+                    }
+                )
+
+        return _stream()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _CappedSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "tools": [{"type": "otari_web_search", "max_uses": 1}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    # The fallover happened, and the served attempt found the cap already spent.
+    assert calls == [
+        "anthropic:claude-haiku-4-5",
+        "anthropic:claude-haiku-4-5",
+        "openai:gpt-4o-mini",
+        "openai:gpt-4o-mini",
+    ]
+    assert _CappedSearchBackend.calls == 1
 
 
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
@@ -1548,7 +1772,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1657,7 +1881,7 @@ def test_hybrid_mode_web_search_403_when_disabled(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1719,7 +1943,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1784,7 +2008,7 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1837,7 +2061,7 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1898,7 +2122,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1969,7 +2193,7 @@ def test_hybrid_mode_streaming_falls_through_on_provider_400(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "anything", "messages": [{"role": "user", "content": "hi"}], "stream": True},
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -2066,7 +2290,7 @@ def test_platform_mode_sandbox_403_when_disabled(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2105,7 +2329,7 @@ def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2152,7 +2376,7 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2224,7 +2448,7 @@ def test_platform_mode_streaming_sandbox_gets_the_same_image(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2263,7 +2487,7 @@ def test_platform_mode_sandbox_per_request_hint_wins(
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2305,7 +2529,7 @@ def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
     monkeypatch.setattr("gateway.api.routes.chat.mcp_tool_loop", fake_mcp_tool_loop)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2358,7 +2582,7 @@ def test_platform_mode_sandbox_unreachable_returns_502(
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _DownSandboxBackend)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
@@ -2415,7 +2639,7 @@ def test_platform_mode_web_search_unreachable_returns_502(
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", fake_build_web_search_backend)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],

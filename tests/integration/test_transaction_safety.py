@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.entities import Budget, User
 from gateway.services.budget_service import _cas_reset_user_budget, _is_model_free
 
@@ -23,7 +23,7 @@ def test_create_user_rollback_on_commit_failure(
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
         resp = client.post(
-            "/v1/users",
+            f"{API_ROOT}/users",
             json={"user_id": "fail-user"},
             headers=master_key_header,
         )
@@ -35,17 +35,17 @@ def test_delete_user_rollback_on_commit_failure(
     master_key_header: dict[str, str],
 ) -> None:
     """delete_user rolls back both the API key deactivation and soft-delete on commit failure."""
-    client.post("/v1/users", json={"user_id": "del-fail-user"}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "del-fail-user"}, headers=master_key_header)
 
     with patch(
         "gateway.api.routes.users.AsyncSession.commit",
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
-        resp = client.delete("/v1/users/del-fail-user", headers=master_key_header)
+        resp = client.delete(f"{API_ROOT}/users/del-fail-user", headers=master_key_header)
     assert resp.status_code == 500
 
     # User should still be active because the commit was rolled back
-    resp = client.get("/v1/users/del-fail-user", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/users/del-fail-user", headers=master_key_header)
     assert resp.status_code == 200
 
 
@@ -57,13 +57,13 @@ def test_create_key_rollback_on_commit_failure(
     # Provisioned before the patch: the route resolves the caller's organization,
     # and first-boot provisioning commits, which the patch below would otherwise
     # fail outside the handler's own rollback.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     with patch(
         "gateway.api.routes.keys.AsyncSession.commit",
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
         resp = client.post(
-            "/v1/keys",
+            f"{API_ROOT}/keys",
             json={"key_name": "fail-key"},
             headers=master_key_header,
         )
@@ -80,7 +80,7 @@ def test_create_budget_rollback_on_commit_failure(
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
         resp = client.post(
-            "/v1/budgets",
+            f"{API_ROOT}/budgets",
             json={"max_budget": 100.0},
             headers=master_key_header,
         )
@@ -97,7 +97,7 @@ def test_set_pricing_rollback_on_commit_failure(
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
         resp = client.post(
-            "/v1/pricing",
+            f"{API_ROOT}/pricing",
             json={
                 "model_key": "openai:gpt-4o",
                 "input_price_per_million": 2.5,
@@ -196,7 +196,7 @@ def test_auth_commit_failure_does_not_break_verification(
 ) -> None:
     """API key verification succeeds even if the last_used_at commit fails."""
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "auth-fail-key"},
         headers=master_key_header,
     )
@@ -207,7 +207,7 @@ def test_auth_commit_failure_does_not_break_verification(
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
         resp = client.get(
-            "/v1/users",
+            f"{API_ROOT}/users",
             headers={API_KEY_HEADER: f"Bearer {api_key}"},
         )
         # Auth should not crash with 500 from the commit failure.

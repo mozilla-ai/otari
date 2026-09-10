@@ -16,7 +16,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 |---|---|
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
-| `POST {base}/gateway/mcp-servers/resolve`   | Swap workspace-scoped MCP server ids for inline server configs (called only when a request references MCP server ids) |
+| `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's web-search policy (called only when a request uses the `otari_web_search` tool) |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
@@ -219,9 +219,14 @@ its own tenant.
 
 ## MCP server resolution
 
-Called only when a request references one or more workspace-scoped MCP server
-ids (a hybrid-only feature). Otari swaps those ids for the inline server
-configs it needs to open the connections.
+Called when a request references workspace-scoped MCP server ids (a
+hybrid-only feature). Otari swaps those ids for the inline server configs it
+needs to open the connections. The caller-orchestrated endpoints,
+`GET /v1/mcp/servers/{mcp_server_id}/tools` and `POST /v1/mcp/execute`, call the
+same endpoint with the one id they were asked about. They accept the legacy
+response shape, which returns one enabled connection config without `id` or
+`enabled` and omits disabled servers, while validating either field when a newer
+peer supplies it.
 
 ### Request
 
@@ -236,14 +241,19 @@ Content-Type: application/json
 }
 ```
 
+The caller-orchestrated endpoints send exactly one id:
+`{"mcp_server_ids": ["2c948a61-dc96-4cd8-96bb-8e1434bf424e"]}`.
+
 ### Response
 
 ```json
 {
   "servers": [
     {
+      "id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
       "name": "github",
       "url": "https://mcp.example.com/github",
+      "enabled": true,
       "authorization_token": "ghp_...",   // optional
       "purpose_hint": "Repo and issue lookups",   // optional
       "allowed_tools": ["list_issues", "get_file"] // optional
@@ -253,9 +263,30 @@ Content-Type: application/json
 ```
 
 Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
-`allowed_tools` off each entry in `servers`; a missing `servers` key is treated
-as an empty list. The same URL-safety rules as inline MCP configs apply once the
-configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
+`allowed_tools` off each entry in `servers`; for the tool loop, a missing
+`servers` key is treated as an empty list. The same URL-safety rules as inline
+MCP configs apply once the configs are resolved (SSRF guard, no bearer token
+over cleartext `http://`).
+
+For a caller-orchestrated request, exactly one returned entry is bound to the
+one id Otari requested. A legacy entry may omit `id` and `enabled`; Otari uses
+the requested id and treats a returned config as enabled. An empty `servers`
+list is the legacy representation of a disabled server and becomes
+`404 mcp_server_not_found`, the same public result as any inaccessible server.
+A missing or malformed `servers` list, multiple entries, malformed recognized
+fields, or an explicit id that does not match remain
+`502 mcp_resolution_failed`.
+
+New peers should return `id` and `enabled`. When present, `id` must match the
+request and `enabled` must be a JSON boolean; `enabled: false` becomes the same
+404 without opening an MCP connection. These fields remain unused by the
+managed tool loop.
+
+Otari derives the `server_revision` those endpoints publish from the resolved
+URL, a digest of the resolved credential, the effective enabled state, and the
+sorted `allowed_tools`. `name` and `purpose_hint` are excluded, so retitling a
+server does not invalidate an authorization an application is still holding.
+Nothing platform-side stores or returns a revision.
 
 ### Failure
 
@@ -264,6 +295,14 @@ configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
 | `400`, `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
+
+The caller-orchestrated endpoints publish their own error contract instead of
+forwarding any detail, because a platform `detail` may name a workspace, a plan,
+or a stored server. Statuses remain meaningful: `401` becomes
+`authentication_failed`, `402` becomes `payment_required`, `403` becomes
+`forbidden`, `404` becomes `mcp_server_not_found`, and `429` keeps its status and
+`Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
+`502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Web search resolution
 
@@ -407,6 +446,32 @@ that in mind:
   and are not part of `prompt_tokens`. `cache_write_tokens` is a true cache
   creation charge billed at a premium.
 
+`cache_write_1h_tokens` is an optional **subset** of `cache_write_tokens`: the
+portion created with a one-hour TTL rather than the five-minute default, which
+Anthropic bills at a higher rate. It is never added to `cache_write_tokens`, so
+the five-minute portion is `cache_write_tokens - cache_write_1h_tokens`. A
+receiver that does not price the two TTLs separately can ignore it.
+
+The key is present whenever `cache_write_tokens` is non-zero, and `0` there means
+every write used the five-minute TTL. It is omitted entirely when the report
+carries no cache writes, which is every OpenAI and Gemini report; hence its
+absence from the example above. Absent means zero, so a report from an older
+gateway prices exactly as before. A cache-writing report looks like:
+
+```json
+"usage": {
+  "prompt_tokens": 13,
+  "completion_tokens": 7,
+  "total_tokens": 20,
+  "cache_read_tokens": 8,
+  "cache_write_tokens": 30,
+  "cache_write_1h_tokens": 10
+}
+```
+
+so 10 of those 30 written tokens carry the one-hour TTL and the other 20 the
+five-minute one.
+
 The platform must accept these additive keys with lenient parsing; a handler that
 rejects unknown fields would 422 the report (a non-retryable status), silently
 dropping it. See companion issue mozilla-ai/otari-ai#1168.
@@ -485,10 +550,14 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
    per-attempt failover budget (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`,
    default 2000 ms). The sole/final attempt has no next attempt to fall over to,
    so it additionally gets `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS`
-   of grace on top of the budget (default 0, i.e. unchanged), so a slow-but-valid
-   first token is not turned into a timeout, while the wait stays bounded. If the
-   upstream raises before yielding or the wait times out, move to the next
-   attempt.
+   of grace on top of the budget (default 0). A request that forwards provider
+   tools but does not run a gateway-managed tool loop keeps the tight budget on
+   non-final attempts, while its final attempt takes the tool-loop budget
+   (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP`, default 30000 ms) as
+   its base before the grace is added. This gives tool-heavy agents more time
+   only when there is nowhere left to fail over, and the configured grace stays
+   additive in every mode. If the upstream raises before yielding or the bounded
+   wait times out, move to the next attempt.
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
    and start flushing SSE chunks to the client.
 
@@ -523,9 +592,11 @@ flag.
 |---|---|---|
 | `OTARI_AI_TOKEN` | none | Setting this enables hybrid mode. |
 | `PLATFORM_HEALTH_PATH` | `/utils/health-check/` | Path under `base_url` probed to report `platform_reachable` on `GET /health`; `GET /health/readiness` answers `503` when the same probe fails. Only a `2xx` counts as reachable, so point it at a route the peer actually serves: a `404`, a `401`, and a redirect to a login page all report unreachable. The default is an otari.ai route. |
+| `PLATFORM_HEALTH_URL` | none | Full URL probed instead of `base_url` + `PLATFORM_HEALTH_PATH`, for a peer whose health route does not live under `base_url`'s own path (an unversioned `/health` beside a versioned `/v1` API, say). Takes precedence over `PLATFORM_HEALTH_PATH` when set. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_INLINE_TIMEOUT_MS` | `1500` | Budget for the one usage report the response path waits on to attach inline cost. Expiry ships the response without cost; the report itself continues. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
-| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |
-| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, on top of the budget. `0` = unchanged. |
+| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. Forwarded provider-tool requests retain it on non-final attempts. |
+| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP` | `30000` | Gate budget for a gateway-managed tool loop, and the final-attempt base for a request that forwards provider tools. |
+| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, added on top of whichever base budget applies. |

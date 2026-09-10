@@ -2,21 +2,25 @@ import { RouterProvider } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { HybridLanding } from "@/app/HybridLanding"
 import { router } from "@/app/router"
-import type { DeploymentBootstrap } from "@/client"
+import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
+import { PageError } from "@/design-system/feedback/PageError"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import { publicAuthPath } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
-import { ErrorBanner } from "@/shared/components/ui"
+import type { WireBootstrap } from "@/shared/helpers/bootstrap"
+import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
  * The hash path, live: it changes without a reload (following an emailed
  * link while a tab is already open, or the accept page navigating away when
- * it is done), and `DeploymentRoot` has to notice, unlike the bootstrap and
- * auth state everything else here reads once per load.
+ * it is done), and both `App` and `DeploymentRoot` have to notice, unlike the
+ * bootstrap and auth state everything else here reads once per load. Read once
+ * in `App` and passed down rather than called in both, so one listener decides
+ * which branch renders and when the boundary around it resets.
  */
 function useHashPath(): string {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -31,32 +35,42 @@ function useHashPath(): string {
 export default function App({
   bootstrap,
 }: {
-  bootstrap: DeploymentBootstrap | null
+  // `WireBootstrap`, not `DeploymentBootstrap`: this is the one component that
+  // takes the payload as it came off the wire, and an older gateway sends fewer
+  // fields than the generated type promises. `normalizeBootstrap` below is
+  // where it becomes the complete shape everything under here reads.
+  bootstrap: WireBootstrap | null
 }) {
+  // Read here rather than only in `DeploymentRoot` because the boundary below
+  // resets on it: which branch renders is a function of the hash, so a throw in
+  // one of them must not outlive the navigation away from it.
+  const hash = useHashPath()
+
   // Null means /v1/bootstrap did not answer (see main.tsx). The app deliberately
   // has no fallback deployment to assume: rendering a management dashboard at a
   // gateway that does not serve one is the failure this contract exists to
   // prevent, so say what happened instead.
   if (!bootstrap) {
     return (
-      <div className="flex min-h-full items-center justify-center p-6">
-        <div className="w-full max-w-md">
-          <ErrorBanner
-            error={
-              new Error(
-                "Could not reach the gateway, so the dashboard does not know what it is connected to. Check that it is running, then reload.",
-              )
-            }
-          />
-        </div>
-      </div>
+      <PageError
+        error={
+          new Error(
+            "Could not reach the gateway, so the dashboard does not know what it is connected to. Check that it is running, then reload.",
+          )
+        }
+      />
     )
   }
 
+  // Outside the provider rather than inside it, because the provider's own
+  // correction memo reads `sign_in_methods` and is therefore one of the things
+  // that can throw on a bootstrap this dashboard did not expect.
   return (
-    <DeploymentProvider value={bootstrap}>
-      <DeploymentRoot />
-    </DeploymentProvider>
+    <ErrorBoundary resetKey={hash}>
+      <DeploymentProvider value={normalizeBootstrap(bootstrap)}>
+        <DeploymentRoot hash={hash} />
+      </DeploymentProvider>
+    </ErrorBoundary>
   )
 }
 
@@ -67,10 +81,9 @@ export default function App({
  * *session* gets to require. No page below here reads the deployment mode
  * again.
  */
-function DeploymentRoot() {
+function DeploymentRoot({ hash }: { hash: string }) {
   const { deployment_type, session_type } = useDeployment()
   const { isAuthenticated } = useAuth()
-  const hash = useHashPath()
 
   // A hybrid gateway is data-plane only: otari.ai owns its organizations,
   // credentials, routing, budgets and usage, and a second management UI beside

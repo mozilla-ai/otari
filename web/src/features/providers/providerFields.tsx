@@ -9,18 +9,26 @@ import {
   TextField,
 } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
+import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
+import { Field } from "@/design-system/forms/Field"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { useProviderCatalog } from "@/shared/api/providers"
 
-import { useProviderCatalog } from "@/shared/api/hooks"
+import {
+  type CredentialFieldValues,
+  credentialFieldsFor,
+} from "./providerCredentialFields"
 
-// The two form controls a provider credential needs wherever it is edited, and
-// the parsing that goes with one of them.
+// The form controls a provider credential needs wherever it is edited, and the
+// parsing that goes with them.
 //
 // Shared because the same credential is entered on two pages that are otherwise
 // unrelated: `/providers`, where it belongs to the process, and
 // `/organization/provider-keys`, where it belongs to the tenant. Both take a
 // provider name any-llm has to recognize and both take `client_args`, so a
-// second copy of either control would be a second place for the JSON guard and
-// the catalog lookup to drift.
+// second copy of any of these controls would be a second place for the JSON
+// guard, the catalog lookup and the per-provider field list to drift.
 
 // client_args is whatever the provider's SDK client constructor takes (timeouts,
 // custom headers), so it has no fixed schema and the form edits it as JSON. Blank
@@ -57,8 +65,73 @@ export function formatClientArgs(
     : ""
 }
 
-// The client_args editor. Options are passed straight to the provider client, so
-// a bad value is rejected here rather than sent (issue #517).
+// The typed fields a provider expects inside `client_args`, from the registry.
+// Renders nothing for the providers that need none, which is nearly all of them.
+export function ProviderCredentialFields({
+  provider,
+  values,
+  onChange,
+  errors,
+  redacted = [],
+}: {
+  provider: string
+  values: CredentialFieldValues
+  onChange: (next: CredentialFieldValues) => void
+  /** Per-field messages from `validateCredentialFields`, keyed by field key. */
+  errors: Record<string, string>
+  /** Fields whose stored value came back masked, so blank means "keep it". */
+  redacted?: readonly string[]
+}) {
+  const fields = credentialFieldsFor(provider)
+  if (fields.length === 0) return null
+
+  return (
+    <>
+      {fields.map((field) => {
+        const value = values[field.key] ?? ""
+        const error = errors[field.key]
+        const set = (next: string) => onChange({ ...values, [field.key]: next })
+        // The gateway masks anything credential-shaped by key name, so a stored
+        // value is often unreadable whether or not the registry calls it a
+        // secret. Say it is set instead of prefilling the mask.
+        const description = redacted.includes(field.key)
+          ? `Set already, and never shown again. Leave blank to keep it. ${field.helpText}`
+          : field.helpText
+        if (field.isSecret) {
+          return (
+            <SecretField
+              key={field.key}
+              label={field.label}
+              value={value}
+              onChange={set}
+              placeholder={field.placeholder ?? "••••••••"}
+              description={description}
+              isInvalid={error !== undefined}
+              errorMessage={error}
+            />
+          )
+        }
+        return (
+          <Field
+            key={field.key}
+            label={field.label}
+            value={value}
+            onChange={set}
+            isRequired={field.isRequired}
+            placeholder={field.placeholder}
+            description={description}
+            isInvalid={error !== undefined}
+            errorMessage={error}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+// The client_args editor: the escape hatch for whatever the typed fields above
+// do not describe. Options are passed straight to the provider client, so a bad
+// value is rejected here rather than sent (issue #517).
 export function ClientArgsField({
   value,
   onChange,
@@ -82,14 +155,19 @@ export function ClientArgsField({
         spellCheck={false}
         className="font-mono text-xs"
       />
-      <Description
-        className={error ? "text-caption text-danger" : "text-caption"}
-      >
-        {error ??
-          // Unlike the API key, these are stored and returned unencrypted, so say
-          // so before someone puts a token in a custom header here.
-          "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Stored in plain text, so keep secrets out."}
-      </Description>
+      <FieldMessages>
+        <Description
+          className={error ? "text-caption text-danger" : "text-caption"}
+        >
+          {error ??
+            // Both halves of that sentence are load-bearing, and blanket "keep
+            // secrets out" advice would be wrong: Bedrock's classic IAM shape
+            // genuinely needs a secret in here (`gateway/models/provider_keys.py`),
+            // `redact_secret_like_values` is why it does not come back, and
+            // `encrypted_api_key` is the protection it does not get.
+            "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. An option named like a credential is masked when read back, but nothing here is encrypted at rest."}
+        </Description>
+      </FieldMessages>
     </TextField>
   )
 }
@@ -105,6 +183,7 @@ export function ProviderComboBox({
   placeholder,
   extra = [],
   includeCatalog = true,
+  excludeIds,
 }: {
   label: string
   value: string
@@ -115,18 +194,21 @@ export function ProviderComboBox({
   // When false, offer only `extra` (e.g. the two API dialects), not the full
   // provider catalog.
   includeCatalog?: boolean
+  // Catalog entries to leave out, for a form that cannot honor them. Per call
+  // site rather than a rule of the picker: which providers are offerable
+  // depends on what the form collects, not on the catalog. See
+  // `BYO_UNSUPPORTED_PROVIDERS`.
+  excludeIds?: readonly string[]
 }) {
   const catalog = useProviderCatalog()
-  const options = useMemo(
-    () =>
-      includeCatalog
-        ? [
-            ...extra,
-            ...(catalog.data ?? []).map((p) => ({ id: p.id, name: p.name })),
-          ]
-        : extra,
-    [catalog.data, extra, includeCatalog],
-  )
+  const options = useMemo(() => {
+    const catalogOptions = includeCatalog
+      ? (catalog.data ?? [])
+          .filter((p) => !excludeIds?.includes(p.id))
+          .map((p) => ({ id: p.id, name: p.name }))
+      : []
+    return [...extra, ...catalogOptions]
+  }, [catalog.data, extra, includeCatalog, excludeIds])
 
   // Seed the input with the selected option's display name. The field owns its
   // text after mount (updated on typing and on selection); syncing it back from
@@ -187,7 +269,28 @@ export function ProviderComboBox({
         <ComboBox.Trigger />
       </ComboBox.InputGroup>
       <ComboBox.Popover>
-        <ListBox items={visible} className="max-h-72 overflow-auto">
+        <ListBox
+          items={visible}
+          className="max-h-72 overflow-auto"
+          renderEmptyState={() => (
+            <ComboBoxEmpty
+              // A loading catalog counts as an empty source, so a query that
+              // matches none of `extra` says the catalog is still coming rather
+              // than that nothing matches. Both halves are gated on
+              // `includeCatalog`: a picker offering only the API dialects must
+              // not report a catalog it excludes.
+              isSourceEmpty={
+                options.length === 0 || (includeCatalog && catalog.isLoading)
+              }
+              emptyMessage={
+                includeCatalog && catalog.isLoading
+                  ? "Loading the provider catalog…"
+                  : "No provider to offer here."
+              }
+              noMatchesMessage="No provider matches what you typed."
+            />
+          )}
+        >
           {(option: { id: string; name: string }) => (
             <ListBoxItem id={option.id} textValue={option.name}>
               {option.name}

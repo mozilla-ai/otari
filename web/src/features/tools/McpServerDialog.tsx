@@ -2,9 +2,10 @@ import { AlertDialog, Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { WorkspaceMcpServer } from "@/client"
-import { Field } from "@/shared/components/Field"
-import { SecretField } from "@/shared/components/SecretField"
-import { Checkbox, ErrorBanner } from "@/shared/components/ui"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { SecretField } from "@/design-system/forms/SecretField"
 
 // The form behind both Add and Edit, one component rather than two: the only
 // field that behaves differently between them is the bearer token, and keeping

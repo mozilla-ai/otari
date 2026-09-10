@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usage, price_billable_usage
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing, UsageLog, User
@@ -472,7 +473,7 @@ async def ingest_external_events(
             detail=(
                 "External usage can only be imported with a budget-exempt API key (or the master key). "
                 "Imported usage is retrospective and cannot be budget-enforced, so it must not count toward "
-                "a budget. Set exclude_from_budget on this key (Keys page toggle, or PATCH /v1/keys/{id}), "
+                f"a budget. Set exclude_from_budget on this key (Keys page toggle, or PATCH {API_ROOT}/keys/{{id}}), "
                 "or import with a key that already has it."
             ),
         )
@@ -532,7 +533,7 @@ async def ingest_external_events(
                 result,
                 index,
                 event.source_event_id,
-                f"user_id '{target_user}' not found. Create the user via POST /v1/users first.",
+                f"user_id '{target_user}' not found. Create the user via POST {API_ROOT}/users first.",
             )
             continue
 

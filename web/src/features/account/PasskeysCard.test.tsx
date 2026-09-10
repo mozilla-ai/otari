@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap } from "@/client"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
@@ -45,9 +46,9 @@ function mockApi(routes: Record<string, () => Response>) {
     })
 }
 
-const LIST = "GET /v1/auth/webauthn/credentials"
-const OPTIONS = "POST /v1/auth/webauthn/register/options"
-const REGISTER = "POST /v1/auth/webauthn/register"
+const LIST = `GET ${API_ROOT}/auth/webauthn/credentials`
+const OPTIONS = `POST ${API_ROOT}/auth/webauthn/register/options`
+const REGISTER = `POST ${API_ROOT}/auth/webauthn/register`
 
 function renderCard(passkeysReady = true) {
   return render(
@@ -221,7 +222,7 @@ describe("PasskeysCard", () => {
     await waitFor(() => {
       const registered = fetchMock.mock.calls.find(
         ([url, init]) =>
-          String(url) === "/v1/auth/webauthn/register" &&
+          String(url) === `${API_ROOT}/auth/webauthn/register` &&
           (init as RequestInit)?.method === "POST",
       )
       if (!registered) {
@@ -300,7 +301,7 @@ describe("PasskeysCard", () => {
   it("renames a passkey", async () => {
     const fetchMock = mockApi({
       [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }),
-      [`PATCH /v1/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
+      [`PATCH ${API_ROOT}/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
         jsonResponse({ ...PASSKEY, name: "Old laptop" }),
     })
     const user = userEvent.setup()
@@ -355,7 +356,7 @@ describe("PasskeysCard", () => {
   it("deletes a passkey after confirming, and says the password still works", async () => {
     const fetchMock = mockApi({
       [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }),
-      [`DELETE /v1/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
+      [`DELETE ${API_ROOT}/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
         new Response(null, { status: 204 }),
     })
     const user = userEvent.setup()
@@ -388,7 +389,7 @@ describe("PasskeysCard", () => {
   it("stops offering passkey sign-in once the last usable one is deleted", async () => {
     mockApi({
       [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }),
-      [`DELETE /v1/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
+      [`DELETE ${API_ROOT}/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
         new Response(null, { status: 204 }),
     })
     const user = userEvent.setup()
@@ -419,7 +420,7 @@ describe("PasskeysCard", () => {
     mockApi({
       // Newest first, so the orphan is the first Delete button on the page.
       [LIST]: () => jsonResponse({ data: [orphan, PASSKEY], count: 2 }),
-      [`DELETE /v1/auth/webauthn/credentials/${orphan.id}`]: () =>
+      [`DELETE ${API_ROOT}/auth/webauthn/credentials/${orphan.id}`]: () =>
         new Response(null, { status: 204 }),
     })
     const user = userEvent.setup()
@@ -447,7 +448,7 @@ describe("PasskeysCard", () => {
     mockApi({
       // PASSKEY first this time, so the usable one is the button that is clicked.
       [LIST]: () => jsonResponse({ data: [PASSKEY, orphan], count: 2 }),
-      [`DELETE /v1/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
+      [`DELETE ${API_ROOT}/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
         new Response(null, { status: 204 }),
     })
     const user = userEvent.setup()

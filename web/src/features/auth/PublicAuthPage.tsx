@@ -85,7 +85,7 @@ function ProviderUnavailable({ provider }: { provider: string }) {
       description={`This deployment is not configured to sign anyone in with ${label}.`}
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
     >
-      <p className="text-center text-sm text-muted">
+      <p className="text-sm text-muted">
         An operator can turn it on by registering an OAuth client with {label}{" "}
         and giving this gateway its ID and secret. Until then, sign in with the
         credential the sign-in screen offers.
@@ -117,7 +117,7 @@ function MailUnavailable({
       description="This flow works by emailing you a link, and this deployment is not configured to send mail."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
     >
-      <p className="text-center text-sm text-muted">
+      <p className="text-sm text-muted">
         {offersProviderSignIn
           ? "Sign in with one of the providers on the sign-in screen instead, which needs no mail. An operator can turn this flow on by configuring outgoing mail and a public base URL for this gateway."
           : "An operator can turn it on by configuring outgoing mail and a public base URL for this gateway."}

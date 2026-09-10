@@ -1,8 +1,7 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
-
-import { useResetPassword } from "@/shared/api/hooks"
-import { ErrorBanner } from "@/shared/components/ui"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { useResetPassword } from "@/shared/api/auth"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,
@@ -132,7 +131,7 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           autoComplete="new-password"
         />
         {problem ? (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-caption text-danger">
             {problem}
           </p>
         ) : null}

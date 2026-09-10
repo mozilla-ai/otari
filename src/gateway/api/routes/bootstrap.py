@@ -28,13 +28,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password
 from gateway.services.tenancy.webauthn_service import has_any_credential
 
-router = APIRouter(prefix="/v1/bootstrap", tags=["bootstrap"])
+router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
 DeploymentType = Literal["standalone", "hosted", "hybrid"]
 SessionType = Literal["local_operator", "hosted_user", "none"]
@@ -54,12 +54,12 @@ SessionType = Literal["local_operator", "hosted_user", "none"]
 # this list stays the set of methods that need no further qualification.
 SignInMethod = Literal["master_key", "password", "passkey"]
 
-# The management API groups a standalone gateway serves, one name per ``/v1/``
+# The management API groups a standalone gateway serves, one name per ``/api/v1/``
 # router the dashboard's surfaces are built on. Naming the groups rather than the
 # pages keeps the list checkable: ``test_deployment_bootstrap`` asserts every
 # name here is a route this app actually mounts, so a surface cannot outlive the
 # API behind it. Several pages share one (Activity and Usage are both views over
-# ``/v1/usage``), and the Overview index needs none.
+# ``/api/v1/usage``), and the Overview index needs none.
 #
 # Deliberately *not* called capabilities. otari.ai already spends that word on
 # the entitlement axis, down to a nav item's ``capability`` field and a
@@ -75,9 +75,9 @@ SignInMethod = Literal["master_key", "password", "passkey"]
 # the shared shell also runs against a hosted control plane, where the two come
 # apart.
 STANDALONE_SURFACES: tuple[str, ...] = (
-    # The deployment-wide account administration prefix (/v1/admin). The
+    # The deployment-wide account administration prefix (/api/v1/admin). The
     # deployment axis only: it says this process hosts the surface, not that the
-    # caller may use it, which is `GET /v1/admin/access`'s question and the
+    # caller may use it, which is `GET /api/v1/admin/access`'s question and the
     # service's to enforce.
     "admin",
     "budgets",
@@ -108,19 +108,19 @@ STANDALONE_SURFACES: tuple[str, ...] = (
 # control whose blast radius nobody looking at it can see.
 #
 # ``organization_providers`` appears, and is the per-tenant surface that
-# replaces it: ``/v1/organizations/me/provider-keys``, the organization-scoped
+# replaces it: ``/api/v1/organizations/me/provider-keys``, the organization-scoped
 # BYO keys #670 shipped. It is the one name here that is not its router's path
 # prefix, because the router is nested under ``organizations``; ``organizations``
 # stays a separate surface, since the roster and the credential set are
 # different pages with different access.
 #
 # Dropping the surface is not itself a guard over the table: ``config.yml``'s
-# ``providers:`` block and ``/v1/provider-credentials`` still populate it with no
+# ``providers:`` block and ``/api/v1/provider-credentials`` still populate it with no
 # page in front of them, which is #818's to close.
 #
 # ``organization_usage`` appears for a different reason: not a credential's
 # ownership but a question that only exists once tenants do. The router behind it
-# (``/v1/organizations/me/usage``) is mounted on both editions, but on standalone
+# (``/api/v1/organizations/me/usage``) is mounted on both editions, but on standalone
 # the organization is the deployment and ``/usage`` already answers it whole, so
 # the dashboard's organization-wide Usage page is a destination only where "my
 # organization" is narrower than "everything" (otari-ai#1963).
@@ -174,9 +174,9 @@ class DeploymentBootstrap(BaseModel):
             "dashboard but not inference (otari#822); null for standalone and hybrid, both of "
             "which serve inference at the address that reached this page. Not a human link "
             "target like management_url: it is the gateway's bare address, which the dashboard "
-            "suffixes with /v1 to build its request snippets. So it must carry no /v1 path "
-            "segment anywhere (a value ending in /v1, or a whole endpoint like "
-            "/v1/chat/completions, renders that path twice) and no credential, since this "
+            "suffixes with the API root to build its request snippets. So it must carry no API "
+            f"root anywhere (a value ending in {API_ROOT}, or a whole endpoint like "
+            f"{API_ROOT}/chat/completions, renders that path twice) and no credential, since this "
             "response is unauthenticated. This gateway refuses both at startup; any deployment "
             "serving this contract should publish the same shape. Null on a hosted "
             "deployment means unconfigured, and the dashboard then shows no snippet rather "
@@ -212,7 +212,7 @@ class DeploymentBootstrap(BaseModel):
     )
     sign_in_methods: list[SignInMethod] = Field(
         description=(
-            "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
+            "How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
             "first-boot credential and is offered until the operator identity has a password, which "
             "is what claiming the deployment means; 'password' replaces it from then on, and the "
             "master key stays the credential for the management API. 'passkey' appears alongside "
@@ -331,10 +331,10 @@ async def _sign_in_methods(db: AsyncSession, config: GatewayConfig) -> list[Sign
     """How this deployment may be signed in to right now, sorted.
 
     Two independent questions. Which of the two *typed* credentials
-    ``POST /v1/auth/session`` accepts is the first, and they are mutually
+    ``POST /api/v1/auth/session`` accepts is the first, and they are mutually
     exclusive: the master key until the operator identity holds a password
     (otari#702), that password from then on. Whether a passkey can sign somebody in is the second, and it
-    is additive, because ``POST /v1/auth/webauthn/authenticate`` is a separate
+    is additive, because ``POST /api/v1/auth/webauthn/authenticate`` is a separate
     endpoint that does not displace either.
 
     A passkey is published only when one could actually answer: the deployment

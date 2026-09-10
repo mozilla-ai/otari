@@ -16,7 +16,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.search_backend import (
     DEFAULT_MAX_TOKENS_PER_PAGE,
     SearchProviderError,
@@ -126,7 +126,7 @@ def test_no_configured_tools_names_every_route_in() -> None:
         resolve_search_tool(_config(), None)
     detail = str(excinfo.value)
     assert "dashboard" in detail
-    assert "/v1/search-tools" in detail
+    assert f"{API_ROOT}/search-tools" in detail
     assert "OTARI_CONFIG_YAML" in detail
 
 

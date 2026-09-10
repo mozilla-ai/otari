@@ -50,7 +50,7 @@ from gateway.services.url_safety import redact_url_secrets
 from gateway.version import __version__
 
 router = APIRouter(
-    prefix="/v1/settings",
+    prefix="/settings",
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -139,7 +139,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         # smtp_user/smtp_password are deliberately absent: they are credentials,
         # and this view carries no secret. Whether the login they configure
-        # works is answered by a real send (POST /v1/settings/mail/test), which
+        # works is answered by a real send (POST /api/v1/settings/mail/test), which
         # returns the transport's own error, rather than by echoing either here.
         "Email delivery",
         (
@@ -200,7 +200,7 @@ _DELIBERATELY_OMITTED: tuple[str, ...] = (
     # Structured blocks. ``ConfigField.value`` is bool/int/float/str/list[str],
     # so a dict or a nested model has no representation here at all. Each of
     # these has its own surface where it can be rendered as what it is
-    # (/v1/provider-credentials, /v1/pricing, /v1/routing, /v1/search-tools).
+    # (/api/v1/provider-credentials, /api/v1/pricing, /api/v1/routing, /api/v1/search-tools).
     "aliases",
     "model_capabilities",
     "platform",

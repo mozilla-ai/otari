@@ -15,6 +15,8 @@ from prometheus_client import (
 )
 from starlette.responses import Response
 
+from gateway.core.config import API_ROOT, API_VERSION
+
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -30,14 +32,14 @@ PROCESS_COLLECTOR = ProcessCollector(registry=REGISTRY)
 REQUESTS = Counter(
     "gateway_requests",
     "Total number of HTTP requests",
-    ["method", "endpoint", "status"],
+    ["method", "endpoint", "api_version", "status"],
     registry=REGISTRY,
 )
 
 REQUEST_DURATION_SECONDS = Histogram(
     "gateway_request_duration_seconds",
     "HTTP request duration in seconds",
-    ["method", "endpoint"],
+    ["method", "endpoint", "api_version"],
     registry=REGISTRY,
 )
 
@@ -125,23 +127,34 @@ LOG_WRITER_ROWS = Counter(
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 _UNMATCHED_ENDPOINT = "unmatched"
+# What a request outside the API root reports for its version.
+_NO_VERSION = ""
 
 
-def _endpoint_label(scope: Scope) -> str:
-    """Return the matched route template for a request, or a bounded fallback.
+def _endpoint_label(scope: Scope) -> tuple[str, str]:
+    """Return the resource a request matched and the API version it came in under.
 
     Labeling metrics with the raw ``scope["path"]`` mints a new Prometheus
     series per distinct path parameter value (file id, batch id, per-user
     lookups, ...), which is unbounded label cardinality. FastAPI records the
     matched route on the scope once routing finishes, so its ``path`` template
-    (for example ``/v1/files/{file_id}``) collapses those into a single series.
+    (for example ``/files/{file_id}``) collapses those into a single series.
     Requests that match no route land in the ``unmatched`` bucket.
+
+    The API root is split off into its own label so a series survives the root
+    moving, and so two versions served side by side stay distinguishable
+    instead of summing into one. A path outside the root keeps its whole
+    template: ``/metrics`` is ours to name, and an OTel signal path is not.
     """
     route = scope.get("route")
     template = getattr(route, "path", None)
-    if isinstance(template, str) and template:
-        return template
-    return _UNMATCHED_ENDPOINT
+    if not isinstance(template, str) or not template:
+        return _UNMATCHED_ENDPOINT, _NO_VERSION
+    if template == API_ROOT:
+        return "/", API_VERSION
+    if template.startswith(f"{API_ROOT}/"):
+        return template[len(API_ROOT) :], API_VERSION
+    return template, _NO_VERSION
 
 
 async def metrics_endpoint(request: Request) -> Response:
@@ -182,9 +195,13 @@ class MetricsMiddleware:
         finally:
             duration = time.monotonic() - start
             ACTIVE_REQUESTS.dec()
-            endpoint = _endpoint_label(scope)
-            REQUESTS.labels(method=method, endpoint=endpoint, status=str(status_code)).inc()
-            REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint).observe(duration)
+            endpoint, api_version = _endpoint_label(scope)
+            REQUESTS.labels(
+                method=method, endpoint=endpoint, api_version=api_version, status=str(status_code)
+            ).inc()
+            REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint, api_version=api_version).observe(
+                duration
+            )
 
 
 def record_tokens(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:

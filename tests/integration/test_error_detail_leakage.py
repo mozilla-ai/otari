@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from gateway.api.routes._pipeline import PROVIDER_BAD_REQUEST_DETAIL
+from gateway.core.config import API_ROOT
 
 
 def test_provider_error_does_not_leak_details(
@@ -22,7 +23,7 @@ def test_provider_error_does_not_leak_details(
 ) -> None:
     """Test that provider errors return a generic message without internal details."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:nonexistent-model-xyz",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -44,7 +45,7 @@ class _UpstreamError(Exception):
 def _post_chat(client: TestClient, headers: dict[str, str], exc: Exception) -> Any:
     with patch("gateway.api.routes.chat.acompletion", new_callable=AsyncMock, side_effect=exc):
         return client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "Hi"}]},
             headers=headers,
         )
@@ -114,7 +115,7 @@ def test_gateway_fault_error_keeps_a_fixed_detail(
 
 def test_health_readiness_does_not_leak_db_details(client: TestClient) -> None:
     """Test that readiness endpoint doesn't leak database details on success."""
-    response = client.get("/health/readiness")
+    response = client.get(f"{API_ROOT}/health/readiness")
     assert response.status_code == 200
     data = response.json()
     # Should not contain "error" key

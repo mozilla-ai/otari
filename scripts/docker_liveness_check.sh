@@ -68,7 +68,7 @@ docker run -d --name "$OTARI_CONTAINER" \
 
 echo "Waiting for gateway to be healthy..."
 for i in {1..60}; do
-    if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:8000/api/v1/health > /dev/null 2>&1; then
         echo "Gateway is responding"
         break
     fi
@@ -81,16 +81,16 @@ for i in {1..60}; do
     sleep 1
 done
 
-echo "Testing /health endpoint..."
-curl -sf http://localhost:8000/health
+echo "Testing /api/v1/health endpoint..."
+curl -sf http://localhost:8000/api/v1/health
 echo ""
 
-echo "Testing /health/liveness endpoint..."
-curl -sf http://localhost:8000/health/liveness
+echo "Testing /api/v1/health/liveness endpoint..."
+curl -sf http://localhost:8000/api/v1/health/liveness
 echo ""
 
-echo "Testing /health/readiness endpoint..."
-curl -sf http://localhost:8000/health/readiness
+echo "Testing /api/v1/health/readiness endpoint..."
+curl -sf http://localhost:8000/api/v1/health/readiness
 echo ""
 
 # The dashboard bundle is not committed: the Dockerfile's web stage builds it and

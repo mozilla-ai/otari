@@ -33,7 +33,7 @@ from gateway.services.tenancy.deployment_user_service import DeploymentUserServi
 # top, inside the service, because it is about who the caller *is* rather than
 # whether they authenticated.
 router = APIRouter(
-    prefix="/v1/admin",
+    prefix="/admin",
     tags=["admin"],
     dependencies=[Depends(verify_master_key)],
 )
@@ -72,7 +72,7 @@ async def list_deployment_users(
 ) -> DeploymentUsersPublic:
     """List every account on this deployment, with the organizations each belongs to.
 
-    Deployment-wide, so it is not the same list as ``GET /v1/organizations/me/members``:
+    Deployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:
     that one is the caller's organization roster and drops a suspended
     membership, while this one carries every identity at whatever standing,
     including one whose memberships are all suspended. Each row also reports when

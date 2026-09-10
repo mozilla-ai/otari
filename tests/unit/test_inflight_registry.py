@@ -7,6 +7,7 @@ import pytest
 from starlette.requests import Request
 from starlette.types import Receive, Scope, Send
 
+from gateway.core.config import API_ROOT
 from gateway.inflight import (
     INFLIGHT_SCOPE_KEY,
     InFlightMiddleware,
@@ -79,7 +80,7 @@ class TestTrackRequest:
         class _App:
             state = type("_State", (), {"inflight": registry})()
 
-        return Request({"type": "http", "method": "POST", "path": "/v1/chat/completions", "app": _App()})
+        return Request({"type": "http", "method": "POST", "path": f"{API_ROOT}/chat/completions", "app": _App()})
 
     def test_an_untracked_app_is_a_no_op(self) -> None:
         """A bare ASGI scope has nowhere to record anything; tracking must not raise."""
@@ -120,7 +121,7 @@ async def _send(message: MutableMapping[str, Any]) -> None:
 class TestMiddleware:
     @staticmethod
     def _scope() -> Scope:
-        return {"type": "http", "method": "POST", "path": "/v1/chat/completions"}
+        return {"type": "http", "method": "POST", "path": f"{API_ROOT}/chat/completions"}
 
     @pytest.mark.asyncio
     async def test_entry_is_dropped_once_the_response_is_sent(self) -> None:

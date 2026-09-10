@@ -1,3 +1,11 @@
+// `formatPct` and `formatRelative` are re-exported rather than defined here:
+// they carry no product vocabulary, so `TrendChip` and `RefreshButton` in the
+// design system need them, and that layer may not import this one. This module
+// stays the single formatter module a page reaches for (DESIGN.md, "Where
+// things come from"), so the names it published are unchanged and there is one
+// implementation of each.
+export { formatPct, formatRelative } from "@/design-system/helpers/format"
+
 export function formatNumber(value: number | null | undefined): string {
   if (value == null) {
     return "0"
@@ -132,10 +140,6 @@ export function formatTokens(value: number): string {
   return String(value)
 }
 
-export function formatPct(fraction: number): string {
-  return `${(fraction * 100).toFixed(1)}%`
-}
-
 // Period-over-period change. null when there is no comparable previous value
 // (unbounded range, or a previous value of zero which would divide by zero).
 export function deltaFraction(
@@ -144,42 +148,4 @@ export function deltaFraction(
 ): number | null {
   if (previous === undefined || previous === 0) return null
   return (current - previous) / previous
-}
-
-export function formatRelative(
-  iso: string | null | undefined,
-  now: number = Date.now(),
-): string {
-  if (!iso) {
-    return "never"
-  }
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) {
-    return iso
-  }
-  const seconds = Math.round((now - date.getTime()) / 1000)
-  const future = seconds < 0
-  const abs = Math.abs(seconds)
-
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["second", 60],
-    ["minute", 60],
-    ["hour", 24],
-    ["day", 30],
-    ["month", 12],
-    ["year", Number.POSITIVE_INFINITY],
-  ]
-
-  let value = abs
-  let unit: Intl.RelativeTimeFormatUnit = "second"
-  for (const [candidate, divisor] of units) {
-    unit = candidate
-    if (value < divisor) {
-      break
-    }
-    value = Math.floor(value / divisor)
-  }
-
-  const rtf = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" })
-  return rtf.format(future ? value : -value, unit)
 }

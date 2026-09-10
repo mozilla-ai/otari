@@ -24,7 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 
 # Sentinel raised if a provider entrypoint is invoked. Enforcement rejects the
 # request before the provider call, so reaching this is itself the failure.
@@ -35,7 +35,7 @@ def _send_embeddings(
     client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:text-embedding-3-small"
 ) -> Response:
     return client.post(
-        "/v1/embeddings",
+        f"{API_ROOT}/embeddings",
         json={"model": model, "input": "hello world", "user": user_id},
         headers=headers,
     )
@@ -45,7 +45,7 @@ def _send_moderations(
     client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:omni-moderation-latest"
 ) -> Response:
     return client.post(
-        "/v1/moderations",
+        f"{API_ROOT}/moderations",
         json={"model": model, "input": "hello world", "user": user_id},
         headers=headers,
     )
@@ -55,7 +55,7 @@ def _send_rerank(
     client: TestClient, headers: dict[str, str], user_id: str, model: str = "cohere:rerank-v3.5"
 ) -> Response:
     return client.post(
-        "/v1/rerank",
+        f"{API_ROOT}/rerank",
         json={
             "model": model,
             "query": "what is the capital of france",
@@ -70,7 +70,7 @@ def _send_images(
     client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:dall-e-3"
 ) -> Response:
     return client.post(
-        "/v1/images/generations",
+        f"{API_ROOT}/images/generations",
         json={"model": model, "prompt": "a red bicycle", "user": user_id},
         headers=headers,
     )
@@ -80,7 +80,7 @@ def _send_transcription(
     client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:whisper-1"
 ) -> Response:
     return client.post(
-        "/v1/audio/transcriptions",
+        f"{API_ROOT}/audio/transcriptions",
         files={"file": ("clip.mp3", b"fake-audio-bytes", "audio/mpeg")},
         data={"model": model, "user": user_id},
         headers=headers,
@@ -91,7 +91,7 @@ def _send_speech(
     client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:tts-1"
 ) -> Response:
     return client.post(
-        "/v1/audio/speech",
+        f"{API_ROOT}/audio/speech",
         json={"model": model, "input": "hello world", "voice": "alloy", "user": user_id},
         headers=headers,
     )
@@ -112,7 +112,7 @@ _ROUTE_PARAMS = [pytest.param(patch_target, send, id=route_id) for route_id, pat
 
 
 def _create_blocked_user(client: TestClient, headers: dict[str, str], user_id: str) -> None:
-    resp = client.post("/v1/users", json={"user_id": user_id, "blocked": True}, headers=headers)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": user_id, "blocked": True}, headers=headers)
     assert resp.status_code == 200
 
 
@@ -120,11 +120,11 @@ def _create_over_budget_user(client: TestClient, headers: dict[str, str], user_i
     """A user pinned to a zero-dollar budget: any billable request is already at
     the cap, so ``reserve_budget`` rejects with 403 (mirrors the chat-completions
     over-budget test)."""
-    budget = client.post("/v1/budgets", json={"max_budget": 0.0}, headers=headers)
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=headers)
     assert budget.status_code == 200
     budget_id = budget.json()["budget_id"]
     created = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": user_id, "budget_id": budget_id},
         headers=headers,
     )
@@ -182,7 +182,7 @@ def test_batches_rejects_blocked_user(
     owner_user_id = "default"
 
     blocked = client.patch(
-        f"/v1/users/{owner_user_id}",
+        f"{API_ROOT}/users/{owner_user_id}",
         json={"blocked": True},
         headers=master_key_header,
     )
@@ -190,7 +190,7 @@ def test_batches_rejects_blocked_user(
 
     with patch("gateway.api.routes.batches.acreate_batch", side_effect=_PROVIDER_REACHED):
         response = client.post(
-            "/v1/batches",
+            f"{API_ROOT}/batches",
             json={
                 "model": "openai:gpt-4o-mini",
                 "requests": [
@@ -227,7 +227,7 @@ def test_billable_route_unresolvable_model_returns_400(
     # Create the user so reservation-first routes (audio) clear the
     # user/blocked/budget gate and actually reach model resolution; otherwise
     # they would 404 before the selector is parsed.
-    created = client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    created = client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     assert created.status_code == 200
 
     with patch(patch_target, side_effect=_PROVIDER_REACHED):

@@ -6,7 +6,7 @@ request, what is tried after a retryable failure, and which guardrails always ru
 in a file this process does not own); these routes manage the ``routing_policies``
 table, which means the same thing to a request but can change without a restart.
 
-Scoping matches ``/v1/aliases``: a stored policy belongs to one workspace and,
+Scoping matches ``/api/v1/aliases``: a stored policy belongs to one workspace and,
 within it, is either workspace-wide (``user_id`` omitted) or scoped to one user,
 who is then the only caller that resolves it. Omitting ``workspace_id`` means the
 deployment's default workspace, so a single-workspace deployment never names one.
@@ -49,7 +49,7 @@ from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
 
 router = APIRouter(
-    prefix="/v1/routing/policies",
+    prefix="/routing/policies",
     tags=["routing"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -315,7 +315,7 @@ async def _validate_router_pricing(
             detail=(
                 f"Router candidate(s) {', '.join(missing)} have no pricing. A router scores candidates by "
                 "cost, so it would decline every request and this policy would always serve "
-                f"'{spec.default_target}'. Add pricing for those models (POST /v1/pricing) first."
+                f"'{spec.default_target}'. Add pricing for those models (POST /api/v1/pricing) first."
             ),
         )
 

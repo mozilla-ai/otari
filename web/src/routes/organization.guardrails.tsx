@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { UnavailableHere } from "@/shared/components/ui"
+import { UnavailableHere } from "@/shared/components/access/UnavailableHere"
 
 // Declared so the organization rail can name the destination the navigation
 // design draws, and gated on a surface this gateway does not report, so the link

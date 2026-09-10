@@ -41,7 +41,7 @@ useQuery({
 ```
 
 Without it, every keystroke in a filter empties the table. The dashboard already does this in
-a few hooks (`web/src/shared/api/hooks.ts`); a new filtered query should not be the exception.
+a few hooks under `web/src/shared/api/`; a new filtered query should not be the exception.
 
 ## Skeletons match what they replace
 

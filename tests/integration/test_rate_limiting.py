@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
 from .conftest import build_test_client
 
@@ -44,7 +44,7 @@ def no_rate_limit_client(postgres_url: str) -> Generator[TestClient]:
 
 def _create_test_user(client: TestClient, master_key: str = "test-master-key") -> str:
     header = {API_KEY_HEADER: f"Bearer {master_key}"}
-    resp = client.post("/v1/users", json={"user_id": "rl-test-user", "alias": "RL"}, headers=header)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": "rl-test-user", "alias": "RL"}, headers=header)
     assert resp.status_code == 200
     result: str = resp.json()["user_id"]
     return result
@@ -53,7 +53,7 @@ def _create_test_user(client: TestClient, master_key: str = "test-master-key") -
 def _chat_request(client: TestClient, user_id: str, master_key: str = "test-master-key") -> Any:
     header = {API_KEY_HEADER: f"Bearer {master_key}"}
     return client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o-mini",
             "messages": [{"role": "user", "content": "hi"}],

@@ -23,7 +23,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.models.entities import DashboardSession
@@ -51,7 +51,7 @@ def _client(tmp_path: Path) -> TestClient:
 
 
 def _sign_in_with_master_key(client: TestClient) -> dict[str, object]:
-    response = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+    response = client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY})
     assert response.status_code == 200, response.text
     body: dict[str, object] = response.json()
     return body
@@ -60,7 +60,7 @@ def _sign_in_with_master_key(client: TestClient) -> dict[str, object]:
 def _claim(client: TestClient, *, email: str = EMAIL, password: str = PASSWORD) -> None:
     """Claim the deployment with the master key in a header, as an operator would."""
     response = client.put(
-        "/v1/auth/password",
+        f"{API_ROOT}/auth/password",
         json={"email": email, "new_password": password},
         headers={"Otari-Key": MASTER_KEY},
     )
@@ -85,17 +85,17 @@ def test_first_boot_still_signs_in_with_the_master_key(tmp_path: Path) -> None:
 
         assert SESSION_COOKIE_NAME in client.cookies
         assert body["user_id"] and body["active_organization_id"]
-        assert client.get("/v1/settings").status_code == 200
+        assert client.get(f"{API_ROOT}/settings").status_code == 200
 
 
 def test_an_unclaimed_deployment_advertises_the_master_key(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
 
 
 def test_a_password_sign_in_before_anyone_has_one_is_refused(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        response = client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD})
 
         assert response.status_code == 401
         assert SESSION_COOKIE_NAME not in client.cookies
@@ -109,14 +109,14 @@ def test_a_password_sign_in_before_anyone_has_one_is_refused(tmp_path: Path) -> 
 def test_claiming_sets_the_address_and_retires_master_key_sign_in(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": EMAIL, "new_password": PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
 
         assert response.status_code == 200, response.text
         assert response.json() == {"email": EMAIL, "master_key_sign_in_retired": True}
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["password"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["password"]
 
 
 def test_the_claimed_address_is_normalized(tmp_path: Path) -> None:
@@ -124,14 +124,14 @@ def test_the_claimed_address_is_normalized(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _claim(client, email="  Operator@Example.COM  ")
 
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
 
 def test_claiming_without_an_address_is_refused(tmp_path: Path) -> None:
     """The operator identity first boot provisions has none, so one must be supplied."""
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"new_password": PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
@@ -145,16 +145,16 @@ def test_an_operator_signed_in_on_the_cookie_can_claim(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _sign_in_with_master_key(client)
 
-        response = client.put("/v1/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
+        response = client.put(f"{API_ROOT}/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
 
         assert response.status_code == 200, response.text
         # The claiming session survives; the operator is not signed out mid-claim.
-        assert client.get("/v1/settings").status_code == 200
+        assert client.get(f"{API_ROOT}/settings").status_code == 200
 
 
 def test_claiming_needs_a_credential(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        response = client.put("/v1/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
+        response = client.put(f"{API_ROOT}/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
 
         assert response.status_code == 401
 
@@ -165,7 +165,7 @@ def test_changing_an_address_that_already_exists_is_refused(tmp_path: Path) -> N
         _claim(client)
 
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": "someone.else@example.com", "new_password": NEW_PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
@@ -178,17 +178,17 @@ def test_claiming_an_address_another_identity_holds_is_refused(tmp_path: Path) -
     """The column is unique and the address is what sign-in matches on."""
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
-        added = client.post("/v1/organizations/me/members", json={"email": EMAIL}, headers=headers)
+        added = client.post(f"{API_ROOT}/organizations/me/members", json={"email": EMAIL}, headers=headers)
         assert added.status_code == 201, added.text
 
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": EMAIL, "new_password": PASSWORD},
             headers=headers,
         )
 
         assert response.status_code == 409, response.text
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
 
 
 def test_the_email_conflict_detector_reads_sqlite_and_ignores_other_constraints(tmp_path: Path) -> None:
@@ -228,14 +228,16 @@ def test_resubmitting_the_same_address_with_a_new_password_is_not_a_change(tmp_p
         _claim(client)
 
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": EMAIL.upper(), "new_password": NEW_PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
 
         assert response.status_code == 200, response.text
         assert response.json()["email"] == EMAIL
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        )
 
 
 def test_claiming_an_identity_that_already_has_an_address_stamps_it_verified(tmp_path: Path) -> None:
@@ -260,7 +262,7 @@ def test_claiming_an_identity_that_already_has_an_address_stamps_it_verified(tmp
 
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"new_password": PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
@@ -284,7 +286,7 @@ def test_an_ordinary_password_change_does_not_stamp_the_address_verified(tmp_pat
     with _client(tmp_path) as client:
         _claim(client)
 
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
         engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
         with engine.begin() as connection:
@@ -292,7 +294,7 @@ def test_an_ordinary_password_change_does_not_stamp_the_address_verified(tmp_pat
 
         assert (
             client.put(
-                "/v1/auth/password",
+                f"{API_ROOT}/auth/password",
                 json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
             ).status_code
             == 200
@@ -315,7 +317,9 @@ def test_a_second_identity_without_a_password_cannot_be_given_one_by_anyone(tmp_
     """
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
-        added = client.post("/v1/organizations/me/members", json={"email": "member@example.com"}, headers=headers)
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
+        )
         assert added.status_code == 201, added.text
         _claim(client)
 
@@ -323,7 +327,7 @@ def test_a_second_identity_without_a_password_cannot_be_given_one_by_anyone(tmp_
         # this sets the operator's own password and leaves the member's NULL.
         assert (
             client.put(
-                "/v1/auth/password",
+                f"{API_ROOT}/auth/password",
                 json={"new_password": NEW_PASSWORD},
                 headers=headers,
             ).status_code
@@ -332,7 +336,7 @@ def test_a_second_identity_without_a_password_cannot_be_given_one_by_anyone(tmp_
 
         assert (
             client.post(
-                "/v1/auth/session", json={"email": "member@example.com", "password": NEW_PASSWORD}
+                f"{API_ROOT}/auth/session", json={"email": "member@example.com", "password": NEW_PASSWORD}
             ).status_code
             == 401
         )
@@ -355,14 +359,14 @@ def test_a_password_outside_the_published_bounds_is_refused(
     """A multi-byte password hits the ceiling sooner than its character count reads."""
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": EMAIL, "new_password": password},
             headers={"Otari-Key": MASTER_KEY},
         )
 
         assert response.status_code == expected_status, response.text
         # Nothing was stored, so the deployment is still on its bootstrap credential.
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
 
 
 def test_an_address_longer_than_the_column_is_refused_by_the_schema(tmp_path: Path) -> None:
@@ -374,13 +378,13 @@ def test_an_address_longer_than_the_column_is_refused_by_the_schema(tmp_path: Pa
     """
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": "a" * 250 + "@example.com", "new_password": PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
 
         assert response.status_code == 422, response.text
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
 
 
 # =============================================================================
@@ -392,21 +396,21 @@ def test_a_claimed_deployment_signs_in_with_email_and_password(tmp_path: Path) -
     with _client(tmp_path) as client:
         _claim(client)
 
-        response = client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD})
 
         assert response.status_code == 200, response.text
         assert SESSION_COOKIE_NAME in client.cookies
         assert response.json()["user_id"]
         assert response.json()["active_organization_id"]
         # The cookie alone opens the management API, exactly as a master-key session did.
-        assert client.get("/v1/settings").status_code == 200
+        assert client.get(f"{API_ROOT}/settings").status_code == 200
 
 
 def test_master_key_sign_in_is_refused_once_the_deployment_is_claimed(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _claim(client)
 
-        response = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        response = client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY})
 
         assert response.status_code == 403
         assert "email and password" in response.json()["detail"]
@@ -418,7 +422,7 @@ def test_a_wrong_master_key_is_still_a_401_on_a_claimed_deployment(tmp_path: Pat
     with _client(tmp_path) as client:
         _claim(client)
 
-        assert client.post("/v1/auth/session", json={"master_key": "wrong"}).status_code == 401
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": "wrong"}).status_code == 401
 
 
 def test_the_master_key_still_authenticates_the_management_api(tmp_path: Path) -> None:
@@ -427,11 +431,11 @@ def test_the_master_key_still_authenticates_the_management_api(tmp_path: Path) -
         _claim(client)
         headers = {"Otari-Key": MASTER_KEY}
 
-        assert client.get("/v1/keys", headers=headers).status_code == 200
-        assert client.get("/v1/users", headers=headers).status_code == 200
-        assert client.get("/v1/budgets", headers=headers).status_code == 200
-        assert client.get("/v1/settings", headers=headers).status_code == 200
-        created = client.post("/v1/keys", json={"key_name": "after-claim"}, headers=headers)
+        assert client.get(f"{API_ROOT}/keys", headers=headers).status_code == 200
+        assert client.get(f"{API_ROOT}/users", headers=headers).status_code == 200
+        assert client.get(f"{API_ROOT}/budgets", headers=headers).status_code == 200
+        assert client.get(f"{API_ROOT}/settings", headers=headers).status_code == 200
+        created = client.post(f"{API_ROOT}/keys", json={"key_name": "after-claim"}, headers=headers)
         assert created.status_code in (200, 201), created.text
 
 
@@ -449,7 +453,7 @@ def test_every_failed_password_sign_in_answers_the_same(tmp_path: Path, credenti
     with _client(tmp_path) as client:
         _claim(client)
 
-        response = client.post("/v1/auth/session", json=credentials)
+        response = client.post(f"{API_ROOT}/auth/session", json=credentials)
 
         assert response.status_code == 401
         assert response.json()["detail"] == "Incorrect email or password"
@@ -460,7 +464,10 @@ def test_signing_in_is_case_insensitive_in_the_address(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _claim(client)
 
-        assert client.post("/v1/auth/session", json={"email": EMAIL.upper(), "password": PASSWORD}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL.upper(), "password": PASSWORD}).status_code
+            == 200
+        )
 
 
 def test_a_deactivated_identity_cannot_sign_in(tmp_path: Path) -> None:
@@ -473,7 +480,7 @@ def test_a_deactivated_identity_cannot_sign_in(tmp_path: Path) -> None:
         connection.execute(text('UPDATE "user" SET is_active = 0'))
 
     with _client(tmp_path) as client:
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 401
+        assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 401
 
 
 def test_an_unverified_identity_with_the_right_password_is_refused(tmp_path: Path) -> None:
@@ -491,7 +498,7 @@ def test_an_unverified_identity_with_the_right_password_is_refused(tmp_path: Pat
         connection.execute(text('UPDATE "user" SET email_verified_at = NULL'))
 
     with _client(tmp_path) as client:
-        response = client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD})
         assert response.status_code == 403, response.text
         assert "verify your email" in response.json()["detail"].lower()
         assert SESSION_COOKIE_NAME not in client.cookies
@@ -501,7 +508,7 @@ def test_a_verified_identity_signs_in_normally(tmp_path: Path) -> None:
     """Claiming the deployment stamps ``email_verified_at``, so sign-in is unaffected by #650's gate."""
     with _client(tmp_path) as client:
         _claim(client)
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -516,7 +523,7 @@ def test_a_verified_identity_signs_in_normally(tmp_path: Path) -> None:
 )
 def test_a_sign_in_body_must_carry_exactly_one_credential(tmp_path: Path, body: dict[str, str]) -> None:
     with _client(tmp_path) as client:
-        assert client.post("/v1/auth/session", json=body).status_code == 422
+        assert client.post(f"{API_ROOT}/auth/session", json=body).status_code == 422
 
 
 # =============================================================================
@@ -527,20 +534,22 @@ def test_a_sign_in_body_must_carry_exactly_one_credential(tmp_path: Path, body: 
 def test_a_signed_in_operator_changes_their_password_with_the_current_one(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _claim(client)
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
         )
 
         assert response.status_code == 200, response.text
         # Still signed in on the session the change was made from.
-        assert client.get("/v1/settings").status_code == 200
+        assert client.get(f"{API_ROOT}/settings").status_code == 200
 
     with _client(tmp_path) as fresh:
-        assert fresh.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 401
-        assert fresh.post("/v1/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        assert fresh.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 401
+        assert (
+            fresh.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        )
 
 
 @pytest.mark.parametrize(
@@ -557,14 +566,14 @@ def test_a_password_change_from_a_session_is_refused_without_the_right_proof(
 ) -> None:
     with _client(tmp_path) as client:
         _claim(client)
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
-        response = client.put("/v1/auth/password", json=body)
+        response = client.put(f"{API_ROOT}/auth/password", json=body)
 
         assert response.status_code == 400, response.text
         assert expected_detail in response.json()["detail"]
         # The stored password is untouched.
-        assert client.get("/v1/settings").status_code == 200
+        assert client.get(f"{API_ROOT}/settings").status_code == 200
 
 
 def test_the_master_key_resets_a_forgotten_password_without_the_old_one(tmp_path: Path) -> None:
@@ -573,33 +582,37 @@ def test_the_master_key_resets_a_forgotten_password_without_the_old_one(tmp_path
         _claim(client)
 
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"new_password": NEW_PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
 
         assert response.status_code == 200, response.text
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        )
 
 
 def test_a_password_change_revokes_the_identity_s_other_sessions(tmp_path: Path) -> None:
     """A cookie minted under the old password must not outlive it."""
     with _client(tmp_path) as elsewhere, _client(tmp_path) as here:
         _claim(here)
-        assert elsewhere.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
-        assert here.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert (
+            elsewhere.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        )
+        assert here.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
         assert len(_sessions(tmp_path)) == 2
 
         assert (
             here.put(
-                "/v1/auth/password",
+                f"{API_ROOT}/auth/password",
                 json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
             ).status_code
             == 200
         )
 
-        assert here.get("/v1/settings").status_code == 200
-        assert elsewhere.get("/v1/settings").status_code == 401
+        assert here.get(f"{API_ROOT}/settings").status_code == 200
+        assert elsewhere.get(f"{API_ROOT}/settings").status_code == 401
         assert len(_sessions(tmp_path)) == 1
 
 
@@ -607,18 +620,18 @@ def test_a_master_key_reset_revokes_every_session_including_the_browser_s(tmp_pa
     """A header caller has no session of its own to spare, and a reset is a recovery."""
     with _client(tmp_path) as browser:
         _claim(browser)
-        assert browser.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+        assert browser.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
         assert (
             browser.put(
-                "/v1/auth/password",
+                f"{API_ROOT}/auth/password",
                 json={"new_password": NEW_PASSWORD},
                 headers={"Otari-Key": MASTER_KEY},
             ).status_code
             == 200
         )
 
-        assert browser.get("/v1/settings").status_code == 401
+        assert browser.get(f"{API_ROOT}/settings").status_code == 401
         assert _sessions(tmp_path) == []
 
 
@@ -635,7 +648,7 @@ def test_a_session_that_outlived_its_expiry_does_not_authenticate_a_change(tmp_p
         )
 
     with _client(tmp_path) as client:
-        response = client.put("/v1/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
+        response = client.put(f"{API_ROOT}/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
 
         assert response.status_code == 401
 
@@ -652,9 +665,9 @@ def test_a_refused_sign_in_body_is_not_echoed_back(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         oversized = "p" * (MAX_PASSWORD_BYTES + 1)
 
-        too_long = client.post("/v1/auth/session", json={"email": EMAIL, "password": oversized})
+        too_long = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": oversized})
         both = client.post(
-            "/v1/auth/session",
+            f"{API_ROOT}/auth/session",
             json={"master_key": MASTER_KEY, "email": EMAIL, "password": PASSWORD},
         )
 
@@ -696,13 +709,15 @@ def test_an_address_stored_with_other_casing_is_still_the_identity_s_own(tmp_pat
 
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": EMAIL, "new_password": NEW_PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
 
         assert response.status_code == 200, response.text
-        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        assert (
+            client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+        )
 
 
 def test_a_malformed_stored_address_is_not_reported_as_the_caller_s_mistake(tmp_path: Path) -> None:
@@ -728,7 +743,7 @@ def test_a_malformed_stored_address_is_not_reported_as_the_caller_s_mistake(tmp_
 
     with _client(tmp_path) as client:
         response = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"email": EMAIL, "new_password": NEW_PASSWORD},
             headers={"Otari-Key": MASTER_KEY},
         )
@@ -782,14 +797,16 @@ def test_a_member_s_password_leaves_an_unclaimed_deployment_on_the_master_key(tm
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
         _sign_in_with_master_key(client)  # provisions the operator identity
-        added = client.post("/v1/organizations/me/members", json={"email": "member@example.com"}, headers=headers)
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
+        )
         assert added.status_code == 201, added.text
 
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
 
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
         client.cookies.clear()
-        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
 
 
 def test_a_member_changing_their_password_is_told_the_master_key_still_signs_in(tmp_path: Path) -> None:
@@ -802,16 +819,18 @@ def test_a_member_changing_their_password_is_told_the_master_key_still_signs_in(
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
         _sign_in_with_master_key(client)
-        added = client.post("/v1/organizations/me/members", json={"email": "member@example.com"}, headers=headers)
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
+        )
         assert added.status_code == 201, added.text
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
 
         client.cookies.clear()
-        signed_in = client.post("/v1/auth/session", json={"email": "member@example.com", "password": PASSWORD})
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "member@example.com", "password": PASSWORD})
         assert signed_in.status_code == 200, signed_in.text
 
         changed = client.put(
-            "/v1/auth/password",
+            f"{API_ROOT}/auth/password",
             json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
         )
 
@@ -859,7 +878,7 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
                 },
             )
 
-        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
 
         # And the master key is not refused as a retired login. It cannot mint a
         # session on this database either, but for the reason that actually
@@ -874,7 +893,7 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
         gateway_logger.addHandler(caplog.handler)
         caplog.set_level(logging.ERROR, logger="gateway")
         try:
-            refused = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+            refused = client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY})
         finally:
             gateway_logger.removeHandler(caplog.handler)
 

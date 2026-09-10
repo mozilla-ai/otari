@@ -10,8 +10,10 @@ import type {
   RoutingPolicyResponse,
 } from "@/client"
 import { RoutingPage } from "@/features/routing/RoutingPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
-import { organizationContext } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const policy = (
@@ -91,9 +93,9 @@ function mockApi(
     // its list read off `deployment_operator`, and most tests here are about
     // the management view.
     context?: OrganizationContext
-    // What `/v1/organizations/me/routing-policies` answers, for member tests.
+    // What /api/v1/organizations/me/routing-policies answers, for member tests.
     memberPolicies?: RoutingPolicyResponse[]
-    // What `/v1/organizations/me/aliases` answers, its sibling.
+    // What /api/v1/organizations/me/aliases answers, its sibling.
     memberAliases?: {
       name: string
       target: string
@@ -101,6 +103,8 @@ function mockApi(
       user_id: string | null
       workspace_id?: string
     }[]
+    // What a delete of a deployment-wide policy answers, for the error path.
+    deleteBody?: { status: number; detail: string }
   } = {},
 ) {
   let list = [...policies]
@@ -117,7 +121,7 @@ function mockApi(
         init?.body === undefined ? undefined : JSON.parse(String(init.body))
       calls.push({ url, method, body })
 
-      if (url.includes("/v1/organizations/me/routing-policies")) {
+      if (url.includes(`${API_ROOT}/organizations/me/routing-policies`)) {
         if (method === "POST") {
           const row = policy(body.name, body.spec)
           memberList = [
@@ -135,7 +139,7 @@ function mockApi(
         }
         return jsonResponse(memberList)
       }
-      if (url.includes("/v1/organizations/me/aliases")) {
+      if (url.includes(`${API_ROOT}/organizations/me/aliases`)) {
         if (method === "POST") {
           const row = {
             name: body.name as string,
@@ -159,10 +163,15 @@ function mockApi(
         }
         return jsonResponse(memberAliasList)
       }
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())
       }
-      if (url.includes("/v1/routing/policies/explain")) {
+      // The user picker's roster read. Empty here: these tests are about
+      // policies, and every owner in `USERS` is a plain id rather than a member.
+      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
+        return jsonResponse({ data: [], count: 0 })
+      }
+      if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
         return jsonResponse({
           name: "fast",
           selection_reason: "default",
@@ -186,7 +195,7 @@ function mockApi(
           guardrails: [],
         })
       }
-      if (url.includes("/v1/routing/status")) {
+      if (url.includes(`${API_ROOT}/routing/status`)) {
         return jsonResponse({
           user_id: "alice",
           embedding_model: "openai:text-embedding-3-small",
@@ -207,14 +216,14 @@ function mockApi(
           ],
         })
       }
-      if (url.includes("/v1/routing/preferences/rank")) {
+      if (url.includes(`${API_ROOT}/routing/preferences/rank`)) {
         return jsonResponse({
           recorded: (body as { examples: unknown[] }).examples.length,
           seed_count: 20,
           pools: [{ task_id: null, records: 7, warm: false }],
         })
       }
-      if (url.includes("/v1/routing/policies")) {
+      if (url.includes(`${API_ROOT}/routing/policies`)) {
         if (method === "POST") {
           // An upsert, like the real endpoint: appending would put two rows under
           // one name and scope, which is a state the API cannot produce. And
@@ -238,6 +247,16 @@ function mockApi(
           return jsonResponse(row)
         }
         if (method === "DELETE") {
+          if (opts.deleteBody) {
+            // Not `jsonResponse`, which is a 200 by construction.
+            return new Response(
+              JSON.stringify({ detail: opts.deleteBody.detail }),
+              {
+                status: opts.deleteBody.status,
+                headers: { "Content-Type": "application/json" },
+              },
+            )
+          }
           const name = decodeURIComponent(
             url.split("?")[0].split("/").pop() ?? "",
           )
@@ -246,14 +265,14 @@ function mockApi(
         }
         return jsonResponse(list)
       }
-      if (url.includes("/v1/aliases")) {
+      if (url.includes(`${API_ROOT}/aliases`)) {
         if (method === "DELETE") {
           aliasList = []
           return new Response(null, { status: 204 })
         }
         return jsonResponse(aliasList)
       }
-      if (url.includes("/v1/tool-settings")) {
+      if (url.includes(`${API_ROOT}/tool-settings`)) {
         return jsonResponse({
           fields: [
             {
@@ -265,20 +284,25 @@ function mockApi(
           ],
         })
       }
-      if (url.includes("/v1/users")) return jsonResponse(USERS)
-      if (url.includes("/v1/models"))
+      if (url.includes(`${API_ROOT}/users`)) return jsonResponse(USERS)
+      if (url.includes(`${API_ROOT}/models`))
         return jsonResponse({ object: "list", data: [] })
       return jsonResponse([])
     })
   return { spy, calls }
 }
 
+// The user picker asks the organization roster what to call each owner, and that
+// read is gated on the `organizations` surface, so these pages need the
+// deployment context the shell always gives them.
 function renderPage(ui: ReactElement, url = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url }) },
   )
 }
@@ -294,9 +318,11 @@ function renderInWorkspace(ui: ReactElement, url = "/") {
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url }) },
   )
 }
@@ -325,7 +351,7 @@ describe("RoutingPage", () => {
     // needs to see that a fallback exists without opening the policy.
     expect(within(fastRow).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
     expect(within(fastRow).getByText(/\+1 on failure/)).toBeInTheDocument()
-    expect(within(fastRow).getByText("stored")).toBeInTheDocument()
+    expect(within(fastRow).getByText("STORED")).toBeInTheDocument()
   })
 
   it("marks a policy that decides per request, since it has no single target", async () => {
@@ -333,7 +359,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
-    expect(within(autoRow).getByText("Dynamic")).toBeInTheDocument()
+    expect(within(autoRow).getByText("DYNAMIC")).toBeInTheDocument()
     expect(within(autoRow).getByText(/Chosen per request/)).toBeInTheDocument()
   })
 
@@ -499,7 +525,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const body = post!.body as {
       name: string
@@ -528,7 +555,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     expect((post!.body as { rename_from?: string }).rename_from).toBeUndefined()
   })
@@ -640,6 +668,98 @@ describe("RoutingPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("names the policy in a confirm dialog before deleting it", async () => {
+    // otari-ai#2110: the confirmation used to arm inside the row, where it read
+    // as part of the table rather than as a decision. It is a modal now, and
+    // the policy it is about has to be named in it: the row is behind the
+    // backdrop, so the name on the row is no longer the operator's reference.
+    const { calls } = mockApi([policy("fast", CHAIN)])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Delete" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/^fast stops resolving/)).toBeVisible()
+    // Nothing is sent by opening it.
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete policy" }),
+    )
+
+    const deletes = calls.filter((call) => call.method === "DELETE")
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].url).toContain(`${API_ROOT}/routing/policies/fast`)
+  })
+
+  it("deletes nothing when the confirm dialog is cancelled", async () => {
+    const { calls } = mockApi([policy("fast", CHAIN)])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    expect(screen.getByText("fast")).toBeInTheDocument()
+  })
+
+  it("reports a refused delete inside the dialog, leaving the row", async () => {
+    // The page banner no longer carries this: the operator is looking at the
+    // modal, and a message behind the backdrop is a message they do not read.
+    mockApi([policy("fast", CHAIN)], "http://guardrails:8000", [], {
+      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete policy" }),
+    )
+
+    expect(
+      await within(dialog).findByText(/referenced by an alias/),
+    ).toBeVisible()
+    // Still open, so the operator can retry or back out rather than being
+    // returned to a table that looks unchanged for no stated reason.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(screen.getByText("fast")).toBeInTheDocument()
+  })
+
+  it("does not greet the next row's confirm with the last row's refusal", async () => {
+    // The mutation holds its error until the next call, and the dialog reads it,
+    // so without clearing it on close the second row opens already reporting a
+    // failure that was about the first.
+    mockApi([policy("fast", CHAIN), policy("smart", LEARNED)], undefined, [], {
+      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const fast = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(fast).getByRole("button", { name: "Delete" }))
+    const first = await screen.findByRole("alertdialog")
+    await user.click(
+      within(first).getByRole("button", { name: "Delete policy" }),
+    )
+    await within(first).findByText(/referenced by an alias/)
+    await user.click(within(first).getByRole("button", { name: "Cancel" }))
+
+    const smart = screen.getByText("smart").closest("tr")!
+    await user.click(within(smart).getByRole("button", { name: "Delete" }))
+
+    const second = await screen.findByRole("alertdialog")
+    expect(within(second).getByText(/^smart stops resolving/)).toBeVisible()
+    expect(within(second).queryByText(/referenced by an alias/)).toBeNull()
+  })
+
   it("deletes an alias through the alias endpoint, not the policy one", async () => {
     const { calls } = mockApi([], "http://guardrails:8000", [
       {
@@ -654,13 +774,17 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("legacy")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    await user.click(within(row).getByRole("button", { name: "Confirm" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete alias",
+      }),
+    )
 
     const deletes = calls.filter((call) => call.method === "DELETE")
     expect(deletes).toHaveLength(1)
     // An alias still lives in model_aliases; deleting it as a policy would 404 and
     // leave the row in place.
-    expect(deletes[0].url).toContain("/v1/aliases/legacy")
+    expect(deletes[0].url).toContain(`${API_ROOT}/aliases/legacy`)
   })
 
   it("will not let an alias grow options an alias cannot hold", async () => {
@@ -747,7 +871,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[1]).toEqual({ default: "openai:gpt-5-nano" })
@@ -774,7 +899,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -816,7 +942,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("Weighted")).toBeInTheDocument()
+    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
     expect(
       within(row).getByText(/70% \/ 30% across 2 models/),
     ).toBeInTheDocument()
@@ -859,7 +985,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -894,7 +1021,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -938,7 +1066,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0].weights).toEqual({
@@ -966,7 +1095,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(within(row).getByText("Weighted")).toBeInTheDocument()
+    expect(within(row).getByText("WEIGHTED")).toBeInTheDocument()
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
     // Loading it as weighted is half the claim; saving it back unchanged is the
@@ -978,7 +1107,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes("/v1/routing/policies"),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1063,7 +1193,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("future")).closest("tr")!
-    expect(within(row).getByText("Routed")).toBeInTheDocument()
+    expect(within(row).getByText("ROUTED")).toBeInTheDocument()
     expect(within(row).queryByText("Learned")).not.toBeInTheDocument()
   })
 
@@ -1189,11 +1319,11 @@ describe("RoutingPage", () => {
     await user.keyboard("{Escape}")
 
     expect(await screen.findByText("6 / 20 examples")).toBeInTheDocument()
-    expect(screen.getByText("warming up")).toBeInTheDocument()
+    expect(screen.getByText("WARMING UP")).toBeInTheDocument()
     // A task partition warms on its own, so it gets its own line.
     expect(screen.getByText("summaries")).toBeInTheDocument()
     expect(screen.getByText("21 / 20 examples")).toBeInTheDocument()
-    expect(screen.getByText("routing")).toBeInTheDocument()
+    expect(screen.getByText("ROUTING")).toBeInTheDocument()
   })
 
   it("says where examples come from instead of offering to collect them", async () => {
@@ -1207,7 +1337,7 @@ describe("RoutingPage", () => {
     await user.click(within(row).getByRole("button", { name: "Examples" }))
 
     expect(
-      await screen.findByText(/POST \/v1\/routing\/preferences\/rank/),
+      await screen.findByText(/POST \/api\/v1\/routing\/preferences\/rank/),
     ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /teach it/i })).toBeInTheDocument()
     // No write affordance anywhere in it.
@@ -1351,9 +1481,11 @@ describe("RoutingPage", () => {
       memberPolicies: [policy("mine", CHAIN)],
     })
     render(
-      <QueryClientProvider client={client}>
-        <RoutingPage />
-      </QueryClientProvider>,
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <RoutingPage />
+        </QueryClientProvider>
+      </DeploymentProvider>,
       { wrapper: withRouter({ url: "/" }) },
     )
 
@@ -1374,10 +1506,14 @@ describe("RoutingPage", () => {
     await screen.findByText("fast")
 
     const urls = calls.map((call) => call.url)
-    expect(urls.some((url) => url.endsWith("/v1/routing/policies"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/aliases"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/tool-settings"))).toBe(false)
-    expect(urls.some((url) => url.includes("/v1/users"))).toBe(false)
+    expect(
+      urls.some((url) => url.endsWith(`${API_ROOT}/routing/policies`)),
+    ).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/aliases`))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/tool-settings`))).toBe(
+      false,
+    )
+    expect(urls.some((url) => url.includes(`${API_ROOT}/users`))).toBe(false)
   })
 
   it("withholds the deep-linked add form from a member", async () => {
@@ -1457,7 +1593,7 @@ describe("RoutingPage for an organization admin", () => {
     const written = calls.find(
       (call) =>
         call.method === "POST" &&
-        call.url.includes("/v1/organizations/me/routing-policies"),
+        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
     )
     expect(written).toBeDefined()
     expect(written?.body).toMatchObject({
@@ -1468,7 +1604,8 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       calls.some(
         (call) =>
-          call.method === "POST" && call.url.endsWith("/v1/routing/policies"),
+          call.method === "POST" &&
+          call.url.endsWith(`${API_ROOT}/routing/policies`),
       ),
     ).toBe(false)
   })
@@ -1495,10 +1632,16 @@ describe("RoutingPage for an organization admin", () => {
 
     await screen.findByText("doomed")
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete policy",
+      }),
+    )
 
     const deleted = calls.find((call) => call.method === "DELETE")
-    expect(deleted?.url).toContain("/v1/organizations/me/routing-policies/")
+    expect(deleted?.url).toContain(
+      `${API_ROOT}/organizations/me/routing-policies/`,
+    )
     expect(deleted?.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
   })
 
@@ -1523,7 +1666,7 @@ describe("RoutingPage for an organization admin", () => {
     const written = calls.find(
       (call) =>
         call.method === "POST" &&
-        call.url.includes("/v1/organizations/me/routing-policies"),
+        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
     )
     expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
   })
@@ -1575,7 +1718,7 @@ describe("RoutingPage for an organization admin", () => {
     const written = calls.find(
       (call) =>
         call.method === "POST" &&
-        call.url.includes("/v1/organizations/me/aliases"),
+        call.url.includes(`${API_ROOT}/organizations/me/aliases`),
     )
     expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
   })
@@ -1600,10 +1743,14 @@ describe("RoutingPage for an organization admin", () => {
 
     await screen.findByText("doomed-alias")
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete alias",
+      }),
+    )
 
     const deleted = calls.find((call) => call.method === "DELETE")
-    expect(deleted?.url).toContain("/v1/organizations/me/aliases/")
+    expect(deleted?.url).toContain(`${API_ROOT}/organizations/me/aliases/`)
     expect(deleted?.url).toContain(`workspace_id=${OTHER_WORKSPACE}`)
   })
 

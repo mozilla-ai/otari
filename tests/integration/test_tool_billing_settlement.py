@@ -26,7 +26,7 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.entities import UsageLog, User
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
@@ -83,7 +83,7 @@ def _completion(*, tool_call: bool, prompt_tokens: int = 10, completion_tokens: 
 def search_pricing(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Price the gateway's own web_search tool under ``otari:web_search``."""
     response = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "otari:web_search",
             "input_price_per_million": _SEARCH_RATE_PER_MILLION,
@@ -146,7 +146,7 @@ async def test_search_calls_are_metered_priced_and_spent(
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -203,7 +203,7 @@ async def test_failed_search_is_counted_but_never_billed(
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "what is otari"}],
@@ -230,11 +230,11 @@ async def test_unpriced_tool_is_refused_when_require_pricing_is_on(
     set deliberately omits ``search_pricing``.
     """
     strict_pricing_client.post(
-        "/v1/users", json={"user_id": "tool-user"}, headers={API_KEY_HEADER: "Bearer test-master-key"}
+        f"{API_ROOT}/users", json={"user_id": "tool-user"}, headers={API_KEY_HEADER: "Bearer test-master-key"}
     )
     # Price the model so the model gate passes and the tool gate is what fires.
     strict_pricing_client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "openai:gpt-4o", "input_price_per_million": 1.0, "output_price_per_million": 1.0},
         headers={API_KEY_HEADER: "Bearer test-master-key"},
     )
@@ -244,7 +244,7 @@ async def test_unpriced_tool_is_refused_when_require_pricing_is_on(
         patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
     ):
         response = strict_pricing_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4o",
                 "messages": [{"role": "user", "content": "hi"}],

@@ -26,6 +26,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from gateway.core.config import API_ROOT
+
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _REQUEST = {
     "model": "anthropic:claude-3-5-sonnet-20241022",
@@ -50,7 +52,7 @@ def _text_response(text: str = "ok") -> MessageResponse:
 
 def _default_workspace_id(client: TestClient, master_key_header: dict[str, str]) -> str:
     """The workspace an API-key request bills to on a fresh deployment."""
-    listed = client.get("/v1/workspaces", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/workspaces", headers=master_key_header)
     assert listed.status_code == 200
     workspace_id: str = listed.json()["data"][0]["id"]
     return workspace_id
@@ -63,7 +65,7 @@ def _set_policy(
     **policy: Any,
 ) -> dict[str, Any]:
     response = client.put(
-        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
         json=policy,
         headers=master_key_header,
     )
@@ -101,7 +103,7 @@ def _post_with_sandbox_patched(
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch("gateway.api.routes._pipeline.SandboxBackend", new=fake_sandbox),
     ):
-        response = client.post("/v1/messages", json=body, headers=headers)
+        response = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
     return response, seen
 
 
@@ -155,7 +157,7 @@ def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_sandbox(
 
     with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -238,7 +240,7 @@ def test_clearing_the_policy_puts_the_request_back_where_it_started(
     _set_policy(client, master_key_header, workspace_id, enabled=False)
 
     cleared = client.delete(
-        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
         headers=master_key_header,
     )
     assert cleared.status_code == 200
@@ -285,7 +287,7 @@ def test_a_streaming_request_gets_the_same_ceilings(
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
         patch("gateway.api.routes._pipeline.SandboxBackend", new=fake_sandbox),
     ):
-        response = client.post("/v1/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
+        response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
 
     assert response.status_code == 200, response.text
     assert seen.max_iterations == 2
@@ -327,12 +329,12 @@ def test_the_policy_surface_needs_the_master_key(
 ) -> None:
     workspace_id = _default_workspace_id(client, master_key_header)
 
-    unauthenticated = client.get(f"/v1/workspaces/{workspace_id}/code-execution-policy")
+    unauthenticated = client.get(f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy")
     assert unauthenticated.status_code == 401
 
     # A working API key is not the master key, which is what this router gates on.
     with_an_api_key = client.get(
-        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
         headers=api_key_header,
     )
     assert with_an_api_key.status_code == 401
@@ -345,7 +347,7 @@ def test_a_limit_the_deployment_could_never_honor_is_refused(
     workspace_id = _default_workspace_id(client, master_key_header)
 
     response = client.put(
-        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
         json={"enabled": True, "exec_timeout_s": 600},
         headers=master_key_header,
     )
@@ -376,7 +378,7 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     priced = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-3-5-sonnet-20241022",
             "input_price_per_million": 3.0,
@@ -388,10 +390,10 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
 
     def _user(name: str, max_budget: float) -> str:
         budget_id = client.post(
-            "/v1/budgets", json={"max_budget": max_budget}, headers=master_key_header
+            f"{API_ROOT}/budgets", json={"max_budget": max_budget}, headers=master_key_header
         ).json()["budget_id"]
         created = client.post(
-            "/v1/users",
+            f"{API_ROOT}/users",
             json={"user_id": name, "budget_id": budget_id},
             headers=master_key_header,
         )
@@ -400,7 +402,7 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
 
     def _post(user: str) -> Any:
         return client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={**_REQUEST, "metadata": {"user_id": user}},
             headers=master_key_header,
         )
@@ -561,7 +563,7 @@ def test_an_image_the_operator_never_allowed_cannot_be_stored(
     workspace_id = _default_workspace_id(client, master_key_header)
 
     response = client.put(
-        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
         json={"enabled": True, "image": "ghcr.io/attacker/pwn:latest"},
         headers=master_key_header,
     )
@@ -595,7 +597,7 @@ def test_a_tool_list_this_deployment_cannot_run_is_refused_at_the_write(
     workspace_id = _default_workspace_id(client, master_key_header)
 
     response = client.put(
-        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
         json={"enabled": True, "tools": ["bash_code_execution"]},
         headers=master_key_header,
     )
@@ -676,7 +678,7 @@ def test_a_streaming_request_gets_the_same_image_and_tool_set(
         patch("gateway.api.routes._pipeline.SandboxBackend", new=fake_sandbox),
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_stream),
     ):
-        response = client.post("/v1/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
+        response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
 
     assert response.status_code == 200
     assert seen["image"] == _IMAGE

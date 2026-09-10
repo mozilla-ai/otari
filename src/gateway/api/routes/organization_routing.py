@@ -1,6 +1,6 @@
 """The routing configuration of the caller's own organization, for a tenant.
 
-``/v1/routing/policies`` and ``/v1/aliases`` are deployment-wide and
+``/api/v1/routing/policies`` and ``/api/v1/aliases`` are deployment-wide and
 operator-only, which is right: they list every tenant's stored rows and take a
 ``workspace_id`` the client supplies, so nothing but the operator gate stands
 between a signed-in member and another organization's routing (the escalation
@@ -40,7 +40,7 @@ member, Edit for an admin (otari-ai#1942, otari-ai#1969).
 Aliases and policies did not need an owner column for any of this. Both tables
 already carry a non-nullable ``workspace_id``, and a workspace belongs to exactly
 one organization, so the row's tenant is a join away. That is why this follows
-mozilla-ai/otari#875's shape (a ``/v1/organizations/me/*`` router over the same
+mozilla-ai/otari#875's shape (a ``/api/v1/organizations/me/*`` router over the same
 rows) without following its migration.
 
 **What stops a tenant widening their own access.** A policy or an alias decides
@@ -93,18 +93,18 @@ from gateway.services.tenancy.authorization import (
 )
 from gateway.services.tenancy.organization_model_access import resolve_session_model_allowlist
 
-# Authentication only, like the rest of the ``/v1/organizations/me`` surface.
+# Authentication only, like the rest of the ``/api/v1/organizations/me`` surface.
 # What the caller may read or write is decided per request below, which is the
 # pattern the tenant-scoped routers already follow and the reason the deployment
 # operator gate does not belong here.
 policies_router = APIRouter(
-    prefix="/v1/organizations/me/routing-policies",
+    prefix="/organizations/me/routing-policies",
     tags=["routing"],
     dependencies=[Depends(verify_master_key)],
 )
 
 aliases_router = APIRouter(
-    prefix="/v1/organizations/me/aliases",
+    prefix="/organizations/me/aliases",
     tags=["aliases"],
     dependencies=[Depends(verify_master_key)],
 )
@@ -238,7 +238,7 @@ async def list_visible_routing_policies(
 
     Stored policies from the caller's visible workspaces plus the config-file
     policies, which are deployment-wide and resolve in every workspace. The
-    response is the shape ``GET /v1/routing/policies`` answers, narrowed to the
+    response is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the
     caller's own organization.
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))

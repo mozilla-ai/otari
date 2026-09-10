@@ -6,6 +6,10 @@ import type {
   WorkspaceMember,
   WorkspaceMemberRole,
 } from "@/client"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   asMembershipRole,
   MEMBERSHIP_ROLES,
@@ -17,9 +21,7 @@ import {
   useRemoveWorkspaceMember,
   useUpdateWorkspaceMemberRole,
   useWorkspaceMembers,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { ErrorBanner, FilterSelect, InfoBanner } from "@/shared/components/ui"
+} from "@/shared/api/workspaces"
 
 // A workspace's roster, shared by the two places one is shown: expanded inside
 // a row on the Workspaces page, and as the whole of the Members page in the
@@ -191,7 +193,7 @@ export function WorkspaceMembersPanel({
                 />
                 <Button
                   size="sm"
-                  variant="danger-soft"
+                  variant="danger"
                   isDisabled={!canManageWorkspace}
                   onPress={() => setRemoving(member)}
                 >

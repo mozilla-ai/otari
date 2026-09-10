@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test"
 
+import { HYBRID_BASE_URL } from "./e2e/hybrid"
+
 // End-to-end tests for the dashboard, run against a real gateway serving the
 // built bundle (booted by `webServer` below). Component behavior is covered by
 // Vitest; this exercises the multi-page flows a browser actually walks.
@@ -33,12 +35,6 @@ const SCREENSHOT_VIEWPORTS = {
 } as const
 
 const SCREENSHOT_THEMES = ["light", "dark"] as const
-
-// The second gateway this suite boots, in hybrid mode (e2e/serve-hybrid.sh). The
-// port is e2e/otari.hybrid.yml's, and the host is 127.0.0.1 rather than
-// localhost so the page's own `window.location.origin` matches this string,
-// which the hybrid spec asserts against.
-const HYBRID_BASE_URL = "http://127.0.0.1:8010"
 
 // One project per cell. The theme reaches the app through localStorage (see
 // e2e/screenshots/fixtures.ts, which reads it back off the project name);
@@ -183,14 +179,14 @@ export default defineConfig({
     },
     ...screenshotProjects,
   ],
-  // Two gateways, both booted before any project runs. The hybrid one is up for
-  // the screenshot projects too, which never visit it; it opens no database and
-  // costs a process, which is cheaper than making its lifetime conditional on
+  // Two gateways, both booted before any project runs. The screenshot projects
+  // use the hybrid one only for their hybrid landing registry; it opens no database
+  // and costs a process, which is cheaper than making its lifetime conditional on
   // which projects were selected.
   webServer: [
     {
       command: "bash e2e/serve.sh",
-      url: "http://127.0.0.1:8000/health",
+      url: "http://127.0.0.1:8000/api/v1/health",
       // Opt-in only: by default always start a fresh gateway (serve.sh resets the
       // DB), so a stray server already on :8000 can't silently skip the reset and
       // leave the serial flows running against dirty state. Set
@@ -202,7 +198,7 @@ export default defineConfig({
     },
     {
       command: "bash e2e/serve-hybrid.sh",
-      url: `${HYBRID_BASE_URL}/health`,
+      url: `${HYBRID_BASE_URL}/api/v1/health`,
       // Same opt-in as above, for consistency rather than for the reset: this
       // gateway holds no state to leave dirty, but a stray process on :8010 in a
       // mode of its own would be a confusing thing to run against.

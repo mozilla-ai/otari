@@ -1,5 +1,5 @@
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
-import { PageHeader } from "@/shared/components/ui"
+import { PageHeader } from "@/shared/components/deprecated/PageHeader"
 
 /**
  * The selected workspace's MCP servers, as a destination of their own.

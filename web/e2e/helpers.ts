@@ -4,6 +4,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test"
+import { API_ROOT } from "@/shared/api/client"
 
 // Matches web/e2e/otari.yml. The login step needs a known key.
 export const MASTER_KEY = "e2e-master-key"
@@ -91,9 +92,12 @@ export const authHeaders = {
  * fine.
  */
 export async function dismissSetupGuide(page: Page): Promise<void> {
-  const listed = await page.request.get("/v1/workspaces?skip=0&limit=1000", {
-    headers: authHeaders,
-  })
+  const listed = await page.request.get(
+    `${API_ROOT}/workspaces?skip=0&limit=1000`,
+    {
+      headers: authHeaders,
+    },
+  )
   await expectOk(listed, "list workspaces")
   const { data, count } = (await listed.json()) as {
     data: { id: string }[]
@@ -109,7 +113,7 @@ export async function dismissSetupGuide(page: Page): Promise<void> {
   ).toBe(count)
   for (const workspace of data) {
     const dismissed = await page.request.post(
-      `/v1/workspaces/${workspace.id}/activation/dismiss`,
+      `${API_ROOT}/workspaces/${workspace.id}/activation/dismiss`,
       { headers: authHeaders },
     )
     await expectOk(dismissed, `dismiss the setup guide in ${workspace.id}`)

@@ -146,10 +146,12 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
         database_url=f"sqlite:///{tmp_path / 'lifespan.db'}",
         master_key="sk-test-master",
     )
-    lifespan = _create_lifespan(config)
+    lifespan = _create_lifespan()
+    app = FastAPI()
+    app.state.config = config
 
     # No asyncio.timeout wrapper: if shutdown regresses this hangs, and the
     # suite-wide pytest timeout reports it. A short bound here would be
     # indistinguishable from the fix under test.
-    async with lifespan(FastAPI()):
+    async with lifespan(app):
         pass

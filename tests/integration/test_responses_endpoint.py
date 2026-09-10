@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 
 
 class _FakeUsage:
@@ -70,7 +70,7 @@ def test_responses_endpoint_basic_completion(
         new_callable=AsyncMock,
         return_value=_FakeResponse(fake_payload, fake_usage),
     ):
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 200
     data = result.json()
@@ -88,7 +88,7 @@ def test_responses_endpoint_scopes_prompt_cache_key(
     mock_aresponses = AsyncMock(return_value=_FakeResponse({"id": "resp_123", "output": []}))
 
     with patch("gateway.api.routes.responses.aresponses", new=mock_aresponses):
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 200
     assert mock_aresponses.await_args is not None
@@ -107,7 +107,7 @@ def test_responses_endpoint_master_key_requires_user(
     responses_request_body.pop("user")
 
     with patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock) as mock_call:
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 400
     assert result.json()["detail"] == "When using master key, 'user' field is required in request body"
@@ -130,7 +130,7 @@ def test_responses_endpoint_rejects_unsupported_provider(
         patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock) as mock_call,
         patch("gateway.api.routes.responses.AnyLLM.get_provider_class", return_value=_UnsupportedProvider),
     ):
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 400
     assert "does not support" in result.json()["detail"]
@@ -155,7 +155,7 @@ def test_responses_endpoint_streaming(
     ]
 
     with patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock, return_value=_make_stream(events)):
-        resp = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        resp = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
@@ -189,7 +189,7 @@ def test_responses_endpoint_preserves_encrypted_reasoning_fields(
     with patch(
         "gateway.api.routes.responses.aresponses", new_callable=AsyncMock, return_value=_FakeResponse(payload)
     ) as mock_call:
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 200
     assert result.json()["reasoning"]["encrypted_content"] == "***"
@@ -216,7 +216,7 @@ def test_responses_endpoint_bearer_auth(
         new_callable=AsyncMock,
         return_value=_FakeResponse({"id": "resp_token"}),
     ):
-        result = client.post("/v1/responses", json=body, headers=headers)
+        result = client.post(f"{API_ROOT}/responses", json=body, headers=headers)
 
     assert result.status_code == 200
     assert result.json()["id"] == "resp_token"
@@ -234,7 +234,7 @@ def test_responses_endpoint_provider_error_non_streaming(
         new_callable=AsyncMock,
         side_effect=RuntimeError("boom"),
     ):
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 502
     assert result.json() == {"detail": "LLM provider error"}
@@ -254,7 +254,7 @@ def test_responses_endpoint_provider_error_streaming(
         new_callable=AsyncMock,
         side_effect=RuntimeError("boom"),
     ):
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 502
     assert result.json() == {"detail": "LLM provider error"}
@@ -274,7 +274,7 @@ def test_responses_endpoint_no_usage_data(
         new_callable=AsyncMock,
         return_value=_FakeResponse(payload, usage=None),
     ):
-        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert result.status_code == 200
     assert result.json()["id"] == "resp_no_usage"
@@ -295,7 +295,7 @@ def test_responses_endpoint_streaming_mid_stream_error(
         new_callable=AsyncMock,
         return_value=_make_failing_stream(events, RuntimeError("stream boom")),
     ):
-        resp = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        resp = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert resp.status_code == 200
     lines = list(resp.iter_lines())

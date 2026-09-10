@@ -1,0 +1,205 @@
+name: Otari Design System
+
+# Publishes web/.storybook as the design system's reference: every primitive
+# with its variants, states and both themes.
+#
+# Three jobs, split by what each costs.
+#
+# `catalog` is the pull request gate: it builds the catalog, which is where a
+# story that stops compiling fails, and it takes about a minute.
+#
+# `render` walks every story in both themes in headless Chromium, and it is
+# deliberately NOT a pull request gate. It takes seconds locally and more than
+# twenty minutes on a hosted runner, and the cause has not been pinned down (the
+# per-navigation cost is roughly 45 times the local one; a cold browser cache and
+# the default `raf` polling were both ruled out or fixed and neither accounts for
+# it). Six times the slowest existing job, on every `web/` change, is not a trade
+# worth making. So it runs on main and on demand, which is exactly how
+# `otari-dashboard.yml` treats the screenshot suite and for the same reason.
+#
+# It does catch what the build cannot, and an earlier version of this comment
+# claimed otherwise. Two faults reached the published site before it was asked
+# the right question: seven stories with a full-bleed band cut off the left of
+# the frame, and an icon requested from the origin root rather than the base
+# path. Both compiled cleanly.
+#
+# The gap this leaves is real and worth stating: a story that compiles but throws
+# at render reaches main, and `render` is what reports it there. Reduce that by
+# running the sweep locally before pushing, which is where it is fast:
+# `pnpm --dir web exec node .storybook/smoke.mjs`.
+#
+# Only `publish` needs Pages, and it runs on main alone.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - '.github/workflows/otari-design-system.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - '.github/workflows/otari-design-system.yml'
+  workflow_dispatch:
+
+# Superseded PR runs are cancelled; a run on main never is.
+#
+# The distinction is the whole point and the first spelling of this got it
+# backwards. A pull request run has nothing to publish, so cancelling it when a
+# newer commit arrives only saves runner time. A run on main is holding a Pages
+# deployment, and cancelling that mid-flight is precisely what leaves the site
+# half-updated, which is the outcome this key exists to prevent. GitHub's own
+# Pages guidance says the same.
+concurrency:
+  group: design-system-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    # The pnpm that web/package.json's `packageManager` pins, before setup-node,
+    # whose `cache: pnpm` shells out to pnpm for the store path. Same ordering
+    # and same reason as otari-dashboard.yml.
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        package_json_file: web/package.json
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 'lts/*'
+        cache: pnpm
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Build the catalog
+      env:
+        STORYBOOK_BASE_PATH: /${{ github.event.repository.name }}/
+      run: pnpm run storybook:build
+
+    # The real check. `storybook build` is a bundler run: it does not execute a
+    # story, so a component that throws on render, a decorator that is missing a
+    # provider, and a story whose subject renders nothing all build clean. This
+    # renders all of them in headless Chromium in both themes and reports any
+    # that error, come up empty, or log an uncaught exception.
+    #
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: design-system-catalog
+        path: web/storybook-static
+        retention-days: 14
+
+    # Only main publishes. The artifact above is what a pull request gets, which
+    # is enough to review a component's variants without giving every branch the
+    # ability to overwrite the reference site.
+    - name: Upload the Pages artifact
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      with:
+        path: web/storybook-static
+
+  # The full sweep. On main and on demand, for the reason in the header.
+  render:
+    needs: catalog
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        package_json_file: web/package.json
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 'lts/*'
+        cache: pnpm
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+
+    # Chromium only: the sweep drives it, and the screenshot suite's browsers
+    # are another workflow's business.
+    - name: Install Chromium
+      run: pnpm run e2e:install
+
+    # Built under the same base path `publish` uses, because that is the build
+    # this job exists to prove. Left at the root it renders a bundle nobody
+    # serves, and a URL written from the origin root instead of the base
+    # resolves in the sweep and 404s on the site. `<img src="/favicon.svg">`
+    # did exactly that on two pages: correct on a dashboard served at `/`,
+    # missing on a project site served under `/otari/`.
+    - name: Build the catalog
+      env:
+        STORYBOOK_BASE_PATH: /${{ github.event.repository.name }}/
+      run: pnpm run storybook:build
+
+    # It serves the static build rather than the dev server, because the static
+    # build is what publishes and so is what should be proven.
+    #
+    # Python's own module rather than `serve` or `http-server`: both would be new
+    # dependencies, and `npx --yes` would fetch one mid-run. A plain file server
+    # is enough here, since the catalog needs no SPA fallback: `/index.json` and
+    # `/iframe.html` are both real files on disk, and a rewrite-everything server
+    # would actually be worse, turning a missing asset into a 200 that renders.
+    #
+    # It is served one directory up, under the repository name, so the base path
+    # the bundle was built with is the path it is actually reached at. Serving
+    # the build at the root would put every asset one segment away from where
+    # the bundle asks for it, and nothing would load at all.
+    #
+    # The exit status is the grep's, not the pipeline's: `smoke.mjs` reports its
+    # failures on stdout and exits 0 either way, so without the grep this step
+    # passes over a catalog where every story threw.
+    - name: Render every story in both themes
+      run: |
+        mkdir -p site
+        mv storybook-static "site/${{ github.event.repository.name }}"
+        python3 -m http.server 6006 --directory site &
+        curl -s --retry 60 --retry-delay 2 --retry-connrefused \
+          -o /dev/null "http://localhost:6006/${{ github.event.repository.name }}/index.json"
+        SMOKE_ORIGIN="http://localhost:6006/${{ github.event.repository.name }}" \
+          pnpm exec node .storybook/smoke.mjs | tee smoke.log
+        grep -q "ALL RENDERED CLEAN" smoke.log
+
+  publish:
+    # Both, and `render` is the load-bearing one: publishing on `catalog` alone
+    # would put a catalog live while the check that renders it is still running,
+    # so a story that throws would be on the site before anything said so.
+    needs: [catalog, render]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # `pages: write` and `id-token: write` are what deploy-pages needs to claim
+    # the deployment; nothing here writes to the repository.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+    - id: deploy
+      uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

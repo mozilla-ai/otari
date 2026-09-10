@@ -11,11 +11,11 @@ This is that check. It boots the packaged CLI as a subprocess (not an in-process
 TestClient) so a failure to *start* counts as a failure, then walks the path a
 self-hoster walks on day one:
 
-1. ``/health``, ``/health/liveness``, ``/health/readiness`` answer.
+1. ``/api/v1/health``, ``/api/v1/health/liveness``, ``/api/v1/health/readiness`` answer.
 2. Readiness reports no ``mode``, which is what standalone looks like: hybrid
    mode stamps ``mode: hybrid`` on both health payloads, so the absence is the
    assertion that no platform token selected the other edition behind our back.
-3. ``/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
+3. ``/api/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
    the first request a browser makes, and a second statement of which edition
    booted.
 4. Create a user, then an API key for it (master-key admin surface).
@@ -26,7 +26,7 @@ self-hoster walks on day one:
    the BYO candidate and presenting the stored key to the provider, so a 200 with
    the expected body proves credential storage, routing, fallback, and dispatch
    all work in the OSS edition.
-8. The usage row for that request is readable back through ``/v1/usage``.
+8. The usage row for that request is readable back through ``/api/v1/usage``.
 9. Mail, which this deployment never configured, reports itself unavailable and
    names what would turn it on, and a send is refused rather than accepted and
    dropped. That is the state every self-hoster who wants no email is in, so it
@@ -78,6 +78,11 @@ REPLY = "oss-edition-smoke-ok"
 # Where the mock provider serves each behavior. The failing prefix is what the
 # policy's default candidate points at, the working prefix what its on_failure
 # candidate points at.
+# The root the packaged app serves its API at. Spelled here rather than imported,
+# so this gate stays standard-library only and keeps catching an import that
+# should not reach an OSS code path. A unit test pins it against the app's own
+# constant, so the two cannot drift.
+API_ROOT = "/api/v1"
 FAILING_PREFIX = "/failing"
 WORKING_PREFIX = "/working"
 
@@ -413,13 +418,13 @@ def _await_health(process: subprocess.Popen[bytes], base_url: str) -> None:
         if process.poll() is not None:
             raise SmokeFailure(f"The OSS edition exited with code {process.returncode} before becoming healthy")
         try:
-            status, _ = _request("GET", f"{base_url}/health")
+            status, _ = _request("GET", f"{base_url}{API_ROOT}/health")
         except OSError:
             status = 0
         if status == 200:
             return
         time.sleep(0.5)
-    raise SmokeFailure(f"The OSS edition did not answer /health within {HEALTH_TIMEOUT_SECONDS}s")
+    raise SmokeFailure(f"The OSS edition did not answer {API_ROOT}/health within {HEALTH_TIMEOUT_SECONDS}s")
 
 
 def _tail(log_path: Path, lines: int = 80) -> str:
@@ -442,26 +447,26 @@ def _expect(status: int, expected: int, what: str, body: Any) -> None:
 
 def check_health(base_url: str) -> None:
     """Assert the three probes answer, and that this is the standalone edition."""
-    status, body = _request("GET", f"{base_url}/health")
-    _expect(status, 200, "GET /health", body)
+    status, body = _request("GET", f"{base_url}{API_ROOT}/health")
+    _expect(status, 200, f"GET {API_ROOT}/health", body)
     if not isinstance(body, dict) or body.get("status") != "healthy":
-        raise SmokeFailure(f"GET /health did not report healthy: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/health did not report healthy: {body!r}")
     if "mode" in body:
         raise SmokeFailure(
-            f"GET /health reports mode {body['mode']!r}. Only hybrid mode stamps a mode, so this "
+            f"GET {API_ROOT}/health reports mode {body['mode']!r}. Only hybrid mode stamps a mode, so this "
             "process is not the OSS edition."
         )
 
-    status, body = _request("GET", f"{base_url}/health/liveness")
-    _expect(status, 200, "GET /health/liveness", body)
+    status, body = _request("GET", f"{base_url}{API_ROOT}/health/liveness")
+    _expect(status, 200, f"GET {API_ROOT}/health/liveness", body)
 
-    status, body = _request("GET", f"{base_url}/health/readiness")
-    _expect(status, 200, "GET /health/readiness", body)
+    status, body = _request("GET", f"{base_url}{API_ROOT}/health/readiness")
+    _expect(status, 200, f"GET {API_ROOT}/health/readiness", body)
     if not isinstance(body, dict) or body.get("database") != "connected":
-        raise SmokeFailure(f"GET /health/readiness did not report a connected database: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/health/readiness did not report a connected database: {body!r}")
     if "mode" in body:
         raise SmokeFailure(
-            f"GET /health/readiness reports mode {body['mode']!r}, so this process is not the OSS edition."
+            f"GET {API_ROOT}/health/readiness reports mode {body['mode']!r}, so this process is not the OSS edition."
         )
     log("Health probes answer, and the edition is standalone")
 
@@ -474,14 +479,14 @@ def check_bootstrap(base_url: str) -> None:
     which edition booted: an enterprise or platform-connected build answers
     something other than ``standalone`` here.
     """
-    status, body = _request("GET", f"{base_url}/v1/bootstrap")
-    _expect(status, 200, "GET /v1/bootstrap", body)
+    status, body = _request("GET", f"{base_url}{API_ROOT}/bootstrap")
+    _expect(status, 200, f"GET {API_ROOT}/bootstrap", body)
     if not isinstance(body, dict):
-        raise SmokeFailure(f"GET /v1/bootstrap did not return an object: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/bootstrap did not return an object: {body!r}")
     if body.get("deployment_type") != "standalone" or body.get("session_type") != "local_operator":
-        raise SmokeFailure(f"GET /v1/bootstrap does not describe the OSS edition: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/bootstrap does not describe the OSS edition: {body!r}")
     if not body.get("surfaces"):
-        raise SmokeFailure(f"GET /v1/bootstrap reports no management surfaces: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/bootstrap reports no management surfaces: {body!r}")
     log("The deployment bootstrap answers without a credential, as standalone")
 
 
@@ -494,24 +499,24 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
     front. A 200 here would mean the deployment accepted a message nobody would
     ever receive.
     """
-    status, body = _request("GET", f"{base_url}/v1/settings/mail", headers=admin)
-    _expect(status, 200, "GET /v1/settings/mail", body)
+    status, body = _request("GET", f"{base_url}{API_ROOT}/settings/mail", headers=admin)
+    _expect(status, 200, f"GET {API_ROOT}/settings/mail", body)
     if not isinstance(body, dict):
-        raise SmokeFailure(f"GET /v1/settings/mail did not return an object: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/settings/mail did not return an object: {body!r}")
     if body.get("transport") != "none" or body.get("ready") is not False:
-        raise SmokeFailure(f"GET /v1/settings/mail reports mail on a deployment with none: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/settings/mail reports mail on a deployment with none: {body!r}")
     missing = body.get("missing")
     if not missing:
-        raise SmokeFailure(f"GET /v1/settings/mail names nothing to configure: {body!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/settings/mail names nothing to configure: {body!r}")
 
     status, body = _request(
         "POST",
-        f"{base_url}/v1/settings/mail/test",
+        f"{base_url}{API_ROOT}/settings/mail/test",
         headers=admin,
         payload={"to": "smoke@example.com"},
     )
     if status != 503:
-        raise SmokeFailure(f"POST /v1/settings/mail/test returned {status}, expected a 503 refusal: {body!r}")
+        raise SmokeFailure(f"POST {API_ROOT}/settings/mail/test returned {status}, expected a 503 refusal: {body!r}")
     # The status alone is not the property worth gating on: any 503 would pass
     # that, including one from an unrelated outage. What this design promises is
     # that the refusal *names what to set*, so the refusal is checked against
@@ -527,22 +532,22 @@ def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     """Create a user and an API key for it, and return the raw key."""
     status, body = _request(
         "POST",
-        f"{base_url}/v1/users",
+        f"{base_url}{API_ROOT}/users",
         headers=admin,
         payload={"user_id": names.user_id, "alias": "OSS edition smoke"},
     )
-    _expect(status, 200, "POST /v1/users", body)
+    _expect(status, 200, f"POST {API_ROOT}/users", body)
 
     status, body = _request(
         "POST",
-        f"{base_url}/v1/keys",
+        f"{base_url}{API_ROOT}/keys",
         headers=admin,
         payload={"key_name": "oss-edition-smoke", "user_id": names.user_id},
     )
-    _expect(status, 200, "POST /v1/keys", body)
+    _expect(status, 200, f"POST {API_ROOT}/keys", body)
     key = body.get("key") if isinstance(body, dict) else None
     if not isinstance(key, str) or not key:
-        raise SmokeFailure(f"POST /v1/keys returned no key: {body!r}")
+        raise SmokeFailure(f"POST {API_ROOT}/keys returned no key: {body!r}")
     log("Created a user and an API key")
     return key
 
@@ -551,7 +556,7 @@ def register_byo_provider(base_url: str, admin: dict[str, str], names: Names, *,
     """Store a BYO provider credential at runtime, the way an operator would."""
     status, body = _request(
         "POST",
-        f"{base_url}/v1/provider-credentials",
+        f"{base_url}{API_ROOT}/provider-credentials",
         headers=admin,
         payload={
             "instance": names.byo_instance,
@@ -560,7 +565,7 @@ def register_byo_provider(base_url: str, admin: dict[str, str], names: Names, *,
             "api_key": names.byo_key,
         },
     )
-    _expect(status, 201, "POST /v1/provider-credentials", body)
+    _expect(status, 201, f"POST {API_ROOT}/provider-credentials", body)
     log("Stored a BYO provider credential")
 
 
@@ -568,7 +573,7 @@ def create_fallback_policy(base_url: str, admin: dict[str, str], names: Names) -
     """Create a policy whose default candidate is down and whose fallback is the BYO one."""
     status, body = _request(
         "POST",
-        f"{base_url}/v1/routing/policies",
+        f"{base_url}{API_ROOT}/routing/policies",
         headers=admin,
         payload={
             "name": names.policy,
@@ -578,7 +583,7 @@ def create_fallback_policy(base_url: str, admin: dict[str, str], names: Names) -
             },
         },
     )
-    _expect(status, 200, "POST /v1/routing/policies", body)
+    _expect(status, 200, f"POST {API_ROOT}/routing/policies", body)
     log("Created a routing policy with a fallback candidate")
 
 
@@ -586,14 +591,14 @@ def run_completion(base_url: str, key: str, provider: _MockProviderServer, names
     """Send one completion at the policy and assert it was served by the fallback."""
     status, body = _request(
         "POST",
-        f"{base_url}/v1/chat/completions",
+        f"{base_url}{API_ROOT}/chat/completions",
         headers={KEY_HEADER: key},
         payload={
             "model": names.policy,
             "messages": [{"role": "user", "content": "Is the OSS edition alive?"}],
         },
     )
-    _expect(status, 200, "POST /v1/chat/completions", body)
+    _expect(status, 200, f"POST {API_ROOT}/chat/completions", body)
     content = ""
     if isinstance(body, dict):
         choices = body.get("choices") or []
@@ -619,10 +624,10 @@ def run_completion(base_url: str, key: str, provider: _MockProviderServer, names
 
 def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> None:
     """Assert the completion was recorded, which is the OSS control plane's own job."""
-    status, rows = _request("GET", f"{base_url}/v1/usage?limit=10", headers=admin)
-    _expect(status, 200, "GET /v1/usage", rows)
+    status, rows = _request("GET", f"{base_url}{API_ROOT}/usage?limit=10", headers=admin)
+    _expect(status, 200, f"GET {API_ROOT}/usage", rows)
     if not isinstance(rows, list) or not rows:
-        raise SmokeFailure(f"GET /v1/usage recorded nothing for the completion: {rows!r}")
+        raise SmokeFailure(f"GET {API_ROOT}/usage recorded nothing for the completion: {rows!r}")
     served = [
         row
         for row in rows
@@ -634,7 +639,7 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
     ]
     if not served:
         raise SmokeFailure(
-            f"GET /v1/usage has no successful row for {names.user_id} on the BYO provider "
+            f"GET {API_ROOT}/usage has no successful row for {names.user_id} on the BYO provider "
             f"{names.byo_instance!r}: {rows!r}"
         )
     log("Usage for the completion is readable back")

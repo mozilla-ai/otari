@@ -1,6 +1,8 @@
 import { Button, Modal } from "@heroui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import {
   canCopyImages,
   copyBlobAsImage,
@@ -8,7 +10,6 @@ import {
   rasterize,
   shareFilename,
 } from "@/features/usage/shareImage"
-import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { CARD_SIZES, type CardRatio, ShareCard } from "./ShareCard"
 import {
   availableStats,
@@ -298,7 +299,7 @@ export function ShareDialog(props: ShareDialogProps) {
                         <Button
                           key={stat.id}
                           size="sm"
-                          variant={hero?.id === stat.id ? "primary" : "outline"}
+                          variant={hero?.id === stat.id ? "primary" : "ghost"}
                           aria-pressed={hero?.id === stat.id}
                           onPress={() => set("hero", stat.id)}
                         >
@@ -331,7 +332,7 @@ export function ShareDialog(props: ShareDialogProps) {
                               variant={
                                 presentation.ratio === ratio
                                   ? "primary"
-                                  : "outline"
+                                  : "ghost"
                               }
                               aria-pressed={presentation.ratio === ratio}
                               onPress={() => set("ratio", ratio)}
@@ -349,9 +350,7 @@ export function ShareDialog(props: ShareDialogProps) {
                             key={theme}
                             size="sm"
                             variant={
-                              presentation.theme === theme
-                                ? "primary"
-                                : "outline"
+                              presentation.theme === theme ? "primary" : "ghost"
                             }
                             aria-pressed={presentation.theme === theme}
                             onPress={() => set("theme", theme)}
@@ -368,7 +367,7 @@ export function ShareDialog(props: ShareDialogProps) {
                             key={rows}
                             size="sm"
                             variant={
-                              presentation.rows === rows ? "primary" : "outline"
+                              presentation.rows === rows ? "primary" : "ghost"
                             }
                             aria-pressed={presentation.rows === rows}
                             onPress={() => set("rows", rows)}
@@ -383,7 +382,7 @@ export function ShareDialog(props: ShareDialogProps) {
                   <div className="flex flex-wrap gap-1.5">
                     <Button
                       size="sm"
-                      variant={presentation.hideDollars ? "primary" : "outline"}
+                      variant={presentation.hideDollars ? "primary" : "ghost"}
                       aria-pressed={presentation.hideDollars}
                       onPress={() =>
                         set("hideDollars", !presentation.hideDollars)
@@ -397,13 +396,16 @@ export function ShareDialog(props: ShareDialogProps) {
             </Modal.Body>
             <Modal.Footer className="flex flex-wrap items-center gap-2">
               {notice !== undefined ? (
-                <span className="mr-auto text-xs text-accent">{notice}</span>
+                // Muted, not link ink: a notice is a result, not a destination, and
+                // link ink on something unclickable promises an interaction
+                // that is not there.
+                <span className="mr-auto text-xs text-muted">{notice}</span>
               ) : null}
               <Button variant="ghost" onPress={onClose}>
                 Close
               </Button>
               <Button
-                variant={copyable ? "outline" : "primary"}
+                variant={copyable ? "ghost" : "primary"}
                 isDisabled={busy || blocked}
                 onPress={() =>
                   withBlob(

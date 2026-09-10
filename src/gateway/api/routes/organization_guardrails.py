@@ -11,7 +11,7 @@ Scoped to ``/me`` for the reason `routes/organization_pricing.py` and
 organization and the caller's identity already points at it, so a request cannot
 name one. Multi-organization administration is the overlay's to contribute.
 
-These entries sit *above* ``/v1/tool-settings``, which stays the deployment's own
+These entries sit *above* ``/api/v1/tool-settings``, which stays the deployment's own
 guardrail configuration. ``guardrails_url`` there is still what a guardrail
 without an endpoint of its own is sent to, and an organization with no entries
 changes nothing about how a request is checked.
@@ -38,7 +38,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 # says a request is the operator's, the membership says whether that identity may
 # change what every workspace of the organization is checked against.
 router = APIRouter(
-    prefix="/v1/organizations/me/guardrails",
+    prefix="/organizations/me/guardrails",
     tags=["organization-guardrails"],
     dependencies=[Depends(verify_master_key)],
 )

@@ -7,10 +7,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, API_VERSION, OTLP_ROOT, GatewayConfig
 from gateway.metrics import (
     REGISTRY,
     MetricsMiddleware,
+    _endpoint_label,
     metrics_endpoint,
     record_abandoned_attempt,
     record_auth_failure,
@@ -152,7 +153,7 @@ def _make_test_app(*, enable_metrics: bool = True) -> FastAPI:
 def test_middleware_increments_request_counter() -> None:
     app = _make_test_app()
     client = TestClient(app)
-    labels = {"method": "GET", "endpoint": "/ok", "status": "200"}
+    labels = {"method": "GET", "endpoint": "/ok", "api_version": "", "status": "200"}
     before = _sample("gateway_requests_total", labels)
 
     client.get("/ok")
@@ -163,7 +164,7 @@ def test_middleware_increments_request_counter() -> None:
 def test_middleware_records_duration() -> None:
     app = _make_test_app()
     client = TestClient(app)
-    labels = {"method": "GET", "endpoint": "/ok"}
+    labels = {"method": "GET", "endpoint": "/ok", "api_version": ""}
     before = _sample("gateway_request_duration_seconds_count", labels)
 
     client.get("/ok")
@@ -175,7 +176,7 @@ def test_middleware_records_duration() -> None:
 def test_middleware_tracks_error_status_codes() -> None:
     app = _make_test_app()
     client = TestClient(app, raise_server_exceptions=False)
-    labels = {"method": "GET", "endpoint": "/error", "status": "503"}
+    labels = {"method": "GET", "endpoint": "/error", "api_version": "", "status": "503"}
     before = _sample("gateway_requests_total", labels)
 
     client.get("/error")
@@ -187,23 +188,23 @@ def test_middleware_labels_parameterized_route_with_template() -> None:
     """Different path params collapse to one series; unknown paths bucket as 'unmatched'."""
     app = FastAPI()
 
-    @app.get("/v1/files/{file_id}")
+    @app.get(f"{API_ROOT}/files/{{file_id}}")
     async def get_file(file_id: str) -> dict[str, str]:
         return {"id": file_id}
 
     app.add_middleware(MetricsMiddleware)
     client = TestClient(app, raise_server_exceptions=False)
 
-    template_labels = {"method": "GET", "endpoint": "/v1/files/{file_id}", "status": "200"}
-    raw_labels_a = {"method": "GET", "endpoint": "/v1/files/aaa", "status": "200"}
-    raw_labels_b = {"method": "GET", "endpoint": "/v1/files/bbb", "status": "200"}
-    unmatched_labels = {"method": "GET", "endpoint": "unmatched", "status": "404"}
+    template_labels = {"method": "GET", "endpoint": "/files/{file_id}", "api_version": "v1", "status": "200"}
+    raw_labels_a = {"method": "GET", "endpoint": "/files/aaa", "api_version": "v1", "status": "200"}
+    raw_labels_b = {"method": "GET", "endpoint": "/files/bbb", "api_version": "v1", "status": "200"}
+    unmatched_labels = {"method": "GET", "endpoint": "unmatched", "api_version": "", "status": "404"}
 
     before_template = _sample("gateway_requests_total", template_labels)
     before_unmatched = _sample("gateway_requests_total", unmatched_labels)
 
-    assert client.get("/v1/files/aaa").status_code == 200
-    assert client.get("/v1/files/bbb").status_code == 200
+    assert client.get(f"{API_ROOT}/files/aaa").status_code == 200
+    assert client.get(f"{API_ROOT}/files/bbb").status_code == 200
     assert client.get("/no/such/route").status_code == 404
 
     # Two distinct ids produce a single labeled series keyed by the route template.
@@ -215,10 +216,43 @@ def test_middleware_labels_parameterized_route_with_template() -> None:
     assert _sample("gateway_requests_total", unmatched_labels) - before_unmatched == 1.0
 
 
+def test_the_endpoint_label_does_not_carry_the_api_root() -> None:
+    """A metric series has to outlive the root moving, which is why the root is not in it.
+
+    The label is what a dashboard, a recording rule and an alert expression are
+    keyed on, and those live outside this repository and far longer than any
+    one prefix. Splitting the root off means moving the API renames no series,
+    and two roots served side by side stay countable apart instead of summing
+    into one.
+    """
+    from starlette.routing import Route
+
+    def endpoint_for(path: str) -> tuple[str, str]:
+        return _endpoint_label({"route": Route(path, endpoint=lambda request: None)})
+
+    assert endpoint_for(f"{API_ROOT}/chat/completions") == ("/chat/completions", "v1")
+    assert endpoint_for(f"{API_ROOT}/files/{{file_id}}") == ("/files/{file_id}", "v1")
+    # Outside the root, the template is the whole identity: /metrics is ours to
+    # name and an OTel signal path belongs to OTel.
+    assert endpoint_for("/metrics") == ("/metrics", "")
+    assert endpoint_for(f"{OTLP_ROOT}/v1/traces") == (f"{OTLP_ROOT}/v1/traces", "")
+    # A sibling root is not silently folded into this one, or a v2 rollout would
+    # be invisible: both versions would sum into one series.
+    assert endpoint_for("/api/v2/chat/completions") == ("/api/v2/chat/completions", "")
+    # The root is matched on the segment boundary, not as a byte prefix. This is
+    # the bug class that has bitten this migration more than once.
+    assert endpoint_for(f"{API_ROOT}beta/chat") == (f"{API_ROOT}beta/chat", "")
+    assert endpoint_for(f"{API_ROOT}-internal/x") == (f"{API_ROOT}-internal/x", "")
+    # The root itself is a resource, not an empty label.
+    assert endpoint_for(API_ROOT) == ("/", API_VERSION)
+    # The version reported is the one the app was built with, not a literal.
+    assert endpoint_for(f"{API_ROOT}/chat/completions")[1] == API_VERSION
+
+
 def test_middleware_skips_metrics_endpoint() -> None:
     app = _make_test_app()
     client = TestClient(app)
-    labels = {"method": "GET", "endpoint": "/metrics", "status": "200"}
+    labels = {"method": "GET", "endpoint": "/metrics", "api_version": "", "status": "200"}
     before = _sample("gateway_requests_total", labels)
 
     client.get("/metrics")

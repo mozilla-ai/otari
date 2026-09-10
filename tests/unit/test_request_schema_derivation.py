@@ -100,7 +100,7 @@ def test_renamed_params_are_exposed_under_the_wire_name(endpoint: str) -> None:
 
 
 def test_messages_request_preserves_container_for_upstream() -> None:
-    """The compatibility field survives validation and request serialization unchanged."""
+    """The SDK-derived field survives validation and request serialization unchanged."""
     request = MessagesRequest.model_validate(
         {
             "model": "anthropic:claude-sonnet-4-5",

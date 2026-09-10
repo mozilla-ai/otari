@@ -105,8 +105,33 @@ describe("formatRelative", () => {
   const now = Date.parse("2026-01-01T12:00:00Z")
 
   it("describes past timestamps", () => {
-    expect(formatRelative("2026-01-01T11:59:30Z", now)).toContain("seconds ago")
-    expect(formatRelative("2026-01-01T10:00:00Z", now)).toContain("hours ago")
+    // Compact is the product's voice: "30s ago", not "30 seconds ago". The
+    // difference is 10px of table lane, which is why the copy is the fix rather
+    // than the column width.
+    expect(formatRelative("2026-01-01T11:59:30Z", now)).toBe("30s ago")
+    expect(formatRelative("2026-01-01T10:00:00Z", now)).toBe("2h ago")
+    expect(formatRelative("2025-12-30T12:00:00Z", now)).toBe("2d ago")
+    // A clock a little ahead of the server reads as the present rather than as
+    // a request that has not happened yet.
+    expect(formatRelative("2026-01-01T12:00:05Z", now)).toBe("just now")
+  })
+
+  /** An ISO timestamp `days` before `now`, so a boundary reads as its number. */
+  const daysAgo = (days: number) =>
+    new Date(now - days * 86_400_000).toISOString()
+
+  it("steps up to months and years rather than counting days forever", () => {
+    // `formatRelative` runs on long-lived rows too: a claimed email domain, an
+    // account's last sign-in, a price's last edit. Without these buckets a
+    // domain claimed a year and a half ago read as "548d ago".
+    expect(formatRelative(daysAgo(29), now)).toBe("29d ago")
+    expect(formatRelative(daysAgo(30), now)).toBe("1mo ago")
+    expect(formatRelative(daysAgo(45), now)).toBe("1mo ago")
+    expect(formatRelative(daysAgo(60), now)).toBe("2mo ago")
+    expect(formatRelative(daysAgo(359), now)).toBe("11mo ago")
+    expect(formatRelative(daysAgo(360), now)).toBe("1y ago")
+    expect(formatRelative(daysAgo(548), now)).toBe("1y ago")
+    expect(formatRelative(daysAgo(730), now)).toBe("2y ago")
   })
 
   it("returns 'never' for missing timestamps", () => {

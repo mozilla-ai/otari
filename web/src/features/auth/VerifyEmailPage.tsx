@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react"
-
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { useVerifyEmail } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
-import { useVerifyEmail } from "@/shared/api/hooks"
-import { ErrorBanner } from "@/shared/components/ui"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
@@ -110,7 +109,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout title="Verify your email">
-      <p role="status" className="text-center text-sm text-muted">
+      <p role="status" className="text-sm text-muted">
         Confirming your address…
       </p>
     </PublicAuthLayout>

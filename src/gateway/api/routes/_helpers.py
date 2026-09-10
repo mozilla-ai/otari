@@ -374,7 +374,7 @@ async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID
     and is where every row predating workspace scoping was backfilled.
 
     A named workspace is checked rather than left to the foreign key, matching
-    ``POST /v1/keys``: an id naming no workspace is a bad request, and letting it
+    ``POST /api/v1/keys``: an id naming no workspace is a bad request, and letting it
     reach the constraint answers 500 "Database error" for a value the caller
     supplied and can fix.
     """

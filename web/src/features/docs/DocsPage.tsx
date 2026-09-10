@@ -1,10 +1,9 @@
-import { Card } from "@heroui/react"
-import type { ComponentPropsWithoutRef } from "react"
+import type { ComponentPropsWithoutRef, ReactElement, ReactNode } from "react"
+import { Children, isValidElement, useEffect, useRef, useState } from "react"
 import type { Components, ExtraProps } from "react-markdown"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { Markdown } from "@/design-system/content/Markdown"
 
-import { PageHeader } from "@/shared/components/ui"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 // The operator user guide is bundled straight from the repo's docs so the
 // running dashboard ships the guide that matches it, instead of pointing at a
 // docs site that may describe a different version. Rebuilding the dashboard
@@ -83,7 +82,7 @@ const guideBody = dropSection(
 type MdProps<E extends "a" | "table" | "pre"> = ComponentPropsWithoutRef<E> &
   ExtraProps
 
-const markdownComponents: Components = {
+export const markdownComponents: Components = {
   a: ({ node: _node, href, children, ...props }: MdProps<"a">) => {
     const resolved = resolveDocHref(href)
     // Every rewritten link is now an absolute GitHub URL (external), so it opens
@@ -106,7 +105,7 @@ const markdownComponents: Components = {
   table: ({ node: _node, ...props }: MdProps<"table">) => (
     // biome-ignore lint/a11y/useSemanticElements: <section> would not make the overflow keyboard-reachable, which is the point
     <div
-      className="otari-markdown-scroll"
+      className="my-4 max-w-full overflow-x-auto"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be focusable (axe scrollable-region-focusable)
       tabIndex={0}
       role="region"
@@ -117,32 +116,112 @@ const markdownComponents: Components = {
   ),
   // Code blocks scroll horizontally on overflow; make them focusable too so the
   // clipped content is keyboard-reachable (axe scrollable-region-focusable).
-  pre: ({ node: _node, ...props }: MdProps<"pre">) => (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: same as the table above; the block scrolls, so it has to be reachable
-    // biome-ignore lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT
-    <pre tabIndex={0} role="region" aria-label="Code" {...props} />
-  ),
+  pre: (props: MdProps<"pre">) => <CodeBlock {...props} />,
+}
+
+/**
+ * A code block with a label row above it: the language on the left, a copy
+ * affordance on the right.
+ *
+ * The row is a cell of the block rather than a button floating on it, which is
+ * how the copy family works everywhere else in this product and is also what
+ * keeps the control out of the text it would otherwise sit over. The language
+ * comes from the `language-*` class remark puts on the inner `<code>`, and the
+ * row is dropped entirely when there is neither a language nor anything to
+ * copy, rather than rendering an empty bar.
+ */
+function CodeBlock({ node: _node, children, ...props }: MdProps<"pre">) {
+  const [copied, setCopied] = useState(false)
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
+
+  const child = Children.toArray(children).find(isValidElement) as
+    | ReactElement<{ className?: string; children?: ReactNode }>
+    | undefined
+  const language =
+    /language-([\w+-]+)/.exec(child?.props.className ?? "")?.[1] ?? ""
+  const text =
+    typeof child?.props.children === "string" ? child.props.children : ""
+
+  const copy = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        clearTimeout(resetTimer.current)
+        resetTimer.current = setTimeout(() => setCopied(false), 2_000)
+      }
+    } catch {
+      // No Clipboard API, or it refused. The block is selectable either way, so
+      // there is nothing to fall back to and nothing to claim.
+    }
+  }
+
+  return (
+    <div className="my-5">
+      {/* The label row: the language on the left, the copy affordance on the
+          right, both in mono at the caption step on the block's own surface.
+          The row is a cell of the block rather than a button floating on it,
+          which is how the copy family works everywhere else here. */}
+      <div className="flex items-center justify-between gap-3 border border-code-border bg-code-control px-4 py-1.5 text-mono-micro text-code-foreground">
+        <span>{language || "code"}</span>
+        {text ? (
+          <button
+            type="button"
+            onClick={copy}
+            className="opacity-75 hover:opacity-100"
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        ) : null}
+      </div>
+      {/* biome-ignore-start lint/a11y/noNoninteractiveTabindex: same as the table above; the block scrolls, so it has to be reachable */}
+      {/* biome-ignore-start lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT */}
+      {/* A code block is a small object of its own on the prose ground, which
+          is the one place in this product where an edge is right: it is a
+          verbatim thing to be copied, not a division of the page. `border-t-0`
+          because the label row above already drew that edge. */}
+      <pre
+        tabIndex={0}
+        role="region"
+        aria-label={language ? `${language} code` : "Code"}
+        className="overflow-x-auto border border-code-border border-t-0 bg-code-surface px-4 py-3.5 text-mono-caption leading-5 text-code-foreground"
+        {...props}
+      >
+        {children}
+      </pre>
+      {/* biome-ignore-end lint/a11y/noNoninteractiveTabindex: see above */}
+      {/* biome-ignore-end lint/a11y/useSemanticElements: see above */}
+    </div>
+  )
 }
 
 export function DocsPage() {
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="User guide"
-        description="A reference for operating this dashboard, bundled with and version-matched to the running gateway. New here? The get-started walkthrough lives at /welcome."
-      />
-      <Card>
-        <Card.Content className="p-5 sm:p-6">
-          <div className="otari-markdown">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
-            >
-              {guideBody}
-            </ReactMarkdown>
-          </div>
-        </Card.Content>
-      </Card>
+    <div className="flex flex-col">
+      {/* The prose measure, not the app's 620px default: on the one page whose
+          subject is the measure, the widest line should not be the scanning-size
+          paragraph at the top of it. */}
+      <PageIntro title="User guide" descriptionClassName="max-w-[560px]">
+        A reference for operating this dashboard, bundled with and
+        version-matched to the running gateway. New here? The get-started
+        walkthrough lives at /welcome.
+      </PageIntro>
+      {/* The prose pattern: a 560px measure at 16px, bounded above by the
+          section rule and on its right by a rule that runs the height of the
+          page, with the ground beyond it left free. The interim 620px cap this
+          replaces was a number chosen on this page; 560 at 16/26 is the measure
+          the pattern sets, and the type steps *up* from the 14px the rest of
+          the product uses, because this is read rather than scanned. */}
+      <div className="flex flex-1 border-t border-border">
+        <div className="min-w-0 border-r border-border px-4 py-8 md:px-6">
+          <Markdown className="max-w-[560px]" components={markdownComponents}>
+            {guideBody}
+          </Markdown>
+        </div>
+      </div>
     </div>
   )
 }

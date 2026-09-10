@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 
@@ -42,7 +42,7 @@ def _client(tmp_path: Path, **overrides: object) -> TestClient:
 
 def _add_member(client: TestClient, *, email: str) -> None:
     response = client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": email, "role": "member"},
         headers={"Otari-Key": MASTER_KEY},
     )
@@ -55,7 +55,7 @@ def _signed_up(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: s
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
-        response = client.post("/v1/auth/signup", json={"email": email, "password": PASSWORD})
+        response = client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})
     finally:
         gateway_logger.removeHandler(caplog.handler)
     assert response.status_code == 200, response.text
@@ -69,7 +69,7 @@ def _resend(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str)
     caplog.set_level(logging.INFO, logger="gateway")
     caplog.clear()
     try:
-        response = client.post("/v1/auth/resend-verification", json={"email": email})
+        response = client.post(f"{API_ROOT}/auth/resend-verification", json={"email": email})
     finally:
         gateway_logger.removeHandler(caplog.handler)
     return response.status_code, caplog.text
@@ -79,10 +79,10 @@ def test_a_valid_token_verifies_and_the_identity_can_sign_in(tmp_path: Path, cap
     with _client(tmp_path) as client:
         token = _signed_up(client, caplog, email="ada@example.com")
 
-        response = client.post("/v1/auth/verify-email", json={"token": token})
+        response = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
         assert response.status_code == 200, response.text
 
-        signed_in = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
         assert signed_in.status_code == 200
 
 
@@ -91,16 +91,16 @@ def test_a_reused_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixt
     with _client(tmp_path) as client:
         token = _signed_up(client, caplog, email="ada@example.com")
 
-        first = client.post("/v1/auth/verify-email", json={"token": token})
+        first = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
         assert first.status_code == 200
 
-        second = client.post("/v1/auth/verify-email", json={"token": token})
+        second = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
         assert second.status_code == 400
 
 
 def test_an_unknown_token_is_refused(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        response = client.post("/v1/auth/verify-email", json={"token": "not-a-real-token"})
+        response = client.post(f"{API_ROOT}/auth/verify-email", json={"token": "not-a-real-token"})
         assert response.status_code == 400
 
 
@@ -116,7 +116,7 @@ def test_an_expired_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFi
         )
 
     with _client(tmp_path) as client:
-        response = client.post("/v1/auth/verify-email", json={"token": token})
+        response = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
         assert response.status_code == 400
 
 
@@ -136,7 +136,7 @@ def test_a_token_is_refused_once_the_identity_is_deactivated(
         connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"})
 
     with _client(tmp_path) as client:
-        response = client.post("/v1/auth/verify-email", json={"token": token})
+        response = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
         assert response.status_code == 400
 
 
@@ -165,7 +165,7 @@ def test_resend_for_an_already_verified_address_sends_nothing(
 ) -> None:
     with _client(tmp_path) as client:
         token = _signed_up(client, caplog, email="grace@example.com")
-        assert client.post("/v1/auth/verify-email", json={"token": token}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
 
         status_code, text_seen = _resend(client, caplog, email="grace@example.com")
 
@@ -207,8 +207,8 @@ def test_resend_sends_a_fresh_link_for_a_genuinely_unverified_identity(
 
         assert second_token != first_token
         # The old link stops working the moment a new one is issued.
-        assert client.post("/v1/auth/verify-email", json={"token": first_token}).status_code == 400
-        assert client.post("/v1/auth/verify-email", json={"token": second_token}).status_code == 200
+        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": first_token}).status_code == 400
+        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": second_token}).status_code == 200
 
 
 def test_resend_without_mail_configured_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -216,7 +216,7 @@ def test_resend_without_mail_configured_is_refused(tmp_path: Path, caplog: pytes
         _signed_up(client, caplog, email="ada@example.com")
 
     with _client(tmp_path, mail_transport="none", public_base_url=None) as client:
-        response = client.post("/v1/auth/resend-verification", json={"email": "ada@example.com"})
+        response = client.post(f"{API_ROOT}/auth/resend-verification", json={"email": "ada@example.com"})
         assert response.status_code == 503
         # Not the central tenancy handler's generic 5xx body: this refusal has
         # to name what is missing, the same as GET /v1/settings/mail's own.
@@ -228,8 +228,8 @@ def test_repeated_resend_calls_get_throttled(tmp_path: Path) -> None:
         create_app(_config(tmp_path, dashboard_login_rate_limit_per_minute=2))
     ) as client:
         for _ in range(2):
-            response = client.post("/v1/auth/resend-verification", json={"email": "nobody@example.com"})
+            response = client.post(f"{API_ROOT}/auth/resend-verification", json={"email": "nobody@example.com"})
             assert response.status_code == 200
 
-        throttled = client.post("/v1/auth/resend-verification", json={"email": "nobody@example.com"})
+        throttled = client.post(f"{API_ROOT}/auth/resend-verification", json={"email": "nobody@example.com"})
         assert throttled.status_code == 429

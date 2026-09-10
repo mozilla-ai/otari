@@ -9,6 +9,7 @@ gateway's own fault keeps a fixed detail and never echoes upstream text.
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
 from fastapi.testclient import TestClient
@@ -18,13 +19,14 @@ from gateway.api.routes._pipeline import (
     PROVIDER_ERROR_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
 )
+from gateway.core.config import API_ROOT
 
 _RAW = "raw upstream message SECRET-9f3a"
 
 # The upstream OpenAI rejection for function tools + a non-'none' reasoning_effort.
 _REASONING_TOOLS_MSG = (
     "Function tools with reasoning_effort are not supported for gpt-5.6-sol in "
-    "/v1/chat/completions. To use function tools, use /v1/responses or set "
+    f"{API_ROOT}/chat/completions. To use function tools, use /v1/responses or set "
     "reasoning_effort to 'none'."
 )
 
@@ -47,15 +49,16 @@ class _ParamError(Exception):
 
 # (upstream status, mapped HTTP status, mapped detail). 500 and the bare case
 # fall through to the generic provider error each format already returned.
-# 400/422/404 are the caller's request to fix, so they carry the upstream
-# message; the rest are the gateway's own fault and keep a fixed string.
+# 400/422/404 are the caller's request to fix and 429 is theirs to act on, so
+# those carry the upstream message; the rest are the gateway's own fault and
+# keep a fixed string.
 _CASES = [
     (400, 400, _RAW),
     (422, 400, _RAW),
     (404, 404, _RAW),
+    (429, 429, _RAW),
     (401, 502, PROVIDER_CREDENTIALS_DETAIL),
     (403, 502, PROVIDER_CREDENTIALS_DETAIL),
-    (429, 429, PROVIDER_RATE_LIMITED_DETAIL),
 ]
 
 
@@ -74,7 +77,7 @@ def test_chat_classifies_provider_error(
         side_effect=_StatusError(upstream),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -83,6 +86,63 @@ def test_chat_classifies_provider_error(
     assert response.json()["detail"] == expected_detail
     if expected_detail != _RAW:
         assert "SECRET" not in response.text
+
+
+def test_chat_rate_limit_falls_back_when_the_provider_said_nothing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """A 429 whose body carried no explanation still gets a usable detail."""
+
+    class _Silent(Exception):
+        def __init__(self) -> None:
+            super().__init__("")
+            self.status_code = 429
+
+    with patch(
+        "gateway.api.routes.chat.acompletion",
+        new_callable=AsyncMock,
+        side_effect=_Silent(),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == PROVIDER_RATE_LIMITED_DETAIL
+
+
+def test_chat_forwards_the_upstream_retry_after(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """The one upstream header a rate-limited caller can act on reaches the
+    wire, so a client can honor the provider's own backoff window instead of
+    guessing one."""
+
+    class _RateLimited(Exception):
+        def __init__(self) -> None:
+            super().__init__("Quota exceeded.")
+            self.status_code = 429
+            self.response = httpx.Response(429, headers={"Retry-After": "34"})
+
+    with patch(
+        "gateway.api.routes.chat.acompletion",
+        new_callable=AsyncMock,
+        side_effect=_RateLimited(),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "34"
 
 
 def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(
@@ -97,7 +157,7 @@ def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(
         side_effect=UnsupportedParameterError("prompt_cache_key", "anthropic"),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "anthropic:claude-3-5-sonnet",
                 "messages": [{"role": "user", "content": "Hi"}],
@@ -121,7 +181,7 @@ def test_chat_unknown_status_stays_generic_502(
         side_effect=_StatusError(500),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -144,7 +204,7 @@ def test_chat_surfaces_reasoning_effort_tools_conflict(
         side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:gpt-5.6-sol", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -168,7 +228,7 @@ def test_responses_surfaces_reasoning_effort_tools_conflict(
         new_callable=AsyncMock,
         side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
     ):
-        response = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert response.status_code == 400
     assert response.json()["detail"] == _REASONING_TOOLS_MSG
@@ -192,7 +252,7 @@ def test_messages_surfaces_reasoning_effort_tools_conflict(
         new_callable=AsyncMock,
         side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
     ):
-        response = client.post("/v1/messages", json=messages_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == 400
     detail = response.json()["detail"]
@@ -216,7 +276,7 @@ def test_responses_classifies_provider_error(
         new_callable=AsyncMock,
         side_effect=_StatusError(upstream),
     ):
-        response = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
     assert response.status_code == expected_status
     assert response.json()["detail"] == expected_detail
@@ -228,8 +288,8 @@ def test_responses_classifies_provider_error(
 _MESSAGES_CASES = [
     (400, 400, _RAW, "invalid_request_error"),
     (404, 404, _RAW, "not_found_error"),
+    (429, 429, _RAW, "rate_limit_error"),
     (401, 502, PROVIDER_CREDENTIALS_DETAIL, "api_error"),
-    (429, 429, PROVIDER_RATE_LIMITED_DETAIL, "rate_limit_error"),
 ]
 
 
@@ -251,7 +311,7 @@ def test_messages_classifies_provider_error(
         new_callable=AsyncMock,
         side_effect=_StatusError(upstream),
     ):
-        response = client.post("/v1/messages", json=messages_request_body, headers=master_key_header)
+        response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
 
     assert response.status_code == expected_status
     detail = response.json()["detail"]

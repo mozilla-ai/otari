@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.entities import DashboardSession, RuntimeSetting
 from gateway.models.tenancy import (
     DeploymentUserUpdateRequest,
@@ -51,7 +51,7 @@ from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 
 def _list(client: TestClient, headers: dict[str, str]) -> dict[str, Any]:
-    response = client.get("/v1/admin/users", headers=headers)
+    response = client.get(f"{API_ROOT}/admin/users", headers=headers)
     assert response.status_code == 200, response.text
     body: dict[str, Any] = response.json()
     return body
@@ -123,7 +123,7 @@ def test_the_list_carries_every_identity_with_its_organizations(
     db_session_factory: Callable[[], Session],
 ) -> None:
     # Provision the tenancy root by making one master-key request first.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     operator_id = _bootstrap_user_id(db_session_factory)
     member_id = _add_identity(
@@ -165,7 +165,7 @@ def test_the_list_shows_an_identity_whose_every_membership_is_suspended(
     db_session_factory: Callable[[], Session],
 ) -> None:
     """The case the organization roster deliberately hides, and this surface exists for."""
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     stuck_id = _add_identity(
         db_session_factory,
@@ -175,7 +175,7 @@ def test_the_list_shows_an_identity_whose_every_membership_is_suspended(
         status="suspended",
     )
 
-    roster = client.get("/v1/organizations/me/members", headers=master_key_header)
+    roster = client.get(f"{API_ROOT}/organizations/me/members", headers=master_key_header)
     assert roster.status_code == 200, roster.text
     assert str(stuck_id) not in [row["user_id"] for row in roster.json()["data"]]
 
@@ -190,11 +190,11 @@ def test_a_session_stamps_the_identity_it_was_minted_for(
     test_config: GatewayConfig,
 ) -> None:
     """`last_sign_in_at` is written wherever a session is minted, not at each route."""
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     operator_id = _bootstrap_user_id(db_session_factory)
     assert _row(_list(client, master_key_header), operator_id)["last_sign_in_at"] is None
 
-    response = client.post("/v1/auth/session", json={"master_key": test_config.master_key})
+    response = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
     assert response.status_code == 200, response.text
 
     assert _row(_list(client, master_key_header), operator_id)["last_sign_in_at"] is not None
@@ -210,7 +210,7 @@ def test_deactivating_an_account_ends_its_dashboard_sessions(
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     member_id = _add_identity(
         db_session_factory,
@@ -233,7 +233,7 @@ def test_deactivating_an_account_ends_its_dashboard_sessions(
         session.close()
 
     response = client.patch(
-        f"/v1/admin/users/{member_id}",
+        f"{API_ROOT}/admin/users/{member_id}",
         headers=master_key_header,
         json={"is_active": False},
     )
@@ -252,7 +252,7 @@ def test_deactivating_an_account_ends_its_dashboard_sessions(
     assert remaining == 0
 
     revived = client.patch(
-        f"/v1/admin/users/{member_id}",
+        f"{API_ROOT}/admin/users/{member_id}",
         headers=master_key_header,
         json={"is_active": True},
     )
@@ -266,7 +266,7 @@ def test_the_superuser_flag_flips_on_its_own(
     db_session_factory: Callable[[], Session],
 ) -> None:
     """Omitting `is_active` leaves it alone: the two are separate decisions."""
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     member_id = _add_identity(
         db_session_factory,
@@ -276,7 +276,7 @@ def test_the_superuser_flag_flips_on_its_own(
     )
 
     response = client.patch(
-        f"/v1/admin/users/{member_id}",
+        f"{API_ROOT}/admin/users/{member_id}",
         headers=master_key_header,
         json={"is_superuser": True},
     )
@@ -291,11 +291,11 @@ def test_an_operator_cannot_deactivate_or_demote_themselves(
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     operator_id = _bootstrap_user_id(db_session_factory)
 
     for body in ({"is_active": False}, {"is_superuser": False}):
-        response = client.patch(f"/v1/admin/users/{operator_id}", headers=master_key_header, json=body)
+        response = client.patch(f"{API_ROOT}/admin/users/{operator_id}", headers=master_key_header, json=body)
         assert response.status_code == 400, response.text
 
     assert _row(_list(client, master_key_header), operator_id)["is_active"] is True
@@ -307,7 +307,7 @@ def test_a_change_naming_neither_flag_is_refused(
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     member_id = _add_identity(
         db_session_factory,
@@ -316,14 +316,14 @@ def test_a_change_naming_neither_flag_is_refused(
         email="ada@example.com",
     )
 
-    response = client.patch(f"/v1/admin/users/{member_id}", headers=master_key_header, json={})
+    response = client.patch(f"{API_ROOT}/admin/users/{member_id}", headers=master_key_header, json={})
 
     assert response.status_code == 400, response.text
 
 
 def test_an_unknown_account_is_not_found(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.patch(
-        f"/v1/admin/users/{uuid.uuid4()}",
+        f"{API_ROOT}/admin/users/{uuid.uuid4()}",
         headers=master_key_header,
         json={"is_active": False},
     )
@@ -334,7 +334,7 @@ def test_an_unknown_account_is_not_found(client: TestClient, master_key_header: 
 def test_the_operator_probe_answers_for_the_bootstrap_caller(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    response = client.get("/v1/admin/access", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/admin/access", headers=master_key_header)
 
     assert response.status_code == 200, response.text
     assert response.json() == {"granted": True}
@@ -389,15 +389,15 @@ def test_a_non_operator_session_is_refused_with_404_by_every_route(
     ``/access`` is the one endpoint that answers rather than hides, which is what
     leaves the sidebar something to gate on.
     """
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     member_id, token = _session_for(db_session_factory, organization_id=organization_id, email="ada@example.com")
 
     client.cookies.set(SESSION_COOKIE_NAME, token)
     try:
-        listed = client.get("/v1/admin/users")
-        access = client.get("/v1/admin/access")
-        patched = client.patch(f"/v1/admin/users/{member_id}", json={"is_superuser": True})
+        listed = client.get(f"{API_ROOT}/admin/users")
+        access = client.get(f"{API_ROOT}/admin/access")
+        patched = client.patch(f"{API_ROOT}/admin/users/{member_id}", json={"is_superuser": True})
     finally:
         client.cookies.clear()
 
@@ -413,7 +413,7 @@ def test_an_operator_session_that_is_not_the_bootstrap_one_administers(
     db_session_factory: Callable[[], Session],
 ) -> None:
     """The other side of the cookie path: `is_self` names the caller, not the marker."""
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
     organization_id = _default_organization_id(db_session_factory)
     operator_id, token = _session_for(
         db_session_factory,
@@ -424,10 +424,10 @@ def test_an_operator_session_that_is_not_the_bootstrap_one_administers(
 
     client.cookies.set(SESSION_COOKIE_NAME, token)
     try:
-        listed = client.get("/v1/admin/users")
-        own = client.patch(f"/v1/admin/users/{operator_id}", json={"is_active": False})
+        listed = client.get(f"{API_ROOT}/admin/users")
+        own = client.patch(f"{API_ROOT}/admin/users/{operator_id}", json={"is_active": False})
         anchor = client.patch(
-            f"/v1/admin/users/{_bootstrap_user_id(db_session_factory)}",
+            f"{API_ROOT}/admin/users/{_bootstrap_user_id(db_session_factory)}",
             json={"is_active": False},
         )
     finally:

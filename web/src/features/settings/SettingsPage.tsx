@@ -1,24 +1,25 @@
-import { AlertDialog, Button, buttonVariants, Card, Input } from "@heroui/react"
+import { AlertDialog, Button, buttonVariants, Input } from "@heroui/react"
 import { useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
+import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { Toggle } from "@/design-system/forms/Toggle"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { Toolbar } from "@/design-system/layout/Toolbar"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
-import { Toggle } from "@/features/settings/Toggle"
+import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useReencryptProviderCredentials,
-  useRotateMasterKey,
-  useSettings,
   useStoredProviders,
-  useUpdateSettings,
-} from "@/shared/api/hooks"
-import {
-  Checkbox,
-  ErrorBanner,
-  FilterSelect,
-  InfoBanner,
-  PageHeader,
-  PageLoading,
-} from "@/shared/components/ui"
+} from "@/shared/api/providers"
+import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -103,7 +104,7 @@ function NumberSetting({
         value={draft}
         disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
-        className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none disabled:opacity-50"
+        className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
       />
       <Button
         size="sm"
@@ -147,7 +148,7 @@ function TextSetting({
         disabled={disabled}
         placeholder="unset"
         onChange={(event) => setDraft(event.target.value)}
-        className="w-56 rounded-md border border-field-border bg-field px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
+        className={`w-56 ${INPUT_CLASS}`}
       />
       <Button
         size="sm"
@@ -191,11 +192,20 @@ function SettingControl({
 }) {
   if (!field.settable) {
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-body tabular-nums">{formatValue(field)}</span>
-        <span className="rounded-full border border-border px-2 py-0.5 text-caption">
-          startup-only
+      <div className="flex min-w-0 items-center gap-2">
+        {/* `break-all` because the values that reach this branch are paths and
+            URLs, which hold no space to wrap at: without it the string's
+            min-content width is its full length, which is what pushed the row
+            past the card and squeezed the description column to a word a line
+            (otari#809). */}
+        <span className="min-w-0 break-all text-sm tabular-nums text-foreground">
+          {formatValue(field)}
         </span>
+        {/* A label, not a chip. A bordered capsule next to a value, on a
+            surface that has no boxes on it, puts the shape to work where the
+            type should be. `text-overline` is exactly that role and already
+            carries the size, weight, tracking, uppercase and muted color. */}
+        <span className="shrink-0 text-overline">startup-only</span>
       </div>
     )
   }
@@ -203,10 +213,10 @@ function SettingControl({
   if (field.type === "bool") {
     return (
       <Toggle
-        checked={field.value === true}
+        isSelected={field.value === true}
         onChange={(next) => patch(settableUpdate(field.key, next))}
         label={field.key}
-        disabled={disabled}
+        isDisabled={disabled}
       />
     )
   }
@@ -255,77 +265,28 @@ function ConfigRow({
   disabled: boolean
 }) {
   return (
-    <div className="flex items-start justify-between gap-6 py-4">
+    // `flex-wrap` so the control drops to its own full-width line rather than
+    // squeezing the description when the two cannot share one: the row is
+    // full-bleed on the desk and 390px wide on a phone, and the second is where
+    // a `w-56` control and a sentence stopped fitting side by side.
+    <div className="flex flex-wrap items-start justify-between gap-6 py-4">
       <div className="min-w-0">
         <code className="font-mono text-body">{field.key}</code>
         {field.description ? (
-          <p className="mt-1 text-sm text-muted">{field.description}</p>
+          // `max-w-prose` for the reason the page header carries one: these
+          // rows became full-bleed with the rest of the page, and the longest
+          // description here measured 1211px, about 175 characters to the line,
+          // roughly twice a readable measure. The row still spans the page; the
+          // sentence inside it does not have to.
+          <p className="mt-1 max-w-prose text-caption">{field.description}</p>
         ) : null}
       </div>
-      <div className="shrink-0 pt-0.5">
+      {/* `min-w-0`, not `shrink-0`: a column that refuses to shrink keeps its
+          flex base size, so a long unbreakable value here carried the row past
+          the card's right edge whatever the value's own span allowed. */}
+      <div className="min-w-0 pt-0.5">
         <SettingControl field={field} patch={patch} disabled={disabled} />
       </div>
-    </div>
-  )
-}
-
-function CopyField({
-  value,
-  fieldRef,
-}: {
-  value: string
-  fieldRef?: React.RefObject<HTMLInputElement | null>
-}) {
-  const internalRef = useRef<HTMLInputElement>(null)
-  const ref = fieldRef ?? internalRef
-  const [copied, setCopied] = useState(false)
-  const [selectHint, setSelectHint] = useState(false)
-
-  const copy = async () => {
-    ref.current?.focus()
-    ref.current?.select()
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value)
-        setCopied(true)
-        setSelectHint(false)
-        window.setTimeout(() => setCopied(false), 2_000)
-        return
-      }
-    } catch {
-      // Fall through to the manual-copy hint.
-    }
-    setSelectHint(true)
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-caption">New master key</span>
-        <Button size="sm" variant="outline" onPress={copy}>
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <input
-        ref={ref}
-        readOnly
-        value={value}
-        onFocus={(event) => event.currentTarget.select()}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        data-1p-ignore
-        data-lpignore="true"
-      />
-      <span aria-live="polite" className="text-xs text-success">
-        {copied ? "Copied to clipboard." : ""}
-      </span>
-      {selectHint ? (
-        <span className="text-caption">
-          Selected. Press Ctrl/Cmd-C to copy.
-        </span>
-      ) : null}
     </div>
   )
 }
@@ -343,12 +304,13 @@ function MasterKeyRotationDialog({
   onRegenerate: () => void
   onClose: () => void
 }) {
-  const keyRef = useRef<HTMLInputElement>(null)
+  const keyRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     if (masterKey === undefined) return
+    // Focus without a selection: the key is concealed until it is asked for,
+    // and selecting the stand-in would invite a Ctrl/Cmd-C that copies bullets.
     keyRef.current?.focus()
-    keyRef.current?.select()
   }, [masterKey])
 
   return (
@@ -373,7 +335,12 @@ function MasterKeyRotationDialog({
                   The previous master key has stopped working. This browser tab
                   now uses the new key.
                 </p>
-                <CopyField value={masterKey} fieldRef={keyRef} />
+                <CopyField
+                  label="New master key"
+                  value={masterKey}
+                  concealed={CONCEALED_SECRET}
+                  fieldRef={keyRef}
+                />
               </>
             ) : (
               <>
@@ -455,8 +422,10 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <code className="font-mono text-body">master_key</code>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <code className="text-sm font-medium text-foreground">
+            master_key
+          </code>
+          <p className="mt-1 max-w-3xl text-caption">
             {isGenerated
               ? "This gateway uses its first-run generated dashboard key. Regeneration invalidates the current key immediately."
               : "This gateway uses a key managed through OTARI_MASTER_KEY or config.yml. Rotate it in configuration, then restart the gateway."}
@@ -465,12 +434,12 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
         <AlertDialog isOpen={dialogOpen} onOpenChange={onOpenChange}>
           {isGenerated ? (
             <AlertDialog.Trigger
-              className={buttonVariants({ size: "sm", variant: "danger-soft" })}
+              className={buttonVariants({ size: "sm", variant: "danger" })}
             >
               Regenerate
             </AlertDialog.Trigger>
           ) : (
-            <Button size="sm" variant="danger-soft" isDisabled>
+            <Button size="sm" variant="danger" isDisabled>
               Managed in configuration
             </Button>
           )}
@@ -503,8 +472,10 @@ function SecretKeyRow() {
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <code className="font-mono text-body">OTARI_SECRET_KEY</code>
-          <p className="mt-1 max-w-3xl text-sm text-muted">
+          <code className="text-sm font-medium text-foreground">
+            OTARI_SECRET_KEY
+          </code>
+          <p className="mt-1 max-w-3xl text-caption">
             Generate a new key with <code>uv run otari gen-secret-key</code>,
             then restart with{" "}
             <code>OTARI_SECRET_KEY=&lt;new-key&gt;,&lt;old-key&gt;</code>.
@@ -516,7 +487,7 @@ function SecretKeyRow() {
         <div className="shrink-0">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             isDisabled={!hasStoredKeys || reencrypt.isPending}
             onPress={() => reencrypt.mutate()}
           >
@@ -558,17 +529,10 @@ function SecurityKeysSection({
   masterKeySource: "configured" | "generated"
 }) {
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-heading">
-        Credential security <span className="font-normal text-muted">(2)</span>
-      </h2>
-      <Card>
-        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-          <MasterKeyRow source={masterKeySource} />
-          <SecretKeyRow />
-        </Card.Content>
-      </Card>
-    </section>
+    <SettingsGroup title="Credential security" count={2}>
+      <MasterKeyRow source={masterKeySource} />
+      <SecretKeyRow />
+    </SettingsGroup>
   )
 }
 
@@ -632,15 +596,16 @@ export function SettingsPage() {
   const groups = groupFields(filtered)
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Settings"
-        description="Every effective gateway setting. Settable fields apply immediately and persist across restarts; startup-only fields are shown for reference and change only via config.yml or environment variables (then a restart)."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Settings">
+        Every effective gateway setting. Settable fields apply immediately and
+        persist across restarts; startup-only fields are shown for reference and
+        change only via config.yml or environment variables (then a restart).
+      </PageIntro>
 
       <ErrorBanner error={settings.error ?? updateSettings.error} />
 
-      <div className="flex flex-wrap items-center gap-3">
+      <Toolbar className="pb-3">
         <input
           ref={searchRef}
           type="search"
@@ -656,10 +621,10 @@ export function SettingsPage() {
         <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only
         </Checkbox>
-      </div>
+      </Toolbar>
 
       {data ? (
-        <p className="text-caption">
+        <p className="pb-2 text-xs text-subtle">
           Showing {filtered.length} of {allFields.length} settings
         </p>
       ) : null}
@@ -671,26 +636,20 @@ export function SettingsPage() {
       {settings.isLoading ? <PageLoading /> : null}
 
       {groups.map((group) => (
-        <section key={group.name} className="flex flex-col gap-2">
-          <h2 className="text-heading">
-            {group.name}{" "}
-            <span className="font-normal text-muted">
-              ({group.fields.length})
-            </span>
-          </h2>
-          <Card>
-            <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-              {group.fields.map((field) => (
-                <ConfigRow
-                  key={field.key}
-                  field={field}
-                  patch={patch}
-                  disabled={!data || pending}
-                />
-              ))}
-            </Card.Content>
-          </Card>
-        </section>
+        <SettingsGroup
+          key={group.name}
+          title={group.name}
+          count={group.fields.length}
+        >
+          {group.fields.map((field) => (
+            <ConfigRow
+              key={field.key}
+              field={field}
+              patch={patch}
+              disabled={!data || pending}
+            />
+          ))}
+        </SettingsGroup>
       ))}
 
       {data ? (
@@ -702,7 +661,7 @@ export function SettingsPage() {
       <MaintenanceModeCard />
 
       {data ? (
-        <p className="text-caption">
+        <p className="pt-6 text-xs text-subtle">
           Mode: {data.mode} · Version {data.version}
           {data.require_pricing ? " · require_pricing on" : ""}
         </p>

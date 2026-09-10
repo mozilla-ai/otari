@@ -17,11 +17,12 @@ from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session
 
 from gateway.api.routes.otlp import _MAX_METRIC_DATA_POINTS
+from gateway.core.config import API_ROOT
 from gateway.models.entities import AgentTelemetry, UsageLog, User
 
 from .otlp_helpers import gauge_metric, metrics_export, metrics_export_protobuf, number_point, sum_metric
 
-_PATH = "/v1/metrics"
+_PATH = "/otlp/v1/metrics"
 _START = 1784000000000000000
 _POINT = 1784000060000000000
 # The batch size SC-009 names, and the ceiling on the statements it may cost.
@@ -55,9 +56,9 @@ def _agent_telemetry_inserts() -> Iterator[list[str]]:
 
 
 def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: str = "alice") -> dict[str, str]:
-    client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": f"metrics-import-{user_id}", "user_id": user_id, "exclude_from_budget": True},
         headers=master_key_header,
     )
@@ -172,7 +173,7 @@ def test_metrics_export_skips_metrics_captured_elsewhere(
     rows = db_session.query(AgentTelemetry).all()
     assert [row.name for row in rows] == ["claude_code.commit.count"]
 
-    summary = client.get("/v1/usage/summary", headers=master_key_header)
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header)
     assert summary.status_code == 200, summary.text
     assert summary.json()["totals"]["cost"] == 0.0
     assert summary.json()["totals"]["request_count"] == 0
@@ -348,7 +349,7 @@ def test_metrics_export_records_a_point_carrying_no_session(
 def _key_with_capture_override(
     client: TestClient, master_key_header: dict[str, str], user_id: str, *, capture: bool | None
 ) -> tuple[dict[str, str], str]:
-    client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     payload: dict[str, object] = {
         "key_name": f"metrics-import-{user_id}",
         "user_id": user_id,
@@ -356,7 +357,7 @@ def _key_with_capture_override(
     }
     if capture is not None:
         payload["capture_agent_telemetry"] = capture
-    response = client.post("/v1/keys", json=payload, headers=master_key_header)
+    response = client.post(f"{API_ROOT}/keys", json=payload, headers=master_key_header)
     assert response.status_code == 200, response.text
     body = response.json()
     return {"Otari-Key": f"Bearer {body['key']}"}, str(body["id"])
@@ -373,7 +374,7 @@ def test_capture_toggle_off_blocks_metric_rows_but_not_usage(
     assert db_session.query(AgentTelemetry).count() == 0
     assert db_session.query(UsageLog).count() == 0
 
-    patch = client.patch(f"/v1/keys/{key_id}", json={"capture_agent_telemetry": None}, headers=master_key_header)
+    patch = client.patch(f"{API_ROOT}/keys/{key_id}", json={"capture_agent_telemetry": None}, headers=master_key_header)
     assert patch.status_code == 200, patch.text
     assert patch.json()["capture_agent_telemetry"] is None
 

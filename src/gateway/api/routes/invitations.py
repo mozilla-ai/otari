@@ -10,7 +10,7 @@ No session is minted on accept: the token proves possession of an emailed
 link, not of a password, so accepting only resolves the membership to
 ``active``, the same place ``POST /me/members`` already lands a member added
 directly. The identity it resolves to is password-less on the roster until it
-is claimed, and claiming it is ``POST /v1/auth/signup``, which the dashboard's
+is claimed, and claiming it is ``POST /api/v1/auth/signup``, which the dashboard's
 accept page hands the recipient straight to (otari#835).
 """
 
@@ -28,7 +28,7 @@ from gateway.models.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService
 
-router = APIRouter(prefix="/v1/invitations", tags=["invitations"])
+router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
 def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:
@@ -48,7 +48,7 @@ OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization
 def _throttle(request: Request) -> None:
     """Throttle calls to these routes per client IP.
 
-    ``POST /v1/auth/session`` is the only other unauthenticated route that
+    ``POST /api/v1/auth/session`` is the only other unauthenticated route that
     takes a credential, and it is IP-limited (``auth_session._check_login_rate_limit``,
     via ``app.state.login_rate_limiter``); these two were not, and ``accept``
     writes. The token's entropy (``secrets.token_urlsafe(32)``) already rules

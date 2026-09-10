@@ -33,11 +33,12 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
 from gateway.inflight import InFlightRegistry
 
 from .conftest import MODEL_NAME
 
-IN_FLIGHT = "/v1/usage/in-flight"
+IN_FLIGHT = f"{API_ROOT}/usage/in-flight"
 _MESSAGES = [{"role": "user", "content": "Hello"}]
 
 
@@ -71,7 +72,7 @@ def _chunk() -> ChatCompletionChunk:
 
 def _chat(client: TestClient, headers: dict[str, str], **extra: Any) -> Any:
     return client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": MODEL_NAME, "messages": _MESSAGES, **extra},
         headers=headers,
     )
@@ -210,7 +211,7 @@ def test_a_stream_stays_in_flight_until_its_body_is_consumed(
     with patch("gateway.api.routes.chat.acompletion", side_effect=open_stream):
         with client.stream(
             "POST",
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": MODEL_NAME, "messages": _MESSAGES, "stream": True},
             headers=api_key_header,
         ) as response:
@@ -245,7 +246,7 @@ def test_a_pass_through_request_is_registered_too(
 
     with patch("gateway.api.routes.embeddings.aembedding", side_effect=slow_embedding):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
@@ -286,7 +287,7 @@ def test_which_refusals_reach_the_registry(
     with patch.object(InFlightRegistry, "begin", autospec=True, wraps=None) as begin:
         begin.return_value = "tracked"
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": model, "messages": _MESSAGES},
             headers=api_key_header,
         )

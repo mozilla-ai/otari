@@ -18,7 +18,7 @@ from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
 
 router = APIRouter(
-    prefix="/v1/users",
+    prefix="/users",
     tags=["users"],
     dependencies=[Depends(require_deployment_operator)],
 )

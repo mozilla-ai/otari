@@ -29,7 +29,7 @@ function mockApi(opts: {
 }) {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     const url = String(path)
-    if (url === "/v1/invitations/validate") {
+    if (url === "/invitations/validate") {
       if (opts.previewError) {
         throw new ApiError(400, opts.previewError)
       }
@@ -40,7 +40,7 @@ function mockApi(opts: {
         expires_at: "2026-01-08T00:00:00+00:00",
       }) as never
     }
-    if (url === "/v1/invitations/accept") {
+    if (url === "/invitations/accept") {
       if (opts.acceptError) {
         throw new ApiError(400, opts.acceptError)
       }
@@ -186,7 +186,7 @@ describe("AcceptInvitationPage", () => {
 
     expect(await screen.findByText(/sends no mail/i)).toBeInTheDocument()
     expect(screen.getByText(/An operator can turn that on/)).toBeInTheDocument()
-    // Never this: `PUT /v1/auth/password` only acts on the caller's own
+    // Never this: `PUT /api/v1/auth/password` only acts on the caller's own
     // identity, so no endpoint here lets an admin set someone else's password.
     expect(screen.queryByText(/ask whoever administers/i)).toBeNull()
     expect(
@@ -226,7 +226,7 @@ describe("AcceptInvitationPage", () => {
     let accepted = false
     vi.mocked(apiFetch).mockImplementation(async (path) => {
       const url = String(path)
-      if (url === "/v1/invitations/validate") {
+      if (url === "/invitations/validate") {
         if (accepted) {
           throw new ApiError(
             400,

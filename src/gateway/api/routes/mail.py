@@ -1,20 +1,20 @@
 """Outgoing mail settings, and the operator's way to prove they work.
 
-Two endpoints under ``/v1/settings``, operator-gated and standalone-only like
+Two endpoints under ``/api/v1/settings``, operator-gated and standalone-only like
 the rest of the management API:
 
-* ``GET /v1/settings/mail`` reports which transport (if any) this deployment
+* ``GET /api/v1/settings/mail`` reports which transport (if any) this deployment
   would send through, what it would send as, and, when it cannot send, exactly
   which settings are missing. Naming them is the point: "mail is unavailable" is
   only honest if it says what would make it available.
-* ``POST /v1/settings/mail/test`` renders and sends a real templated message, so
+* ``POST /api/v1/settings/mail/test`` renders and sends a real templated message, so
   an operator can confirm the configuration end to end rather than discovering
   it the first time someone is invited. On a deployment with no transport it
   refuses with 503 up front and never pretends to have sent anything.
 
 The refusal is the reusable half. A surface with no non-mail fallback (the
 password-reset flow to come) gates on the same ``mail_ready`` the dashboard
-reads from ``/v1/bootstrap`` and refuses the same way, rather than accepting a
+reads from ``/api/v1/bootstrap`` and refuses the same way, rather than accepting a
 request it will silently drop.
 """
 
@@ -24,12 +24,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config, require_deployment_operator
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
 from gateway.services.mail import Mailer, MailNotConfiguredError, normalized_address
 
 router = APIRouter(
-    prefix="/v1/settings/mail",
+    prefix="/settings/mail",
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -46,7 +46,7 @@ class MailSettings(BaseModel):
         description=(
             "Whether a message carrying a link back to this deployment can be sent, which is "
             "what every message the control plane sends needs. Matches 'mail_ready' on "
-            "/v1/bootstrap."
+            f"{API_ROOT}/bootstrap."
         )
     )
     from_email: str | None = Field(description="The 'From' address on outgoing mail, if one is configured.")

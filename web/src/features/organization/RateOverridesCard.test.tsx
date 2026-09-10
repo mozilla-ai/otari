@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext, OrganizationPricingOverride } from "@/client"
 import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { getModalBackdrop } from "@/tests/modal"
 import { renderWithRouter } from "@/tests/router"
@@ -66,7 +67,7 @@ function mockApi({
       method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
-    if (url.includes("/v1/organizations/me/pricing")) {
+    if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
       if (method === "GET") {
         return jsonResponse({ data: overrides, count: overrides.length })
       }
@@ -108,7 +109,7 @@ describe("RateOverridesCard", () => {
     expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument()
     expect(await screen.findByText("$2.50")).toBeInTheDocument()
     expect(await screen.findByText(/^From /)).toBeInTheDocument()
-    expect(await screen.findByText("Active")).toBeInTheDocument()
+    expect(await screen.findByText("ACTIVE")).toBeInTheDocument()
   })
 
   it("shows an unset cache rate as absent rather than as zero", async () => {
@@ -146,7 +147,7 @@ describe("RateOverridesCard", () => {
   it("shows the error rather than the empty state when the list fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/organizations/me/pricing")) {
+      if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
         return jsonResponse({ detail: "pricing is unavailable" }, 503)
       }
       return jsonResponse(organizationContext())
@@ -185,7 +186,7 @@ describe("RateOverridesCard", () => {
       const write = requests.find(
         (request) =>
           request.method === "POST" &&
-          request.url.includes("/v1/organizations/me/pricing"),
+          request.url.includes(`${API_ROOT}/organizations/me/pricing`),
       )
       expect(write?.body).toMatchObject({
         model_key: "anthropic:claude-sonnet-5",
@@ -286,7 +287,7 @@ describe("RateOverridesCard", () => {
     await waitFor(() => {
       const write = requests.find((request) => request.method === "PUT")
       expect(write?.url).toContain(
-        "/v1/organizations/me/pricing/11111111-1111-1111-1111-111111111111",
+        `${API_ROOT}/organizations/me/pricing/11111111-1111-1111-1111-111111111111`,
       )
       expect(write?.body).toMatchObject({ input_price_per_million: 1.25 })
       // Immutable on this endpoint, so the body must not carry it.
@@ -336,7 +337,7 @@ describe("RateOverridesCard", () => {
           (request) =>
             request.method === "DELETE" &&
             request.url.includes(
-              "/v1/organizations/me/pricing/11111111-1111-1111-1111-111111111111",
+              `${API_ROOT}/organizations/me/pricing/11111111-1111-1111-1111-111111111111`,
             ),
         ),
       ).toBe(true)

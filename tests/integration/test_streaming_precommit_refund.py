@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import UsageLog, User
 
 from .conftest import MODEL_NAME
@@ -28,11 +29,11 @@ _PRICING = {"input_price_per_million": 2.5, "output_price_per_million": 10.0}
 
 
 def _seed_budgeted_user(client: TestClient, headers: dict[str, str], user_id: str) -> None:
-    budget = client.post("/v1/budgets", json={"max_budget": 100.0}, headers=headers)
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 100.0}, headers=headers)
     assert budget.status_code == 200
     budget_id = budget.json()["budget_id"]
     created = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": user_id, "budget_id": budget_id},
         headers=headers,
     )
@@ -40,7 +41,7 @@ def _seed_budgeted_user(client: TestClient, headers: dict[str, str], user_id: st
 
 
 def _configure_pricing(client: TestClient, headers: dict[str, str], model_key: str) -> None:
-    res = client.post("/v1/pricing", json={"model_key": model_key, **_PRICING}, headers=headers)
+    res = client.post(f"{API_ROOT}/pricing", json={"model_key": model_key, **_PRICING}, headers=headers)
     assert res.status_code == 200
 
 
@@ -81,7 +82,7 @@ def test_chat_streaming_precommit_error_refunds(
 
     with patch("gateway.api.routes.chat.acompletion", side_effect=_boom):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "hi"}],
@@ -112,7 +113,7 @@ def test_messages_streaming_precommit_error_refunds(
 
     with patch("gateway.api.routes.messages.amessages", side_effect=_boom):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "hi"}],
@@ -146,7 +147,7 @@ def test_responses_streaming_precommit_error_refunds(
 
     with patch("gateway.api.routes.responses.aresponses", side_effect=_boom):
         response = client.post(
-            "/v1/responses",
+            f"{API_ROOT}/responses",
             json={"model": "openai:gpt-4o-mini", "input": "hi", "stream": True, "user": user_id},
             headers=master_key_header,
         )

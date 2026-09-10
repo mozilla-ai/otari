@@ -12,11 +12,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
 from .conftest import build_test_client
 
-ALIASES = "/v1/aliases"
+ALIASES = f"{API_ROOT}/aliases"
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 
 
@@ -69,7 +69,8 @@ def _create(client: TestClient, name: str, target: str, user_id: str | None = No
 
 def _create_user(client: TestClient, user_id: str = "u1") -> None:
     assert (
-        client.post("/v1/users", json={"user_id": user_id, "alias": user_id}, headers=HEADERS).status_code == 200
+        client.post(f"{API_ROOT}/users", json={"user_id": user_id, "alias": user_id}, headers=HEADERS).status_code
+        == 200
     )
 
 
@@ -82,7 +83,7 @@ def _post_chat_capture(client: TestClient, model: str, user: str = "u1") -> dict
 
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=fake_acompletion)):
         client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": model, "messages": [{"role": "user", "content": "Hi"}], "user": user},
             headers=HEADERS,
         )
@@ -103,11 +104,11 @@ def test_alias_routes_require_master_key(client: TestClient) -> None:
 @pytest.mark.parametrize(
     ("method", "path", "json_body"),
     [
-        ("POST", "/v1/aliases", {"name": "probe", "target": "anthropic:claude-opus-4"}),
-        ("DELETE", "/v1/aliases/probe", None),
-        ("PATCH", "/v1/settings", {"model_discovery": False}),
-        ("GET", "/v1/providers", None),
-        ("GET", "/v1/models/metadata", None),
+        ("POST", f"{API_ROOT}/aliases", {"name": "probe", "target": "anthropic:claude-opus-4"}),
+        ("DELETE", f"{API_ROOT}/aliases/probe", None),
+        ("PATCH", f"{API_ROOT}/settings", {"model_discovery": False}),
+        ("GET", f"{API_ROOT}/providers", None),
+        ("GET", f"{API_ROOT}/models/metadata", None),
     ],
 )
 def test_management_endpoints_reject_a_valid_non_master_key(
@@ -120,7 +121,7 @@ def test_management_endpoints_reject_a_valid_non_master_key(
     which would hand a tenant key control of routing and billing toggles, would
     fail here.
     """
-    created = client.post("/v1/keys", json={"key_name": "probe"}, headers=HEADERS)
+    created = client.post(f"{API_ROOT}/keys", json={"key_name": "probe"}, headers=HEADERS)
     assert created.status_code == 200
     key_header = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
 
@@ -129,7 +130,7 @@ def test_management_endpoints_reject_a_valid_non_master_key(
 
     # The same key still works on the caller-facing listing, so the 401 above is
     # the master-key gate, not a broken key.
-    assert client.get("/v1/models", headers=key_header).status_code == 200
+    assert client.get(f"{API_ROOT}/models", headers=key_header).status_code == 200
 
 
 def test_create_and_list(client: TestClient) -> None:
@@ -271,7 +272,7 @@ async def test_deleted_alias_stops_routing(client: TestClient) -> None:
         # surfaced as a 400 (not a bare 500) and, crucially, does not quietly
         # keep reaching the old target.
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "fast", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
             headers=HEADERS,
         )
@@ -284,7 +285,7 @@ async def test_deleted_alias_stops_routing(client: TestClient) -> None:
 def test_stored_alias_appears_in_the_model_listing(client: TestClient) -> None:
     _create(client, "fast", "anthropic:claude-haiku-4")
 
-    data = client.get("/v1/models", headers=HEADERS).json()["data"]
+    data = client.get(f"{API_ROOT}/models", headers=HEADERS).json()["data"]
     entry = next(m for m in data if m["id"] == "fast")
 
     assert entry["owned_by"] == "otari"
@@ -295,12 +296,12 @@ def test_stored_alias_appears_in_the_model_listing(client: TestClient) -> None:
 def test_stored_alias_inherits_its_targets_price(client: TestClient) -> None:
     _create(client, "fast", "anthropic:claude-haiku-4")
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "anthropic:claude-haiku-4", "input_price_per_million": 1.0, "output_price_per_million": 5.0},
         headers=HEADERS,
     )
 
-    entry = client.get("/v1/models/fast", headers=HEADERS).json()
+    entry = client.get(f"{API_ROOT}/models/fast", headers=HEADERS).json()
     assert entry["pricing"] == {
         "input_price_per_million": 1.0,
         "output_price_per_million": 5.0,
@@ -340,7 +341,7 @@ async def test_a_users_alias_does_not_leak_to_another_user(client: TestClient) -
     dispatch = AsyncMock()
     with patch("gateway.api.routes.chat.acompletion", new=dispatch):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "mine", "messages": [{"role": "user", "content": "Hi"}], "user": "u2"},
             headers=HEADERS,
         )
@@ -443,12 +444,14 @@ async def test_a_tenant_key_cannot_borrow_another_users_alias(lenient_client: Te
     _create_user(lenient_client, "u1")
     _create_user(lenient_client, "u2")
     _create(lenient_client, "mine", "anthropic:claude-haiku-4", user_id="u1")
-    u2_key = lenient_client.post("/v1/keys", json={"key_name": "u2", "user_id": "u2"}, headers=HEADERS).json()["key"]
+    u2_key = lenient_client.post(f"{API_ROOT}/keys", json={"key_name": "u2", "user_id": "u2"}, headers=HEADERS).json()[
+        "key"
+    ]
 
     dispatch = AsyncMock()
     with patch("gateway.api.routes.chat.acompletion", new=dispatch):
         resp = lenient_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             # u2's key, naming u1: tolerated as a tag, never as an identity.
             json={"model": "mine", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
             headers={API_KEY_HEADER: f"Bearer {u2_key}"},
@@ -461,7 +464,7 @@ async def test_a_tenant_key_cannot_borrow_another_users_alias(lenient_client: Te
 def test_alias_for_a_deleted_user_is_rejected(client: TestClient) -> None:
     # A soft-deleted user cannot authenticate, so the alias would never resolve.
     _create_user(client, "u1")
-    assert client.delete("/v1/users/u1", headers=HEADERS).status_code in (200, 204)
+    assert client.delete(f"{API_ROOT}/users/u1", headers=HEADERS).status_code in (200, 204)
 
     resp = client.post(
         ALIASES, json={"name": "fast", "target": "anthropic:claude-haiku-4", "user_id": "u1"}, headers=HEADERS
@@ -474,12 +477,12 @@ def test_a_user_scoped_alias_is_not_in_another_users_model_listing(client: TestC
     _create_user(client, "u2")
     _create(client, "mine", "anthropic:claude-haiku-4", user_id="u1")
     keys = {
-        user: client.post("/v1/keys", json={"key_name": user, "user_id": user}, headers=HEADERS).json()["key"]
+        user: client.post(f"{API_ROOT}/keys", json={"key_name": user, "user_id": user}, headers=HEADERS).json()["key"]
         for user in ("u1", "u2")
     }
 
     def listed(user: str) -> set[str]:
-        resp = client.get("/v1/models", headers={API_KEY_HEADER: f"Bearer {keys[user]}"})
+        resp = client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: f"Bearer {keys[user]}"})
         assert resp.status_code == 200, resp.text
         return {model["id"] for model in resp.json()["data"]}
 
@@ -496,7 +499,7 @@ def test_pricing_a_user_scoped_alias_name_is_rejected(client: TestClient) -> Non
     _create(client, "fast", "anthropic:claude-haiku-4", user_id="u1")
 
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "fast", "input_price_per_million": 99.0, "output_price_per_million": 99.0},
         headers=HEADERS,
     )
@@ -510,11 +513,11 @@ def test_pricing_a_stored_alias_is_rejected(client: TestClient) -> None:
     _create(client, "fast", "anthropic:claude-haiku-4")
 
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "fast", "input_price_per_million": 99.0, "output_price_per_million": 99.0},
         headers=HEADERS,
     )
 
     assert resp.status_code == 400
     assert "anthropic:claude-haiku-4" in resp.json()["detail"]
-    assert client.get("/v1/pricing/fast", headers=HEADERS).status_code == 404
+    assert client.get(f"{API_ROOT}/pricing/fast", headers=HEADERS).status_code == 404

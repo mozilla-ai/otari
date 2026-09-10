@@ -43,7 +43,8 @@ Calling the gateway from your own code.
 
 - [API reference](api-reference.md): authentication, mode availability, and links to generated schemas.
 - [Built-in tools](tools.md): sandboxed code execution and web search Otari runs itself.
-- [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests.
+- [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests,
+  or drive them from your own application through the caller-orchestrated endpoints.
 - [Files](files.md): file uploads and document understanding for local models.
 - [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.

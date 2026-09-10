@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { API_ROOT } from "@/shared/api/client"
 
 // Runs in the `hybrid` project, against its own gateway (web/e2e/otari.hybrid.yml,
 // booted by web/e2e/serve-hybrid.sh), not the standalone one every other spec
@@ -30,7 +31,7 @@ test.describe("hybrid deployment", () => {
   test("the deployment bootstrap offers no surface and no session", async ({
     request,
   }) => {
-    const response = await request.get("/v1/bootstrap")
+    const response = await request.get(`${API_ROOT}/bootstrap`)
 
     expect(response.status()).toBe(200)
     // Whole-object, as the standalone assertion is: a field quietly appearing
@@ -84,8 +85,11 @@ test.describe("hybrid deployment", () => {
     // made an HTTP health request to the address in its config (the standalone
     // gateway next door, standing in for otari.ai) and reported what came back,
     // so the success path of that check is covered and not only its failure.
-    await expect(page.getByText("Healthy", { exact: true })).toBeVisible()
-    await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+    // Uppercased at the render site rather than in the source: both words come
+    // from one `StatusRow`, which prints `status.state.toUpperCase()`, so the
+    // capitalized form in the component is not what lands on the page.
+    await expect(page.getByText("HEALTHY", { exact: true })).toBeVisible()
+    await expect(page.getByText("CONNECTED", { exact: true })).toBeVisible()
 
     // What a client is pointed at, taken from the URL this page was served from
     // rather than from anything the gateway reports, so a deployment behind a

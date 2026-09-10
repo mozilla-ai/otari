@@ -1,6 +1,6 @@
 """The maintenance-mode switch: freeze and unfreeze dashboard sign-ins.
 
-Two endpoints under ``/v1/settings``, operator-gated and standalone-only like
+Two endpoints under ``/api/v1/settings``, operator-gated and standalone-only like
 the rest of the management API. The state itself, and why it is stored the way
 it is, belongs to ``services/maintenance_mode_service.py``.
 
@@ -8,9 +8,9 @@ It sits here rather than in ``settings.py`` because that module's payload is a
 projection of ``GatewayConfig`` fields, and this is not one: it is deployment
 state with no config field behind it, read per sign-in attempt rather than from
 the running worker's config. ``mail.py`` already sets the precedent for a
-``/v1/settings/*`` surface owning its own module.
+``/api/v1/settings/*`` surface owning its own module.
 
-``GET /v1/bootstrap`` publishes the same flag unauthenticated, so the sign-in
+``GET /api/v1/bootstrap`` publishes the same flag unauthenticated, so the sign-in
 screen can say a deployment is down for maintenance rather than presenting a
 form whose only outcome is a refusal. This pair is what an operator toggles it
 with, and it is separate from the bootstrap because the settings page needs a
@@ -30,7 +30,7 @@ from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode, stage_maintenance_mode
 
 router = APIRouter(
-    prefix="/v1/settings/maintenance-mode",
+    prefix="/settings/maintenance-mode",
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -41,7 +41,7 @@ class MaintenanceMode(BaseModel):
 
     enabled: bool = Field(
         description=(
-            "When true, POST /v1/auth/session refuses every credential with 503 so nobody starts "
+            "When true, POST /api/v1/auth/session refuses every credential with 503 so nobody starts "
             "a new dashboard session during a redeploy. Sessions already issued keep working, and "
             "the management API and the data plane are unaffected: a caller presenting the master "
             "key or an API key through the header is never frozen out."

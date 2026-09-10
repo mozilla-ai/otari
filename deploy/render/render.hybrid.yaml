@@ -23,9 +23,9 @@ projects:
             region: oregon
             image:
               url: docker.io/mzdotai/otari:0.2.0
-            # In hybrid mode, /health/readiness checks platform reachability
+            # In hybrid mode, /api/v1/health/readiness checks platform reachability
             # instead of a database, so this works with zero local storage.
-            healthCheckPath: /health/readiness
+            healthCheckPath: /api/v1/health/readiness
             envVars:
               # Otari binds OTARI_PORT (default 8000), not Render's PORT.
               # Pin both so Render's port scanner and the process agree.

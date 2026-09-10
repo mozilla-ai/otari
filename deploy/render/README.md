@@ -8,7 +8,7 @@ Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml
 
 | Resource | Plan | Details |
 | --- | --- | --- |
-| `otari` | Free web service | Published image pinned in `render.yaml`, Oregon, health check at `/health/readiness` |
+| `otari` | Free web service | Published image pinned in `render.yaml`, Oregon, health check at `/api/v1/health/readiness` |
 | `otari-db` | Free Render Postgres 16 | Database and user `otari`, private connections only |
 
 The web service is stateless. Postgres stores users, API key hashes, budgets, pricing, and usage history. On first boot, Otari runs its database migrations and creates a bootstrap API key, which is printed once in the service logs.
@@ -51,7 +51,7 @@ The underlying [any-llm](https://github.com/mozilla-ai/any-llm) SDK reads each p
 ### Pricing
 
 The Blueprint sets `OTARI_REQUIRE_PRICING=true` (fail closed) and
-`OTARI_DEFAULT_PRICING=true` (bundled fallback prices). Database pricing always takes precedence. For a custom model that is not covered by the bundled data, add pricing through the `/v1/pricing` API, `OTARI_CONFIG_YAML`, or `OTARI_CONFIG_B64`. See [Full config via environment](../../docs/configuration.md#full-config-via-environment).
+`OTARI_DEFAULT_PRICING=true` (bundled fallback prices). Database pricing always takes precedence. For a custom model that is not covered by the bundled data, add pricing through the `/api/v1/pricing` API, `OTARI_CONFIG_YAML`, or `OTARI_CONFIG_B64`. See [Full config via environment](../../docs/configuration.md#full-config-via-environment).
 
 ## Deploy
 
@@ -72,15 +72,15 @@ The Blueprint sets `OTARI_REQUIRE_PRICING=true` (fail closed) and
 ```bash
 export OTARI_URL=https://<your-service>.onrender.com
 
-curl "$OTARI_URL/health"
-curl "$OTARI_URL/health/readiness"
+curl "$OTARI_URL/api/v1/health"
+curl "$OTARI_URL/api/v1/health/readiness"
 ```
 
 Readiness should report that the database is connected. Find the bootstrap
 `gw-…` key in the `otari` service logs. It is printed in full only once, during the first successful startup.
 
 ```bash
-curl "$OTARI_URL/v1/chat/completions" \
+curl "$OTARI_URL/api/v1/chat/completions" \
   -H "Authorization: Bearer <gw-key>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -111,7 +111,7 @@ A separate Blueprint, [`render.hybrid.yaml`](./render.hybrid.yaml), deploys hybr
 
 | Resource | Plan | Details |
 | --- | --- | --- |
-| `otari-hybrid` | Free web service | Published image pinned in `render.hybrid.yaml`, Oregon, health check at `/health/readiness` |
+| `otari-hybrid` | Free web service | Published image pinned in `render.hybrid.yaml`, Oregon, health check at `/api/v1/health/readiness` |
 
 No database is created. Otari keeps no local state in hybrid mode: users, budgets, and usage are managed by otari.ai instead.
 
@@ -123,7 +123,7 @@ No database is created. Otari keeps no local state in hybrid mode: users, budget
 | `OTARI_HOST` | `0.0.0.0` | Binds Otari on the container network. |
 | `OTARI_AI_TOKEN` | you provide | The gateway token (`gw_...`) for this Otari instance. Create it in otari.ai under **Organization > Gateways > Create token**. Setting this alone switches Otari into hybrid mode; no `OTARI_MODE` is needed. |
 
-`OTARI_MASTER_KEY`, `OTARI_DATABASE_URL`, the pricing flags, and the migration/bootstrap flags from the standalone Blueprint don't apply here: hybrid mode has no local database or management endpoints to protect. Only `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` are exposed. Chat requests use `Authorization: Bearer <otari-user-token>` issued by otari.ai, not a locally minted API key.
+`OTARI_MASTER_KEY`, `OTARI_DATABASE_URL`, the pricing flags, and the migration/bootstrap flags from the standalone Blueprint don't apply here: hybrid mode has no local database or management endpoints to protect. Only `/api/v1/health`, `/api/v1/health/liveness`, `/api/v1/health/readiness`, `/api/v1/chat/completions`, `/api/v1/messages`, and `/api/v1/responses` are exposed. Chat requests use `Authorization: Bearer <otari-user-token>` issued by otari.ai, not a locally minted API key.
 
 ### Deploy
 
@@ -137,14 +137,14 @@ No database is created. Otari keeps no local state in hybrid mode: users, budget
 ```bash
 export OTARI_URL=https://<your-service>.onrender.com
 
-curl "$OTARI_URL/health"
-curl "$OTARI_URL/health/readiness"
+curl "$OTARI_URL/api/v1/health"
+curl "$OTARI_URL/api/v1/health/readiness"
 ```
 
-The `/health` response includes `"mode": "hybrid"` and platform reachability. Then verify a chat request using an otari.ai user token:
+The `/api/v1/health` response includes `"mode": "hybrid"` and platform reachability. Then verify a chat request using an otari.ai user token:
 
 ```bash
-curl "$OTARI_URL/v1/chat/completions" \
+curl "$OTARI_URL/api/v1/chat/completions" \
   -H "Authorization: Bearer <otari-user-token>" \
   -H "Content-Type: application/json" \
   -d '{

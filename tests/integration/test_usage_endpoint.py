@@ -9,9 +9,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
+from gateway.core.config import API_ROOT
 from gateway.models.entities import APIKey, UsageLog, User
 
-USAGE_PATH = "/v1/usage"
+USAGE_PATH = f"{API_ROOT}/usage"
 
 
 def _ensure_user(db: Session, user_id: str) -> None:
@@ -102,7 +103,7 @@ def test_list_usage_filters_by_request_group(
 
     listed = client.get(USAGE_PATH, params={"request_group_id": "grp-1"}, headers=master_key_header)
     assert sorted(row["id"] for row in listed.json()) == ["absorbed-1", "served-1"]
-    count = client.get("/v1/usage/count", params={"request_group_id": "grp-1"}, headers=master_key_header)
+    count = client.get(f"{API_ROOT}/usage/count", params={"request_group_id": "grp-1"}, headers=master_key_header)
     assert count.json()["total"] == 2
 
 
@@ -138,8 +139,8 @@ def test_list_usage_request_group_batch_is_capped(
 def test_list_usage_filters_by_api_key(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
-    k1 = client.post("/v1/keys", json={"key_name": "k1"}, headers=master_key_header).json()["id"]
-    k2 = client.post("/v1/keys", json={"key_name": "k2"}, headers=master_key_header).json()["id"]
+    k1 = client.post(f"{API_ROOT}/keys", json={"key_name": "k1"}, headers=master_key_header).json()["id"]
+    k2 = client.post(f"{API_ROOT}/keys", json={"key_name": "k2"}, headers=master_key_header).json()["id"]
     ts = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
     _make_log(db_session, user_id="u", timestamp=ts, api_key_id=k1, log_id="log-k1")
     _make_log(db_session, user_id="u", timestamp=ts, api_key_id=k2, log_id="log-k2")
@@ -147,7 +148,7 @@ def test_list_usage_filters_by_api_key(
 
     listed = client.get(USAGE_PATH, params={"api_key_id": k1}, headers=master_key_header)
     assert [r["id"] for r in listed.json()] == ["log-k1"]
-    count = client.get("/v1/usage/count", params={"api_key_id": k1}, headers=master_key_header)
+    count = client.get(f"{API_ROOT}/usage/count", params={"api_key_id": k1}, headers=master_key_header)
     assert count.json()["total"] == 1
 
 

@@ -30,6 +30,8 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 from .conftest import MODEL_NAME
 
 _MESSAGES = [{"role": "user", "content": "hi"}]
@@ -56,7 +58,7 @@ def _dispatch(client: TestClient, headers: dict[str, str], body: dict[str, Any])
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": MODEL_NAME, "messages": _MESSAGES, **body},
             headers=headers,
         )
@@ -131,7 +133,7 @@ async def test_streaming_dispatches_the_folded_cap(client: TestClient, api_key_h
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": MODEL_NAME,
                 "messages": _MESSAGES,
@@ -161,7 +163,7 @@ async def test_param_the_provider_cannot_take_is_a_400_naming_it(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": MODEL_NAME, "messages": _MESSAGES, "seed": 7},
             headers=api_key_header,
         )

@@ -2,17 +2,17 @@ import { Button, Card, Chip } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationSpendCeiling } from "@/client"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import {
   useCreateOrganizationSpendCeiling,
   useDeleteOrganizationSpendCeiling,
   useOrganizationBudgets,
   useOrganizationSpendCeilings,
   useUpdateOrganizationSpendCeiling,
-  useWorkspaces,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { ErrorBanner } from "@/shared/components/ui"
+} from "@/shared/api/budgets"
+import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatDate, formatUsd } from "@/shared/helpers/format"
 
 import { limitLabel, periodLabel, scopeLabel } from "./organizationBudget"

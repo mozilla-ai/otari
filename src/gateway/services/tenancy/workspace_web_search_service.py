@@ -157,7 +157,7 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     enabled: bool = Field(
         description=(
             "False refuses web search for this workspace, both the otari_web_search tool "
-            "and POST /v1/search. The fields below narrow the tool only."
+            "and the search endpoint. The fields below narrow the tool only."
         )
     )
     max_results: int | None = Field(

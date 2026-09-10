@@ -11,6 +11,7 @@ import type {
   User,
 } from "@/client"
 import { BudgetsPage } from "@/features/budgets/BudgetsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 
@@ -85,7 +86,7 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
 
-      if (url.includes("/v1/users")) {
+      if (url.includes(`${API_ROOT}/users`)) {
         if (method === "PATCH") {
           const userId = decodeURIComponent(url.split("/").pop() ?? "")
           if (opts.failedUserUpdates?.includes(userId)) {
@@ -99,7 +100,7 @@ function mockApi(
         return jsonResponse(users)
       }
 
-      if (url.includes("/v1/budgets")) {
+      if (url.includes(`${API_ROOT}/budgets`)) {
         if (url.includes("/reset-logs")) {
           return jsonResponse(resetLogs)
         }
@@ -127,13 +128,14 @@ function mockApi(
         }
         return jsonResponse(list)
       }
-      if (url.includes("/v1/organizations/me/budgets")) {
+      if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes("/v1/organizations/me/spend-ceilings")) {
+      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes("/v1/organizations/me")) return jsonResponse(context)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(context)
       return jsonResponse([])
     })
 }
@@ -266,12 +268,13 @@ describe("BudgetsPage", () => {
     )
     await user.type(screen.getByLabelText("Name (optional)"), "team-free-tier")
     await user.type(screen.getByLabelText("Spending limit (USD)"), "250")
-    await user.click(screen.getByRole("button", { name: "Weekly" }))
+    await user.click(screen.getByRole("radio", { name: "Weekly" }))
     await user.click(screen.getByRole("button", { name: "Create budget" }))
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+        String(u).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: "team-free-tier",
@@ -306,7 +309,7 @@ describe("BudgetsPage", () => {
     const patch = await vi.waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).includes("/v1/users/alice") &&
+          String(u).includes(`${API_ROOT}/users/alice`) &&
           (init?.method ?? "") === "PATCH",
       )
       if (!call) throw new Error("no PATCH yet")
@@ -341,7 +344,7 @@ describe("BudgetsPage", () => {
     await vi.waitFor(() => {
       const patches = fetchMock.mock.calls.filter(
         ([url, init]) =>
-          String(url).includes("/v1/users/alice") &&
+          String(url).includes(`${API_ROOT}/users/alice`) &&
           (init?.method ?? "") === "PATCH",
       )
       expect(patches).toHaveLength(2)
@@ -349,7 +352,8 @@ describe("BudgetsPage", () => {
 
     const budgetPosts = fetchMock.mock.calls.filter(
       ([url, init]) =>
-        String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+        String(url).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(budgetPosts).toHaveLength(1)
   })
@@ -403,7 +407,7 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).includes("/v1/budgets") &&
+          String(url).includes(`${API_ROOT}/budgets`) &&
           (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
@@ -417,7 +421,7 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.click(screen.getByRole("button", { name: "Custom" }))
+    await user.click(screen.getByRole("radio", { name: "Custom" }))
     await user.click(screen.getByLabelText("Every N days"))
     await user.paste("0.1")
 
@@ -428,7 +432,8 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+          String(u).includes(`${API_ROOT}/budgets`) &&
+          (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
   })
@@ -441,7 +446,7 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.click(screen.getByRole("button", { name: "Custom" }))
+    await user.click(screen.getByRole("radio", { name: "Custom" }))
     await user.click(screen.getByLabelText("Every N days"))
     await user.paste("1.5")
 
@@ -453,7 +458,8 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+          String(u).includes(`${API_ROOT}/budgets`) &&
+          (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
   })
@@ -496,7 +502,8 @@ describe("BudgetsPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+        String(u).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: null,
@@ -522,7 +529,7 @@ describe("BudgetsPage", () => {
   })
 
   it("marks a budget an organization owns and withholds assignment on it", async () => {
-    // `/v1/users` refuses to cap a gateway user at a tenant's budget, so offering
+    // /api/v1/users refuses to cap a gateway user at a tenant's budget, so offering
     // the multiselect would be offering a save that answers 404.
     mockApi({
       budgets: [
@@ -591,14 +598,16 @@ describe("BudgetsPage", () => {
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    expect(within(row).getByText(/lose this limit/)).toBeInTheDocument()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/lose this limit/)).toBeInTheDocument()
     await user.click(
-      within(row).getByRole("button", { name: "Delete permanently" }),
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
     )
 
     const del = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/budgets/") && (init?.method ?? "") === "DELETE",
+        String(u).includes(`${API_ROOT}/budgets/`) &&
+        (init?.method ?? "") === "DELETE",
     )
     expect(del).toBeDefined()
     expect(screen.queryByText("11111111")).not.toBeInTheDocument()
@@ -626,7 +635,7 @@ describe("BudgetsPage", () => {
     await vi.waitFor(() => {
       const del = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).includes("/v1/budgets/b1") &&
+          String(u).includes(`${API_ROOT}/budgets/b1`) &&
           (init?.method ?? "").toUpperCase() === "DELETE",
       )
       expect(del).toBeTruthy()
@@ -657,9 +666,11 @@ describe("BudgetsPage", () => {
 
     // Withheld at the request, not only in the markup.
     const read = requests.mock.calls.map(([url]) => String(url))
-    expect(read.some((url) => /\/v1\/budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/v1\/scoped-budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/v1\/users/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(
+      false,
+    )
+    expect(read.some((url) => /\/api\/v1\/users/.test(url))).toBe(false)
   })
 
   it("keeps the deployment page for an operator", async () => {

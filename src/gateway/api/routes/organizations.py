@@ -61,7 +61,7 @@ from gateway.services.tenancy import OrganizationDomainService, OrganizationServ
 # every handler here happens to take one today, and a future handler that did
 # not would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/organizations",
+    prefix="/organizations",
     tags=["organizations"],
     dependencies=[Depends(verify_master_key)],
 )
@@ -249,7 +249,7 @@ async def list_caller_pending_memberships(
     lists the organizations the caller is already an active member of and
     deliberately omits an ``invited`` one.
 
-    Takes no token, unlike ``/v1/invitations/*``: those are public because the
+    Takes no token, unlike ``/api/v1/invitations/*``: those are public because the
     recipient of an emailed link holds nothing else to prove anything with,
     while this caller is authenticated as the addressee and the membership's
     own ``user_id`` is what scopes the answer. An invitation whose deadline has
@@ -270,7 +270,7 @@ async def accept_caller_pending_membership(
 ) -> AcceptInvitationResultPublic:
     """Accept an invitation addressed to the caller, resolving it to an active membership.
 
-    Does the same work as ``POST /v1/invitations/accept``, including the
+    Does the same work as ``POST /api/v1/invitations/accept``, including the
     workspace assignments parked at invite time, and answers the same shape.
     Addressed by membership id rather than by token: the caller is already the
     addressee, so a token would add nothing their session does not carry.
@@ -323,7 +323,7 @@ async def invite_active_organization_member(
 
     Organization owners and admins only. Unlike ``POST /me/members``, the
     membership lands ``invited`` rather than ``active``: it becomes active
-    once the recipient accepts (``POST /v1/invitations/accept``). The response
+    once the recipient accepts (``POST /api/v1/invitations/accept``). The response
     always carries the accept link, whether or not it was actually emailed
     (``mail_sent``), so an operator can share it themselves when mail is not
     configured or the send fails.

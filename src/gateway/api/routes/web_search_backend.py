@@ -9,7 +9,7 @@ share that module, so both surfaces answer a query the same way.
 
 The contract is the one ``WebSearchBackend`` already speaks to a SearXNG
 container, so the client side is one setting: a hybrid gateway's
-``web_search_url`` pointed at ``{control-plane}/v1/web-search``. It has to be
+``web_search_url`` pointed at ``{control-plane}/api/v1/web-search``. It has to be
 that host and path, under the gateway's own ``PLATFORM_BASE_URL``, because
 ``url_targets_platform`` is what decides whether the platform token is forwarded
 at all, and that token is the credential below. A standalone gateway forwards no
@@ -47,7 +47,7 @@ from gateway.services.search_backend import get_search_client
 from gateway.services.web_search_backend import MAX_RESULTS_CAP, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
-router = APIRouter(prefix="/v1/web-search", tags=["web-search"])
+router = APIRouter(prefix="/web-search", tags=["web-search"])
 
 ConfigDep = Annotated[GatewayConfig, Depends(get_config)]
 

@@ -89,6 +89,7 @@ from gateway.api.routes._platform import (
     upstream_error_message,
     upstream_exception_chain,
     upstream_exception_shape,
+    upstream_retry_after,
 )
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
@@ -198,6 +199,7 @@ from gateway.services.tool_usage import (
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
+from gateway.services.web_search_budget import WebSearchBudget
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -235,8 +237,8 @@ PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
 # than the caller's. These never embed the upstream message: a rejected
 # credential or an exhausted account is where provider internals concentrate,
 # and it is not the caller's problem to debug (see classify_provider_error and
-# test_error_detail_leakage). The two caller-fault details below are fallbacks,
-# used only when the provider gave us no message to pass on.
+# test_error_detail_leakage). The bad-request, model-not-found, and rate-limited
+# details below are fallbacks, used only when the provider gave us no message.
 PROVIDER_BAD_REQUEST_DETAIL = "The provider rejected the request as invalid (check the model name and parameters)"
 PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
 PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
@@ -247,6 +249,7 @@ PROVIDER_BILLING_DETAIL = (
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
+ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
 SANDBOX_NOT_CONFIGURED_DETAIL = (
     "otari_code_execution tool requested but no sandbox is configured on this gateway. "
     "Set OTARI_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
@@ -269,6 +272,7 @@ WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
+WEB_SEARCH_MAX_USES_INVALID_DETAIL = "web_search max_uses must be a non-negative integer"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
 SANDBOX_TOOLS_EXCLUDED_DETAIL = (
     "code execution is not available to this workspace: its policy's tool list excludes "
@@ -302,7 +306,7 @@ WEB_SEARCH_UNREACHABLE_DETAIL = (
 UNPRICED_TOOL_DETAIL_TEMPLATE = (
     "The gateway tool '{tool}' has no pricing, and this gateway runs with "
     "require_pricing enabled, so it will not run work it cannot bill. Set a "
-    "per-request price for model_key '{key}' (POST /v1/pricing, or the dashboard's "
+    "per-request price for model_key '{key}' (POST /api/v1/pricing, or the dashboard's "
     "Tools & Guardrails screen), or set require_pricing to false to serve it unpriced."
 )
 
@@ -318,6 +322,7 @@ class ErrorKind(Enum):
     INVALID_REQUEST = auto()
     API = auto()
     PERMISSION = auto()
+    RATE_LIMIT = auto()
 
 
 class ProviderErrorMapping(NamedTuple):
@@ -353,11 +358,11 @@ def _unsupported_feature_detail(exc: BaseException) -> str:
         if isinstance(candidate, UnsupportedParameterError):
             # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
             # both through upstream_error_message would repeat the same reason.
-            return _redacted_caller_fault_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
-    return _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+            return _redacted_upstream_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
+    return _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
 
 
-def _redacted_caller_fault_detail(message: str, fallback: str) -> str:
+def _redacted_upstream_detail(message: str, fallback: str) -> str:
     """Return redacted explanatory text, or a fixed detail when none remains."""
     redacted = redact_upstream_message(message)
     explanatory = redacted.replace("[redacted]", "")
@@ -386,14 +391,6 @@ _FORWARDED_PARAMS: frozenset[str] = frozenset(
         set(CompletionParams.model_fields)
         | set(MessagesParams.model_fields)
         | set(ResponsesParams.model_fields)
-        # Declared on the chat request rather than derived, and forwarded through
-        # any-llm's ``**kwargs`` (see ``chat.ChatCompletionRequest.service_tier``).
-        | {"service_tier"}
-        # Same shape on the Messages request (see
-        # ``messages.MessagesRequest.container``). A provider that bridges
-        # Messages through Chat Completions has no parameter for it, so it
-        # arrives here as the unknown-keyword TypeError.
-        | {"container"}
     )
     - SENSITIVE_PARAM_FIELDS
 )
@@ -448,11 +445,17 @@ def _rejected_param(exc: BaseException) -> str | None:
     return None
 
 
-def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
-    """The detail for a rejection that is the caller's request to fix.
+def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
+    """The detail for a failure the caller can act on.
 
     Returns the provider's own message, redacted and length-capped, because the
     provider is the only party that knows what it objected to.
+
+    A ``message`` attribute wins over the joined chain for the same reason
+    :func:`_unsupported_feature_detail` prefers one: an SDK that stringifies a
+    failure usually re-embeds its own message, and google-genai appends the
+    whole response body, so the joined text reads as a stutter followed by
+    JSON. Only the joined chain sees an exception that carries no ``message``.
 
     Falls back to ``fallback`` when what is left says nothing. Some SDKs
     stringify a failure as bare punctuation or the status code itself, and
@@ -462,7 +465,11 @@ def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     A message made entirely of redaction placeholders is empty for this
     purpose, too.
     """
-    return _redacted_caller_fault_detail(upstream_error_message(exc), fallback)
+    for candidate in upstream_exception_chain(exc):
+        message = getattr(candidate, "message", None)
+        if isinstance(message, str) and (detail := _redacted_upstream_detail(message, "")):
+            return detail
+    return _redacted_upstream_detail(upstream_error_message(exc), fallback)
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
@@ -474,14 +481,14 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     can act on and leaving everything else (including provider 5xx and
     connection errors) to the generic 502.
 
-    Detail text splits on whose fault the failure is. When the provider rejected
-    the caller's request (400/422/404), the provider's own message is passed
-    through, redacted and length-capped, because it is the only description of
-    what was actually wrong and no fixed string we write can substitute for it.
-    When the failure is the gateway's own (a rejected credential, an exhausted
-    provider account, a 5xx), the detail stays a fixed string: those carry no
-    remedy the caller could apply, and are where a raw message is most likely to
-    name the operator's credentials or topology.
+    Detail text splits on whether the caller can act on the failure. A rejection
+    of the caller's request (400/422/404) and a rate limit (429) pass the
+    provider's own message through, redacted and length-capped, because it is
+    the only description of what was actually wrong. When the failure is the
+    gateway's own (a rejected credential, an exhausted provider account, a 5xx),
+    the detail stays a fixed string: those carry no remedy the caller could
+    apply, and are where a raw message is most likely to name the operator's
+    credentials or topology.
 
     Timeout detection (including the OpenAI/Anthropic SDKs' own
     ``APITimeoutError``, and a duck-typed fallback for other provider SDKs) is
@@ -516,23 +523,45 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     if is_provider_billing_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
     if status_code in (400, 422):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
+        return ProviderErrorMapping(
+            status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+        )
     if status_code == 404:
         return ProviderErrorMapping(
-            status.HTTP_404_NOT_FOUND, _caller_fault_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+            status.HTTP_404_NOT_FOUND, _upstream_message_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
         )
     # A provider rejecting the gateway's credentials is a gateway-config fault,
     # not the caller's: surface it as a 502, never as a client-facing 401/403.
     if status_code in (401, 403):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_CREDENTIALS_DETAIL)
-    # A provider 429 is surfaced as a client 429. Note this drops the upstream
-    # Retry-After: the (status, detail) pair cannot carry it, so the caller
-    # can't honor the provider's exact backoff window. Acceptable because the
-    # gateway has no single correct value to forward (BYO vs shared keys differ)
-    # and a bare 429 still tells the caller to back off.
+    # A 429 is not the caller's request to fix but is theirs to act on, and only
+    # the provider's text names the exhausted quota and the retry window. Still
+    # drops the upstream Retry-After: the (status, detail) pair cannot carry it,
+    # and on a streaming failure the headers are already flushed.
     if status_code == 429:
-        return ProviderErrorMapping(status.HTTP_429_TOO_MANY_REQUESTS, PROVIDER_RATE_LIMITED_DETAIL)
+        return ProviderErrorMapping(
+            status.HTTP_429_TOO_MANY_REQUESTS, _upstream_message_detail(exc, PROVIDER_RATE_LIMITED_DETAIL)
+        )
     return None
+
+
+def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, str] | None:
+    """Response headers for a classified provider failure, or ``None``.
+
+    Forwards the upstream ``Retry-After`` on a 429, which is the one header a
+    rate-limited caller can act on and the one piece of a provider's rate-limit
+    response that its message body cannot always carry. Restricted to the 429:
+    on the statuses that surface as a fixed-detail 502 the header would describe
+    the gateway's own upstream account, which is not the caller's to read.
+
+    Returns ``None`` rather than an empty dict when there is nothing to send, so
+    ``HTTPException(headers=...)`` stays unset instead of being handed a dict
+    that adds nothing.
+    """
+    if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+        return None
+    retry_after = upstream_retry_after(exc)
+    return {"Retry-After": retry_after} if retry_after is not None else None
 
 
 def failure_status_code(exc: BaseException) -> int:
@@ -621,7 +650,13 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     endpoint: str
     stream_format: StreamFormat
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
         """Build the format's wire error for ``status_code`` / ``message``."""
         ...
 
@@ -669,6 +704,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> ResultT: ...
 
     def open_tool_loop_stream(
@@ -678,6 +714,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
     def inject_hints(
@@ -1854,7 +1891,7 @@ async def resolve_request_context(
                 # The key's own workspace, not the resolved one: a master-key
                 # request has no key and resolves to the default workspace, which
                 # would narrow an operator's file references to it. `fetch_file`
-                # reads None as "every workspace", matching the /v1/files routes.
+                # reads None as "every workspace", matching the /api/v1/files routes.
                 post_chars, vision_usage = await normalize_messages(
                     user_id,
                     gate_impl,
@@ -1963,6 +2000,15 @@ async def resolve_request_context(
 # ---------------------------------------------------------------------------
 
 
+def _read_web_search_max_uses(entry: dict[str, Any] | None) -> int | None:
+    if entry is None or entry.get("max_uses") is None:
+        return None
+    value = entry["max_uses"]
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(WEB_SEARCH_MAX_USES_INVALID_DETAIL)
+    return value
+
+
 class ToolContext:
     """Resolved gateway-tool configuration for one request."""
 
@@ -2017,6 +2063,12 @@ class ToolContext:
         # request shares one tally across attempts: every executed call was paid
         # for, whether or not its attempt won.
         self.tally = ToolUsageTally()
+        # One budget per request, for the reason the tally is: a multi-attempt
+        # request re-runs its searches on the attempt that serves, and every one of
+        # them is billed, so the cap has to be spent by the request rather than
+        # refilled per attempt.
+        cap = self.max_web_search_uses
+        self.web_search_budget = WebSearchBudget(cap) if cap is not None else None
 
     def build_sandbox_backend(self) -> SandboxBackend:
         """The one place a ``SandboxBackend`` is constructed for this request.
@@ -2056,6 +2108,30 @@ class ToolContext:
     def emit_native_web_search(self) -> bool:
         """Whether this request should get Anthropic-native server-tool blocks back."""
         return self.use_web_search and declares_native_web_search(self.web_search_tool_entry)
+
+    @property
+    def max_web_search_uses(self) -> int | None:
+        """The web-search use cap, when the caller supplied one.
+
+        Not gated on :attr:`emit_native_web_search`: the cap bounds what the request
+        is billed for, so it is honored on every declaration shape and in every wire
+        format. Only the *refusal* is format-specific, an Anthropic
+        ``max_uses_exceeded`` result block where the caller can read one and a plain
+        tool error everywhere else.
+
+        ``0`` is a cap of zero searches, not the absence of one. Reading it as
+        "uncapped" would answer a spend limit with unlimited spend, which is the one
+        direction this must not fail; a caller who meant "do not search" is better
+        served by every search being refused than by a bill.
+
+        Invalid values are rejected rather than treated as uncapped, so a malformed
+        spend control cannot fail open. Rejection belongs to ``prepare_gateway_tools``,
+        which is the one place that builds a ``ToolContext`` and the only one holding
+        the ``adapter`` that knows the caller's error envelope. This property is a
+        plain read of a value already validated there; the ``ValueError`` it would
+        raise on an unvalidated entry is a programming error, not a request one.
+        """
+        return _read_web_search_max_uses(self.web_search_tool_entry)
 
     @property
     def intercepts_web_search(self) -> bool:
@@ -2421,7 +2497,7 @@ async def prepare_gateway_tools(
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
         # hybrid mode when the backend IS the platform (its URL is under the
         # platform base URL the gateway already trusts this token with for resolve):
-        # the platform-hosted /v1/sandbox proxy authenticates the caller's workspace
+        # the platform-hosted /api/v1/sandbox proxy authenticates the caller's workspace
         # token and derives tenancy + per-workspace code-exec policy from it. Never
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
@@ -2441,7 +2517,7 @@ async def prepare_gateway_tools(
             # Platform owns the per-workspace code-exec policy: 403 if the workspace
             # has it off, otherwise apply the workspace defaults (per-request values
             # win) — the default purpose hint and the loop-iteration ceiling. The
-            # tools allow-list + exec timeout are re-enforced by the /v1/sandbox proxy.
+            # tools allow-list + exec timeout are re-enforced by the /api/v1/sandbox proxy.
             policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
             # Fail closed on a malformed policy: a non-bool `enabled` is a cross-service
             # contract break, not a "disabled" signal — surface it as 502, never run.
@@ -2532,6 +2608,10 @@ async def prepare_gateway_tools(
             tools_after_sandbox,
             intercept=intercept_web_search,
         )
+        try:
+            _read_web_search_max_uses(web_search_tool_entry)
+        except ValueError as exc:
+            raise adapter.error(400, WEB_SEARCH_MAX_USES_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from exc
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
         # hybrid mode, where the backend may be the platform-hosted web-search
         # endpoint that authenticates the gateway. Standalone backends (SearXNG /
@@ -3003,7 +3083,7 @@ async def _apply_tool_charges(
     for tool in unpriced:
         logger.warning(
             "Gateway tool '%s' ran %d time(s) but has no pricing; recorded without cost. "
-            "Price it with POST /v1/pricing using model_key '%s'.",
+            "Price it with POST /api/v1/pricing using model_key '%s'.",
             tool,
             billable[tool],
             gateway_tool_pricing_key(tool),
@@ -3215,6 +3295,21 @@ async def _log_failure_and_refund(
 # ---------------------------------------------------------------------------
 
 
+def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
+    """Tool-loop kwargs this request carries, omitting the ones it never set.
+
+    Presence-encoded rather than passed as ``None``, for the reason
+    ``on_first_response`` is: a test fake mirrors the call shape a given request
+    actually produces, so a kwarg appearing at all is itself the signal.
+
+    The budget itself travels, not the number it was built from: every attempt of
+    one request draws on the same one.
+    """
+    if tool_ctx.web_search_budget is None:
+        return {}
+    return {"web_search_budget": tool_ctx.web_search_budget}
+
+
 async def dispatch_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
@@ -3255,6 +3350,7 @@ async def dispatch_non_stream(
             tool_ctx.max_tool_iterations,
             on_first_response,
             emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_loop_options(tool_ctx),
         )
 
 
@@ -3288,6 +3384,7 @@ async def _eager_backend_stream(
             backend,
             tool_ctx.max_tool_iterations,
             emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_loop_options(tool_ctx),
         ):
             yield event
     finally:
@@ -3710,15 +3807,24 @@ def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool
     )
 
 
-def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
+def stream_final_attempt_extra_seconds(
+    config: GatewayConfig,
+    *,
+    tool_mode: bool = False,
+    has_forwarded_tools: bool = False,
+) -> float:
     """Extra first-chunk grace granted only to the sole/final streaming attempt.
 
     Added on top of the per-attempt failover budget for the terminal attempt,
-    which has no next entry in the routing policy to fall over to. Keeps that
-    attempt's wait bounded while not converting a slow-but-valid first token into
-    a timeout. Mode-agnostic (applies on top of the plain or tool-loop budget).
+    which has no next entry in the routing policy to fall over to. A request that
+    forwards provider-native tools but does not run a gateway-managed tool loop
+    keeps the plain failover budget on non-final attempts, and on the final one
+    is raised to the tool-loop base before the configured grace is added, so
+    tool-heavy agents get the relaxed criterion only where there is nowhere left
+    to fail over. The grace stays additive in every mode: an operator who
+    configures it always buys that much more time.
     """
-    return (
+    configured_extra = (
         int(
             config.platform.get(
                 _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
@@ -3727,6 +3833,12 @@ def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
         )
         / 1000
     )
+    if tool_mode or not has_forwarded_tools:
+        return configured_extra
+
+    plain_budget = stream_first_chunk_timeout_seconds(config, tool_mode=False)
+    tool_loop_budget = stream_first_chunk_timeout_seconds(config, tool_mode=True)
+    return configured_extra + max(0.0, tool_loop_budget - plain_budget)
 
 
 # ---------------------------------------------------------------------------
@@ -3943,7 +4055,11 @@ async def run_streaming_with_fallback(
     """
     tool_mode = tool_ctx.use_tool_loop
     first_chunk_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
-    final_attempt_extra = stream_final_attempt_extra_seconds(config)
+    final_attempt_extra = stream_final_attempt_extra_seconds(
+        config,
+        tool_mode=tool_mode,
+        has_forwarded_tools=bool(tool_ctx.remaining_user_tools),
+    )
 
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
@@ -3989,6 +4105,7 @@ async def run_streaming_with_fallback(
             pool_for_loop,
             tool_ctx.max_tool_iterations,
             emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_loop_options(tool_ctx),
         )
 
     # See run_platform_non_stream: BackgroundTasks only run after a successful
@@ -4105,8 +4222,10 @@ def raise_all_streaming_attempts_failed(
     Gateway-side backend failures (sandbox / web_search eager-open) get a 502
     with a backend-specific detail so operators don't chase a fake provider
     outage. A single attempt preserves its classified provider error. Once a
-    multi-attempt route is exhausted, it surfaces the aggregate result: 504
-    when the last failure was a timeout, otherwise 502.
+    multi-attempt route is exhausted, it surfaces the aggregate result: 504 when
+    the last failure was a timeout, 429 when it was a rate limit, and 502
+    otherwise. A 502 for an exhausted-by-rate-limit route would tell a client
+    that was just asked to back off that it may retry now.
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
@@ -4117,9 +4236,16 @@ def raise_all_streaming_attempts_failed(
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
     if len(route.attempts) <= 1:
         raise adapter.provider_error(exc) from exc
-    kind, _ = upstream_exception_shape(exc)
+    kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
+    if status_code == 429:
+        raise adapter.error(
+            429,
+            ALL_PROVIDERS_RATE_LIMITED_DETAIL,
+            ErrorKind.RATE_LIMIT,
+            provider_error_headers(exc, 429),
+        ) from exc
     raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
 
 

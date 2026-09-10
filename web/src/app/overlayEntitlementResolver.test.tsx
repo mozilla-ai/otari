@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
-import { EntitlementGate } from "@/shared/components/EntitlementGate"
+import { EntitlementGate } from "@/shared/components/access/EntitlementGate"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"

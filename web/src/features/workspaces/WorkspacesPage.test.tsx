@@ -13,6 +13,7 @@ import type {
   WorkspaceMember,
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
+import { API_ROOT } from "@/shared/api/client"
 import {
   budget,
   organizationContext,
@@ -45,7 +46,7 @@ function mockApi(
     // Keyed by workspace id, so a test can give one workspace a default and
     // leave another without one.
     budgetDefaults?: Record<string, WorkspaceBudgetDefault[]>
-    /** A refusal for `POST /v1/workspaces`, for the error paths. */
+    /** A refusal for `POST ${API_ROOT}/workspaces`, for the error paths. */
     createRefusal?: { status: number; detail: string }
   } = {},
 ) {
@@ -66,21 +67,27 @@ function mockApi(
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
-    if (url.includes("/members") && url.includes("/v1/workspaces/")) {
+    if (url.includes("/members") && url.includes(`${API_ROOT}/workspaces/`)) {
       if (method === "GET") {
         return jsonResponse({ data: members, count: members.length })
       }
       return jsonResponse(members[0] ?? workspaceMember())
     }
+    if (url.includes("provider-keys")) {
+      if (url.includes("/models")) return jsonResponse({ models: [] })
+      if (url.includes(`${API_ROOT}/workspaces/`))
+        return jsonResponse({ data: [] })
+      return jsonResponse({ data: [], count: 0 })
+    }
     if (url.includes("member-budget-policies")) {
-      const id = url.split("/v1/workspaces/")[1]?.split("/")[0] ?? ""
+      const id = url.split(`${API_ROOT}/workspaces/`)[1]?.split("/")[0] ?? ""
       const rows = budgetDefaults[id] ?? []
       return jsonResponse({ data: rows, count: rows.length })
     }
-    if (url.includes("/v1/budgets")) {
+    if (url.includes(`${API_ROOT}/budgets`)) {
       return jsonResponse(budgets)
     }
-    if (url.includes("/v1/workspaces")) {
+    if (url.includes(`${API_ROOT}/workspaces`)) {
       if (method === "GET") {
         return jsonResponse({ data: list, count: list.length })
       }
@@ -93,7 +100,7 @@ function mockApi(
       }
       return jsonResponse(workspace({ name: "Created" }))
     }
-    if (url.includes("/v1/organizations/me/members")) {
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       return jsonResponse({ data: orgMembers, count: orgMembers.length })
     }
     return jsonResponse(context)
@@ -146,11 +153,30 @@ describe("WorkspacesPage", () => {
     await user.click(screen.getByRole("button", { name: "Create workspace" }))
 
     const post = requests.find((request) => request.method === "POST")
-    expect(post?.url).toContain("/v1/workspaces")
+    expect(post?.url).toContain(`${API_ROOT}/workspaces`)
     expect(post?.body).toEqual({
       name: "Research",
       description: "Experiments",
     })
+  })
+
+  // The form itself carries no band, so that the scope switcher can put it in a
+  // modal (otari-ai#2107). The band belongs to this page, and it is pinned here
+  // because losing it is invisible in jsdom: the fields render either way.
+  it("frames the create form as a band of the page", async () => {
+    mockApi({})
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+
+    // Reached from the field rather than from the page, because a page is
+    // several bands and only this one frames the form.
+    const band = screen.getByLabelText("Name").closest("section.otari-bleed")
+    expect(band).not.toBeNull()
+    expect(band).toHaveClass("border-y")
   })
 
   it("puts a refused create on the name that caused it, not in a banner", async () => {
@@ -224,7 +250,7 @@ describe("WorkspacesPage", () => {
 
     const remove = requests.find((request) => request.method === "DELETE")
     expect(remove?.url).toContain(
-      "/v1/workspaces/44444444-4444-4444-4444-444444444444",
+      `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444`,
     )
   })
 
@@ -272,7 +298,7 @@ describe("WorkspacesPage", () => {
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toContain(
-      "/v1/workspaces/44444444-4444-4444-4444-444444444444",
+      `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444`,
     )
     expect(patch?.body).toEqual({ name: "Renamed", description: null })
   })
@@ -323,7 +349,7 @@ describe("WorkspacesPage", () => {
     await screen.findByText("Bravo")
     expect(screen.queryByText("Default member budget")).toBeNull()
     expect(
-      requests.some((request) => request.url.includes("/v1/budgets")),
+      requests.some((request) => request.url.includes(`${API_ROOT}/budgets`)),
     ).toBe(false)
     expect(
       requests.some((request) =>
@@ -352,8 +378,76 @@ describe("WorkspacesPage", () => {
     const post = requests.find((request) => request.method === "POST")
     expect(post?.body).toEqual({ name: "Research", description: null })
     expect(
-      requests.some((request) => request.url.includes("/v1/budgets")),
+      requests.some((request) => request.url.includes(`${API_ROOT}/budgets`)),
     ).toBe(false)
+  })
+
+  it("confirms before removing a per-provider budget default", async () => {
+    // otari-ai#2110: this Remove used to delete on the click, with no
+    // confirmation of any kind. It was the only delete in the dashboard that
+    // asked nothing.
+    const requests = mockApi({
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+      budgetDefaults: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceBudgetDefault({
+            id: "default-openai",
+            budget_id: "bud-team",
+            provider_key_id: "openai",
+          }),
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await screen.findByText("Per-provider defaults")
+    await user.click(
+      screen.getByRole("button", { name: "Remove default for openai" }),
+    )
+
+    // The click opens the dialog and sends nothing.
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/openai fall back to/)).toBeVisible()
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove default" }),
+    )
+
+    const removed = requests.find((request) => request.method === "DELETE")
+    expect(removed?.url).toContain("default-openai")
+  })
+
+  it("keeps a per-provider default when the confirm is cancelled", async () => {
+    const requests = mockApi({
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+      budgetDefaults: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceBudgetDefault({
+            id: "default-openai",
+            budget_id: "bud-team",
+            provider_key_id: "openai",
+          }),
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await screen.findByText("Per-provider defaults")
+    await user.click(
+      screen.getByRole("button", { name: "Remove default for openai" }),
+    )
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    )
+
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
   })
 
   it("withholds the default-budget controls from a non-operator's edit form", async () => {
@@ -379,14 +473,61 @@ describe("WorkspacesPage", () => {
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.body).toEqual({ name: "Renamed", description: null })
     const operatorOnly = [
-      "/v1/budgets",
-      "/v1/providers",
+      `${API_ROOT}/budgets`,
+      `${API_ROOT}/providers`,
       "member-budget-policies",
     ]
     expect(
       requests.filter((request) =>
         operatorOnly.some((path) => request.url.includes(path)),
       ),
+    ).toEqual([])
+  })
+
+  it("offers the workspace's provider keys on an admin's edit form", async () => {
+    // The per-workspace half of the organization's provider keys, which the
+    // roles matrix has at Edit for an admin and hidden from everyone else. Not
+    // withheld from a non-operator, unlike the budget controls above it: these
+    // are the tenant's own credentials rather than the deployment's.
+    const requests = mockApi({
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+
+    expect(await screen.findByText("Provider keys")).toBeInTheDocument()
+    expect(
+      requests.some((request) =>
+        request.url.includes(
+          `${API_ROOT}/workspaces/44444444-4444-4444-4444-444444444444/provider-keys`,
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      requests.some((request) =>
+        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
+      ),
+    ).toBe(true)
+  })
+
+  it("keeps the provider keys and their reads away from a member", async () => {
+    // A member cannot open the edit form, which is where the section lives, so
+    // it is never mounted and neither of its reads is made. The gateway agrees
+    // on the writes (`require_workspace_management_access`) and refuses the
+    // organization's key list to anyone who does not manage the organization.
+    const requests = mockApi({
+      context: organizationContext({ role: "member" }),
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+    })
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Bravo")
+    expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()
+    expect(screen.queryByText("Provider keys")).toBeNull()
+    expect(
+      requests.filter((request) => request.url.includes("provider-keys")),
     ).toEqual([])
   })
 })

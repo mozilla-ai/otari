@@ -25,6 +25,7 @@ from gateway.api.routes._pipeline import (
     _PendingUsageReport,
     classify_provider_error,
     prepare_gateway_tools,
+    provider_error_headers,
     raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
@@ -51,10 +52,14 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
+from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
-router = APIRouter(prefix="/v1", tags=["responses"])
+router = APIRouter(tags=["responses"])
+
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/responses"
 
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
@@ -253,17 +258,27 @@ class _ResponsesAdapter:
     """
 
     name = "responses"
-    endpoint = "/v1/responses"
+    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
     log_success_without_usage = True
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
-        return HTTPException(status_code=status_code, detail=message)
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
+        return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
-            return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+            return HTTPException(
+                status_code=mapping.status_code,
+                detail=mapping.detail,
+                headers=provider_error_headers(exc, mapping.status_code),
+            )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
@@ -331,15 +346,20 @@ class _ResponsesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> ResponsesResponse:
         # ``emit_native_web_search`` is accepted for interface parity and ignored:
         # this format has no native vocabulary for a server-side tool call, so a
         # gateway-run search stays invisible on the wire (see docs/tools.md).
+        # ``web_search_budget`` is not: the cap bounds what the caller is billed
+        # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
+        if web_search_budget is not None:
+            extra["web_search_budget"] = web_search_budget
         return await responses_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -354,11 +374,16 @@ class _ResponsesAdapter:
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
+        extra: dict[str, Any] = {}
+        if web_search_budget is not None:
+            extra["web_search_budget"] = web_search_budget
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            **extra,
         )
 
     def inject_hints(

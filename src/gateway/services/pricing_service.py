@@ -11,6 +11,7 @@ from genai_prices.types import PriceCalculation, TieredPrices
 from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import meter_cost, quantize_cost, to_decimal
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, OrganizationModelPricing
@@ -858,7 +859,7 @@ def no_pricing_error_detail(model: str) -> str:
     """
     return (
         f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
-        "Fix it either way: add pricing (POST /v1/pricing, or the pricing section of config.yml), "
-        'or enable the default-pricing fallback (PATCH /v1/settings {"default_pricing": true}) '
+        f"Fix it either way: add pricing (POST {API_ROOT}/pricing, or the pricing section of config.yml), "
+        f'or enable the default-pricing fallback (PATCH {API_ROOT}/settings {{"default_pricing": true}}) '
         "to meter with public list prices."
     )

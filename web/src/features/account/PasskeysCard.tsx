@@ -1,24 +1,19 @@
-import {
-  Button,
-  Card,
-  Description,
-  Input,
-  Label,
-  TextField,
-} from "@heroui/react"
+import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 import { FiKey, FiSmartphone } from "react-icons/fi"
 
 import type { Passkey } from "@/client"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { Section } from "@/design-system/layout/Section"
 import {
   useDeletePasskey,
   usePasskeys,
   useRegisterPasskey,
   useRenamePasskey,
-} from "@/shared/api/hooks"
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
-import { ErrorBanner } from "@/shared/components/ui"
-import { RowActions } from "@/shared/components/ui/RowActions"
+} from "@/shared/api/auth"
+import { RowActions } from "@/shared/components/deprecated/RowActions"
 import { formatDateTime } from "@/shared/helpers/format"
 import {
   MAX_PASSKEY_NAME_LENGTH,
@@ -227,103 +222,107 @@ export function PasskeysCard() {
   }
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Passkeys</h2>
-      <Card>
-        <Card.Content className="flex flex-col gap-4 px-5 py-5">
-          <p className="max-w-3xl text-sm text-muted">
-            Sign in with your device instead of typing a password. The key stays
-            on the device or in your credential manager; this gateway only ever
-            stores the public half, so there is nothing here anybody could sign
-            in with. Your password still works.
+    <>
+      <Section
+        className="border-t border-border pt-6 pb-5"
+        contentClassName="flex flex-col gap-4"
+      >
+        <h2 className="text-title">Passkeys</h2>
+
+        <p className="max-w-3xl text-sm text-muted">
+          Sign in with your device instead of typing a password. The key stays
+          on the device or in your credential manager; this gateway only ever
+          stores the public half, so there is nothing here anybody could sign in
+          with. Your password still works.
+        </p>
+
+        {!passkeys_ready ? (
+          <p className="text-sm text-muted">
+            This gateway is not set up for passkeys yet. An operator needs to
+            set <code className="font-mono text-xs">public_base_url</code> to
+            the address this dashboard is served on, and restart.
           </p>
+        ) : !canUsePasskeys ? (
+          <p className="text-sm text-muted">
+            This browser cannot use passkeys. They need a recent browser on a
+            secure (HTTPS) connection.
+          </p>
+        ) : null}
 
-          {!passkeys_ready ? (
-            <p className="text-sm text-muted">
-              This gateway is not set up for passkeys yet. An operator needs to
-              set <code className="font-mono text-xs">public_base_url</code> to
-              the address this dashboard is served on, and restart.
-            </p>
-          ) : !canUsePasskeys ? (
-            <p className="text-sm text-muted">
-              This browser cannot use passkeys. They need a recent browser on a
-              secure (HTTPS) connection.
-            </p>
-          ) : null}
+        {/* The query's own error carries the gateway's message, which for the
+          unconfigured case names the setting to fill in. */}
+        <ErrorBanner error={passkeys.error} />
+        <ErrorBanner error={register.error} />
+        <ErrorBanner error={remove.error} />
 
-          {/* The query's own error carries the gateway's message, which for the
-              unconfigured case names the setting to fill in. */}
-          <ErrorBanner error={passkeys.error} />
-          <ErrorBanner error={register.error} />
-          <ErrorBanner error={remove.error} />
+        {passkeys.isPending && !passkeys.data ? (
+          <p className="text-sm text-muted" role="status">
+            Loading passkeys…
+          </p>
+        ) : rows.length > 0 ? (
+          <ul className="flex flex-col">
+            {rows.map((passkey) => (
+              <PasskeyRow
+                key={passkey.id}
+                passkey={passkey}
+                isBusy={isBusy}
+                onRename={() => {
+                  setRenaming(passkey)
+                  setRenamedTo(passkey.name)
+                  rename.reset()
+                }}
+                onDelete={() => {
+                  setDeleting(passkey)
+                  remove.reset()
+                }}
+              />
+            ))}
+          </ul>
+        ) : passkeys.isSuccess && passkeys_ready ? (
+          <p className="text-sm text-muted">You have no passkeys yet.</p>
+        ) : null}
 
-          {passkeys.isPending && !passkeys.data ? (
-            <p className="text-sm text-muted" role="status">
-              Loading passkeys…
-            </p>
-          ) : rows.length > 0 ? (
-            <ul className="flex flex-col">
-              {rows.map((passkey) => (
-                <PasskeyRow
-                  key={passkey.id}
-                  passkey={passkey}
-                  isBusy={isBusy}
-                  onRename={() => {
-                    setRenaming(passkey)
-                    setRenamedTo(passkey.name)
-                    rename.reset()
-                  }}
-                  onDelete={() => {
-                    setDeleting(passkey)
-                    remove.reset()
-                  }}
-                />
-              ))}
-            </ul>
-          ) : passkeys.isSuccess && passkeys_ready ? (
-            <p className="text-sm text-muted">You have no passkeys yet.</p>
-          ) : null}
-
-          {/* Registration is the one action that needs a live ceremony, so it
-              is the only one gated. Listing, renaming and deleting stay
-              available either way: a deployment that lost its relying-party ID
-              is exactly when somebody has orphans to clear out. */}
-          {passkeys_ready && canUsePasskeys && !passkeys.isError ? (
-            <form
-              className="flex flex-col gap-3 sm:flex-row sm:items-end"
-              onSubmit={(event) => {
-                event.preventDefault()
-                startRegistration()
-              }}
+        {/* Registration is the one action that needs a live ceremony, so it
+          is the only one gated. Listing, renaming and deleting stay
+          available either way: a deployment that lost its relying-party ID
+          is exactly when somebody has orphans to clear out. */}
+        {passkeys_ready && canUsePasskeys && !passkeys.isError ? (
+          <form
+            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+            onSubmit={(event) => {
+              event.preventDefault()
+              startRegistration()
+            }}
+          >
+            <TextField
+              value={newName}
+              onChange={setNewName}
+              className="flex max-w-md flex-1 flex-col gap-1"
             >
-              <TextField
-                value={newName}
-                onChange={setNewName}
-                className="flex max-w-md flex-1 flex-col gap-1"
-              >
-                <Label className="text-body">Name</Label>
-                <Input
-                  placeholder="Work laptop"
-                  maxLength={MAX_PASSKEY_NAME_LENGTH}
-                />
-                <Description className="text-caption">
+              <Label className="text-body">Name</Label>
+              <Input
+                placeholder="Work laptop"
+                maxLength={MAX_PASSKEY_NAME_LENGTH}
+              />
+              <FieldMessages>
+                <Description className="text-muted">
                   Optional. It is only a label, so you can tell this passkey
                   from the others.
                 </Description>
-              </TextField>
-              <div className="sm:pb-6">
-                <Button
-                  type="submit"
-                  variant="primary"
-                  isPending={register.isPending}
-                >
-                  Add a passkey
-                </Button>
-              </div>
-            </form>
-          ) : null}
-        </Card.Content>
-      </Card>
+              </FieldMessages>
+            </TextField>
+            <div className="sm:pb-6">
+              <Button
+                type="submit"
+                variant="primary"
+                isPending={register.isPending}
+              >
+                Add a passkey
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </Section>
 
       <ConfirmDialog
         isOpen={renaming !== null}
@@ -371,6 +370,6 @@ export function PasskeysCard() {
           </>
         }
       />
-    </section>
+    </>
   )
 }

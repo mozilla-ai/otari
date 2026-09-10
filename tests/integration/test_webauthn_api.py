@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
@@ -53,13 +53,13 @@ def _register(
     name: str | None = None,
 ) -> dict[str, Any]:
     """Run a whole registration ceremony and return the stored passkey."""
-    options = client.post("/v1/auth/webauthn/register/options", headers=headers)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=headers)
     assert options.status_code == 200, options.text
     response = authenticator.register(challenge_of(options.json()))
     body: dict[str, Any] = {"credential": response}
     if name is not None:
         body["name"] = name
-    created = client.post("/v1/auth/webauthn/register", json=body, headers=headers)
+    created = client.post(f"{API_ROOT}/auth/webauthn/register", json=body, headers=headers)
     assert created.status_code == 201, created.text
     result: dict[str, Any] = created.json()
     return result
@@ -67,10 +67,10 @@ def _register(
 
 def _sign_in(client: TestClient, authenticator: SoftwareAuthenticator, **kwargs: Any) -> Any:
     """Run a whole sign-in ceremony and return the raw response."""
-    options = client.post("/v1/auth/webauthn/authenticate/options")
+    options = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
     assert options.status_code == 200, options.text
     assertion = authenticator.authenticate(challenge_of(options.json()), **kwargs)
-    return client.post("/v1/auth/webauthn/authenticate", json={"credential": assertion})
+    return client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": assertion})
 
 
 def test_a_passkey_registers_and_then_signs_in(
@@ -84,7 +84,7 @@ def test_a_passkey_registers_and_then_signs_in(
     # Who the master key resolves to, captured before the passkey exists, so the
     # sign-in below can be shown to resolve the same identity rather than merely
     # some identity.
-    bootstrap = client.post("/v1/auth/session", json={"master_key": test_config.master_key})
+    bootstrap = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
     assert bootstrap.status_code == 200, bootstrap.text
     operator_id = bootstrap.json()["user_id"]
     client.cookies.clear()
@@ -107,7 +107,7 @@ def test_a_passkey_registers_and_then_signs_in(
 
     # The cookie now authenticates on its own, with no header credential: the
     # passkey minted the same session a password would have.
-    listed = client.get("/v1/auth/webauthn/credentials")
+    listed = client.get(f"{API_ROOT}/auth/webauthn/credentials")
     assert listed.status_code == 200, listed.text
     assert listed.json()["count"] == 1
     assert listed.json()["data"][0]["last_used_at"] is not None
@@ -122,13 +122,13 @@ def test_passkeys_are_unavailable_when_the_deployment_has_no_address(
     503 naming the setting, not a 500 and not a ceremony that starts and then
     fails inside the browser.
     """
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     assert options.status_code == 503, options.text
     assert "public_base_url" in options.json()["detail"]
 
     # Listing is deliberately not gated: a deployment that lost its relying
     # party still has to let somebody see and remove what it left behind.
-    listed = client.get("/v1/auth/webauthn/credentials", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/auth/webauthn/credentials", headers=master_key_header)
     assert listed.status_code == 200, listed.text
     assert listed.json()["count"] == 0
 
@@ -142,7 +142,7 @@ def test_an_explicit_rp_id_overrides_the_derived_one(
     """A parent domain can be configured, and it is what the ceremony uses."""
     monkeypatch.setattr(test_config, "public_base_url", "http://sub.testserver")
     monkeypatch.setattr(test_config, "webauthn_rp_id", "testserver")
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     assert options.status_code == 200, options.text
     assert options.json()["rp"]["id"] == "testserver"
 
@@ -155,13 +155,13 @@ def test_a_challenge_is_spent_once(
 ) -> None:
     """Replaying a whole assertion is refused: the challenge row is gone."""
     _register(client, master_key_header, authenticator)
-    options = client.post("/v1/auth/webauthn/authenticate/options")
+    options = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
     assertion = authenticator.authenticate(challenge_of(options.json()))
 
-    first = client.post("/v1/auth/webauthn/authenticate", json={"credential": assertion})
+    first = client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": assertion})
     assert first.status_code == 200, first.text
 
-    replay = client.post("/v1/auth/webauthn/authenticate", json={"credential": assertion})
+    replay = client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": assertion})
     assert replay.status_code == 401, replay.text
 
 
@@ -177,15 +177,15 @@ def test_a_failed_ceremony_leaves_its_challenge_spendable(
     keeps a mistyped-PIN style failure from costing a fresh options round trip.
     """
     _register(client, master_key_header, authenticator)
-    options = client.post("/v1/auth/webauthn/authenticate/options")
+    options = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
     challenge = challenge_of(options.json())
 
     from_elsewhere = authenticator.authenticate(challenge, origin="https://evil.example.com")
-    refused = client.post("/v1/auth/webauthn/authenticate", json={"credential": from_elsewhere})
+    refused = client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": from_elsewhere})
     assert refused.status_code == 401, refused.text
 
     honest = authenticator.authenticate(challenge)
-    accepted = client.post("/v1/auth/webauthn/authenticate", json={"credential": honest})
+    accepted = client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": honest})
     assert accepted.status_code == 200, accepted.text
 
 
@@ -269,14 +269,15 @@ def test_a_credential_registered_under_another_relying_party_is_inert(
     monkeypatch.setattr(test_config, "webauthn_rp_id", "moved.testserver")
     monkeypatch.setattr(test_config, "public_base_url", "http://moved.testserver")
 
-    listed = client.get("/v1/auth/webauthn/credentials", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/auth/webauthn/credentials", headers=master_key_header)
     assert listed.status_code == 200, listed.text
     assert listed.json()["count"] == 1
     assert listed.json()["data"][0]["is_usable"] is False
 
     # And the one action left for it still works.
     assert (
-        client.delete(f"/v1/auth/webauthn/credentials/{passkey['id']}", headers=master_key_header).status_code == 204
+        client.delete(f"{API_ROOT}/auth/webauthn/credentials/{passkey['id']}", headers=master_key_header).status_code
+        == 204
     )
 
 
@@ -299,9 +300,9 @@ def test_a_passkey_cannot_assert_under_a_relying_party_it_was_not_registered_for
         credential_id=authenticator.credential_id,
         private_key=authenticator.private_key,
     )
-    options = client.post("/v1/auth/webauthn/authenticate/options")
+    options = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
     assertion = moved.authenticate(challenge_of(options.json()))
-    refused = client.post("/v1/auth/webauthn/authenticate", json={"credential": assertion})
+    refused = client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": assertion})
     assert refused.status_code == 401, refused.text
 
 
@@ -313,9 +314,9 @@ def test_a_registration_challenge_cannot_be_answered_as_a_sign_in(
 ) -> None:
     """The ceremony a challenge was issued for is the server's choice, not the caller's."""
     _register(client, master_key_header, authenticator)
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     assertion = authenticator.authenticate(challenge_of(options.json()))
-    refused = client.post("/v1/auth/webauthn/authenticate", json={"credential": assertion})
+    refused = client.post(f"{API_ROOT}/auth/webauthn/authenticate", json={"credential": assertion})
     assert refused.status_code == 401, refused.text
 
 
@@ -327,9 +328,9 @@ def test_the_same_authenticator_cannot_register_twice(
 ) -> None:
     """The unique index decides it, whatever the browser did with exclude_credentials."""
     _register(client, master_key_header, authenticator)
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     again = client.post(
-        "/v1/auth/webauthn/register",
+        f"{API_ROOT}/auth/webauthn/register",
         json={"credential": authenticator.register(challenge_of(options.json()))},
         headers=master_key_header,
     )
@@ -343,7 +344,7 @@ def test_registration_options_exclude_what_this_identity_already_holds(
     passkeys_configured: None,
 ) -> None:
     _register(client, master_key_header, authenticator)
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     excluded = [item["id"] for item in options.json()["excludeCredentials"]]
     assert excluded == [authenticator.credential_id_b64]
 
@@ -356,7 +357,7 @@ def test_sign_in_options_name_no_credentials(
 ) -> None:
     """Publishing a list would make this endpoint an oracle; see begin_authentication."""
     _register(client, master_key_header, authenticator)
-    options = client.post("/v1/auth/webauthn/authenticate/options")
+    options = client.post(f"{API_ROOT}/auth/webauthn/authenticate/options")
     assert options.status_code == 200, options.text
     assert not options.json().get("allowCredentials")
 
@@ -380,9 +381,9 @@ def test_registering_a_name_that_is_taken_is_refused(
 ) -> None:
     """A name the caller chose is refused rather than silently altered."""
     _register(client, master_key_header, SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN), name="Laptop")
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     clash = client.post(
-        "/v1/auth/webauthn/register",
+        f"{API_ROOT}/auth/webauthn/register",
         json={
             "credential": SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN).register(challenge_of(options.json())),
             "name": "Laptop",
@@ -401,7 +402,7 @@ def test_a_passkey_renames_and_deletes(
     passkey = _register(client, master_key_header, authenticator, name="Old name")
 
     renamed = client.patch(
-        f"/v1/auth/webauthn/credentials/{passkey['id']}",
+        f"{API_ROOT}/auth/webauthn/credentials/{passkey['id']}",
         json={"name": "  New name  "},
         headers=master_key_header,
     )
@@ -409,9 +410,9 @@ def test_a_passkey_renames_and_deletes(
     # Trimmed, so a name that differs only in whitespace is not a second name.
     assert renamed.json()["name"] == "New name"
 
-    deleted = client.delete(f"/v1/auth/webauthn/credentials/{passkey['id']}", headers=master_key_header)
+    deleted = client.delete(f"{API_ROOT}/auth/webauthn/credentials/{passkey['id']}", headers=master_key_header)
     assert deleted.status_code == 204, deleted.text
-    assert client.get("/v1/auth/webauthn/credentials", headers=master_key_header).json()["count"] == 0
+    assert client.get(f"{API_ROOT}/auth/webauthn/credentials", headers=master_key_header).json()["count"] == 0
 
     # And it no longer signs anybody in.
     assert _sign_in(client, authenticator).status_code == 401
@@ -426,7 +427,7 @@ def test_renaming_onto_another_passkeys_name_is_refused(
     other = _register(client, master_key_header, SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN), name="Phone")
 
     clash = client.patch(
-        f"/v1/auth/webauthn/credentials/{other['id']}",
+        f"{API_ROOT}/auth/webauthn/credentials/{other['id']}",
         json={"name": "Laptop"},
         headers=master_key_header,
     )
@@ -441,7 +442,7 @@ def test_a_blank_rename_is_refused(
 ) -> None:
     passkey = _register(client, master_key_header, authenticator)
     blank = client.patch(
-        f"/v1/auth/webauthn/credentials/{passkey['id']}",
+        f"{API_ROOT}/auth/webauthn/credentials/{passkey['id']}",
         json={"name": "   "},
         headers=master_key_header,
     )
@@ -454,7 +455,9 @@ def test_an_unknown_passkey_is_a_404(
     passkeys_configured: None,
 ) -> None:
     missing = "00000000-0000-0000-0000-000000000000"
-    assert client.delete(f"/v1/auth/webauthn/credentials/{missing}", headers=master_key_header).status_code == 404
+    assert (
+        client.delete(f"{API_ROOT}/auth/webauthn/credentials/{missing}", headers=master_key_header).status_code == 404
+    )
 
 
 def test_managing_passkeys_needs_a_credential(
@@ -462,8 +465,8 @@ def test_managing_passkeys_needs_a_credential(
     passkeys_configured: None,
 ) -> None:
     """The management half is not public; only the two sign-in calls are."""
-    assert client.get("/v1/auth/webauthn/credentials").status_code == 401
-    assert client.post("/v1/auth/webauthn/register/options").status_code == 401
+    assert client.get(f"{API_ROOT}/auth/webauthn/credentials").status_code == 401
+    assert client.post(f"{API_ROOT}/auth/webauthn/register/options").status_code == 401
 
 
 def test_bootstrap_publishes_passkey_only_once_one_can_answer(
@@ -473,12 +476,12 @@ def test_bootstrap_publishes_passkey_only_once_one_can_answer(
     passkeys_configured: None,
 ) -> None:
     """A sign-in button whose only outcome is "no passkey found" is not offered."""
-    before = client.get("/v1/bootstrap")
+    before = client.get(f"{API_ROOT}/bootstrap")
     assert "passkey" not in before.json()["sign_in_methods"]
 
     _register(client, master_key_header, authenticator)
 
-    after = client.get("/v1/bootstrap")
+    after = client.get(f"{API_ROOT}/bootstrap")
     assert "passkey" in after.json()["sign_in_methods"]
     # Additive: it appears beside the credential the deployment already took,
     # rather than replacing it.
@@ -488,7 +491,7 @@ def test_bootstrap_publishes_passkey_only_once_one_can_answer(
 def test_bootstrap_omits_passkey_when_the_deployment_is_not_configured(
     client: TestClient,
 ) -> None:
-    assert "passkey" not in client.get("/v1/bootstrap").json()["sign_in_methods"]
+    assert "passkey" not in client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"]
 
 
 def test_one_identitys_registration_challenge_is_not_another_identitys(
@@ -509,7 +512,7 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
 
     # A second identity, signed in with its own password.
     added = client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": "ada@example.com", "role": "member"},
         headers=master_key_header,
     )
@@ -517,24 +520,24 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
-        signed_up = client.post("/v1/auth/signup", json={"email": "ada@example.com", "password": PASSWORD})
+        signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "ada@example.com", "password": PASSWORD})
     finally:
         gateway_logger.removeHandler(caplog.handler)
     assert signed_up.status_code == 200, signed_up.text
     token = _TOKEN_IN_LINK.search(caplog.text)
     assert token, caplog.text
-    assert client.post("/v1/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
 
     # The operator's challenge, taken while they were the caller.
-    operators = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    operators = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     assert operators.status_code == 200, operators.text
     challenge = challenge_of(operators.json())
 
     # Now Ada signs in and answers it as herself.
-    session = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+    session = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
     assert session.status_code == 200, session.text
     stolen = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN).register(challenge)
-    refused = client.post("/v1/auth/webauthn/register", json={"credential": stolen})
+    refused = client.post(f"{API_ROOT}/auth/webauthn/register", json={"credential": stolen})
     assert refused.status_code == 400, refused.text
 
 
@@ -556,7 +559,7 @@ def test_maintenance_mode_freezes_a_passkey_sign_in_too(
     assert _sign_in(client, authenticator).status_code == 200
     client.cookies.clear()
 
-    frozen = client.patch("/v1/settings/maintenance-mode", json={"enabled": True}, headers=master_key_header)
+    frozen = client.patch(f"{API_ROOT}/settings/maintenance-mode", json={"enabled": True}, headers=master_key_header)
     assert frozen.status_code == 200, frozen.text
 
     refused = _sign_in(client, authenticator)
@@ -565,7 +568,7 @@ def test_maintenance_mode_freezes_a_passkey_sign_in_too(
     assert refused.cookies.get(SESSION_COOKIE_NAME) is None
 
     # And it thaws: the refusal does not burn the passkey, only that attempt.
-    thawed = client.patch("/v1/settings/maintenance-mode", json={"enabled": False}, headers=master_key_header)
+    thawed = client.patch(f"{API_ROOT}/settings/maintenance-mode", json={"enabled": False}, headers=master_key_header)
     assert thawed.status_code == 200, thawed.text
     assert _sign_in(client, authenticator).status_code == 200
 
@@ -594,10 +597,10 @@ def test_a_name_an_orphan_holds_is_refused_rather_than_colliding_in_the_database
     monkeypatch.setattr(test_config, "public_base_url", moved_origin)
 
     second = SoftwareAuthenticator(rp_id="moved.testserver", origin=moved_origin)
-    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    options = client.post(f"{API_ROOT}/auth/webauthn/register/options", headers=master_key_header)
     assert options.status_code == 200, options.text
     clash = client.post(
-        "/v1/auth/webauthn/register",
+        f"{API_ROOT}/auth/webauthn/register",
         json={"credential": second.register(challenge_of(options.json())), "name": "Work laptop"},
         headers=master_key_header,
     )

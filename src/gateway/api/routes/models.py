@@ -61,12 +61,10 @@ if TYPE_CHECKING:
 # a parameter because they use what it resolves; ``Depends`` caching means it
 # still runs once per request.
 operator_router = APIRouter(
-    prefix="/v1",
     tags=["models"],
     dependencies=[Depends(require_deployment_operator)],
 )
 catalog_router = APIRouter(
-    prefix="/v1",
     tags=["models"],
     dependencies=[Depends(verify_catalog_reader)],
 )
@@ -90,7 +88,7 @@ class ModelPricingInfo(BaseModel):
     # the billing shapes on a usage row, with one addition specific to here:
     # dropping it would make Pydantic validate every stored tier against
     # PricingTier's rules on read, which is validation this field never used to
-    # do, so a rule tightened later would turn old rows into a 500 on /v1/models.
+    # do, so a rule tightened later would turn old rows into a 500 on /api/v1/models.
     #
     # Deliberately left on pydantic's smart union, unlike the charge lines in
     # _billing_schemas, which pin `union_mode="left_to_right"`. Smart mode takes
@@ -586,7 +584,7 @@ async def list_models(
     # directly anyway. Hiding its candidates cost more than it bought: one policy
     # naming a fallback chain could empty most of the catalog, a model priced by
     # the genai-prices default then vanished from the dashboard along with its
-    # rate, and GET /v1/models/{key} served the same model with its price all
+    # rate, and GET /api/v1/models/{key} served the same model with its price all
     # along, so nothing was actually kept off the wire.
     alias_targets = _alias_target_keys(config, configured_aliases)
 
@@ -599,7 +597,7 @@ async def list_models(
             # reachable with any API key, so it deliberately has no ``refresh``
             # escape hatch: forcing a fanout across every configured provider is
             # an operator action, and lives on the master-key-gated
-            # /v1/models/discoverable and /v1/providers/health instead.
+            # /api/v1/models/discoverable and /api/v1/providers/health instead.
             discovered = await discover_all_models(
                 config,
                 provider_filter=provider,
@@ -702,8 +700,8 @@ async def list_models(
 # first and hand "discoverable" to as a model id. The two are now on different
 # routers, so what keeps this true is the order ``api/main.py`` mounts them in,
 # not the order they are declared in here. The corollary is that a provider model
-# literally named "discoverable" is unreachable via GET /v1/models/discoverable;
-# that is accepted, and such a model is still listed by GET /v1/models.
+# literally named "discoverable" is unreachable via GET /api/v1/models/discoverable;
+# that is accepted, and such a model is still listed by GET /api/v1/models.
 @operator_router.get("/models/discoverable")
 async def list_discoverable_models(
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -714,7 +712,7 @@ async def list_discoverable_models(
 ) -> DiscoverableModelsResponse:
     """List every model the configured provider credentials can reach.
 
-    Operator-facing counterpart to GET /v1/models, which serves a curated catalog
+    Operator-facing counterpart to GET /api/v1/models, which serves a curated catalog
     to API callers. This reports each provider separately and keeps its error, so
     a provider with a bad key is distinguishable from one with no models. It is
     operator-gated because a provider error message describes the gateway's own
@@ -829,7 +827,7 @@ async def get_model(
     # interval *after* each round finishes, so an entry stored at T is already
     # expired when the next round starts and stays expired until that round's
     # dials complete. A TTL-bounded peek here would 404 a model that GET
-    # /v1/models is listing in the same instant, for any provider model with no
+    # /api/v1/models is listing in the same instant, for any provider model with no
     # pricing row and no genai-prices fallback. This endpoint never dials, so
     # serving the last known answer is the only way to agree with the listing.
     discovered_model = None

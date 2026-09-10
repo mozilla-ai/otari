@@ -11,7 +11,7 @@ cannot name an organization at all, because a standalone deployment has exactly
 one and the caller's identity already points at it. Multi-organization
 administration is the overlay's to contribute.
 
-These rates sit *above* ``/v1/pricing``, which stays the deployment price list.
+These rates sit *above* ``/api/v1/pricing``, which stays the deployment price list.
 A model with no override here prices exactly as it did before, and the resolution
 order (override, deployment row, genai-prices dataset) is
 `services.pricing_service.find_model_pricing`.
@@ -47,7 +47,7 @@ from gateway.services.provider_kwargs import normalize_pricing_key
 # says a request is the operator's, the membership says whether that identity may
 # change what the organization is billed.
 router = APIRouter(
-    prefix="/v1/organizations/me/pricing",
+    prefix="/organizations/me/pricing",
     tags=["organization-pricing"],
     dependencies=[Depends(verify_master_key)],
 )
@@ -137,7 +137,7 @@ class OrganizationModelPricingUpdate(OrganizationModelPricingRates):
 
     A full replacement rather than a patch: every rate field is present in the
     body and an omitted optional rate is cleared, so the stored row is exactly
-    what was sent. That is the opposite of ``POST /v1/pricing``, which inherits an
+    what was sent. That is the opposite of ``POST /api/v1/pricing``, which inherits an
     omitted cache rate from the model's previous version, and deliberately so:
     that surface versions a catalog where each write adds a row, while this one
     edits a single row in place and an inheriting patch would make the result
@@ -301,7 +301,7 @@ async def create_organization_pricing(
     naming the period it collides with, rather than shadowing it.
 
     The key is normalized to its canonical ``instance:model`` form first, the same
-    call ``POST /v1/pricing`` makes, and that is what makes one model one row
+    call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
     ``openai/gpt-4o`` are two keys: the overlap rule would not see them as
     colliding, and both would resolve, with the canonical one preferred, leaving

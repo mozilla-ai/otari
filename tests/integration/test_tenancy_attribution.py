@@ -16,12 +16,13 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import User as GatewayUser
 
 
 def _add_member(client: TestClient, headers: dict[str, str], email: str) -> dict[str, Any]:
     response = client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": email, "role": "member"},
         headers=headers,
     )
@@ -31,7 +32,7 @@ def _add_member(client: TestClient, headers: dict[str, str], email: str) -> dict
 
 
 def _roster_row(client: TestClient, headers: dict[str, str], email: str) -> dict[str, Any]:
-    roster = client.get("/v1/organizations/me/members", headers=headers).json()
+    roster = client.get(f"{API_ROOT}/organizations/me/members", headers=headers).json()
     return next(row for row in roster["data"] if row["email"] == email)
 
 
@@ -67,7 +68,7 @@ def test_the_reported_id_is_one_the_keys_endpoint_accepts(
     created = _add_member(client, master_key_header, "ada@example.com")
 
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "ada-laptop", "user_id": created["attribution_user_id"]},
         headers=master_key_header,
     )
@@ -92,7 +93,7 @@ def test_first_boot_gives_the_operator_one_too(
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
-    roster = client.get("/v1/organizations/me/members", headers=master_key_header).json()
+    roster = client.get(f"{API_ROOT}/organizations/me/members", headers=master_key_header).json()
     operator_row = next(row for row in roster["data"] if row["full_name"] == "Operator")
 
     # The operator identity has no email, so the roster is the only place its id
@@ -113,7 +114,7 @@ def test_re_adding_a_removed_member_reuses_the_same_row(
     attribution_user_id = created["attribution_user_id"]
 
     member_id = _roster_row(client, master_key_header, "ada@example.com")["organization_member_id"]
-    removed = client.delete(f"/v1/organizations/me/members/{member_id}", headers=master_key_header)
+    removed = client.delete(f"{API_ROOT}/organizations/me/members/{member_id}", headers=master_key_header)
     assert removed.status_code == 200, removed.text
 
     re_added = _add_member(client, master_key_header, "ada@example.com")
@@ -150,12 +151,12 @@ def test_re_adding_revives_a_soft_deleted_row_without_clearing_its_spend(
     finally:
         session.close()
 
-    deleted = client.delete(f"/v1/users/{attribution_user_id}", headers=master_key_header)
+    deleted = client.delete(f"{API_ROOT}/users/{attribution_user_id}", headers=master_key_header)
     assert deleted.status_code == 204, deleted.text
     assert _roster_row(client, master_key_header, "ada@example.com")["attribution_user_id"] is None
 
     member_id = _roster_row(client, master_key_header, "ada@example.com")["organization_member_id"]
-    client.delete(f"/v1/organizations/me/members/{member_id}", headers=master_key_header)
+    client.delete(f"{API_ROOT}/organizations/me/members/{member_id}", headers=master_key_header)
     re_added = _add_member(client, master_key_header, "ada@example.com")
 
     assert re_added["attribution_user_id"] == attribution_user_id
@@ -165,7 +166,7 @@ def test_re_adding_revives_a_soft_deleted_row_without_clearing_its_spend(
     assert row.spend == 12.5
 
     keyed = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "ada-again", "user_id": attribution_user_id},
         headers=master_key_header,
     )
@@ -177,7 +178,7 @@ def test_the_membership_context_carries_the_callers_workspaces(
     master_key_header: dict[str, str],
 ) -> None:
     """The shell picks a context and a default workspace from this one call."""
-    context = client.get("/v1/organizations/me", headers=master_key_header).json()
+    context = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()
 
     memberships = context["workspace_memberships"]
     assert [m["name"] for m in memberships] == ["Default workspace"]
@@ -190,13 +191,13 @@ def test_a_new_workspace_joins_the_callers_context(
     master_key_header: dict[str, str],
 ) -> None:
     created = client.post(
-        "/v1/workspaces",
+        f"{API_ROOT}/workspaces",
         json={"name": "Platform team"},
         headers=master_key_header,
     )
     assert created.status_code == 201, created.text
 
-    context = client.get("/v1/organizations/me", headers=master_key_header).json()
+    context = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()
 
     assert sorted(m["name"] for m in context["workspace_memberships"]) == [
         "Default workspace",
@@ -217,7 +218,7 @@ def test_the_context_lists_only_workspaces_the_caller_joined(
     """
     from gateway.models.tenancy import Workspace
 
-    context = client.get("/v1/organizations/me", headers=master_key_header).json()
+    context = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()
     organization_id = uuid.UUID(context["organization"]["id"])
 
     session = db_session_factory()
@@ -227,5 +228,5 @@ def test_the_context_lists_only_workspaces_the_caller_joined(
     finally:
         session.close()
 
-    after = client.get("/v1/organizations/me", headers=master_key_header).json()
+    after = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()
     assert [m["name"] for m in after["workspace_memberships"]] == ["Default workspace"]

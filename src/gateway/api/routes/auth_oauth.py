@@ -19,9 +19,16 @@ them to ``/auth/{provider}/callback``, an ordinary path (a redirect URI may not
 carry a fragment, so it cannot be the hash route directly) which
 ``gateway.main`` redirects into the dashboard's own callback page. That page
 compares the returned state against the stored one and, only then, posts the
-authorization code here. So the state round-trips through the browser that
-minted it and this deployment stores nothing between the two requests, which is
-the same reason PKCE stays off; see ``gateway.services.oauth_service``.
+code and the state here, where the state is checked again against the row
+``/authorize`` wrote. Two checks that fail in different directions: the
+browser's binds a callback to the tab that started the flow, and this one binds
+it to a flow this deployment started.
+
+**And to the browser that started it.** ``/authorize`` also sets an HttpOnly
+flow cookie whose digest the row keeps, and the callback refuses without it.
+The code and the state share one redirect URL that the access log and browser
+history both record; the cookie is the half of the flow that neither does. See
+``gateway.services.oauth_service``.
 
 **What this route decides, and what it does not.** It proves the person holds
 the provider account. Who that makes them *here* is behind
@@ -34,7 +41,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,26 +63,40 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.oauth_service import (
+    FLOW_COOKIE_NAME,
+    OAUTH_ROUTE_PREFIX,
+    apply_flow_cookie,
     authorization_url,
     exchange_code,
-    new_state,
+    flow_secret_for,
     provider_label,
     require_configured,
 )
 from gateway.services.tenancy.errors import OAuthNotConfiguredError, TenancyError
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
-router = APIRouter(prefix="/v1/auth/oauth", tags=["auth"])
+router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
 # A code is a provider-issued opaque string, a few hundred characters at most;
 # this is a sanity ceiling on an unauthenticated request body rather than a
 # format, matching the bounds ``auth_session.CreateSessionRequest`` sets.
 _MAX_SUBMITTED_CODE = 2048
+# A state this deployment issued is 43 characters (``secrets.token_urlsafe(32)``).
+# The ceiling is loose rather than exact because the value is looked up by hash
+# and a wrong length is simply a state that matches nothing; what it bounds is
+# how much an unauthenticated caller can make this process hash.
+_MAX_SUBMITTED_STATE = 512
 
 # Only a provider this deployment could ever configure is a path this router
 # answers at all, so an unknown segment is the framework's own 422 rather than a
 # handler deciding what to do with it. Spelled from the config vocabulary so the
 # two cannot drift.
+# The browser's flow cookie, when it sent one. Bounded for the same reason the
+# state is: it is hashed before anything looks at it.
+FlowCookie = Annotated[
+    str | None, Cookie(alias=FLOW_COOKIE_NAME, max_length=_MAX_SUBMITTED_STATE, include_in_schema=False)
+]
+
 ProviderPath = Annotated[
     str,
     Path(
@@ -95,10 +116,13 @@ class AuthorizeResponse(BaseModel):
     authorization_url: str = Field(description="The provider consent screen to navigate to.")
     state: str = Field(
         description=(
-            "An opaque CSRF value to keep for the length of the redirect and compare against the "
-            "'state' the provider returns. It is not stored on this deployment, so a callback "
-            "whose state does not match the one held by the browser that started the flow must be "
-            "abandoned by the client rather than sent here."
+            "An opaque CSRF value to keep for the length of the redirect, compare against the "
+            "'state' the provider returns, and send back with the authorization code. A callback "
+            "whose state does not match the one held by the browser that started the flow should "
+            "be abandoned by the client rather than sent here; one that does is checked again "
+            "against this deployment's own record of it. The response also sets an HttpOnly "
+            "cookie that the callback requires, so the exchange can only be completed from the "
+            "browser this call was made from."
         )
     )
 
@@ -111,22 +135,27 @@ class OAuthCallbackRequest(BaseModel):
     exchange are the same string by construction, and a browser cannot choose
     what this server sends to a provider.
 
-    No ``state`` either, and that is not an omission. The state is checked in the
-    browser, against the value that browser stored when it started the flow;
-    sending it here would let this deployment compare a value to itself, which
-    proves nothing without somewhere to have kept the original.
+    ``state`` is required, and is what binds this callback to an authorization
+    request this deployment actually made: it is claimed from
+    ``oauth_pending_state`` before the code is sent anywhere, and the row it
+    claims is what carries the PKCE verifier the exchange needs. The flow
+    cookie ``/authorize`` set travels alongside and binds it to the browser.
     """
 
     code: str = Field(
         max_length=_MAX_SUBMITTED_CODE,
         description="The authorization code from the provider's redirect.",
     )
+    state: str = Field(
+        max_length=_MAX_SUBMITTED_STATE,
+        description="The 'state' from the provider's redirect, as issued by /authorize.",
+    )
 
 
 class OAuthSessionResponse(BaseModel):
     """A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).
 
-    The same three fields ``POST /v1/auth/session`` answers, deliberately: the
+    The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
     dashboard's sign-in path does not care which credential got it here.
     """
 
@@ -170,19 +199,39 @@ def require_oauth_provider(
 async def authorize(
     provider: ProviderPath,
     request: Request,
+    response: Response,
     config: Annotated[GatewayConfig, Depends(get_config)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    flow_cookie: FlowCookie = None,
 ) -> AuthorizeResponse:
     """Start an OAuth sign-in: where to send the browser, and the state to keep.
 
-    A GET, and safe: it reads configuration and mints a random value, writing
-    nothing. Repeating it simply produces another state, and only the one the
-    browser kept is the one it will compare against.
+    A GET that writes, which is the one thing to know about it. It records the
+    authorization it is about to start (the state's hash, the PKCE verifier the
+    exchange will need, and the digest of a flow secret it sets as an HttpOnly
+    cookie) so the callback has something to check against, and that record is
+    the whole reason the callback can refuse a code this deployment never asked
+    for, or one presented from a browser other than the one that asked.
+
+    Still safe to repeat: each call mints its own state, and only the one the
+    browser kept is the one it sends back. The rows the others leave expire on
+    their own and are swept by the next call. The cookie is reused when the
+    browser already holds one, so a second tab does not break the first.
     """
     throttle_public_auth(request)
-    state = new_state()
-    return AuthorizeResponse(
-        authorization_url=authorization_url(config, provider, state=state), state=state
-    )
+    flow_secret = flow_secret_for(flow_cookie)
+    try:
+        url, state = await authorization_url(config, provider, db=db, flow_secret=flow_secret)
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("Failed to record a pending %s sign-in", provider, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error",
+        ) from None
+    apply_flow_cookie(response, flow_secret, secure=request_is_https(request))
+    return AuthorizeResponse(authorization_url=url, state=state)
 
 
 @router.post(
@@ -198,6 +247,7 @@ async def callback(
     identity_provider: IdentityProviderPortDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    flow_cookie: FlowCookie = None,
 ) -> OAuthSessionResponse:
     """Exchange an authorization code and set the HttpOnly session cookie.
 
@@ -227,7 +277,9 @@ async def callback(
             detail=MAINTENANCE_MODE_REFUSAL,
         )
     try:
-        external = await exchange_code(config, provider, code=body.code)
+        external = await exchange_code(
+            config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
+        )
         identity = await identity_provider.resolve(
             provider=external.provider,
             email=external.email,
@@ -254,9 +306,7 @@ async def callback(
         # racing, which the service settles on its own, and a database that
         # cannot stage this cannot stage the session row either.
         await OrganizationDomainService(db).auto_join_for_user(identity)
-        token, expires_at = await create_dashboard_session(
-            db, config.dashboard_session_ttl_hours, user_id=identity.id
-        )
+        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()

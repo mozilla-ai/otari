@@ -28,8 +28,9 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/v1/organizations/me/usage` for usage, and
 `/v1/organizations/me/keys` for a member's own API keys.
 
-In hybrid mode, the completion APIs accept an otari.ai user token through
-`Authorization: Bearer <token>`. Local API keys and management APIs are not used.
+In hybrid mode, the generation APIs and the `/v1/mcp` endpoints accept an
+otari.ai user token through `Authorization: Bearer <token>`. Local API keys and
+management APIs are not used.
 
 ## Availability by mode
 
@@ -37,6 +38,7 @@ In hybrid mode, the completion APIs accept an otari.ai user token through
 | --- | --- | --- | --- |
 | Health and `/v1/bootstrap` | Yes | Yes | Yes |
 | Chat, Messages, and Responses | Yes | No | Yes |
+| Caller-orchestrated MCP | Yes | No | Yes |
 | Other inference APIs | Yes | No | No |
 | `/v1/models` | Yes | Yes | No |
 | Management APIs | Yes | Yes | No |
@@ -83,6 +85,26 @@ removed.
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
 log provider keys, prompts, responses, or raw upstream bodies.
+
+## Caller-orchestrated MCP
+
+Two stored-server endpoints let an application own its own MCP tool loop, as an
+alternative to sending `mcp_servers` with a completion and letting Otari own it.
+`GET /v1/mcp/servers/{mcp_server_id}/tools` returns the tool definitions a stored
+MCP server exposes to the authenticated workspace, and `POST /v1/mcp/execute`
+runs one exact caller-authorized call and returns the remote server's native MCP
+result.
+
+Otari executes a caller-authorized call; it does not verify a user approval and
+does not claim to. The calling application is the authorization boundary and owns
+any human approval, argument editing, cancellation, and action history. Otari
+enforces authentication, stored-server access, the stored tool allowlist, URL
+safety, and its own execution bounds.
+
+`POST /v1/mcp/execute` must never be retried automatically, including by a
+reverse proxy or service mesh: an `outcome_unknown` response means the tool may
+already have run. See [MCP](mcp.md#caller-orchestrated-mcp) for the request
+shapes, the error and execution-state contract, and the limits.
 
 ## Keeping generated clients current
 

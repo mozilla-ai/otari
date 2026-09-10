@@ -1,8 +1,8 @@
 """Per-workspace web-search configuration (standalone mode only).
 
 The deployment-wide search backend (its URL, its engines, its purpose hint)
-stays on ``/v1/tool-settings``, and the tools ``POST /v1/search`` dispatches to
-stay on ``/v1/search-tools``; this surface says which workspaces on that
+stays on ``/api/v1/tool-settings``, and the tools ``POST /api/v1/search`` dispatches to
+stay on ``/api/v1/search-tools``; this surface says which workspaces on that
 deployment may search and how far their searches may reach. Thin composition
 over `gateway.services.tenancy.workspace_web_search_service`, following
 `routes/workspace_code_execution_policy.py`'s shape (master key on the router,
@@ -27,7 +27,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
 # every handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/web-search",
+    prefix="/workspaces/{workspace_id}/web-search",
     tags=["workspace-web-search"],
     dependencies=[Depends(verify_master_key)],
 )

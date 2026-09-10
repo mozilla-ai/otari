@@ -16,7 +16,7 @@ the multi-query array, and the filters with no field below (recency, context
 size, published-date) are ignored rather than rejected. Both are called out in
 ``docs/api-reference.md`` so a migrating caller can check for them.
 
-Both the body-selected (``POST /v1/search``) and path-selected
+Both the body-selected (``POST /api/v1/search``) and path-selected
 (``POST /v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
 so one Activity filter covers every search regardless of how the tool was
 named.
@@ -84,7 +84,7 @@ from gateway.services.search_backend import (
 from gateway.services.tenancy.workspace_web_search_service import resolve_workspace_web_search_config
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
-router = APIRouter(prefix="/v1", tags=["search"])
+router = APIRouter(tags=["search"])
 
 SEARCH_ENDPOINT = "/v1/search"
 
@@ -110,7 +110,7 @@ class SearchRequest(BaseModel):
         default=None,
         description=(
             "Configured search tool to run against. Optional when exactly one tool is "
-            "configured, and ignored on POST /v1/search/{search_tool_name}."
+            "configured, and ignored on POST /api/v1/search/{search_tool_name}."
         ),
     )
     max_results: int | None = Field(
@@ -198,7 +198,7 @@ async def create_search_for_tool(
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
-    Identical to ``POST /v1/search`` except that the path names the tool, which
+    Identical to ``POST /api/v1/search`` except that the path names the tool, which
     is the form LiteLLM clients use. Any ``search_tool_name`` in the body is
     ignored.
 

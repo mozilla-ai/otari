@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 
 def test_streaming_creation_error_returns_http_error(
     client: TestClient,
@@ -17,7 +19,7 @@ def test_streaming_creation_error_returns_http_error(
     stream and emitting an SSE error event.
     """
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:totally-invalid-model-xyz",
             "messages": [{"role": "user", "content": "Hello"}],

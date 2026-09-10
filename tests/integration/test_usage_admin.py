@@ -13,13 +13,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
+from gateway.core.config import API_ROOT
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.core.usage_source import SERVED_HERE_SLUG, SERVED_HERE_SOURCES
 from gateway.models.entities import UsageLog, User
 
-DELETE_PATH = "/v1/usage"
-SET_PRICE_PATH = "/v1/usage/set-price"
-COUNT_PATH = "/v1/usage/count"
+DELETE_PATH = f"{API_ROOT}/usage"
+SET_PRICE_PATH = f"{API_ROOT}/usage/set-price"
+COUNT_PATH = f"{API_ROOT}/usage/count"
 
 _TS = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 

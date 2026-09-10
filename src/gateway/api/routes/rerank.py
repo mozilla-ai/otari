@@ -18,7 +18,10 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import input_token_cost
 from gateway.services.provider_kwargs import ResolvedProvider
 
-router = APIRouter(prefix="/v1", tags=["rerank"])
+router = APIRouter(tags=["rerank"])
+
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/rerank"
 
 
 class RerankRequest(BaseModel):
@@ -94,7 +97,7 @@ async def create_rerank(
     # carry ``model``, which would echo the target an alias exists to hide. The
     # relabeling is a no-op on results without the field.
     outcome = await run_passthrough(
-        endpoint="/v1/rerank",
+        endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,
         response=response,
         auth_result=auth_result,

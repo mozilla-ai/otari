@@ -2,7 +2,7 @@
 
 A default is a workspace-level template for the per-member ``scoped_budgets``
 ceiling; the materialized per-member rows live on the existing
-``/v1/scoped-budgets`` surface. Thin composition over
+``/api/v1/scoped-budgets`` surface. Thin composition over
 `gateway.services.tenancy.workspace_budget_default_service`, following
 `routes/workspaces.py`'s own shape (master-key on the router, plus the
 caller's tenancy identity for the per-workspace role checks).
@@ -28,7 +28,7 @@ from gateway.services.tenancy.workspace_budget_default_service import (
 # handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/member-budget-policies",
+    prefix="/workspaces/{workspace_id}/member-budget-policies",
     tags=["workspace-member-budget-policies"],
     dependencies=[Depends(verify_master_key)],
 )

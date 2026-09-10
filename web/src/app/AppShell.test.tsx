@@ -9,6 +9,7 @@ import type {
   DeploymentBootstrap,
   GatewaySettings,
 } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
@@ -102,16 +103,16 @@ function renderShell(
     // panel. Answered from the same option, because a harness that could tell
     // the rail one thing and the page another would be describing a deployment
     // that does not exist.
-    if (path.startsWith("/v1/admin/access")) {
+    if (path.startsWith(`${API_ROOT}/admin/access`)) {
       return Response.json({ granted: options.operator ?? true })
     }
-    if (path.startsWith("/v1/admin/users")) {
+    if (path.startsWith(`${API_ROOT}/admin/users`)) {
       return Response.json({ data: [], count: 0 })
     }
-    if (path.startsWith("/v1/organizations/me/memberships")) {
+    if (path.startsWith(`${API_ROOT}/organizations/me/memberships`)) {
       return Response.json({ data: memberships, count: memberships.length })
     }
-    if (path.includes("/v1/settings")) {
+    if (path.includes(`${API_ROOT}/settings`)) {
       return Response.json(options.settings ?? SETTINGS_WITH_PRICING)
     }
     // The membership context, which carries the caller axis. An operator by
@@ -484,6 +485,40 @@ describe("AppShell responsive layout", () => {
   })
 })
 
+describe("the rail's closing rules", () => {
+  // The footer block and the closing band each draw a rule. Between them sits
+  // one row, the way onto the organization rail, and on that rail it is gated
+  // out: the two rules then land 4px apart and read as a single doubled
+  // hairline, which is what a reader reported. The band's rule is the
+  // unconditional one, mirroring the scope band at the head of the rail, so the
+  // footer's is the one that gives way.
+  const footerOf = (container: HTMLElement) =>
+    container.querySelector('[class*="pb-[env(safe-area-inset-bottom)]"]')
+
+  it("keeps the footer rule where a row sits below it", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell(bootstrap(), { url: "/" })
+
+    expect(
+      await screen.findByRole("link", { name: "Organization" }),
+    ).toBeInTheDocument()
+    expect(footerOf(container)).toHaveClass("border-t")
+  })
+
+  it("drops it on the organization rail, where that row is gone", async () => {
+    mockMatchMedia(false)
+    const { container } = await renderShell(bootstrap(), {
+      url: "/organization/members",
+    })
+
+    expect(
+      await screen.findByRole("link", { name: /^Back to/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+    expect(footerOf(container)).not.toHaveClass("border-t")
+  })
+})
+
 describe("AppShell surface gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -534,7 +569,7 @@ describe("AppShell surface gating", () => {
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
     // Awaited, not assumed: two of these rows declare `operatorOnly`, so neither
-    // exists until `GET /v1/organizations/me` answers. Taking the snapshot
+    // exists until `GET /api/v1/organizations/me` answers. Taking the snapshot
     // without waiting is a race that passes on a fast machine and fails on CI,
     // which is what it did. One await covers both, because the caller axis is
     // one read and they appear in the same paint.
@@ -686,7 +721,7 @@ describe("AppShell entitlement gating", () => {
       vi
         .mocked(globalThis.fetch)
         .mock.calls.some((call) =>
-          String(call[0]).includes("/v1/admin/access"),
+          String(call[0]).includes(`${API_ROOT}/admin/access`),
         ),
     ).toBe(false)
   })
@@ -718,13 +753,17 @@ describe("AppShell entitlement gating", () => {
 
     const members = await screen.findByRole("link", { name: "Members & roles" })
     const parent = screen.getByRole("link", { name: "Org settings" })
-    // The selected fill, which the navigation design draws as a lifted chip
-    // (`--color-surface-muted`, reached through `bg-surface-alt`) rather than the
-    // tinted `bg-primary-subtle` this rail used to wear. Asserted as the class
-    // because it is what a reader of the rail actually sees; `aria-current` is
-    // covered separately.
-    expect(members.className).toContain("bg-surface-alt")
-    expect(parent.className).not.toContain("bg-surface-alt")
+    // The selected treatment, asserted as the classes because they are what a
+    // reader of the rail actually sees; `aria-current` is covered separately.
+    // The fill is `bg-surface-subtle`, the louder of the two rungs; hover takes
+    // the quieter `surface-alt`, so a transient state cannot out-shout a
+    // permanent one. The left edge is the part hover can never borrow, which is why it is
+    // asserted here rather than left to `rowStyles.test.ts`: this is the test
+    // that proves exactly one row wears it.
+    expect(members.className).toContain("bg-surface-subtle")
+    expect(members.className).toContain("border-foreground")
+    expect(parent.className).not.toContain("bg-surface-subtle")
+    expect(parent.className).not.toContain("border-foreground")
   })
 
   it("names a gated-off child route after the child, not its parent", async () => {
@@ -932,7 +971,7 @@ describe("AppShell entitlement gating", () => {
   it("withholds Create workspace from a role the server would refuse", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
-    // `POST /v1/workspaces` is owners and admins only, and the Workspaces page
+    // `POST /api/v1/workspaces` is owners and admins only, and the Workspaces page
     // gates its own create control on the same predicate. Offering it here would
     // hand a member the whole form and report the refusal as a 403 after they
     // had typed a name.

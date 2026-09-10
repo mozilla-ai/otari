@@ -13,7 +13,7 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 
 from gateway.api.routes.messages import CountTokensRequest
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 
 
 def _make_message_response(**overrides: Any) -> MessageResponse:
@@ -44,7 +44,7 @@ def test_messages_endpoint_basic_completion(
 
     with patch("gateway.api.routes.messages.amessages", new=mock_amessages):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=messages_request_body,
             headers=master_key_header,
         )
@@ -68,7 +68,7 @@ def test_messages_endpoint_requires_auth(
 ) -> None:
     """Test that the endpoint requires authentication."""
     response = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json=messages_request_body,
     )
     assert response.status_code == 401
@@ -84,7 +84,7 @@ def test_messages_endpoint_master_key_requires_user(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=mock_response):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=messages_request_body,
             headers=master_key_header,
         )
@@ -100,7 +100,7 @@ def test_messages_endpoint_validation_error(
 ) -> None:
     """Test that validation errors are returned for missing fields."""
     response = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={"model": "anthropic:claude-3-5-sonnet"},
         headers=master_key_header,
     )
@@ -141,7 +141,7 @@ def test_messages_endpoint_with_tools(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=tool_use_response):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=request_body,
             headers=master_key_header,
         )
@@ -168,7 +168,7 @@ def test_messages_endpoint_provider_error_format(
         side_effect=RuntimeError("Provider unavailable"),
     ):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=messages_request_body,
             headers=master_key_header,
         )
@@ -201,7 +201,7 @@ def test_messages_endpoint_rejected_param_is_a_400_naming_it(
         side_effect=TypeError("AsyncMessages.create() got an unexpected keyword argument 'seed'"),
     ):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=messages_request_body,
             headers=master_key_header,
         )
@@ -231,7 +231,7 @@ def test_messages_endpoint_provider_error_streaming(
         side_effect=RuntimeError("Provider unavailable"),
     ):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=messages_request_body,
             headers=master_key_header,
         )
@@ -252,7 +252,7 @@ def test_messages_endpoint_bearer_auth(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=mock_response):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=messages_request_body,
             headers={API_KEY_HEADER: f"Bearer {api_key_obj['key']}"},
         )
@@ -300,7 +300,7 @@ def test_messages_endpoint_claude_code_shape(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=mock_response):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=_claude_code_request_body(),
             headers=master_key_header,
         )
@@ -324,7 +324,7 @@ def test_messages_telemetry_user_id_rejected_by_default(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=_make_message_response()):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=body,
             headers={API_KEY_HEADER: f"Bearer {api_key_obj['key']}"},
         )
@@ -343,7 +343,7 @@ def test_messages_telemetry_user_id_allowed_by_per_key_override(
     per-key exception rather than a deployment-wide relaxation (issue #493).
     """
     created = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "claude-code", "user_id": "cc-user", "reject_user_mismatch": False},
         headers=master_key_header,
     )
@@ -355,7 +355,7 @@ def test_messages_telemetry_user_id_allowed_by_per_key_override(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=_make_message_response()):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=body,
             headers={API_KEY_HEADER: f"Bearer {lenient_key}"},
         )
@@ -363,11 +363,11 @@ def test_messages_telemetry_user_id_allowed_by_per_key_override(
     assert response.status_code == 200, response.text
 
     # A second, unflagged key on the same deployment is still rejected.
-    strict = client.post("/v1/keys", json={"key_name": "strict"}, headers=master_key_header)
+    strict = client.post(f"{API_ROOT}/keys", json={"key_name": "strict"}, headers=master_key_header)
     assert strict.status_code == 200, strict.text
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=_make_message_response()):
         strict_response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=body,
             headers={API_KEY_HEADER: f"Bearer {strict.json()['key']}"},
         )
@@ -384,7 +384,7 @@ def test_messages_per_key_override_re_tightens_a_lenient_deployment(
     on a deployment that relaxed the check globally."""
     monkeypatch.setattr(test_config, "reject_user_mismatch", False)
     created = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "pinned-strict", "reject_user_mismatch": True},
         headers=master_key_header,
     )
@@ -395,7 +395,7 @@ def test_messages_per_key_override_re_tightens_a_lenient_deployment(
 
     with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=_make_message_response()):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json=body,
             headers={API_KEY_HEADER: f"Bearer {created.json()['key']}"},
         )
@@ -409,7 +409,7 @@ def test_count_tokens_basic(
 ) -> None:
     """count_tokens returns a positive integer input-token estimate."""
     response = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet",
             "messages": [{"role": "user", "content": "Hello, world!"}],
@@ -432,7 +432,7 @@ def test_count_tokens_accepts_context_management_and_betas(
     assert "betas" in CountTokensRequest.model_fields
 
     response = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-opus-5",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -453,7 +453,7 @@ def test_count_tokens_accepts_context_management_and_betas(
 def test_count_tokens_requires_auth(client: TestClient) -> None:
     """count_tokens rejects unauthenticated callers."""
     response = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -468,7 +468,7 @@ def test_count_tokens_validation_error(
 ) -> None:
     """Missing required fields produce a 422 before any counting."""
     response = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={"model": "anthropic:claude-3-5-sonnet"},
         headers=master_key_header,
     )
@@ -481,7 +481,7 @@ def test_count_tokens_scales_with_input(
 ) -> None:
     """A longer prompt yields a strictly larger token estimate."""
     short = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet",
             "messages": [{"role": "user", "content": "Hi"}],
@@ -490,7 +490,7 @@ def test_count_tokens_scales_with_input(
     ).json()["input_tokens"]
 
     long = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet",
             "messages": [{"role": "user", "content": "Hello " * 200}],
@@ -499,7 +499,7 @@ def test_count_tokens_scales_with_input(
     ).json()["input_tokens"]
 
     with_extras = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json=_claude_code_request_body(),
         headers=master_key_header,
     ).json()["input_tokens"]
@@ -516,7 +516,7 @@ def test_count_tokens_bearer_auth(
     header, which is what Claude Code sends when ANTHROPIC_AUTH_TOKEN is set.
     """
     response = client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet",
             "messages": [{"role": "user", "content": "Hello"}],

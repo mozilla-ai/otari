@@ -1,6 +1,6 @@
 import { Card, Link } from "@heroui/react"
-import { useGatewayHealth } from "@/shared/api/hooks"
-import { CopyableValue } from "@/shared/components/ui"
+import { CopyableValue } from "@/design-system/actions/CopyField"
+import { useGatewayHealth } from "@/shared/api/deployment"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
@@ -60,7 +60,11 @@ export function HybridLanding() {
         <Card.Content className="flex flex-col gap-6 p-7">
           <div className="flex flex-col items-center gap-3 text-center">
             {/* Decorative: the heading beside it already names the product. */}
-            <img src="/favicon.svg" alt="" className="h-12 w-12" />
+            <img
+              src={`${import.meta.env.BASE_URL}favicon.svg`}
+              alt=""
+              className="h-12 w-12"
+            />
             <div>
               <h1 className="text-display">Otari gateway</h1>
               <p className="mt-1 text-sm text-muted">
@@ -116,36 +120,30 @@ interface Status {
   state: string
 }
 
-const TONES: Record<Tone, { pill: string; dot: string }> = {
-  ok: {
-    pill: "border-success bg-success-subtle text-success",
-    dot: "bg-success",
-  },
-  warn: {
-    pill: "border-warning bg-warning-subtle text-warning",
-    dot: "bg-warning",
-  },
-  alert: {
-    pill: "border-danger bg-danger-subtle text-danger",
-    dot: "bg-danger",
-  },
-  pending: { pill: "border-border text-muted", dot: "bg-muted" },
+// Only the dot now: the pill's border and fill were a third statement of what
+// the mark and the word already say.
+const TONES: Record<Tone, { dot: string }> = {
+  ok: { dot: "bg-success" },
+  warn: { dot: "bg-warning" },
+  alert: { dot: "bg-danger" },
+  pending: { dot: "bg-text-subtle" },
 }
 
 /**
- * One live condition, as a labeled pill. Color is never the only signal: the
- * pill carries the state as a word, as the provider health pills do.
+ * One live condition, in the product's status form: a square dot and the state
+ * as a word. Color is never the only signal, which is what the word is for.
  */
 function StatusRow({ label, status }: { label: string; status: Status }) {
-  const { pill, dot } = TONES[status.tone]
+  const { dot } = TONES[status.tone]
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border py-2.5 first:border-t-0">
       <span className="text-sm text-muted">{label}</span>
-      <span
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${pill}`}
-      >
-        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-        {status.state}
+      {/* The status form the rest of the product uses: a square dot and a word,
+          no pill around them. The border and fill were saying a third time what
+          the dot and the ink already say twice. */}
+      <span className="flex items-center gap-2 text-mono-caption text-muted">
+        <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${dot}`} />
+        {status.state.toUpperCase()}
       </span>
     </div>
   )

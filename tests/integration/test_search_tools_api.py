@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
@@ -48,13 +48,13 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _create(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
     payload = {"name": "local", "provider": "searxng", "api_base": "http://searxng:8080", **body}
-    return client.post("/v1/search-tools", json=payload, headers=headers)
+    return client.post(f"{API_ROOT}/search-tools", json=payload, headers=headers)
 
 
 def test_requires_master_key(client: TestClient) -> None:
-    assert client.get("/v1/search-tools").status_code == 401
-    assert client.post("/v1/search-tools", json={"name": "x", "provider": "searxng"}).status_code == 401
-    assert client.delete("/v1/search-tools/x").status_code == 401
+    assert client.get(f"{API_ROOT}/search-tools").status_code == 401
+    assert client.post(f"{API_ROOT}/search-tools", json={"name": "x", "provider": "searxng"}).status_code == 401
+    assert client.delete(f"{API_ROOT}/search-tools/x").status_code == 401
 
 
 def test_create_lists_and_never_returns_the_key(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -67,7 +67,7 @@ def test_create_lists_and_never_returns_the_key(client: TestClient, master_key_h
     assert "api_key" not in body
     assert "exa-live-9876" not in resp.text
 
-    listed = client.get("/v1/search-tools", headers=master_key_header)
+    listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header)
     assert listed.status_code == 200
     assert [tool["name"] for tool in listed.json()["stored"]] == ["local"]
     assert "exa-live-9876" not in listed.text
@@ -140,7 +140,7 @@ def test_patch_updates_base_keeps_key_then_rotates(client: TestClient, master_ke
     _create(client, master_key_header, provider="exa", api_base=None, api_key="exa-orig-1111")
 
     patched = client.patch(
-        "/v1/search-tools/local",
+        f"{API_ROOT}/search-tools/local",
         json={"api_base": "https://proxy.internal"},
         headers=master_key_header,
     )
@@ -148,7 +148,9 @@ def test_patch_updates_base_keeps_key_then_rotates(client: TestClient, master_ke
     assert patched.json()["api_base"] == "https://proxy.internal"
     assert patched.json()["last4"] == "1111"
 
-    rotated = client.patch("/v1/search-tools/local", json={"api_key": "exa-new-2222"}, headers=master_key_header)
+    rotated = client.patch(
+        f"{API_ROOT}/search-tools/local", json={"api_key": "exa-new-2222"}, headers=master_key_header
+    )
     assert rotated.status_code == 200
     assert rotated.json()["last4"] == "2222"
     assert "exa-new-2222" not in rotated.text
@@ -159,16 +161,16 @@ def test_patch_refuses_to_clear_a_key_the_provider_needs(
 ) -> None:
     """The tool as it would be after the patch is validated, not the patch alone."""
     _create(client, master_key_header, provider="exa", api_base=None, api_key="exa-orig")
-    resp = client.patch("/v1/search-tools/local", json={"api_key": None}, headers=master_key_header)
+    resp = client.patch(f"{API_ROOT}/search-tools/local", json={"api_key": None}, headers=master_key_header)
     assert resp.status_code == 422
     assert "api_key is required" in resp.json()["detail"]
-    assert client.get("/v1/search-tools", headers=master_key_header).json()["stored"][0]["last4"] == "orig"
+    assert client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()["stored"][0]["last4"] == "orig"
 
 
 def test_patch_optimistic_precondition(client: TestClient, master_key_header: dict[str, str]) -> None:
     _create(client, master_key_header)
     stale = client.patch(
-        "/v1/search-tools/local",
+        f"{API_ROOT}/search-tools/local",
         json={"api_base": "http://other:8080", "expected_updated_at": "1999-01-01T00:00:00+00:00"},
         headers=master_key_header,
     )
@@ -176,27 +178,27 @@ def test_patch_optimistic_precondition(client: TestClient, master_key_header: di
 
 
 def test_patch_unknown_tool_is_404(client: TestClient, master_key_header: dict[str, str]) -> None:
-    resp = client.patch("/v1/search-tools/nope", json={"api_base": "http://x"}, headers=master_key_header)
+    resp = client.patch(f"{API_ROOT}/search-tools/nope", json={"api_base": "http://x"}, headers=master_key_header)
     assert resp.status_code == 404
 
 
 def test_delete_removes_the_tool(client: TestClient, master_key_header: dict[str, str]) -> None:
     _create(client, master_key_header)
-    assert client.delete("/v1/search-tools/local", headers=master_key_header).status_code == 204
-    assert client.get("/v1/search-tools", headers=master_key_header).json()["stored"] == []
-    assert client.delete("/v1/search-tools/local", headers=master_key_header).status_code == 404
+    assert client.delete(f"{API_ROOT}/search-tools/local", headers=master_key_header).status_code == 204
+    assert client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()["stored"] == []
+    assert client.delete(f"{API_ROOT}/search-tools/local", headers=master_key_header).status_code == 404
 
 
 def test_delete_of_a_config_tool_explains_why_it_cannot(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    resp = client.delete("/v1/search-tools/from-file", headers=master_key_header)
+    resp = client.delete(f"{API_ROOT}/search-tools/from-file", headers=master_key_header)
     assert resp.status_code == 404
     assert "defined in the config file" in resp.json()["detail"]
 
 
 def test_list_reports_config_tools_and_shadowing(client: TestClient, master_key_header: dict[str, str]) -> None:
-    listed = client.get("/v1/search-tools", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()
     assert [tool["name"] for tool in listed["config"]] == ["from-file"]
     assert listed["config"][0]["has_api_key"] is True
     assert listed["config"][0]["shadowed"] is False
@@ -206,7 +208,7 @@ def test_list_reports_config_tools_and_shadowing(client: TestClient, master_key_
     assert _create(client, master_key_header, name="from-file", provider="exa", api_base=None, api_key="k").json()[
         "shadows_config"
     ]
-    after = client.get("/v1/search-tools", headers=master_key_header).json()
+    after = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()
     assert after["config"][0]["shadowed"] is True
     assert after["stored"][0]["shadows_config"] is True
 
@@ -214,7 +216,7 @@ def test_list_reports_config_tools_and_shadowing(client: TestClient, master_key_
 def test_provider_catalog_reports_what_each_provider_needs(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    resp = client.get("/v1/search-tools/providers", headers=master_key_header)
+    resp = client.get(f"{API_ROOT}/search-tools/providers", headers=master_key_header)
     catalog = {entry["id"]: entry for entry in resp.json()}
     assert catalog["exa"]["requires_api_key"] is True
     assert catalog["exa"]["requires_api_base"] is False
@@ -233,7 +235,7 @@ def test_stored_tool_is_immediately_dispatchable(
     outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="Example")])
     mock = AsyncMock(return_value=outcome)
     with patch("gateway.api.routes.search.run_search", mock):
-        resp = client.post("/v1/search/local", json={"query": "otari"}, headers=api_key_header)
+        resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "local"
     dispatched = mock.call_args.args[0]
@@ -247,12 +249,12 @@ def test_deleting_a_stored_tool_restores_the_config_one(
     _create(client, master_key_header, name="from-file", provider="exa", api_base=None, api_key="stored-key")
     mock = AsyncMock(return_value=SearchOutcome(results=[]))
     with patch("gateway.api.routes.search.run_search", mock):
-        client.post("/v1/search/from-file", json={"query": "q"}, headers=api_key_header)
+        client.post(f"{API_ROOT}/search/from-file", json={"query": "q"}, headers=api_key_header)
     assert mock.call_args.args[0].api_key == "stored-key"
 
-    assert client.delete("/v1/search-tools/from-file", headers=master_key_header).status_code == 204
+    assert client.delete(f"{API_ROOT}/search-tools/from-file", headers=master_key_header).status_code == 204
     with patch("gateway.api.routes.search.run_search", mock):
-        client.post("/v1/search/from-file", json={"query": "q"}, headers=api_key_header)
+        client.post(f"{API_ROOT}/search/from-file", json={"query": "q"}, headers=api_key_header)
     assert mock.call_args.args[0].api_key == "file-key"
 
 
@@ -264,12 +266,12 @@ def test_reencrypt_allows_secret_key_retirement(
     _create(client, master_key_header, provider="exa", api_base=None, api_key="exa-rotate")
 
     monkeypatch.setenv("OTARI_SECRET_KEY", f"{new_key},{old_key}")
-    resp = client.post("/v1/search-tools/reencrypt", headers=master_key_header)
+    resp = client.post(f"{API_ROOT}/search-tools/reencrypt", headers=master_key_header)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"reencrypted": 1, "unreadable": 0}
 
     monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
-    listed = client.get("/v1/search-tools", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()
     assert listed["stored"][0]["decryptable"] is True
 
 
@@ -278,5 +280,5 @@ def test_list_flags_a_key_that_can_no_longer_be_decrypted(
 ) -> None:
     _create(client, master_key_header, provider="exa", api_base=None, api_key="exa-orig")
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
-    listed = client.get("/v1/search-tools", headers=master_key_header).json()
+    listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()
     assert listed["stored"][0]["decryptable"] is False

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 import gateway.main as gateway_main
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.dashboard import get_dashboard_dir
 from gateway.log_config import logger as gateway_logger
@@ -251,7 +251,7 @@ def test_hybrid_mode_serves_the_dashboard_at_root(tmp_path: Path, monkeypatch: p
 
     with TestClient(app) as client:
         root = client.get("/")
-        bootstrap = client.get("/v1/bootstrap")
+        bootstrap = client.get(f"{API_ROOT}/bootstrap")
 
     assert root.status_code == 200
     assert '<div id="root">' in root.text
@@ -302,7 +302,7 @@ def test_hybrid_root_carries_no_platform_token(tmp_path: Path, monkeypatch: pyte
     app = create_app(_hybrid_config(tmp_path, "gateway-hybrid-secret-test.db"))
 
     with TestClient(app) as client:
-        served = [client.get("/").text, client.get("/v1/bootstrap").text, client.get("/health").text]
+        served = [client.get("/").text, client.get(f"{API_ROOT}/bootstrap").text, client.get(f"{API_ROOT}/health").text]
 
     for body in served:
         assert token not in body
@@ -323,7 +323,7 @@ def test_create_app_accepts_valid_secret_key(tmp_path: Path, monkeypatch: pytest
     app = create_app(_config(tmp_path, "gateway-good-secret-test.db"))
 
     with TestClient(app) as client:
-        response = client.get("/health")
+        response = client.get(f"{API_ROOT}/health")
 
     assert response.status_code == 200
 

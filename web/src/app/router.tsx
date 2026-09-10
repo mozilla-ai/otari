@@ -1,5 +1,6 @@
 import { createHashHistory, createRouter } from "@tanstack/react-router"
 import { PendingPage } from "@/app/PendingPage"
+import { PageError } from "@/design-system/feedback/PageError"
 import { routeTree } from "@/routeTree.gen"
 import { parseSearch, stringifySearch } from "@/shared/helpers/search"
 
@@ -19,6 +20,17 @@ export const router = createRouter({
   defaultPendingComponent: PendingPage,
   defaultPendingMs: 0,
   defaultPendingMinMs: 0,
+  // Without this a routed throw lands on TanStack's built-in component, which
+  // paints its own inline-styled box and a red `<pre>` of the raw error: the one
+  // thing `design/feedback.md` says never to render. `router.test.tsx` covers
+  // why setting it is what makes a boundary catch the throw at all.
+  defaultErrorComponent: ({ error }) => (
+    // No mention of the sidebar: this serves the root match too, and a throw in
+    // `AppShell` itself replaces the shell the sidebar lives in.
+    <PageError error={error}>
+      This page could not finish rendering. Reload to try again.
+    </PageError>
+  ),
 })
 
 declare module "@tanstack/react-router" {

@@ -21,7 +21,7 @@ mode is why.
 
 Naming the address is the other half of that. "Send it to your Otari gateway" is
 what the caller already believed they were doing, so where the deployment knows
-its data plane (``data_plane_url``, the same value ``GET /v1/bootstrap`` hands
+its data plane (``data_plane_url``, the same value ``GET /api/v1/bootstrap`` hands
 the dashboard) the refusal says which host to use. Left unset it falls back to
 the generic sentence, matching what bootstrap already treats as unconfigured.
 
@@ -67,35 +67,44 @@ _METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 # router dropped there without a prefix added here fails rather than shipping
 # the bare 404 this module exists to avoid.
 DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("/v1/chat", "OpenAI-compatible completions, the path otari#822 was found on"),
+    ("/chat", "OpenAI-compatible completions, the path otari#822 was found on"),
     (
-        "/v1/messages",
-        "Anthropic-shaped completions. The catch-all takes /v1/messages/count_tokens "
+        "/messages",
+        "Anthropic-shaped completions. The catch-all takes /messages/count_tokens "
         "with it: that one bills nothing and contacts no provider, but it sizes a "
         "prompt for a completion this deployment will not serve",
     ),
-    ("/v1/responses", "the Responses API surface"),
-    ("/v1/embeddings", "priced per token like a completion"),
-    ("/v1/images", "priced per image"),
-    ("/v1/audio", "transcription and speech, priced per second or per character"),
-    ("/v1/rerank", "priced per request"),
-    ("/v1/moderations", "dispatches upstream even where the upstream charges nothing"),
+    ("/responses", "the Responses API surface"),
+    ("/embeddings", "priced per token like a completion"),
+    ("/images", "priced per image"),
+    ("/audio", "transcription and speech, priced per second or per character"),
+    ("/rerank", "priced per request"),
+    ("/moderations", "dispatches upstream even where the upstream charges nothing"),
     (
-        "/v1/search",
-        "not /v1/search-tools, which is the management catalog this dispatches "
+        "/search",
+        "not /search-tools, which is the management catalog this dispatches "
         "against and stays mounted. The catch-all cannot reach it either, since it "
-        "only matches under /v1/search/",
+        "only matches under /search/",
     ),
-    ("/v1/batches", "queues completions, so it is dispatch deferred rather than avoided"),
+    ("/batches", "queues completions, so it is dispatch deferred rather than avoided"),
     (
-        "/v1/files",
+        "/mcp",
+        "caller-orchestrated MCP discovery and execution. Neither dispatches to a "
+        "model, and execution bills nothing here, but both open an outbound MCP "
+        "session on behalf of a tenant, which belongs on the data-plane gateway "
+        "that holds that tenant's request context",
+    ),
+    (
+        "/files",
         "dispatches to no provider and costs nothing to serve, so not the leak "
         "itself. It exists only to be referenced from a completion or a batch, and "
         "with both refused here an upload has no consumer on this deployment",
     ),
 )
 
-router = APIRouter(tags=["hosted-mode"])
+# Not published. The document describes what this deployment serves, and a
+# refusal is a deployment posture, not an operation a client can call.
+router = APIRouter(tags=["hosted-mode"], include_in_schema=False)
 
 
 def _detail(data_plane_url: str | None) -> str:
@@ -112,9 +121,8 @@ def _register(prefix: str) -> None:
     async def refuse(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_detail(config.data_plane_url))
 
-    # A distinct name per prefix, so the generated operation ids stay as
-    # readable as the hand-written siblings' in hybrid_mode.
-    refuse.__name__ = f"{prefix.removeprefix('/v1/').replace('/', '_')}_disabled"
+    # A distinct name per prefix, so the routing table reads like hybrid_mode's.
+    refuse.__name__ = f"{prefix.removeprefix('/').replace('/', '_')}_disabled"
     for path in (prefix, f"{prefix}/{{path:path}}"):
         router.api_route(path, methods=_METHODS)(refuse)
 

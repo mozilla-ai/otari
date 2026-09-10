@@ -27,6 +27,25 @@ async function openPage(
   ).toBeVisible()
 }
 
+// The value beside a term in the organization's detail list, the way
+// `tileValue` reads the value beside a tile's label.
+function organizationDetail(page: Page, term: string): Locator {
+  return page
+    .getByText(term, { exact: true })
+    .locator("xpath=following-sibling::dd[1]")
+}
+
+// Renaming is a dialog away, and the dialog shows the name being replaced
+// before it takes the one replacing it.
+async function rename(page: Page, to: string): Promise<void> {
+  await page.getByRole("button", { name: "Change organization name" }).click()
+  const dialog = page.getByRole("alertdialog")
+  await expect(dialog.getByText("Current name")).toBeVisible()
+  await dialog.getByLabel("New name").fill(to)
+  await dialog.getByRole("button", { name: "Change name" }).click()
+  await expect(dialog).toBeHidden()
+}
+
 function memberRow(page: Page, name: string | RegExp): Locator {
   return tableRows(page, "Organization members").filter({
     has: page.getByRole("rowheader", { name }),
@@ -49,19 +68,21 @@ test.describe("standalone tenancy", () => {
 
     // The master key names no user, so the first authenticated request
     // provisions this: one organization, one owner identity, one workspace.
-    const name = page.getByLabel("Organization name")
-    const original = await name.inputValue()
+    const name = organizationDetail(page, "Organization name")
+    const original = ((await name.textContent()) ?? "").trim()
     expect(original).not.toBe("")
 
-    await name.fill("Parity Organization")
-    await page.getByRole("button", { name: "Save name" }).click()
-    await expect(name).toHaveValue("Parity Organization")
+    // The page reads the name rather than offering it in an open box, so
+    // nothing here can be renamed by a stray keystroke on arrival.
+    await expect(page.getByRole("main").getByRole("textbox")).toHaveCount(0)
+
+    await rename(page, "Parity Organization")
+    await expect(name).toHaveText("Parity Organization")
 
     // The slug is set at creation and deliberately does not follow a rename,
     // which is what makes it safe to key anything off.
-    await name.fill(original)
-    await page.getByRole("button", { name: "Save name" }).click()
-    await expect(name).toHaveValue(original)
+    await rename(page, original)
+    await expect(name).toHaveText(original)
   })
 
   test("lists the operator as an undemotable owner", async ({ page }) => {

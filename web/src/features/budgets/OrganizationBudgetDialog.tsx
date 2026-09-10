@@ -2,8 +2,9 @@ import { AlertDialog, Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { OrganizationBudget } from "@/client"
-import { Field } from "@/shared/components/Field"
-import { ErrorBanner, FilterSelect } from "@/shared/components/ui"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Field } from "@/design-system/forms/Field"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
 import {
   PERIOD_OPTIONS,

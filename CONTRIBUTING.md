@@ -6,6 +6,61 @@
 - For significant changes (new endpoints, auth changes, breaking config changes, new dependencies), open an issue first to align on approach.
 - All contributors must follow Mozilla's [Community Participation Guidelines](https://www.mozilla.org/about/governance/policies/participation/).
 
+## Is this an Otari change or an any-llm change?
+
+Otari dispatches every provider call through
+[any-llm](https://github.com/mozilla-ai/any-llm). Much of what looks like an
+Otari bug is a provider integration bug, and fixing it here means patching
+around the SDK instead of fixing it for every any-llm user. Work out which repo
+owns the change before writing code.
+
+**The seam:** any-llm owns talking to a provider. Otari owns deciding whether a
+call happens, with which credentials, and what it cost.
+
+**The test:** reproduce it without Otari. If a direct any-llm call shows the same
+behavior, it belongs upstream.
+
+```python
+# pip install "any-llm-sdk[all]"
+import asyncio
+from any_llm import acompletion
+
+print(asyncio.run(acompletion(
+    model="openai:gpt-4o-mini",   # your provider:model
+    messages=[{"role": "user", "content": "hi"}],
+    # plus the param or option you think Otari is mishandling
+)))
+```
+
+**File it in [any-llm](https://github.com/mozilla-ai/any-llm/issues) if:**
+
+- a provider is unsupported, or needs a new implementation
+- a request param is dropped or mistranslated on the way to a provider SDK
+- a provider's response or stream chunks are not normalized to the OpenAI shape
+- `list_models` behavior, a provider capability flag, a credential env var name, or a default base URL is wrong
+- a provider SDK upgrade breaks the call itself
+
+**File it here if it touches:**
+
+- keys, users, orgs, workspaces, budgets, usage records, or pricing
+- route schemas, the OpenAPI spec, or the Anthropic and Responses envelopes
+- routing, fallback across attempts, or routing memory
+- `config.yml` layering, the `providers:` block, or provider instances and aliases
+- the dashboard, built-in tools, the MCP loop, guardrails, or hybrid mode
+
+Two things that look upstream but are ours: the per-provider setup guides in
+`docs/providers/`, and how a provider error becomes a status code and a
+sanitized message.
+
+### When the fix is upstream but Otari cannot wait
+
+Otari sometimes has to carry a workaround while any-llm catches up. That is a
+legitimate PR here, with conditions: keep the shim as small as the problem
+allows, comment it with a link to the any-llm issue, and open an Otari issue to
+remove it once the SDK pin moves. `service_tier` in
+`src/gateway/api/routes/chat.py` is the worked example. File the upstream issue
+first; a shim with no upstream issue is permanent by accident.
+
 ## Dev setup
 
 **Prerequisites:** Python 3.13+, `uv`, Docker (for integration tests).

@@ -81,7 +81,7 @@ the page that was fetched, so the result is a subset of a subset and the count i
 small list already in memory, rendered in a table, is fine.
 
 When a hook genuinely has to walk everything, bound the walk. `fetchAllPricing` in
-`shared/api/hooks.ts` is the shape to copy, and [data-fetching.md](./data-fetching.md)
+The domain modules under `shared/api/` are the shape to copy, and [data-fetching.md](./data-fetching.md)
 explains the cap.
 
 ## Long lists

@@ -23,7 +23,11 @@ description: Review a pull request or diff for this repository against otari's p
      [security-review](../../instructions/security-review.instructions.md),
      [performance-review](../../instructions/performance-review.instructions.md),
      [frontend-standards](../../instructions/frontend-standards.instructions.md).
-     These auto-apply for Copilot; nothing loads them for you, so read them explicitly.
+     CodeRabbit loads all three as review guidance, through the directory glob in
+     `.coderabbit.yaml` rather than through their `applyTo` frontmatter (its
+     `path_instructions` is empty). No bot reviewing here reads that frontmatter now
+     that Copilot is gone, so it is a note to a human reader and to you: glob it
+     yourself and read the files that match.
 4. Check the repo-specific gates below.
 5. Draft the review, then re-read the draft and drop anything that is not actionable.
 6. Ask whether to post. Never post without a go-ahead for that specific PR.

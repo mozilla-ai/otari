@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.budget_service import ReservationHandle, estimate_tokens
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
@@ -107,7 +107,7 @@ async def _normalize_with_vision(
 
 
 async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
-    request = Request({"type": "http", "method": "POST", "path": "/v1/chat/completions", "headers": []})
+    request = Request({"type": "http", "method": "POST", "path": f"{API_ROOT}/chat/completions", "headers": []})
     return await pipeline.resolve_request_context(
         adapter=chat._ADAPTER,
         raw_request=request,

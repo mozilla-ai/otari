@@ -14,6 +14,7 @@ import pytest_asyncio
 import uvicorn
 from alembic import command
 from alembic.config import Config
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.engine import make_url
@@ -28,9 +29,12 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.api.deps import set_config
+from gateway.container import build_container
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app
+from gateway.rate_limit import RateLimiter
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
 
@@ -284,6 +288,64 @@ def test_config(postgres_url: str) -> GatewayConfig:
     )
 
 
+_APPS: list[tuple[GatewayConfig, FastAPI]] = []
+_APP_CACHE_SIZE = 8
+
+
+def app_for(config: GatewayConfig) -> FastAPI:
+    """An app for ``config``, built once per worker per distinct config.
+
+    ``create_app`` is where a test's setup time goes: FastAPI analyzes every
+    route's signature and builds its pydantic adapters on each call, which is
+    most of a second on a CI runner, for thousands of tests. Everything it
+    derives from the config it derives from the config's content, so an app
+    built for an equal config is the same app; what differs per test is redone
+    here. The lifespan still runs per test (``TestClient`` enters it), so the
+    database-backed startup and the cache resets at shutdown are as fresh as
+    they were.
+
+    The match is by value against a snapshot taken before the build, because a
+    booted app mutates the config it holds (runtime-setting and provider
+    overlays land on it). The app is then pointed at the caller's object, the
+    way ``create_app`` would have: ``app.state.config`` is what ``get_config``
+    and the lifespan read, and ``set_config`` is the process-wide fallback. A
+    test that flips a flag on its own config mid-test is therefore still seen.
+    """
+    for snapshot, app in _APPS:
+        if snapshot == config:
+            break
+    else:
+        snapshot = config.model_copy(deep=True)
+        app = create_app(config)
+        _APPS.append((snapshot, app))
+        del _APPS[:-_APP_CACHE_SIZE]
+    app.state.config = config
+    set_config(config)
+    _refresh_process_state(app, config)
+    return app
+
+
+def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
+    """Redo the part of ``create_app`` that a test can observe across boots.
+
+    The lifespan does not touch these, so on a reused app they would carry one
+    test's state into the next: the login limiter counts calls per client IP
+    and the test client always has the same one, a fixture may rebind a port on
+    the container, and a test that registers an in-flight entry by hand and
+    fails before finishing it would leave it for the next one. The registry is
+    cleared in place rather than replaced, because the middleware holds the one
+    ``create_app`` built and finishes entries on it.
+    """
+    app.state.inflight.clear()
+    app.state.rate_limiter = RateLimiter(config.rate_limit_rpm) if config.rate_limit_rpm is not None else None
+    app.state.login_rate_limiter = (
+        RateLimiter(config.dashboard_login_rate_limit_per_minute)
+        if config.dashboard_login_rate_limit_per_minute is not None
+        else None
+    )
+    app.state.container = build_container(config.bootstrap)
+
+
 def dispose_async_engine(async_engine: AsyncEngine) -> None:
     """Close an async engine's connections from synchronous teardown."""
     try:
@@ -307,13 +369,15 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
     async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(config)
+    app = app_for(config)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with async_session_factory() as session:
             yield session
 
-    app.dependency_overrides[get_db] = override_get_db
+    # Assigned rather than updated: the app outlives the test, so an override
+    # left by an earlier boot would otherwise stay registered.
+    app.dependency_overrides = {get_db: override_get_db}
 
     try:
         with TestClient(app) as test_client:
@@ -324,7 +388,13 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
 
 @pytest.fixture
 def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
-    """Create a test client for the FastAPI app."""
+    """A client on a freshly booted app for the shared config.
+
+    Freshly booted, not freshly built: the app object is shared for the worker's
+    lifetime (``app_for``), and only the lifespan runs per test. Whatever the
+    lifespan sets on ``app.state`` is per test; anything else put on the app
+    outlives the test unless ``_refresh_process_state`` redoes it.
+    """
     yield from build_test_client(test_config)
 
 
@@ -339,7 +409,7 @@ def master_key_header(test_config: GatewayConfig) -> dict[str, str]:
 def api_key_obj(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Create a test API key and return its details."""
     response = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "test-key"},
         headers=master_key_header,
     )
@@ -359,7 +429,7 @@ def api_key_header(test_config: GatewayConfig, api_key_obj: dict[str, Any]) -> d
 def test_user(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Create a test user."""
     response = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -406,7 +476,7 @@ def test_messages_with_longer_response() -> list[dict[str, str]]:
 def model_pricing(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Create model pricing for gemini-2.5-flash."""
     response = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": MODEL_NAME,
             "input_price_per_million": 0.075,

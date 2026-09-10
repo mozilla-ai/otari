@@ -26,7 +26,7 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
 from .conftest import build_test_client
@@ -78,7 +78,7 @@ HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 
 
 def _create_user(client: TestClient) -> None:
-    resp = client.post("/v1/users", json={"user_id": "test-user", "alias": "Test User"}, headers=HEADERS)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": "test-user", "alias": "Test User"}, headers=HEADERS)
     assert resp.status_code == 200
 
 
@@ -90,9 +90,9 @@ def _create_user(client: TestClient) -> None:
 @pytest.mark.parametrize(
     ("path", "payload"),
     [
-        ("/v1/embeddings", {"input": "hello"}),
-        ("/v1/rerank", {"query": "q", "documents": ["a", "b"]}),
-        ("/v1/images/generations", {"prompt": "a cat"}),
+        (f"{API_ROOT}/embeddings", {"input": "hello"}),
+        (f"{API_ROOT}/rerank", {"query": "q", "documents": ["a", "b"]}),
+        (f"{API_ROOT}/images/generations", {"prompt": "a cat"}),
     ],
 )
 def test_unpriced_alias_402_echoes_alias_not_target(
@@ -122,7 +122,7 @@ def test_unpriced_alias_402_echoes_alias_not_target(
 
 
 def test_list_models_shows_aliases_only_with_discovery_off(client: TestClient) -> None:
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
     # Only the curated alias names are exposed; the real provider/model is hidden.
@@ -130,7 +130,7 @@ def test_list_models_shows_aliases_only_with_discovery_off(client: TestClient) -
 
 
 def test_alias_listing_owned_by_is_gateway(client: TestClient) -> None:
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     entry = next(m for m in resp.json()["data"] if m["id"] == "myopusmodel")
     assert entry["owned_by"] == "otari"
     assert entry["object"] == "model"
@@ -139,7 +139,7 @@ def test_alias_listing_owned_by_is_gateway(client: TestClient) -> None:
 def test_alias_listing_surfaces_target_pricing(client: TestClient) -> None:
     # Pricing is configured on the real target; the alias inherits it in listing.
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-opus-4",
             "input_price_per_million": 15.0,
@@ -147,7 +147,7 @@ def test_alias_listing_surfaces_target_pricing(client: TestClient) -> None:
         },
         headers=HEADERS,
     )
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     entry = next(m for m in resp.json()["data"] if m["id"] == "myopusmodel")
     assert entry["pricing"]["input_price_per_million"] == 15.0
     assert entry["pricing"]["output_price_per_million"] == 75.0
@@ -173,7 +173,7 @@ def test_legacy_form_pricing_row_still_prices_alias(client: TestClient, alias_co
     finally:
         engine.dispose()
 
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert {m["id"] for m in data} == {"myopusmodel", "housemodel"}
@@ -181,13 +181,13 @@ def test_legacy_form_pricing_row_still_prices_alias(client: TestClient, alias_co
     assert entry["pricing"]["input_price_per_million"] == 15.0
 
     # The single-model endpoint reads the same row through its filtered query.
-    single = client.get("/v1/models/myopusmodel", headers=HEADERS)
+    single = client.get(f"{API_ROOT}/models/myopusmodel", headers=HEADERS)
     assert single.json()["pricing"]["input_price_per_million"] == 15.0
 
 
 def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "home_lab:qwen3",
             "input_price_per_million": 1.0,
@@ -195,7 +195,7 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         },
         headers=HEADERS,
     )
-    resp = client.get("/v1/models/housemodel", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models/housemodel", headers=HEADERS)
     assert resp.status_code == 200
     assert resp.json()["pricing"] == {
         "input_price_per_million": 1.0,
@@ -209,7 +209,7 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
 
 def test_alias_listing_reports_where_its_price_came_from(client: TestClient) -> None:
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-opus-4",
             "input_price_per_million": 15.0,
@@ -217,7 +217,7 @@ def test_alias_listing_reports_where_its_price_came_from(client: TestClient) -> 
         },
         headers=HEADERS,
     )
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     data = resp.json()["data"]
     # The target is priced in the database, so the alias says so. The unpriced
     # alias reports "none" rather than inheriting the other one's source.
@@ -229,7 +229,7 @@ def test_alias_inherits_target_default_price(default_priced_client: TestClient) 
     # Nothing is priced in the database, but the gateway would still bill this
     # alias at the fallback rate, so the listing has to say so rather than
     # report it as unpriced.
-    resp = default_priced_client.get("/v1/models", headers=HEADERS)
+    resp = default_priced_client.get(f"{API_ROOT}/models", headers=HEADERS)
     entry = next(m for m in resp.json()["data"] if m["id"] == "myopusmodel")
 
     assert entry["pricing_source"] == "default"
@@ -243,7 +243,7 @@ def test_alias_target_is_priced_by_name_though_the_listing_hides_it(
     # name elsewhere (usage logs bill the target, not the alias) has no way to
     # see its rate. Asking for it by name must report what it is billed at
     # rather than 404, which would read as "this model costs nothing".
-    resp = default_priced_client.get("/v1/models/anthropic:claude-opus-4", headers=HEADERS)
+    resp = default_priced_client.get(f"{API_ROOT}/models/anthropic:claude-opus-4", headers=HEADERS)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -254,14 +254,14 @@ def test_alias_target_is_priced_by_name_though_the_listing_hides_it(
 
     # Still withheld from the listing: answering about it by name is not the
     # same as advertising it.
-    listing = default_priced_client.get("/v1/models", headers=HEADERS)
+    listing = default_priced_client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert "anthropic:claude-opus-4" not in {m["id"] for m in listing.json()["data"]}
 
 
 def test_unknown_model_is_still_404_when_nothing_can_price_it(
     default_priced_client: TestClient,
 ) -> None:
-    resp = default_priced_client.get("/v1/models/openai:not-a-real-model-xyz", headers=HEADERS)
+    resp = default_priced_client.get(f"{API_ROOT}/models/openai:not-a-real-model-xyz", headers=HEADERS)
     assert resp.status_code == 404
 
 
@@ -270,7 +270,7 @@ def test_pricing_an_alias_is_rejected(client: TestClient) -> None:
     # is never read. Accepting the write would report success and silently
     # change nothing about what the caller is billed.
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "myopusmodel",
             "input_price_per_million": 99.0,
@@ -285,16 +285,16 @@ def test_pricing_an_alias_is_rejected(client: TestClient) -> None:
     assert "anthropic:claude-opus-4" in detail
 
     # Nothing was written: the alias is still unpriced, not priced at 99.
-    listing = client.get("/v1/models", headers=HEADERS)
+    listing = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert next(m for m in listing.json()["data"] if m["id"] == "myopusmodel")["pricing"] is None
-    assert client.get("/v1/pricing/myopusmodel", headers=HEADERS).status_code == 404
+    assert client.get(f"{API_ROOT}/pricing/myopusmodel", headers=HEADERS).status_code == 404
 
 
 def test_pricing_the_alias_target_is_still_accepted(client: TestClient) -> None:
     # The rejection is scoped to alias names only; the target it points at is the
     # supported way to price an aliased model.
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-opus-4",
             "input_price_per_million": 15.0,
@@ -309,7 +309,7 @@ def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
     # Aliasing a model forces a pricing entry on the real target (billing keys
     # there), and that entry must not put the hidden name back in the listing.
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "home_lab:qwen3",
             "input_price_per_million": 1.0,
@@ -317,7 +317,7 @@ def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
         },
         headers=HEADERS,
     )
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
     assert ids == {"myopusmodel", "housemodel"}
@@ -335,7 +335,7 @@ def test_discovered_alias_target_is_hidden_from_the_listing(alias_config: Gatewa
         client_gen = build_test_client(alias_config.model_copy(update={"model_discovery": True}))
         discovery_client = next(client_gen)
         try:
-            resp = discovery_client.get("/v1/models", headers=HEADERS)
+            resp = discovery_client.get(f"{API_ROOT}/models", headers=HEADERS)
         finally:
             client_gen.close()
 
@@ -350,7 +350,7 @@ def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:
     # Only alias targets are withheld; a priced model nothing points at is still
     # listed, preserving the pricing-only listing behavior.
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "anthropic:claude-haiku-4",
             "input_price_per_million": 1.0,
@@ -358,7 +358,7 @@ def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:
         },
         headers=HEADERS,
     )
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
     assert ids == {"myopusmodel", "housemodel", "anthropic:claude-haiku-4"}
@@ -367,14 +367,14 @@ def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:
 def test_provider_filter_excludes_aliases(client: TestClient) -> None:
     # A ?provider= filter asks for one provider's real models and must not leak
     # the alias mapping.
-    resp = client.get("/v1/models", params={"provider": "anthropic"}, headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", params={"provider": "anthropic"}, headers=HEADERS)
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
     assert "myopusmodel" not in ids
 
 
 def test_get_model_by_alias(client: TestClient) -> None:
-    resp = client.get("/v1/models/housemodel", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models/housemodel", headers=HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == "housemodel"
@@ -395,7 +395,7 @@ def _post_chat_capture(client: TestClient, model: str) -> dict[str, Any]:
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": model, "messages": [{"role": "user", "content": "Hi"}], "user": "test-user"},
             headers=HEADERS,
         )
@@ -446,7 +446,7 @@ async def test_response_model_echoes_alias(client: TestClient) -> None:
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "myopusmodel", "messages": [{"role": "user", "content": "Hi"}], "user": "test-user"},
             headers=HEADERS,
         )
@@ -476,7 +476,7 @@ async def test_streaming_response_model_echoes_alias(client: TestClient) -> None
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "myopusmodel",
                 "messages": [{"role": "user", "content": "Hi"}],
@@ -510,7 +510,7 @@ async def test_embeddings_response_model_echoes_alias(client: TestClient) -> Non
 
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_response):
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "housemodel", "input": "hello", "user": "test-user"},
             headers=HEADERS,
         )
@@ -537,7 +537,7 @@ async def test_moderations_response_model_echoes_alias(client: TestClient) -> No
 
     with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=mock_response):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "myopusmodel", "input": "hello", "user": "test-user"},
             headers=HEADERS,
         )

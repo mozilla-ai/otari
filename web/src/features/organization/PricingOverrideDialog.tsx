@@ -2,8 +2,8 @@ import { Button, Input, Label, Modal, TextField } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
-import { Field } from "@/shared/components/Field"
-import { ErrorBanner } from "@/shared/components/ui"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Field } from "@/design-system/forms/Field"
 
 import {
   findOverlapping,

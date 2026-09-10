@@ -18,14 +18,19 @@ export type { components, operations, paths } from "./schema"
 type Schemas = components["schemas"]
 
 /**
- * Make the fields the gateway defaults optional on the way in.
+ * Make a named set of fields optional, where the generator promised them.
  *
  * The generator marks a property with a schema default as always present, which
  * is true of a response and false of a request body: the point of a default is
  * that a client may omit it. Applied only where the dashboard actually omits
  * one, so it stays a correction rather than a blanket loosening.
+ *
+ * Exported because the response side has the same problem from the other
+ * direction: a gateway older than a field does not send it, whatever the
+ * current schema says. `WireBootstrap` in `shared/helpers/bootstrap.ts` is that
+ * case, and reuses this rather than restating it.
  */
-type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
+export type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 // ---------------------------------------------------------------------------
 // Deployment bootstrap
@@ -50,7 +55,7 @@ export type SessionType = DeploymentBootstrap["session_type"]
  * type.
  */
 export type GatewayHealth =
-  operations["health_check_health_get"]["responses"][200]["content"]["application/json"]
+  operations["health-health_check"]["responses"][200]["content"]["application/json"]
 
 // ---------------------------------------------------------------------------
 // Dashboard sign-in credentials
@@ -170,12 +175,12 @@ export type ToolMeter = Schemas["ToolMeter"]
 // than as named schemas, so they are pinned to the operation instead of being
 // restated as literal unions that could drift.
 type SummaryQuery = NonNullable<
-  operations["usage_summary_v1_usage_summary_get"]["parameters"]["query"]
+  operations["usage-usage_summary"]["parameters"]["query"]
 >
 export type UsageBucket = NonNullable<SummaryQuery["bucket"]>
 export type SummaryDimension = NonNullable<SummaryQuery["dimensions"]>[number]
 type SeriesQuery = NonNullable<
-  operations["usage_series_v1_usage_series_get"]["parameters"]["query"]
+  operations["usage-usage_series"]["parameters"]["query"]
 >
 export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
 
@@ -187,7 +192,7 @@ export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
 // the operation that carries all of them, and a name the spec drops (or a typo)
 // fails to compile here rather than going quiet on the wire.
 type RequestsQuery = NonNullable<
-  operations["list_usage_v1_usage_get"]["parameters"]["query"]
+  operations["usage-list_usage"]["parameters"]["query"]
 >
 /** Fails to compile unless `T` is `true`, so a `false` below is a build error. */
 type Assert<T extends true> = T
@@ -374,6 +379,14 @@ export type ToolSettingsResponse = Schemas["ToolSettingsResponse"]
 export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"]
 export type TestServiceResponse = Schemas["TestServiceResponse"]
 
+// The guardrail catalog behind the mandate form: which profiles the operator's
+// guardrails service has built, and the `validate_kwargs` each one accepts. See
+// `src/gateway/services/guardrail_catalog.py`.
+export type GuardrailCatalog = Schemas["GuardrailCatalog"]
+export type GuardrailProfileSpec = Schemas["GuardrailProfileSpec"]
+export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
+export type GuardrailParameterType = GuardrailParameterSpec["type"]
+
 // ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------
@@ -443,7 +456,7 @@ export type SettableMemberStatus = NonNullable<
 >
 export type WorkspaceMemberRole = NonNullable<
   NonNullable<
-    operations["add_workspace_member_v1_workspaces__workspace_id__members__user_id__post"]["parameters"]["query"]
+    operations["workspaces-add_workspace_member"]["parameters"]["query"]
   >["role"]
 >
 // ---------------------------------------------------------------------------
@@ -498,6 +511,18 @@ export type CreateWorkspaceBudgetDefaultRequest =
   Schemas["WorkspaceMemberBudgetPolicyCreate"]
 export type UpdateWorkspaceBudgetDefaultRequest =
   Schemas["WorkspaceMemberBudgetPolicyUpdate"]
+
+// One workspace's departure from the organization key above: pinned as this
+// workspace's default, opted out of, or neither. `is_default`/`disabled` are the
+// stored flags and `is_effective_*` the resolution across the provider's keys,
+// so a row can be unpinned and still effective (it is the organization default,
+// or the only key that provider has).
+export type WorkspaceProviderKeyOverride =
+  Schemas["WorkspaceProviderKeyOverridePublic"]
+// Tri-state on the way in: an omitted flag is left unchanged, so the dashboard
+// sends one at a time and lets the gateway resolve the other.
+export type SetWorkspaceProviderKeyOverrideRequest =
+  Schemas["WorkspaceProviderKeyOverrideRequest"]
 
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see

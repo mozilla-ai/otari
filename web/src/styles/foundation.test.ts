@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { describe, expect, it } from "vitest"
@@ -8,6 +8,35 @@ import { buildManifest } from "../../pwaManifest"
 // Resolved from the Vitest root (web/) rather than import.meta.url, which the
 // jsdom environment reports as an http URL. Same reason as src/routes.test.ts.
 const WEB = process.cwd()
+
+/**
+ * Every path under `root`, with the probe directory skipped and the walk
+ * retried once.
+ *
+ * Nine sweeps in this file read the source tree, and `architecture.test.ts`
+ * plants a throwaway module under `src/<layer>/__boundary_probe__/` for the
+ * length of one assertion and removes it again. Vitest runs the two files in
+ * parallel, so without this a sweep either reads the probe and reports it as an
+ * offender, or recurses into a directory that vanished mid-walk and throws
+ * instead of yielding a short list. Both are intermittent, which is the worst
+ * kind of red.
+ *
+ * `overlaySeams.test.ts` and `shared/telemetry/overlayTelemetry.test.ts` each
+ * already carry their own version of this; that they had to is what says it
+ * belongs in one place per file that sweeps. Separators are normalized here
+ * too, since every call site wanted that anyway.
+ */
+function walk(root: string): string[] {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return readdirSync(root, { recursive: true })
+        .map((name) => String(name).replaceAll("\\", "/"))
+        .filter((name) => !name.split("/").includes("__boundary_probe__"))
+    } catch (error) {
+      if (attempt > 0) throw error
+    }
+  }
+}
 const CSS = readFileSync(join(WEB, "src", "styles", "globals.css"), "utf8")
 
 /**
@@ -21,6 +50,11 @@ function block(selector: string): string {
   const end = CSS.indexOf("\n}\n", start)
   expect(end, `\`${selector}\` block is never closed`).toBeGreaterThan(start)
   return CSS.slice(start, end)
+}
+
+/** Source with `//` and block comments removed, for rules about written code. */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
 }
 
 /** Every custom property *declared* in a block, as name → value. */
@@ -225,6 +259,27 @@ describe("the type scale's two halves", () => {
     }
   })
 
+  // The other half of the declare-vs-register trap, and the half that fails
+  // silently in the opposite direction. A self-referential registration
+  // (`--color-x: var(--color-x)`) exists only to make the utility, and it
+  // resolves to nothing unless a theme block declares a real value. When it
+  // does not, `text-x` is a class that compiles, ships, and paints the
+  // inherited color instead: no error, no warning, no failing check. That is
+  // how `--color-accent-glyph` lost both declarations to a careless edit and
+  // turned a white checkmark black.
+  it("declares a real value for every self-referential @theme key", () => {
+    const theme = declarations(block("@theme"))
+    const undeclared: string[] = []
+    for (const [key, value] of theme) {
+      if (value !== `var(${key})`) continue
+      if (!LIGHT.has(key) || !DARK.has(key)) undeclared.push(key)
+    }
+    expect(
+      undeclared,
+      "registered in @theme but not declared in both theme blocks, so the utility resolves to nothing",
+    ).toEqual([])
+  })
+
   it("registers in @theme only the keys HeroUI does not declare", () => {
     // Tracking is emitted into `.text-xs` and friends only if the key is
     // registered at build time, so these have to be in `@theme`; a value at
@@ -258,6 +313,100 @@ describe("the type scale's two halves", () => {
       contested,
       `@theme registers type values @heroui/styles also declares (${contested.join(", ")}); it loses on source order, so these belong in the unlayered :root block`,
     ).toEqual([])
+  })
+})
+
+describe("the flat surface: no corners, no elevation", () => {
+  // Both halves of the divided-surface direction are one-line token changes
+  // that reach the whole app, and both fail silently if they land in the wrong
+  // place: a squared corner that is still round, or a shadow zeroed in one
+  // theme only, compiles clean and reports nothing.
+
+  // The text between the end of the previous top-level block and the radius
+  // declaration. Enough to tell whether the declaration is unlayered: if a
+  // `@theme` or `@layer` opener sits in there, it is not.
+  const radiusContext = (() => {
+    const decl = CSS.indexOf("--radius: 0px;")
+    // Empty rather than an assertion when the declaration is gone, so the two
+    // tests below fail with their own messages instead of taking the whole
+    // file down at collection time.
+    if (decl === -1) return ""
+    // Comments stripped: the block below this one explains the cascade rule in
+    // prose, and the words `@theme` and `@layer` in a comment are not openers.
+    return CSS.slice(CSS.lastIndexOf("\n}\n", decl), decl).replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    )
+  })()
+
+  it("zeroes the one radius key every corner derives from", () => {
+    // `--radius-xl|2xl|3xl` and `--field-radius` are all `calc(var(--radius) * n)`
+    // in the emitted stylesheet, so this key is the whole radius surface.
+    const declarations = [...CSS.matchAll(/^\s*--radius:\s*([^;]+);/gm)].map(
+      ([, value]) => value.trim(),
+    )
+    expect(
+      declarations,
+      "`--radius` should be declared exactly once, at zero",
+    ).toEqual(["0px"])
+  })
+
+  it("declares the radius unlayered, where it can outrank @heroui/styles", () => {
+    // `@heroui/styles` declares `--radius` inside its own `@layer base`. An
+    // override written in `@theme` is hoisted to the top theme layer, compiles,
+    // emits, and loses on source order. Only an unlayered declaration wins.
+    expect(
+      radiusContext,
+      "the `--radius` declaration is not in a `:root` block",
+    ).toContain(":root {")
+    const opener = radiusContext.match(/^@(theme|layer)\b.*/m)
+    expect(
+      opener?.[0],
+      "the `--radius` declaration sits inside an at-rule block, so @heroui/styles' own value wins on source order",
+    ).toBeUndefined()
+  })
+
+  it("keeps the radius out of the theme blocks", () => {
+    // Same rule as the type metrics above: a corner has no theme axis, so
+    // declaring it twice only creates a way for the two themes to drift.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      const offenders = [...tokens.keys()].filter((name) =>
+        name.startsWith("--radius"),
+      )
+      expect(
+        offenders,
+        `the ${theme} theme block declares radius keys (${offenders.join(", ")}); radius is declared once, unlayered`,
+      ).toEqual([])
+    }
+  })
+
+  it("zeroes every elevation token in both themes", () => {
+    // A shadow *does* have a theme axis, so unlike the radius these are
+    // declared per theme, and that is exactly what makes a half-done change
+    // possible: zeroed on light, still lifting on dark, invisible in whichever
+    // theme you happen to be looking at. `--shadow-elevation-sm|md|lg` and
+    // `--shadow-modal` (the registered utilities), `--surface-shadow` and
+    // `--overlay-shadow` (which HeroUI's card, popover, modal and toast rules
+    // read) all alias these four.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      for (const key of [
+        "--shadow-sm",
+        "--shadow-md",
+        "--shadow-lg",
+        "--shadow-modal",
+      ]) {
+        expect(
+          tokens.get(key),
+          `${theme}'s ${key} still casts; the surface is one plane in both themes`,
+        ).toBe("none")
+      }
+    }
   })
 })
 
@@ -352,6 +501,8 @@ describe("design foundation tokens", () => {
     ["text-link-hover", "ours"],
     ["text-primary-subtle-foreground", "ours"],
     ["bg-code-surface", "ours"],
+    ["border-control-border", "ours"],
+    ["bg-control-thumb", "ours"],
     ["text-accent", "heroui"],
     ["bg-accent", "heroui"],
     ["text-accent-foreground", "heroui"],
@@ -419,25 +570,241 @@ describe("design foundation tokens", () => {
   })
 })
 
+// A comment opener inside a comment. CSS comments do not nest, so `/*` after
+// one has already opened is not an error and nothing fails: the text just
+// runs on to the next `*/` and the file quietly grows a duplicated header.
+// Three of those reached this file from scripted edits and were found by
+// somebody reading the lines next to them, which is not a way of finding
+// things.
+it("has no comment opened inside another comment in globals.css", () => {
+  const offenders: string[] = []
+  let inComment = false
+  for (let i = 0; i < CSS.length - 1; i++) {
+    if (!inComment && CSS[i] === "/" && CSS[i + 1] === "*") {
+      inComment = true
+      i++
+    } else if (inComment && CSS[i] === "*" && CSS[i + 1] === "/") {
+      inComment = false
+      i++
+    } else if (inComment && CSS[i] === "/" && CSS[i + 1] === "*") {
+      offenders.push(
+        `line ${CSS.slice(0, i).split("\n").length}: ${CSS.slice(i, i + 60)}`,
+      )
+      i++
+    }
+  }
+  expect(offenders, "a `/*` inside a comment is a duplicated header").toEqual(
+    [],
+  )
+})
+
+// A token declared in the theme blocks, named as a class in the tree, and never
+// registered in `@theme`.
+//
+// This has now shipped three times, each time in the same shape and each time
+// invisible: `--color-border-subtle`, `--color-text-subtle` and
+// `--color-border-strong` were all declared in both theme blocks, documented in
+// `web/design/colors.md` as classes a component may use, and reachable from
+// nowhere but this stylesheet's own `var()` calls. Tailwind emits a rule only
+// for a REGISTERED key, so the class compiled, linted, passed every other gate
+// here, and produced no CSS: the border fell back to Tailwind's `currentColor`
+// and a dot to a surface value at 1.14:1. Nothing errors, which is the whole
+// problem.
+//
+// Asked the other way round from the "registers its non-HeroUI utilities"
+// assertion above. That one starts from the documented list and checks the
+// registration; this starts from what the SOURCE actually asks for, which is
+// what catches a token the docs promise and nobody registered.
+// The table's base treatment is the flat plane, and no per-table class repeats
+// it.
+//
+// `.otari-table` used to default to HeroUI's card (a `--color-surface` fill and
+// a `--color-primary-subtle` header) with the row separator on the 0.06 tier,
+// and all sixteen per-table classes carried the same three declarations to undo
+// it: forty-eight copies of one decision, each commented "Same terms as the
+// others" because there was nowhere to say it once. The base now IS those
+// terms.
+//
+// Both halves are asserted, because either one alone rots. Without the first, a
+// future edit puts the fill or the tint back and sixteen tables get a card.
+// Without the second, the copies creep back one page at a time and the base
+// stops being what decides.
+describe("a table is a region, not a card", () => {
+  const PLACES = [
+    "otari-accounts-table",
+    "otari-activity-table",
+    "otari-breakdown",
+    "otari-budgets-table",
+    "otari-domains-table",
+    "otari-keys-table",
+    "otari-mcp-table",
+    "otari-members-table",
+    "otari-models-table",
+    "otari-overview-activity",
+    "otari-pricing-table",
+    "otari-provider-keys-table",
+    "otari-providers-table",
+    "otari-rate-overrides-table",
+    "otari-routing-table",
+    "otari-workspaces-table",
+  ]
+
+  it("defaults the root and the header to no fill", () => {
+    expect(CSS).toMatch(
+      /\.otari-table\.table-root \{[^}]*background-color: transparent;/,
+    )
+    expect(CSS).toMatch(
+      /\.otari-table \.table__header \{[^}]*background-color: transparent;/,
+    )
+    // The accent has five jobs and a table header is none of them, so the tint
+    // must not come back as a default. Asked of a `background-color`
+    // DECLARATION on comment-stripped CSS, not of the token appearing anywhere
+    // in the rule: the rule's own comment names the tint to say it was removed,
+    // and the first spelling of this failed on that. Third time in this change
+    // that a gate read its own documentation as the offence.
+    const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, "")
+    expect(
+      /\.otari-table \.table__header \{[^}]*background-color:\s*var\(--color-primary-subtle\)/.test(
+        bare,
+      ),
+      "the table header is painting the accent as decoration again",
+    ).toBe(false)
+  })
+
+  it("defaults the row separator to the faint tier, on both halves", () => {
+    // HeroUI draws a border on the row AND on its cells, halving the row's on
+    // the way through, so the two are set together or one line renders at two
+    // strengths.
+    expect(CSS).toMatch(
+      /\.otari-table \.table__row \.table__cell \{\s*border-color: var\(--color-border-subtle\);/,
+    )
+    expect(CSS).toMatch(
+      /\.otari-table \.table__row \{\s*border-color: var\(--color-border-subtle\);/,
+    )
+  })
+
+  it.each(PLACES)("%s does not restate the base treatment", (place) => {
+    // Every rule whose selector names this place, with its declarations. A
+    // place may still set its own row height, lane widths, sticky column and
+    // outer rules; what it may not do is repeat one of the three the base owns.
+    const offenders: string[] = []
+    for (const match of CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const selector = match[1].replace(/\/\*[\s\S]*?\*\//g, "").trim()
+      if (!selector.includes(`.${place}`)) continue
+      const body = match[2].replace(/\s+/g, " ")
+      const isRoot = selector.includes("table-root")
+      const isHeader = selector.includes(".table__header")
+      const isRow =
+        selector.includes(".table__row") && !selector.includes(".table__header")
+      if (isRoot && /background-color: transparent/.test(body))
+        offenders.push(`${selector} sets the root fill the base already sets`)
+      if (isHeader && /background-color: transparent/.test(body))
+        offenders.push(`${selector} sets the header fill the base already sets`)
+      if (isRow && /border-color: var\(--color-border-subtle\)/.test(body))
+        offenders.push(`${selector} sets the row tier the base already sets`)
+    }
+    expect(
+      offenders,
+      "delete the declaration; `.otari-table` is what decides these three",
+    ).toEqual([])
+  })
+})
+
+describe("a token named as a class is registered", () => {
+  const SRC = join(WEB, "src")
+  const sources = walk(SRC).filter((name) => /\.tsx?$/.test(name))
+
+  // Every `--color-*` this stylesheet declares anywhere.
+  const declared = new Set(
+    [...CSS.matchAll(/^\s*(--color-[\w-]+)\s*:/gm)].map((m) => m[1]),
+  )
+
+  // What is registered, from BOTH `@theme` blocks that reach the build. Ours is
+  // deliberately partial: the gate above asserts we register only the keys
+  // HeroUI does not, so `--color-border` and `--color-danger` live in HeroUI's
+  // and re-declaring them here would be the mistake. Reading its file is what
+  // keeps this gate from flagging every one of them. It is a pinned exact
+  // version, so a move shows up as a failure here rather than as a rule that
+  // silently stopped covering anything, which the count guard below holds.
+  const HEROUI_THEME = join(
+    WEB,
+    "node_modules",
+    "@heroui",
+    "styles",
+    "dist",
+    "themes",
+    "shared",
+    "theme.css",
+  )
+  const registered = new Set([
+    ...[...block("@theme").matchAll(/(--color-[\w-]+)\s*:/g)].map((m) => m[1]),
+    ...(existsSync(HEROUI_THEME)
+      ? [
+          ...readFileSync(HEROUI_THEME, "utf8").matchAll(
+            /(--color-[\w-]+)\s*:/g,
+          ),
+        ].map((m) => m[1])
+      : []),
+  ])
+
+  it("covers the source tree and both theme blocks", () => {
+    expect(sources.length).toBeGreaterThan(30)
+    expect(declared.size).toBeGreaterThan(20)
+    // Ours alone is around 20 keys and HeroUI's is around 40, so a floor above
+    // either one proves both were read. Without this the rule passes vacuously
+    // the day HeroUI moves that file.
+    expect(
+      registered.size,
+      "HeroUI's @theme was not read, so every token it registers would read as unregistered",
+    ).toBeGreaterThan(45)
+  })
+
+  it("names no unregistered token as a class anywhere in src", () => {
+    // The four properties that take a color token. `divide-` and `fill-` are in
+    // because both are already used in the tree, and both fail the same silent
+    // way.
+    const CLASS = /\b(?:text|bg|border|divide|fill|stroke)-[a-z][\w-]*/g
+    const offenders: string[] = []
+    for (const name of sources) {
+      // Comments stripped, both kinds. This file's other sweeps strip block
+      // comments only, which is not enough here: the first run of this rule
+      // reported `bg-surface-muted` in two auth files and `text-primary` in
+      // `Chip`, and all three were LINE comments warning against the exact
+      // mistake being checked for. A gate that fails on its own documentation
+      // gets deleted rather than obeyed.
+      const source = readFileSync(join(SRC, name), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "")
+      for (const match of source.match(CLASS) ?? []) {
+        const token = `--color-${match.replace(/^(?:text|bg|border|divide|fill|stroke)-/, "")}`
+        if (declared.has(token) && !registered.has(token)) {
+          offenders.push(
+            `${name}: ${match} (${token} is declared but not in @theme)`,
+          )
+        }
+      }
+    }
+    expect(
+      [...new Set(offenders)],
+      "register the key in @theme; a declared-but-unregistered token produces no rule and the class silently changes nothing",
+    ).toEqual([])
+  })
+})
+
 describe("semantic tokens only", () => {
-  // Every source file that styles anything, which is the whole of `src` now
-  // that there is no bridge tree left to be exempt. This used to be scoped to
-  // `shared/components/ui/` because the hand-rolled primitives beside it
-  // predated the foundation; they are on it now, so the exemption has no
-  // subject and the rule is the repo's.
+  // Every source file that styles anything, which is the whole of `src`: there
+  // is no bridge tree left to be exempt, so the rule is the repo's.
   const SRC = join(WEB, "src")
   // The one deliberate exception, and it says why at the top of the file: the
   // share card is rasterized through an <img>-loaded SVG document, where a
   // custom property does not resolve, so its palette has to be literal.
   const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter(
-      (name) =>
-        /\.tsx?$/.test(name) &&
-        !/\.test\.tsx?$/.test(name) &&
-        !EXCEPTIONS.has(name),
-    )
+  const sources = walk(SRC).filter(
+    (name) =>
+      /\.tsx?$/.test(name) &&
+      !/\.test\.tsx?$/.test(name) &&
+      !EXCEPTIONS.has(name),
+  )
 
   it("covers the source tree", () => {
     // A guard on the guard: a moved directory or a broken filter would leave
@@ -468,6 +835,24 @@ describe("semantic tokens only", () => {
     ).not.toMatch(
       /\b(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|shadow|accent|caret|divide|placeholder)(?:-[tblrsexy])?-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/,
     )
+    // A focus ring is an accessibility floor, and until this rule it was spelled
+    // at nine call sites that did not agree: four drew it from `accent`, two
+    // from `focus`, and the rest left the width and offset to the browser. None
+    // of that fails anything, which is why it drifted. The ring is defined once
+    // now, in `@layer base` for plain elements and as `@utility otari-focus-ring`
+    // the two that have to outrank a HeroUI component rule, so a call site has
+    // nothing left to spell. `ring-0` and `ring-offset-0` are deliberately not
+    // matched: those suppress HeroUI's own inner ring rather than drawing ours.
+    //
+    // Matched against the code with comments removed. `rowStyles.ts` explains
+    // why its rows cannot use the base rule, and that explanation has to be
+    // able to name the thing it is explaining.
+    expect(
+      stripComments(source),
+      "a focus ring is defined once in globals.css; use `otari-focus-ring`, do not spell one here",
+    ).not.toMatch(
+      /\b(?:ring|outline)-(?:accent|primary|focus)\b|\boutline-offset-\d|\b(?:ring|outline)-[1-9]\b/,
+    )
     // `bg-white` / `text-black` are the same problem without a number: a
     // literal that never follows the theme.
     expect(
@@ -481,14 +866,14 @@ describe("semantic tokens only", () => {
 
 // A bare heading is not unstyled: the `@layer base` rule in globals.css hands
 // `h1`-`h6` the display face, so a heading that skips the type scale renders in
-// Zilla Slab at whatever size its hand-rolled classes say. otari#810 migrated
-// 35 sites and still left six behind (otari-ai#1933), which is what a rule
-// without a test does.
+// Mozilla Headline at whatever size its hand-rolled classes say. otari#810
+// migrated 35 sites and still left six behind (otari-ai#1933), which is what a
+// rule without a test does.
 describe("headings wear a type role", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   it("covers the source tree", () => {
     // Same guard as the token sweep above: an empty list passes vacuously.
@@ -508,8 +893,22 @@ describe("headings wear a type role", () => {
       if (literal) {
         expect(
           literal[1],
-          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, or text-title`,
-        ).toMatch(/\btext-(?:display|heading|title)\b/)
+          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, text-title, or text-overline`,
+        )
+          // The stems name role FAMILIES, and `\b` matches before a hyphen, so
+          // a named sub-step such as `text-display-sub` satisfies this by
+          // design rather than by accident. A role named outside these stems
+          // would be correct and would still fail here, so it has to arrive
+          // with a change to this pattern.
+          //
+          // `text-overline` is a heading role here even though it is not one
+          // of the page's three sizes: the role exists to label the group
+          // beneath it, so heading that group is the thing it is for. The
+          // alternative was demoting the element to a `span`, which would take
+          // the label out of the document outline to satisfy a check. This
+          // list and the ink-pairing list below already differ; they answer
+          // different questions.
+          .toMatch(/\btext-(?:display|heading|title|overline)\b/)
       } else {
         // No string literal, so the one acceptable shape left is an
         // expression. A heading with no className at all is the bare case
@@ -536,19 +935,18 @@ describe("headings wear a type role", () => {
         }
         expect(
           value,
-          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, or text-title`,
-        ).toMatch(/\btext-(?:display|heading|title)\b/)
+          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, text-title, or text-overline`,
+        ).toMatch(/\btext-(?:display|heading|title|overline)\b/)
       }
     }
   })
 })
 
-// The content scale's roles, and the spelling that kept them empty. Before this
-// sweep `text-caption` had one consumer, `text-body`, `text-emphasis` and
-// `text-overline` between them a handful, and 174 sites wrote the caption role
-// out as `text-xs text-muted`: a size a point under the role's own and an ink
-// the role already sets. A scale nobody uses is documentation, so the roles are
-// enforced here the way the chrome's are below.
+// The content scale's roles, and the spelling that empties them. Left
+// unenforced, the caption role gets written out as `text-xs text-muted` (a size
+// a point under the role's own, and an ink the role already sets) and the roles
+// collect a consumer or two each. A scale nobody uses is documentation, so the
+// roles are enforced here the way the chrome's are below.
 //
 // A role sets family, size, line-height, tracking, weight and ink together, and
 // each of those is a utility somebody can write beside it. That pairing is not a
@@ -609,9 +1007,9 @@ describe("content text wears a type role", () => {
   }
 
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+  const sources = walk(SRC).filter(
+    (name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name),
+  )
   // Block comments go first, for the reason the heading sweep drops them:
   // `ActivityPage` explains in a JSX comment, in backticks, why a `<th>` on
   // `text-overline` carries no `text-muted`.
@@ -623,11 +1021,195 @@ describe("content text wears a type role", () => {
     expect(sources.length).toBeGreaterThan(30)
   })
 
+  /**
+   * The sites where 12px is the ruled size, and why the rule needed the
+   * exception rather than the pages needing a change.
+   *
+   * The discriminator is the referent: `text-caption` is for text whose
+   * referent is a CONTROL, text that helps you operate the thing it sits
+   * under. Metadata, page-referent prose, and a note about an action's effect
+   * rather than its operation are 12px on purpose, and an audit read every
+   * `text-xs` in the tree and ruled each site individually. This rule cannot
+   * express "referent is a control", so it cannot tell the two apart, and
+   * making it green by converting these would reverse a per-site ruling and
+   * move 33 pieces of text up a point. That is why the list is here and not
+   * in the pages.
+   *
+   * Every entry was checked to be present verbatim at the audit's final
+   * commit, so each is a site the audit saw and left, not one it never
+   * reached.
+   *
+   * Read the site before trusting either source. The record is complete for
+   * what was ruled, and a code comment carries decisions made below the
+   * reporting threshold: `--text-xl`'s retune from 20 to 22 is argued at the
+   * stat tile and never reached the record, because the change was reported
+   * upstream as its other half.
+   */
+  const CAPTION_SIZE_IS_RULED: Array<[string, string]> = [
+    // Metadata: identifiers, table-cell content, figures and status labels,
+    // which are read rather than operated.
+    [
+      "features/organization/OrganizationGeneralPage.tsx",
+      "the organization slug in a copyable",
+    ],
+    [
+      "features/admin/DeploymentAccountsPage.tsx",
+      "an account's email under its name, in a cell",
+    ],
+    [
+      "features/workspaces/WorkspacesPage.tsx",
+      "a workspace description truncated in a cell, and its budget helper",
+    ],
+    [
+      "features/models/ModelsPage.tsx",
+      "the selector, the family, and the not-discovered label",
+    ],
+    [
+      "features/models/ModelScopeControl.tsx",
+      "the blocked-from-every-model state banner",
+    ],
+    [
+      "features/overview/OverviewPage.tsx",
+      "an error-count figure and a chart's figcaption",
+    ],
+    [
+      "design-system/metrics/KpiCell.tsx",
+      "the KPI cell's severity and delta line",
+    ],
+    [
+      "features/organization/OrganizationMembersPage.tsx",
+      "a table head row, an empty state, and fieldset prose",
+    ],
+    [
+      "features/activity/ActivityTimeline.tsx",
+      "the brush's drag hint beside the chart",
+    ],
+    // Page-referent: prose that describes the page rather than a control on
+    // it. The auth pages' centered text was ruled this explicitly.
+    ["features/auth/Login.tsx", "the divider row and the page's footer prose"],
+    [
+      "features/invitations/AcceptInvitationPage.tsx",
+      "the centered next-step prose, page-referent",
+    ],
+    // The named edge: a note about what an action will do, in the row with
+    // the button, rather than about how to operate a control.
+    [
+      "features/routing/RoutingPage.tsx",
+      "consequence notes in the button row, and the candidate cap",
+    ],
+    ["features/usage/ShareDialog.tsx", "a notice in the dialog's button row"],
+  ]
+  const RULED = new Map(CAPTION_SIZE_IS_RULED)
+
+  it("names no site that has stopped hand-rolling the caption role", () => {
+    // The guard that makes the list above defensible. A path that no longer
+    // offends is an entry protecting nothing, and without this it keeps
+    // passing silently while the file it names has moved on.
+    const stale = [...RULED.keys()].filter(
+      (name) =>
+        !sources.includes(name) ||
+        !together("text-xs", "text-muted").test(read(name)),
+    )
+    expect(
+      stale,
+      "these are exempted from the caption rule but no longer need to be; delete the entries",
+    ).toEqual([])
+  })
+
   it.each(sources)("spells the caption role in %s as text-caption", (name) => {
+    if (RULED.has(name)) return
     expect(
       read(name),
       `${name} hand-rolls the caption role as \`text-xs text-muted\`: 12px where the role is 13, plus the ink it already sets. Use text-caption`,
     ).not.toMatch(together("text-xs", "text-muted"))
+  })
+
+  /**
+   * The body role's hand-rolled spelling, as the three tokens it takes.
+   *
+   * All three, not the size-and-weight pair: `text-sm font-medium` beside
+   * `text-link`, `text-danger` or `text-success` is a legitimate emphasized
+   * link or status word, and eight files write one. It is the `text-foreground`
+   * that makes the trio a role spelled out.
+   */
+  const HAND_ROLLED_BODY = ["text-sm", "font-medium", "text-foreground"]
+
+  /** Every class-list literal in a source, so a match cannot span two. */
+  const classLists = (source: string): string[] =>
+    [...source.matchAll(/"([^"\n]*)"|`([^`\n]*)`/g)].map(
+      (m) => m[1] ?? m[2] ?? "",
+    )
+
+  const handRollsBody = (source: string): boolean =>
+    classLists(source).some((list) =>
+      HAND_ROLLED_BODY.every((name) =>
+        new RegExp(`(?<![:\\w-])${name}(?![\\w-])`).test(list),
+      ),
+    )
+
+  /**
+   * The one site where the trio is right, and why.
+   *
+   * A role sets the body face, so wearing one on a `<code>` would replace the
+   * mono face Tailwind's preflight gives it. There is no mono role at 14px
+   * (they are 11px, 13px and 30px), so these two identifiers stay spelled out.
+   */
+  const BODY_ROLE_IS_RULED: Array<[string, string]> = [
+    [
+      "features/settings/SettingsPage.tsx",
+      "two <code> identifiers at body size; a role would override the mono face",
+    ],
+  ]
+  const BODY_RULED = new Map(BODY_ROLE_IS_RULED)
+
+  it("names no site that has stopped hand-rolling the body role", () => {
+    // Same guard as the caption list's: an entry that no longer offends is
+    // protecting nothing and would keep passing while its file moved on.
+    const stale = [...BODY_RULED.keys()].filter(
+      (name) => !sources.includes(name) || !handRollsBody(read(name)),
+    )
+    expect(
+      stale,
+      "these are exempted from the body-role rule but no longer need to be; delete the entries",
+    ).toEqual([])
+  })
+
+  it("reads the trio as an offence and an emphasized link as fine", () => {
+    // The rule's own mutation check, since its whole difficulty is the third
+    // token: without it, eight files with a legitimate emphasized link or
+    // status word fail, and a rule that fails on correct code gets suppressed.
+    expect(
+      handRollsBody('<span className="text-sm font-medium text-foreground">'),
+    ).toBe(true)
+    expect(handRollsBody('<a className="text-sm font-medium text-link">')).toBe(
+      false,
+    )
+    expect(
+      handRollsBody('<span className="text-sm font-medium text-danger">'),
+    ).toBe(false)
+    // Two lists, not one: a span may not cross a quote.
+    expect(
+      handRollsBody(
+        'className={on ? "text-sm font-medium" : "text-foreground"}',
+      ),
+    ).toBe(false)
+    expect(
+      handRollsBody(
+        '<span className="text-sm font-medium hover:text-foreground">',
+      ),
+    ).toBe(false)
+  })
+
+  // `--font-weight-medium` is deliberately 400 here, so this trio renders
+  // exactly `text-body` while reading as emphasis to whoever wrote it. It went
+  // from 0 sites to 21 across 14 files on one branch while `text-emphasis`
+  // went to 0 consumers, which is what an unenforced role costs.
+  it.each(sources)("spells the body role in %s as text-body", (name) => {
+    if (BODY_RULED.has(name)) return
+    expect(
+      handRollsBody(read(name)),
+      `${name} hand-rolls the body role as \`text-sm font-medium text-foreground\`. font-medium is 400 here, so it renders as text-body while reading as emphasis. Use text-body, or text-emphasis if it is meant to be heavier`,
+    ).toBe(false)
   })
 
   it.each(sources)("overrides no type role's own metrics in %s", (name) => {
@@ -670,11 +1252,55 @@ describe("the shell chrome's type roles", () => {
     "text-shell-monogram",
   ]
 
+  it("declares text-subtle as a utility, not a color token", () => {
+    // `--color-text-subtle` would generate `text-text-subtle`, and
+    // `--color-subtle` would also mint `bg-subtle` and `border-subtle`. The
+    // utility form is the only one that yields this name and nothing else.
+    expect(CSS).toContain("@utility text-subtle {")
+    expect(
+      declarations(block("@theme")).get("--color-subtle"),
+      "`--color-subtle` in @theme would collide with `@utility text-subtle` in the same layer",
+    ).toBeUndefined()
+  })
+
   it.each(SHELL_ROLES)("declares %s in globals.css", (role) => {
     // The same failure the documented-utilities list guards against: a role
     // named in the scale's comment but never declared is a className that
     // produces no CSS, on text that looks merely unstyled rather than broken.
     expect(CSS).toContain(`@utility ${role} {`)
+  })
+
+  it.each(SHELL_ROLES)("uses %s somewhere in the chrome", (role) => {
+    // The other half, and the one that was promised above but missing. A
+    // declared role with no call site is half of the failure that shipped:
+    // `text-chrome-initials` reached main because the declaration was renamed
+    // to `text-shell-monogram` and the call site was moved back to the old
+    // name, so the span carried a class that produces no CSS. Asserting the
+    // declaration could not catch that, because the declaration was fine.
+    // Two roots, because one of the three roles left `src/app`. The monogram's
+    // only call site is `design-system/indicators/Avatar`, which the account
+    // row now composes instead of drawing the span itself; the other two roles
+    // are still the shell's own. Scanning both keeps the rule as strong as it
+    // was (a declared role with no call site anywhere still fails) rather than
+    // exempting the layer the call site moved to.
+    const ROOTS = [join(WEB, "src", "app"), join(WEB, "src", "design-system")]
+    const users = ROOTS.flatMap((root) =>
+      walk(root)
+        .filter(
+          (name) =>
+            /\.tsx$/.test(name) &&
+            !/\.test\.tsx$/.test(name) &&
+            !/\.stories\.tsx$/.test(name),
+        )
+        .filter((name) =>
+          readFileSync(join(root, name), "utf8").includes(role),
+        ),
+    )
+
+    expect(
+      users,
+      `${role} is declared but never used; a class that produces no CSS reads as unstyled rather than broken`,
+    ).not.toEqual([])
   })
 })
 
@@ -684,13 +1310,17 @@ describe("the shell chrome's type roles", () => {
 describe("no font size is written at a call site", () => {
   it("leaves no arbitrary font size anywhere in the tree", () => {
     const SRC = join(WEB, "src")
-    const offenders = readdirSync(SRC, { recursive: true })
-      .map((name) => String(name).replaceAll("\\", "/"))
+    const offenders = walk(SRC)
       .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
       .filter((name) =>
         // `text-[` followed by a digit: an arbitrary size, as opposed to an
         // arbitrary color, which the token rules above already cover.
-        /text-\[\d/.test(readFileSync(join(SRC, name), "utf8")),
+        /text-\[\d/.test(
+          readFileSync(join(SRC, name), "utf8").replace(
+            /\/\*[\s\S]*?\*\//g,
+            "",
+          ),
+        ),
       )
 
     expect(
@@ -713,17 +1343,77 @@ describe("the phone viewport's touch-target floor", () => {
       /@media \(max-width: 767px\) \{\s*\[data-slot="button"\] \{\s*min-height: 2\.75rem;\s*min-width: 2\.75rem;/,
     )
   })
+
+  it("takes the toolbar's dense field height back off at the same boundary", () => {
+    // The floor above is keyed on `[data-slot="button"]`, which a native
+    // `input[type="search"]` and a HeroUI select trigger are not, so the
+    // toolbar's own 32px rule would otherwise outlive it on the phone layout.
+    // Asserted as a pair: the dense height exists, and it is undone at 767px.
+    //
+    // Both halves are now a custom property on the PLACE rather than a height
+    // on its descendants, which is why these read `--field-height` (see
+    // globals.css, and Toolbar's docstring, for why a variable and not a
+    // descendant selector). What is being held is the pair, not the spelling:
+    // if a rewrite drops the 767px half, a phone gets a 32px search box.
+    expect(CSS).toMatch(
+      /\.otari-toolbar,\s*\.otari-pagination,\s*\.otari-settings \{\s*--field-height: 32px;/,
+    )
+    // The phone override raises the two places whose height is keyed on width.
+    // The pager is the third and is not here: it raises on `pointer: coarse`
+    // instead, asserted below, because a fine pointer at a narrow width is a
+    // resized desktop window rather than a finger.
+    expect(CSS).toMatch(
+      /@media \(max-width: 767px\) \{\s*\.otari-toolbar,\s*\.otari-settings \{\s*--field-height: 44px;/,
+    )
+  })
+
+  // Every dense field, not just the one a review happened to notice. Three
+  // places pin a non-button control to 32px, and a floor keyed on
+  // `[data-slot="button"]` reaches none of them.
+  it("raises the pager's own fields with its buttons on a coarse pointer", () => {
+    expect(CSS).toMatch(
+      /@media \(pointer: coarse\)[\s\S]*?\.otari-pagination \{\s*--field-height: 44px;/,
+    )
+  })
+
+  it("raises a table cell's select on the phone viewport", () => {
+    // Still a descendant selector, and deliberately: a table cell is HeroUI's
+    // own DOM rather than a place of ours, and a select is the only control
+    // that renders in one, so making it a place would put the dense height on
+    // an `.input` a future cell might hold.
+    expect(CSS).toMatch(
+      /\.table__cell \.select__trigger \{\s*height: 44px;\s*min-height: 44px;/,
+    )
+  })
+
+  // The rule the two places above hand their value TO. Without it each place
+  // would declare a property nothing reads, which is the failure mode a
+  // variable handoff has and a descendant selector does not: the old spelling
+  // could not be half-applied, this one can.
+  it("hands the place's variable to the controls that read it", () => {
+    expect(CSS).toMatch(
+      /\.input,\s*\.select__trigger \{\s*min-height: var\(--field-height\);\s*height: var\(--field-height\);\s*padding-block: var\(--field-padding-block\);/,
+    )
+    // The default, so a field outside every place still has a height at all.
+    expect(CSS).toMatch(/--field-height: 36px;/)
+    expect(CSS).toMatch(/--field-padding-block: 6px;/)
+    // The native search input is not one of HeroUI's classes, so it reads the
+    // property through a rule of its own, scoped to the toolbar.
+    expect(CSS).toMatch(
+      /\.otari-toolbar input\[type="search"\] \{\s*min-height: var\(--field-height\);\s*height: var\(--field-height\);/,
+    )
+  })
 })
 
-// Form controls. The shared `Checkbox` (`shared/components/ui.tsx`) is the one
+// Form controls. The shared `Checkbox` (`design-system/forms/Checkbox.tsx`) is the one
 // on the tokens, and a bare `<input type="checkbox">` is the browser's own:
 // system blue in both themes, and a 13px box on a page whose smallest touch
 // target is meant to be 44.
 describe("checkboxes come from the design foundation", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   it("covers the source tree", () => {
     expect(sources.length).toBeGreaterThan(30)
@@ -732,7 +1422,7 @@ describe("checkboxes come from the design foundation", () => {
   it.each(sources)("uses no raw checkbox in %s", (name) => {
     expect(
       readFileSync(join(SRC, name), "utf8"),
-      `${name} hand-rolls a checkbox; use Checkbox from shared/components/ui`,
+      `${name} hand-rolls a checkbox; use Checkbox from design-system/forms/Checkbox`,
     ).not.toContain('type="checkbox"')
   })
 })
@@ -742,9 +1432,9 @@ describe("checkboxes come from the design foundation", () => {
 // are not `DataTable`, which gets this from react-aria) are where they live.
 describe("every column header says what it heads", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   it("covers the source tree", () => {
     expect(sources.length).toBeGreaterThan(30)
@@ -764,5 +1454,376 @@ describe("every column header says what it heads", () => {
         `${match[0]} in ${name} has no scope; a column header is scope="col" and a row header scope="row"`,
       ).toMatch(/\bscope=/)
     }
+  })
+})
+
+// A number field's stepper is the user agent's, so it is spaced from the value
+// in CSS or not at all, and the number it is spaced by has to be the one the
+// trigger family already uses for a field's trailing glyph. Two places
+// declaring the gap between a field's text and the thing at its inline end is
+// how they come to disagree, which is what the type and radius sweeps above
+// guard in their own families.
+describe("a field's trailing glyph is spaced once", () => {
+  const stepper = block(
+    ".input::-webkit-inner-spin-button,\n.input::-webkit-outer-spin-button",
+  )
+  // The triggers' slot block, not the padding block above it: both carry the
+  // same selector list, and `block()` is a first-match `indexOf`, so the gap is
+  // read off the one that declares the layout.
+  const slotGap = CSS.match(
+    /\.dropdown__trigger \{[^}]*display:\s*flex;[^}]*gap:\s*([^;]+);/,
+  )?.[1].trim()
+  const margin = stepper.match(/margin-inline-start:\s*([^;]+);/)?.[1].trim()
+
+  it("spaces the stepper from the value at all", () => {
+    expect(margin, "nothing spaces the stepper from the value").toBe("8px")
+  })
+
+  it("spaces it by the gap the trigger family already uses", () => {
+    expect(slotGap, "no gap found in the trigger slot block").toBeDefined()
+    expect(margin, "the stepper's gap has drifted from the trigger's").toBe(
+      slotGap,
+    )
+  })
+})
+
+// Three button variants, and the only thing that can hold them to three.
+//
+// `Button` is HeroUI's, re-exported directly from @heroui/react, so its
+// `variant` prop is typed by HeroUI's union and still accepts the four names
+// this product retired. Removing our CSS for them does not make
+// `variant="secondary"` a type error; it makes it a silently unstyled button,
+// which is why the reduction needs a check rather than a convention.
+//
+// Keyed on the HOST rather than on the word, which is load-bearing: `Chip` has
+// its own variant union that happens to share `secondary`, and two legitimate
+// `<Chip variant="secondary">` render on the Budgets page. A scan for the word
+// alone would fail on correct code the first time anyone ran it, and a gate
+// that fails on correct code is one people learn to suppress.
+describe("buttons come in three variants", () => {
+  const SRC = join(WEB, "src")
+  const RETIRED = ["outline", "secondary", "tertiary", "danger-soft"]
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
+
+  /**
+   * The index just past the balanced region starting at `text[start]`, which is
+   * either a quoted string or a `{`-delimited expression. Brace depth is
+   * tracked outside quotes only, so a `>` or a `}` inside a string cannot end
+   * it early.
+   */
+  function endOfValue(text: string, start: number): number {
+    const opener = text[start]
+    if (opener === '"' || opener === "'") {
+      const close = text.indexOf(opener, start + 1)
+      return close === -1 ? text.length : close + 1
+    }
+    if (opener !== "{") return start
+    let depth = 0
+    let quote: string | null = null
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i]
+      if (quote) {
+        if (ch === quote) quote = null
+        continue
+      }
+      if (ch === '"' || ch === "'" || ch === "`") {
+        quote = ch
+        continue
+      }
+      if (ch === "{") depth += 1
+      else if (ch === "}") {
+        depth -= 1
+        if (depth === 0) return i + 1
+      }
+    }
+    return text.length
+  }
+
+  /**
+   * The whole `<Button …>` opening tag beginning at `start`.
+   *
+   * Scanned rather than matched: a prop can hold JSX of its own
+   * (`startContent={<FiX />}`), so the tag's own `>` is the first one at brace
+   * depth zero and outside any string, not the first one at all.
+   */
+  function openingTag(text: string, start: number): string {
+    let depth = 0
+    let quote: string | null = null
+    for (let i = start; i < text.length; i += 1) {
+      const ch = text[i]
+      if (quote) {
+        if (ch === quote) quote = null
+        continue
+      }
+      if (ch === '"' || ch === "'" || ch === "`") {
+        quote = ch
+        continue
+      }
+      if (ch === "{") depth += 1
+      else if (ch === "}") depth -= 1
+      else if (ch === ">" && depth === 0) return text.slice(start, i + 1)
+    }
+    return text.slice(start)
+  }
+
+  /**
+   * Every variant name written in one opening tag's `variant` prop.
+   *
+   * Every string literal in the prop's value, not just a bare one straight
+   * after the `=`: a toggle writes `variant={on ? "primary" : "ghost"}`, and a
+   * scan keyed on the literal position reports green on every one of those.
+   */
+  function variantNames(tag: string): string[] {
+    const at = /\bvariant\s*=\s*/.exec(tag)
+    if (!at) return []
+    const start = at.index + at[0].length
+    const value = tag.slice(start, endOfValue(tag, start))
+    return [...value.matchAll(/"([a-z-]+)"/g)].map((m) => m[1])
+  }
+
+  /** Every retired variant a `Button` carries in one file, with its line. */
+  function offenders(source: string): string[] {
+    const found: string[] = []
+    const text = source.replace(/\/\*[\s\S]*?\*\//g, "")
+    // Keyed on the host by reading the tag it opens, rather than by guessing
+    // the nearest `<Capital` behind the prop: that guess resolves
+    // `<Button startContent={<FiX />} variant="outline">` to `FiX` and skips
+    // it. `Chip` still cannot be confused for a Button, because only a tag
+    // that opens `<Button` is read at all.
+    for (const match of text.matchAll(/<Button(?=[\s/>])/g)) {
+      const tag = openingTag(text, match.index)
+      const line = text.slice(0, match.index).split("\n").length
+      for (const name of variantNames(tag)) {
+        if (!RETIRED.includes(name)) continue
+        found.push(`line ${line}: variant="${name}"`)
+      }
+    }
+    // `buttonVariants({ variant: … })` builds a button's className with no JSX
+    // host, so it is matched on the call instead.
+    for (const match of text.matchAll(
+      /buttonVariants\s*\(\s*\{([\s\S]*?)\}/g,
+    )) {
+      for (const found_ of match[1].matchAll(/variant\s*:\s*"([a-z-]+)"/g)) {
+        if (!RETIRED.includes(found_[1])) continue
+        const line = text.slice(0, match.index).split("\n").length
+        found.push(`line ${line}: variant: "${found_[1]}"`)
+      }
+    }
+    return found
+  }
+
+  it("covers the source tree", () => {
+    expect(sources.length).toBeGreaterThan(30)
+  })
+
+  it.each(sources)("uses no retired button variant in %s", (name) => {
+    const source = readFileSync(join(SRC, name), "utf8")
+    expect(
+      offenders(source),
+      `${name} gives a Button a retired variant; use primary, ghost or danger`,
+    ).toEqual([])
+  })
+
+  it("still reads a retired variant on a Button as an offence", () => {
+    // The scan's own mutation check: this is what a reintroduced variant looks
+    // like, and it has to be caught by the same code the sweep above runs.
+    expect(
+      offenders('<Button size="sm" variant="secondary">Go</Button>'),
+    ).toEqual(['line 1: variant="secondary"'])
+    expect(
+      offenders('buttonVariants({ size: "sm", variant: "danger-soft" })'),
+    ).toEqual(['line 1: variant: "danger-soft"'])
+  })
+
+  it("leaves another component's identically named variant alone", () => {
+    // Chip's own vocabulary, which the product uses and must keep.
+    expect(
+      offenders('<Chip size="sm" variant="secondary">soft</Chip>'),
+    ).toEqual([])
+  })
+
+  // The two shapes the first version of this scan reported green on. Six
+  // retired `outline` Buttons survived in `features/usage/ShareDialog.tsx`
+  // behind the first of them, so these are regression tests and not
+  // hypotheticals.
+  it("reads a retired variant inside a conditional expression", () => {
+    expect(
+      offenders('<Button variant={on ? "primary" : "outline"}>Go</Button>'),
+    ).toEqual(['line 1: variant="outline"'])
+  })
+
+  it("reads one on a Button whose earlier prop holds JSX of its own", () => {
+    // The old host guess resolved this tag's host to `FiX` and skipped it.
+    expect(
+      offenders('<Button startContent={<FiX />} variant="outline">Go</Button>'),
+    ).toEqual(['line 1: variant="outline"'])
+  })
+
+  it("still leaves a Chip alone when its variant is conditional", () => {
+    expect(
+      offenders('<Chip variant={on ? "primary" : "secondary"}>soft</Chip>'),
+    ).toEqual([])
+  })
+})
+
+// Every prop of every design-system component is passed by some story.
+//
+// The catalog's claim is that it shows a component's variants and options, and
+// an optional prop is the one thing that can quietly fall outside it: `tsc` is
+// happy, the smoke run renders every story clean, and the story simply never
+// mentions the prop. #970 hit that three times in one rebase (`bounded`, and
+// `docsHref` on two components), each found by reading rather than by a check.
+//
+// Coverage is measured across the WHOLE catalog rather than per file. `Field`'s
+// `isInvalid` is exercised by `FieldMessages.stories.tsx`, which is the right
+// place for it, and a per-file rule would call that a gap.
+describe("the catalog shows every prop", () => {
+  const DS = join(WEB, "src", "design-system")
+
+  /**
+   * Props whose effect cannot be put on screen, each with the reason.
+   *
+   * Passing one in a story to satisfy a checker teaches a reader nothing, so
+   * these are named here instead. Keep it short: a prop lands here only when a
+   * story genuinely cannot show what it does, not when writing one is awkward.
+   */
+  const CANNOT_BE_SHOWN: Record<string, string> = {
+    "actions/CopyButton.selectOnFailure":
+      "the fallback for a refused clipboard write, which a story cannot provoke without breaking the clipboard",
+  }
+
+  // Not props: the first two are every component's, and a leading underscore is
+  // this tree's mark for a parameter destructured only to keep it off the DOM.
+  const NOT_A_PROP = new Set(["children", "className", "ref"])
+
+  function withoutComments(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+  }
+
+  /** A component's props, from its destructured parameters and its Props type. */
+  function propsOf(source: string): Set<string> {
+    const bare = withoutComments(source)
+    const names = new Set<string>()
+    for (const match of bare.matchAll(
+      /export (?:function|const) \w+(?:<[^>]*>)?\(\{([^}]*)\}/g,
+    )) {
+      for (const token of match[1].matchAll(/(?:^|,)\s*([a-zA-Z_]\w*)/g)) {
+        names.add(token[1])
+      }
+    }
+    // The Props declaration, read as a block rather than as a `{ ... }` right
+    // after the name. `Button`'s is `Omit<HeroButtonProps, …> & { … }`, so a
+    // pattern anchored on the brace missed `size`, which is declared there and
+    // forwarded through `...rest` without ever being destructured. Two props in
+    // the whole layer are only visible this way, and the canary above is what
+    // keeps that true.
+    //
+    // Line-anchored on purpose: a member of a nested object type is written
+    // inline here (`options: { value: string; label: string }[]`), so it cannot
+    // match and this stays free of the false positives a greedier read invites.
+    for (const match of bare.matchAll(/(?:interface|type)\s+\w*Props\w*\b/g)) {
+      const tail = bare.slice(match.index + match[0].length)
+      const stop = /\n(?:export|function|const|type|interface)\b/.exec(tail)
+      const block = stop ? tail.slice(0, stop.index) : tail
+      for (const token of block.matchAll(/^\s{2,}([a-zA-Z_]\w*)\??\s*:/gm)) {
+        names.add(token[1])
+      }
+    }
+    for (const name of [...names]) {
+      if (NOT_A_PROP.has(name) || name.startsWith("_")) names.delete(name)
+    }
+    return names
+  }
+
+  // Comments stripped: a story's prose naming a prop would otherwise satisfy
+  // the shorthand pattern below.
+  const storyFiles = walk(DS)
+    .filter((name) => name.endsWith(".stories.tsx"))
+    .map((name) => withoutComments(readFileSync(join(DS, name), "utf8")))
+
+  const stories = storyFiles.join("\n")
+
+  /**
+   * The stories that could be showing this module's components: the ones that
+   * name any of its exports.
+   *
+   * A global search over the whole catalog was the first spelling and it was too
+   * loose by twelve props: `<Button isDisabled>` satisfied `isDisabled` for
+   * every other component that happens to declare it, so a prop with a common
+   * name passed without anyone having shown it. Narrowing to the files that
+   * mention the component keeps the cross-file coverage that matters, since
+   * `FieldMessages.stories.tsx` imports and renders `Field`, which is where
+   * `Field`'s message props are properly shown.
+   */
+  function corpusFor(source: string): string {
+    const exported = [
+      ...source.matchAll(/export (?:function|class) ([A-Z]\w*)/g),
+    ].map((match) => match[1])
+    // Every module in the layer declares at least one, `ErrorBoundary`'s being
+    // the only `class` among them. Falling back to the whole catalog would put
+    // one module back on the loose search this narrowing exists to replace, so
+    // a module the pattern cannot read reports no corpus and fails loudly.
+    expect(exported.length).toBeGreaterThan(0)
+    return storyFiles
+      .filter((text) =>
+        exported.some((name) => new RegExp(`\\b${name}\\b`).test(text)),
+      )
+      .join("\n")
+  }
+
+  const components = walk(DS).filter(
+    (name) =>
+      name.endsWith(".tsx") &&
+      !name.endsWith(".test.tsx") &&
+      !name.endsWith(".stories.tsx"),
+  )
+
+  it("covers the layer and its catalog", () => {
+    expect(components.length).toBeGreaterThan(40)
+    expect(stories.length).toBeGreaterThan(10_000)
+
+    // A guard on the extractor, not on the layer. The rule below asserts only
+    // that a list of missing props is empty, so a regex that stopped matching a
+    // component shape would report every prop as covered and pass. Five
+    // components legitimately yield nothing (their only props are `children` or
+    // `className`), so a per-component floor is wrong; the total is what says
+    // the extractor still works.
+    const extracted = components.reduce(
+      (total, name) =>
+        total + propsOf(readFileSync(join(DS, name), "utf8")).size,
+      0,
+    )
+    expect(extracted).toBeGreaterThan(200)
+
+    // And a canary with known props, so a shape this file reads today cannot
+    // silently stop being read. `Button` is `Omit<HeroButtonProps, …> & { … }`,
+    // which is the least regex-friendly declaration in the layer.
+    const button = propsOf(
+      readFileSync(join(DS, "actions", "Button.tsx"), "utf8"),
+    )
+    expect([...button].sort()).toEqual(["size", "variant"])
+  })
+
+  it.each(components)("shows every prop of %s", (name) => {
+    const source = readFileSync(join(DS, name), "utf8")
+    const module = name.replace(/\.tsx$/, "")
+    const corpus = corpusFor(source)
+    const missing = [...propsOf(source)]
+      .filter((prop) => CANNOT_BE_SHOWN[`${module}.${prop}`] === undefined)
+      .filter((prop) => {
+        // `prop=` or `prop:` for a value, and bare `prop` for JSX boolean
+        // shorthand, which is how the stories pass `bounded` and `nested`.
+        const assigned = new RegExp(`\\b${prop}\\s*[=:]`)
+        const shorthand = new RegExp(`\\b${prop}\\s*(?:/?>|\\n)`)
+        return !assigned.test(corpus) && !shorthand.test(corpus)
+      })
+      .sort()
+
+    expect(
+      missing,
+      `no story passes ${missing.map((p) => `\`${p}\``).join(", ")} on ${module}. Add one, or name it in CANNOT_BE_SHOWN with the reason.`,
+    ).toEqual([])
   })
 })

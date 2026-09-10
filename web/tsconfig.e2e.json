@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    // e2e builds request paths from the app's API_ROOT, so it resolves the
+    // same alias the app does.
+    "paths": { "@/*": ["./src/*"] },
     "target": "ES2023",
     "lib": ["ES2023", "DOM"],
     "module": "ESNext",

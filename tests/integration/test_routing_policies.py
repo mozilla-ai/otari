@@ -36,7 +36,7 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.routing import RoutingConfig
 
 from .conftest import build_test_client
@@ -134,13 +134,13 @@ def client(routing_config: GatewayConfig) -> Generator[TestClient]:
 
 
 def _create_user(client: TestClient, user_id: str = "test-user", **extra: Any) -> None:
-    resp = client.post("/v1/users", json={"user_id": user_id, **extra}, headers=HEADERS)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": user_id, **extra}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
 
 
 def _chat(client: TestClient, model: str, **extra: Any) -> Any:
     return client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": model, "messages": [{"role": "user", "content": "hi"}], "user": "test-user", **extra},
         headers=HEADERS,
     )
@@ -154,7 +154,7 @@ def _awaited_model(mock: AsyncMock) -> str:
 
 
 def _usage_rows(client: TestClient) -> list[dict[str, Any]]:
-    resp = client.get("/v1/usage", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/usage", headers=HEADERS)
     assert resp.status_code == 200, resp.text
     payload: Any = resp.json()
     rows: list[dict[str, Any]] = payload["data"] if isinstance(payload, dict) and "data" in payload else payload
@@ -334,7 +334,7 @@ def test_a_policy_cannot_route_to_a_model_the_key_may_not_use(client: TestClient
     """
     _create_user(client)
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"user_id": "test-user", "allowed_models": ["openai:gpt-5-mini"]},
         headers=HEADERS,
     )
@@ -349,7 +349,7 @@ def test_a_policy_cannot_route_to_a_model_the_key_may_not_use(client: TestClient
 
     with patch("gateway.api.routes.chat.acompletion", new=flaky):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]},
             headers=scoped,
         )
@@ -361,7 +361,7 @@ def test_a_policy_cannot_route_to_a_model_the_key_may_not_use(client: TestClient
     # And with one candidate left, the answer matches naming that model directly.
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_http_error(503))):
         direct = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:gpt-5-mini", "messages": [{"role": "user", "content": "hi"}]},
             headers=scoped,
         )
@@ -373,7 +373,7 @@ def test_a_policy_with_no_permitted_candidate_is_refused_without_naming_its_targ
 ) -> None:
     _create_user(client)
     key_resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"user_id": "test-user", "allowed_models": ["openai:some-other-model"]},
         headers=HEADERS,
     )
@@ -381,7 +381,7 @@ def test_a_policy_with_no_permitted_candidate_is_refused_without_naming_its_targ
     scoped = {API_KEY_HEADER: f"Bearer {key_resp.json()['key']}"}
 
     resp = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]},
         headers=scoped,
     )
@@ -403,7 +403,7 @@ def test_a_policy_with_no_permitted_candidate_is_refused_without_naming_its_targ
 def test_tier_down_fires_once_the_budget_threshold_is_crossed(
     client: TestClient, routing_config: GatewayConfig
 ) -> None:
-    budget = client.post("/v1/budgets", json={"max_budget": 1.0}, headers=HEADERS)
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 1.0}, headers=HEADERS)
     assert budget.status_code == 200, budget.text
     budget_id = budget.json()["budget_id"]
     _create_user(client, budget_id=budget_id)
@@ -443,7 +443,7 @@ def test_a_user_without_a_budget_uses_the_default_candidate(client: TestClient) 
 
 
 def test_policies_are_listed_as_models(client: TestClient) -> None:
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     ids = {model["id"] for model in resp.json()["data"]}
     assert {"fast", "solo", "thrifty"} <= ids
@@ -460,13 +460,13 @@ def test_a_policy_does_not_withhold_its_candidates_from_the_catalog(client: Test
     """
     for key in ("openai:gpt-5-mini", "openai:gpt-5-nano", "anthropic:claude-haiku-4-5"):
         priced = client.post(
-            "/v1/pricing",
+            f"{API_ROOT}/pricing",
             json={"model_key": key, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
             headers=HEADERS,
         )
         assert priced.status_code == 200, priced.text
 
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     entries = {model["id"]: model for model in resp.json()["data"]}
 
@@ -480,7 +480,7 @@ def test_a_price_aimed_at_a_static_policy_names_its_target(client: TestClient) -
     model, so the row would be written and never read.
     """
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "solo", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
         headers=HEADERS,
     )
@@ -492,7 +492,7 @@ def test_a_price_aimed_at_a_static_policy_names_its_target(client: TestClient) -
 
 def test_a_price_aimed_at_a_dynamic_policy_names_every_candidate(client: TestClient) -> None:
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "thrifty", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
         headers=HEADERS,
     )
@@ -507,14 +507,14 @@ def test_a_price_aimed_at_a_stored_policy_is_refused_too(client: TestClient) -> 
     moment ago is already a name pricing must refuse.
     """
     created = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "priceable", "spec": _spec("openai:gpt-5-mini")},
         headers=HEADERS,
     )
     assert created.status_code == 200, created.text
 
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "priceable", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
         headers=HEADERS,
     )
@@ -529,14 +529,14 @@ def test_a_price_aimed_at_a_user_scoped_policy_is_refused_without_naming_candida
     """
     _create_user(client)
     created = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "only-alice", "spec": _spec("openai:gpt-5-mini"), "user_id": "test-user"},
         headers=HEADERS,
     )
     assert created.status_code == 200, created.text
 
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "only-alice", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
         headers=HEADERS,
     )
@@ -566,7 +566,7 @@ def test_a_static_policy_resolves_on_a_non_completion_endpoint(client: TestClien
         "gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=embedding_response
     ) as mock:
         resp = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "solo", "input": "hello", "user": "test-user"},
             headers=HEADERS,
         )
@@ -588,7 +588,7 @@ def test_a_dynamic_policy_is_not_a_model_name_outside_the_completion_routes(clie
     """
     _create_user(client)
     resp = client.post(
-        "/v1/embeddings",
+        f"{API_ROOT}/embeddings",
         json={"model": "thrifty", "input": "hello", "user": "test-user"},
         headers=HEADERS,
     )
@@ -616,7 +616,7 @@ def test_stored_policy_takes_effect_without_a_restart(client: TestClient) -> Non
     """
     _create_user(client)
     created = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "runtime", "spec": _spec("openai:gpt-5-mini", ["anthropic:claude-haiku-4-5"])},
         headers=HEADERS,
     )
@@ -641,8 +641,10 @@ def test_stored_policy_takes_effect_without_a_restart(client: TestClient) -> Non
 
 
 def test_listing_shows_stored_and_config_policies_together(client: TestClient) -> None:
-    client.post("/v1/routing/policies", json={"name": "runtime", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
-    resp = client.get("/v1/routing/policies", headers=HEADERS)
+    client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "runtime", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
+    resp = client.get(f"{API_ROOT}/routing/policies", headers=HEADERS)
 
     assert resp.status_code == 200, resp.text
     by_name = {item["name"]: item for item in resp.json()}
@@ -654,8 +656,10 @@ def test_listing_shows_stored_and_config_policies_together(client: TestClient) -
 
 def test_a_stored_policy_can_be_deleted_and_stops_resolving(client: TestClient) -> None:
     _create_user(client)
-    client.post("/v1/routing/policies", json={"name": "temp", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
-    assert client.delete("/v1/routing/policies/temp", headers=HEADERS).status_code == 204
+    client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "temp", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
+    assert client.delete(f"{API_ROOT}/routing/policies/temp", headers=HEADERS).status_code == 204
 
     resp = _chat(client, "temp")
     assert resp.status_code == 400
@@ -663,7 +667,7 @@ def test_a_stored_policy_can_be_deleted_and_stops_resolving(client: TestClient) 
 
 
 def test_a_config_policy_cannot_be_deleted_through_the_api(client: TestClient) -> None:
-    resp = client.delete("/v1/routing/policies/fast", headers=HEADERS)
+    resp = client.delete(f"{API_ROOT}/routing/policies/fast", headers=HEADERS)
     assert resp.status_code == 404
     assert "config.yml" in resp.json()["detail"]
 
@@ -675,7 +679,7 @@ def test_a_config_policy_cannot_be_deleted_through_the_api(client: TestClient) -
 
 def _rename(client: TestClient, old: str, new: str, spec: dict[str, Any], **extra: Any) -> Any:
     return client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": new, "rename_from": old, "spec": spec, **extra},
         headers=HEADERS,
     )
@@ -687,7 +691,7 @@ def test_renaming_moves_the_row_rather_than_copying_it(client: TestClient) -> No
     """
     _create_user(client)
     created = client.post(
-        "/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
     )
     assert created.status_code == 200, created.text
 
@@ -697,14 +701,16 @@ def test_renaming_moves_the_row_rather_than_copying_it(client: TestClient) -> No
     # The same row, so its history is intact rather than restarting at the rename.
     assert renamed.json()["created_at"] == created.json()["created_at"]
 
-    names = [item["name"] for item in client.get("/v1/routing/policies", headers=HEADERS).json()]
+    names = [item["name"] for item in client.get(f"{API_ROOT}/routing/policies", headers=HEADERS).json()]
     assert "speedy" in names
     assert "quick" not in names
 
 
 def test_the_new_name_serves_and_the_old_one_stops_resolving(client: TestClient) -> None:
     _create_user(client)
-    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
     assert _rename(client, "quick", "speedy", _spec("openai:gpt-5-mini")).status_code == 200
 
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
@@ -723,7 +729,9 @@ def test_a_rename_can_change_the_spec_in_the_same_write(client: TestClient) -> N
     leaving the old name pointing at the new target or the reverse.
     """
     _create_user(client)
-    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
 
     renamed = _rename(client, "quick", "speedy", _spec("anthropic:claude-haiku-4-5"))
     assert renamed.status_code == 200, renamed.text
@@ -738,9 +746,13 @@ def test_renaming_onto_an_existing_policy_is_refused(client: TestClient) -> None
     """Without this the rename would be an upsert onto the target name, deleting a
     working policy to make room for another.
     """
-    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
     client.post(
-        "/v1/routing/policies", json={"name": "taken", "spec": _spec("anthropic:claude-haiku-4-5")}, headers=HEADERS
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
+    client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "taken", "spec": _spec("anthropic:claude-haiku-4-5")},
+        headers=HEADERS,
     )
 
     clash = _rename(client, "quick", "taken", _spec("openai:gpt-5-mini"))
@@ -748,7 +760,7 @@ def test_renaming_onto_an_existing_policy_is_refused(client: TestClient) -> None
     assert "taken" in clash.json()["detail"]
 
     # Both survive, and the occupant keeps its own spec.
-    by_name = {item["name"]: item for item in client.get("/v1/routing/policies", headers=HEADERS).json()}
+    by_name = {item["name"]: item for item in client.get(f"{API_ROOT}/routing/policies", headers=HEADERS).json()}
     assert by_name["quick"]["spec"]["select"] == [{"default": "openai:gpt-5-mini"}]
     assert by_name["taken"]["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
 
@@ -758,7 +770,7 @@ def test_renaming_a_policy_that_does_not_exist_is_a_404(client: TestClient) -> N
     assert resp.status_code == 404
     assert "ghost" in resp.json()["detail"]
     # And it did not fall back to creating the new name.
-    names = [item["name"] for item in client.get("/v1/routing/policies", headers=HEADERS).json()]
+    names = [item["name"] for item in client.get(f"{API_ROOT}/routing/policies", headers=HEADERS).json()]
     assert "speedy" not in names
 
 
@@ -772,13 +784,15 @@ def test_a_rename_is_validated_like_a_fresh_name(client: TestClient) -> None:
     """A rename can walk a policy into every collision a create can, so the new name
     goes through the same checks rather than being trusted because the row existed.
     """
-    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
 
     shadowing = _rename(client, "quick", "fast", _spec("openai:gpt-5-mini"))
     assert shadowing.status_code == 400
     assert "config.yml" in shadowing.json()["detail"]
 
-    client.post("/v1/aliases", json={"name": "cheap", "target": "openai:gpt-5-nano"}, headers=HEADERS)
+    client.post(f"{API_ROOT}/aliases", json={"name": "cheap", "target": "openai:gpt-5-nano"}, headers=HEADERS)
     aliased = _rename(client, "quick", "cheap", _spec("openai:gpt-5-mini"))
     assert aliased.status_code == 400
     assert "alias" in aliased.json()["detail"]
@@ -792,9 +806,11 @@ def test_a_rename_stays_inside_its_scope(client: TestClient) -> None:
     the global policy that shares its name, or vice versa.
     """
     _create_user(client)
-    client.post("/v1/routing/policies", json={"name": "shared", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
     client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies", json={"name": "shared", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
+    client.post(
+        f"{API_ROOT}/routing/policies",
         json={"name": "shared", "spec": _spec("anthropic:claude-haiku-4-5"), "user_id": "test-user"},
         headers=HEADERS,
     )
@@ -802,7 +818,9 @@ def test_a_rename_stays_inside_its_scope(client: TestClient) -> None:
     renamed = _rename(client, "shared", "scoped", _spec("anthropic:claude-haiku-4-5"), user_id="test-user")
     assert renamed.status_code == 200, renamed.text
 
-    rows = {(item["name"], item["user_id"]) for item in client.get("/v1/routing/policies", headers=HEADERS).json()}
+    rows = {
+        (item["name"], item["user_id"]) for item in client.get(f"{API_ROOT}/routing/policies", headers=HEADERS).json()
+    }
     assert ("scoped", "test-user") in rows
     assert ("shared", None) in rows
     assert ("shared", "test-user") not in rows
@@ -812,7 +830,9 @@ def test_rename_from_the_same_name_is_a_plain_update(client: TestClient) -> None
     """A form that always sends `rename_from` must not 409 against the policy it is
     editing just because the name did not change.
     """
-    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
 
     resp = _rename(client, "quick", "quick", _spec("anthropic:claude-haiku-4-5"))
     assert resp.status_code == 200, resp.text
@@ -828,7 +848,7 @@ def test_rename_from_never_falls_back_to_creating_the_policy(client: TestClient)
     assert resp.status_code == 404, resp.text
     assert "ghost" in resp.json()["detail"]
 
-    names = [item["name"] for item in client.get("/v1/routing/policies", headers=HEADERS).json()]
+    names = [item["name"] for item in client.get(f"{API_ROOT}/routing/policies", headers=HEADERS).json()]
     assert "ghost" not in names
 
 
@@ -837,9 +857,13 @@ def test_a_rename_that_loses_a_race_still_reports_the_clash(client: TestClient) 
     take the name in between. The unique constraint catches it, and the answer has to
     stay the 409 the pre-check would have given rather than a bare 500.
     """
-    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
     client.post(
-        "/v1/routing/policies", json={"name": "taken", "spec": _spec("anthropic:claude-haiku-4-5")}, headers=HEADERS
+        f"{API_ROOT}/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
+    client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "taken", "spec": _spec("anthropic:claude-haiku-4-5")},
+        headers=HEADERS,
     )
 
     # False once, so the pre-check waves the rename through as the racing writer's
@@ -851,7 +875,7 @@ def test_a_rename_that_loses_a_race_still_reports_the_clash(client: TestClient) 
     assert "taken" in clash.json()["detail"]
 
     # And the loser is still there under its own name, unwritten.
-    by_name = {item["name"]: item for item in client.get("/v1/routing/policies", headers=HEADERS).json()}
+    by_name = {item["name"]: item for item in client.get(f"{API_ROOT}/routing/policies", headers=HEADERS).json()}
     assert by_name["quick"]["spec"]["select"] == [{"default": "openai:gpt-5-mini"}]
     assert by_name["taken"]["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
 
@@ -861,7 +885,7 @@ def test_a_global_stored_policy_may_not_shadow_a_config_one(client: TestClient) 
     no is the only answer that does not lie about what the gateway will do.
     """
     resp = client.post(
-        "/v1/routing/policies", json={"name": "fast", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+        f"{API_ROOT}/routing/policies", json={"name": "fast", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
     )
     assert resp.status_code == 400
     assert "config.yml" in resp.json()["detail"]
@@ -871,7 +895,7 @@ def test_a_user_scoped_policy_overrides_a_config_one_for_that_user_only(client: 
     _create_user(client)
     _create_user(client, "other-user")
     scoped = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "fast", "spec": _spec("anthropic:claude-haiku-4-5"), "user_id": "test-user"},
         headers=HEADERS,
     )
@@ -885,7 +909,7 @@ def test_a_user_scoped_policy_overrides_a_config_one_for_that_user_only(client: 
 
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
         other = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "fast", "messages": [{"role": "user", "content": "hi"}], "user": "other-user"},
             headers=HEADERS,
         )
@@ -898,7 +922,7 @@ def test_an_invalid_spec_is_refused_with_field_level_errors(client: TestClient) 
     own messages are surfaced rather than flattened into one string.
     """
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "broken", "spec": {"select": [{"target": "openai:gpt-5-mini"}]}},
         headers=HEADERS,
     )
@@ -913,7 +937,7 @@ def test_an_unreachable_budget_threshold_is_refused(client: TestClient) -> None:
     fire and an operator writing it believes they configured something.
     """
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "past-the-cap",
             "spec": {
@@ -934,7 +958,7 @@ def test_still_under_the_cap_is_a_usable_threshold(client: TestClient) -> None:
     reaches selection satisfies, so it must not be refused alongside `gte 100`.
     """
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "under-the-cap",
             "spec": {
@@ -950,20 +974,20 @@ def test_still_under_the_cap_is_a_usable_threshold(client: TestClient) -> None:
 
 
 def test_a_stored_policy_may_not_point_at_an_alias(client: TestClient) -> None:
-    alias = client.post("/v1/aliases", json={"name": "cheap", "target": "openai:gpt-5-nano"}, headers=HEADERS)
+    alias = client.post(f"{API_ROOT}/aliases", json={"name": "cheap", "target": "openai:gpt-5-nano"}, headers=HEADERS)
     assert alias.status_code == 200, alias.text
     resp = client.post(
-        "/v1/routing/policies", json={"name": "chained", "spec": _spec("cheap:x")}, headers=HEADERS
+        f"{API_ROOT}/routing/policies", json={"name": "chained", "spec": _spec("cheap:x")}, headers=HEADERS
     )
     assert resp.status_code == 400
     assert "chaining" in resp.json()["detail"]
 
 
 def test_a_policy_may_not_reuse_an_alias_name(client: TestClient) -> None:
-    alias = client.post("/v1/aliases", json={"name": "taken", "target": "openai:gpt-5-nano"}, headers=HEADERS)
+    alias = client.post(f"{API_ROOT}/aliases", json={"name": "taken", "target": "openai:gpt-5-nano"}, headers=HEADERS)
     assert alias.status_code == 200, alias.text
     resp = client.post(
-        "/v1/routing/policies", json={"name": "taken", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+        f"{API_ROOT}/routing/policies", json={"name": "taken", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
     )
     assert resp.status_code == 400
     assert "alias" in resp.json()["detail"]
@@ -971,7 +995,7 @@ def test_a_policy_may_not_reuse_an_alias_name(client: TestClient) -> None:
 
 def test_writing_a_policy_for_an_unknown_user_is_a_404(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "scoped", "spec": _spec("openai:gpt-5-mini"), "user_id": "nobody"},
         headers=HEADERS,
     )
@@ -980,16 +1004,16 @@ def test_writing_a_policy_for_an_unknown_user_is_a_404(client: TestClient) -> No
 
 def test_policy_management_requires_the_master_key(client: TestClient) -> None:
     _create_user(client)
-    key_resp = client.post("/v1/keys", json={"user_id": "test-user"}, headers=HEADERS)
+    key_resp = client.post(f"{API_ROOT}/keys", json={"user_id": "test-user"}, headers=HEADERS)
     assert key_resp.status_code == 200, key_resp.text
     caller = {API_KEY_HEADER: f"Bearer {key_resp.json()['key']}"}
 
     # Only an operator may decide which models a name reaches; otherwise a caller
     # could widen their own access by writing a policy.
-    assert client.get("/v1/routing/policies", headers=caller).status_code in (401, 403)
+    assert client.get(f"{API_ROOT}/routing/policies", headers=caller).status_code in (401, 403)
     assert (
         client.post(
-            "/v1/routing/policies", json={"name": "sneaky", "spec": _spec("openai:gpt-5-mini")}, headers=caller
+            f"{API_ROOT}/routing/policies", json={"name": "sneaky", "spec": _spec("openai:gpt-5-mini")}, headers=caller
         ).status_code
         in (401, 403)
     )
@@ -1001,7 +1025,7 @@ def test_policy_management_requires_the_master_key(client: TestClient) -> None:
 
 
 def test_explain_returns_the_plan_for_a_saved_policy(client: TestClient) -> None:
-    resp = client.post("/v1/routing/policies/explain", json={"name": "fast"}, headers=HEADERS)
+    resp = client.post(f"{API_ROOT}/routing/policies/explain", json={"name": "fast"}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert [c["dispatch_model"] for c in body["candidates"]] == [
@@ -1016,7 +1040,7 @@ def test_explain_checks_an_unsaved_draft(client: TestClient) -> None:
     accepts a spec that has not been stored.
     """
     resp = client.post(
-        "/v1/routing/policies/explain",
+        f"{API_ROOT}/routing/policies/explain",
         json={"name": "draft", "spec": _spec("openai:gpt-5-mini", ["anthropic:claude-haiku-4-5"])},
         headers=HEADERS,
     )
@@ -1029,7 +1053,7 @@ def test_explain_reports_dropped_candidates_with_reasons(client: TestClient) -> 
     attempt, and an author needs to see that before an outage does.
     """
     resp = client.post(
-        "/v1/routing/policies/explain",
+        f"{API_ROOT}/routing/policies/explain",
         json={"name": "fast", "allowed_models": ["anthropic:claude-haiku-4-5"]},
         headers=HEADERS,
     )
@@ -1042,7 +1066,7 @@ def test_explain_reports_dropped_candidates_with_reasons(client: TestClient) -> 
 
 def test_explain_simulates_a_budget_threshold(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/policies/explain",
+        f"{API_ROOT}/routing/policies/explain",
         json={"name": "thrifty", "budget_used_pct": 85},
         headers=HEADERS,
     )
@@ -1053,7 +1077,7 @@ def test_explain_simulates_a_budget_threshold(client: TestClient) -> None:
 
 
 def test_explain_needs_at_least_a_name_or_a_spec(client: TestClient) -> None:
-    assert client.post("/v1/routing/policies/explain", json={}, headers=HEADERS).status_code == 400
+    assert client.post(f"{API_ROOT}/routing/policies/explain", json={}, headers=HEADERS).status_code == 400
 
 
 def test_explain_prefers_a_draft_over_the_saved_policy_of_the_same_name(client: TestClient) -> None:
@@ -1061,7 +1085,7 @@ def test_explain_prefers_a_draft_over_the_saved_policy_of_the_same_name(client: 
     what their unsaved edit would do, so both name and spec are sent.
     """
     resp = client.post(
-        "/v1/routing/policies/explain",
+        f"{API_ROOT}/routing/policies/explain",
         json={"name": "fast", "spec": _spec("anthropic:claude-haiku-4-5")},
         headers=HEADERS,
     )
@@ -1088,7 +1112,7 @@ def test_an_absorbed_failure_does_not_count_as_an_error_or_an_extra_request(clie
     with patch("gateway.api.routes.chat.acompletion", new=flaky):
         assert _chat(client, "fast").status_code == 200
 
-    summary = client.get("/v1/usage/summary", headers=HEADERS)
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=HEADERS)
     assert summary.status_code == 200, summary.text
     totals = summary.json()["totals"]
 
@@ -1113,7 +1137,7 @@ def test_filtering_to_absorbed_counts_the_attempts_rather_than_reporting_zero(cl
     with patch("gateway.api.routes.chat.acompletion", new=flaky):
         assert _chat(client, "fast").status_code == 200
 
-    summary = client.get("/v1/usage/summary", params={"status": "absorbed"}, headers=HEADERS)
+    summary = client.get(f"{API_ROOT}/usage/summary", params={"status": "absorbed"}, headers=HEADERS)
     assert summary.status_code == 200, summary.text
     totals = summary.json()["totals"]
 
@@ -1121,12 +1145,12 @@ def test_filtering_to_absorbed_counts_the_attempts_rather_than_reporting_zero(cl
     assert totals["request_count"] == 1
 
     # Unfiltered still reads as one request, the served one.
-    unfiltered = client.get("/v1/usage/summary", headers=HEADERS).json()["totals"]
+    unfiltered = client.get(f"{API_ROOT}/usage/summary", headers=HEADERS).json()["totals"]
     assert unfiltered["request_count"] == 1
 
     # And the breakdowns agree with the tile rather than contradicting it.
     by_provider = client.get(
-        "/v1/usage/summary", params={"status": "absorbed", "dimensions": "provider"}, headers=HEADERS
+        f"{API_ROOT}/usage/summary", params={"status": "absorbed", "dimensions": "provider"}, headers=HEADERS
     ).json()["by_provider"]
     assert sum(row["requests"] for row in by_provider) == 1
 
@@ -1152,13 +1176,13 @@ def test_a_stored_policy_is_listed_in_the_model_catalog(client: TestClient) -> N
     the dashboard would work when called and be invisible in the catalog.
     """
     created = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "listed", "spec": _spec("openai:gpt-5-mini")},
         headers=HEADERS,
     )
     assert created.status_code == 200, created.text
 
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     assert resp.status_code == 200
     entries = {model["id"]: model for model in resp.json()["data"]}
     assert "listed" in entries
@@ -1167,7 +1191,7 @@ def test_a_stored_policy_is_listed_in_the_model_catalog(client: TestClient) -> N
 
 def test_a_dynamic_stored_policy_reports_no_single_price(client: TestClient) -> None:
     created = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "listed-dynamic",
             "spec": {
@@ -1181,7 +1205,7 @@ def test_a_dynamic_stored_policy_reports_no_single_price(client: TestClient) -> 
     )
     assert created.status_code == 200, created.text
 
-    resp = client.get("/v1/models", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/models", headers=HEADERS)
     entries = {model["id"]: model for model in resp.json()["data"]}
     assert entries["listed-dynamic"]["pricing"] is None
     # Reuses the existing field rather than inventing a second way to say it.
@@ -1232,7 +1256,7 @@ def test_a_policy_guardrail_is_handed_to_the_guardrail_runner(guarded_client: Te
         patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
     ):
         resp = guarded_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "guarded", "messages": [{"role": "user", "content": "hi"}], "user": "test-user"},
             headers=HEADERS,
         )
@@ -1256,7 +1280,7 @@ def test_a_caller_cannot_weaken_a_policy_guardrail_over_the_wire(guarded_client:
         patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
     ):
         resp = guarded_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "guarded",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -1296,7 +1320,7 @@ def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestCli
         patch("gateway.api.routes.chat.acompletion", new=provider),
     ):
         resp = guarded_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "guarded", "messages": [{"role": "user", "content": "hi"}], "user": "test-user"},
             headers=HEADERS,
         )
@@ -1396,7 +1420,7 @@ def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
 
     with patch("gateway.api.routes.messages.amessages", new=flaky):
         resp = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "fast",
                 "max_tokens": 16,
@@ -1428,7 +1452,7 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
 
     with patch("gateway.api.routes.responses.aresponses", new=flaky):
         resp = client.post(
-            "/v1/responses",
+            f"{API_ROOT}/responses",
             json={"model": "fast", "input": "hi", "user": "test-user"},
             headers=HEADERS,
         )
@@ -1489,7 +1513,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
     """
     _create_user(client)
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "otari:web_search",
             # USD per million calls: a cent per search.
@@ -1544,7 +1568,7 @@ def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
 
     # The per-tool breakdown counts the work once and the request once, even though
     # the request wrote two rows. A plain row count would report two requests here.
-    summary = client.get("/v1/usage/summary", params={"dimensions": "tool"}, headers=HEADERS).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", params={"dimensions": "tool"}, headers=HEADERS).json()
     by_tool = {row["tool"]: row for row in summary["by_tool"]}
     assert by_tool["web_search"]["calls"] == 3
     assert by_tool["web_search"]["requests"] == 1
@@ -1565,7 +1589,7 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     """
     _create_user(client)
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "otari:web_search",
             "input_price_per_million": 10_000.0,
@@ -1608,5 +1632,5 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     assert error_row["cost"] == pytest.approx(0.01)
 
     # And the money is in the ledger, not only on the row.
-    user = client.get("/v1/users/test-user", headers=HEADERS).json()
+    user = client.get(f"{API_ROOT}/users/test-user", headers=HEADERS).json()
     assert user["spend"] == pytest.approx(0.01)

@@ -32,7 +32,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from gateway.core.config import API_KEY_HEADER
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 
 from .test_rate_limiting import _make_rate_limit_client
 
@@ -43,7 +43,7 @@ _MESSAGES = [{"role": "user", "content": "hi"}]
 
 
 def _errors(client: TestClient, headers: dict[str, str]) -> list[dict[str, Any]]:
-    rows = client.get("/v1/usage", params={"status": "error"}, headers=headers).json()
+    rows = client.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=headers).json()
     return [dict(r) for r in rows]
 
 
@@ -61,25 +61,25 @@ def _one_error(client: TestClient, headers: dict[str, str]) -> dict[str, Any]:
 
 
 def _make_user(client: TestClient, headers: dict[str, str], user_id: str, **fields: Any) -> None:
-    resp = client.post("/v1/users", json={"user_id": user_id, **fields}, headers=headers)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": user_id, **fields}, headers=headers)
     assert resp.status_code == 200, resp.text
 
 
 def _make_key(client: TestClient, headers: dict[str, str], name: str, **fields: Any) -> dict[str, str]:
-    resp = client.post("/v1/keys", json={"key_name": name, **fields}, headers=headers)
+    resp = client.post(f"{API_ROOT}/keys", json={"key_name": name, **fields}, headers=headers)
     assert resp.status_code == 200, resp.text
     return {API_KEY_HEADER: f"Bearer {resp.json()['key']}"}
 
 
 def _zero_budget(client: TestClient, headers: dict[str, str]) -> str:
-    resp = client.post("/v1/budgets", json={"max_budget": 0.0}, headers=headers)
+    resp = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=headers)
     assert resp.status_code == 200, resp.text
     return str(resp.json()["budget_id"])
 
 
 def _chat(client: TestClient, headers: dict[str, str], **body: Any) -> int:
     resp = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"messages": _MESSAGES, **body},
         headers=headers,
     )
@@ -105,7 +105,7 @@ def test_model_not_allowed_for_key_is_recorded(client: TestClient, master_key_he
     # The dashboard's "N failed in the last hour" signal reads the count scoped to
     # gateway traffic; a gate that logs must show up there or the alarm undercounts.
     scoped = client.get(
-        "/v1/usage/count", params={"status": "error", "source": "gateway"}, headers=master_key_header
+        f"{API_ROOT}/usage/count", params={"status": "error", "source": "gateway"}, headers=master_key_header
     ).json()
     assert scoped["total"] == 1
 
@@ -195,7 +195,7 @@ def test_unresolvable_selector_releases_the_reservation(
     a nonzero estimate. That is the precondition that makes the refund matter.
     """
     priced = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "ghostprovider:some-model",
             "input_price_per_million": 2.5,
@@ -207,13 +207,13 @@ def test_unresolvable_selector_releases_the_reservation(
 
     # Control: a budget far below the estimate turns the same request into a
     # budget refusal (403), proving the estimate is nonzero and pricing matched.
-    tiny_budget = client.post("/v1/budgets", json={"max_budget": 0.001}, headers=master_key_header).json()[
+    tiny_budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.001}, headers=master_key_header).json()[
         "budget_id"
     ]
     _make_user(client, master_key_header, "tiny-budget-user", budget_id=tiny_budget)
     assert _chat(client, master_key_header, model="ghostprovider:some-model", user="tiny-budget-user") == 403
 
-    budget_id = client.post("/v1/budgets", json={"max_budget": 100.0}, headers=master_key_header).json()[
+    budget_id = client.post(f"{API_ROOT}/budgets", json={"max_budget": 100.0}, headers=master_key_header).json()[
         "budget_id"
     ]
     _make_user(client, master_key_header, "stranded-user", budget_id=budget_id)
@@ -286,7 +286,7 @@ def test_passthrough_rejections_are_recorded(
     _make_user(client, master_key_header, "blocked-embedder", blocked=True)
 
     resp = client.post(
-        "/v1/embeddings",
+        f"{API_ROOT}/embeddings",
         json={"model": model, "input": "hi", "user": "blocked-embedder"},
         headers=master_key_header,
     )
@@ -311,7 +311,7 @@ def test_passthrough_model_not_allowed_is_recorded(client: TestClient, master_ke
     )
 
     resp = client.post(
-        "/v1/embeddings",
+        f"{API_ROOT}/embeddings",
         json={"model": "openai:text-embedding-3-small", "input": "hi"},
         headers=key,
     )
@@ -332,7 +332,7 @@ def test_passthrough_user_key_mismatch_is_recorded(client: TestClient, master_ke
     key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner")
 
     resp = client.post(
-        "/v1/embeddings",
+        f"{API_ROOT}/embeddings",
         json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "embed-stranger"},
         headers=key,
     )
@@ -414,7 +414,7 @@ def test_passthrough_mismatch_rows_are_bounded_by_the_rate_limit(
     attempts = _RPM * 2
     statuses = [
         client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "rl-embed-stranger"},
             headers=key,
         ).status_code

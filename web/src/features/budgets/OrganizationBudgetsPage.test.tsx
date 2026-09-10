@@ -5,8 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationBudget, OrganizationSpendCeiling } from "@/client"
 import { OrganizationBudgetsPage } from "@/features/budgets/OrganizationBudgetsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationContext, workspace } from "@/tests/fixtures"
+import {
+  bootstrap,
+  organizationContext,
+  organizationSpendCeiling as spendCeiling,
+  workspace,
+} from "@/tests/fixtures"
 
 interface RecordedRequest {
   url: string
@@ -27,36 +33,6 @@ function organizationBudget(
     budget_duration_sec: null,
     reset_alignment: "calendar_month",
     ceiling_count: 0,
-    created_at: "2026-01-01T00:00:00+00:00",
-    updated_at: "2026-01-01T00:00:00+00:00",
-    ...overrides,
-  }
-}
-
-function spendCeiling(
-  overrides: Partial<OrganizationSpendCeiling> = {},
-): OrganizationSpendCeiling {
-  return {
-    id: "cccccccc-1111-2222-3333-444444444444",
-    scope_type: "organization",
-    scope_id: "11111111-1111-1111-1111-111111111111",
-    provider_key_id: null,
-    budget_id: "bbbbbbbb-1111-2222-3333-444444444444",
-    name: null,
-    max_budget: 250,
-    current_spend: 12.5,
-    reserved_spend: 0,
-    token_limit: null,
-    current_tokens: 0,
-    reserved_tokens: 0,
-    request_limit: null,
-    current_requests: 0,
-    reserved_requests: 0,
-    budget_duration_sec: null,
-    reset_alignment: "calendar_month",
-    period_start: "2026-08-01T00:00:00+00:00",
-    period_end: "2026-09-01T00:00:00+00:00",
-    manageable: true,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,
@@ -90,21 +66,21 @@ function mockApi({
       method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
-    if (url.includes("/v1/organizations/me/spend-ceilings")) {
+    if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
       if (method === "GET") {
         return jsonResponse({ data: ceilings, count: ceilings.length })
       }
       if (method === "DELETE") return jsonResponse({ message: "deleted" })
       return jsonResponse(spendCeiling(), writeStatus)
     }
-    if (url.includes("/v1/organizations/me/budgets")) {
+    if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
       if (method === "GET") {
         return jsonResponse({ data: budgets, count: budgets.length })
       }
       if (method === "DELETE") return jsonResponse({ message: "deleted" })
       return jsonResponse(organizationBudget(), writeStatus)
     }
-    if (url.includes("/v1/workspaces")) {
+    if (url.includes(`${API_ROOT}/workspaces`)) {
       return jsonResponse({
         data: [workspace({ name: "Engineering" })],
         count: 1,
@@ -142,7 +118,7 @@ afterEach(() => {
 
 describe("OrganizationBudgetsPage", () => {
   it("reads only the organization's own surfaces, never the deployment's", async () => {
-    // The point of the page. `/v1/budgets` and `/v1/scoped-budgets` answer 403
+    // The point of the page. /api/v1/budgets and /api/v1/scoped-budgets answer 403
     // to a tenant, so touching either would paint a refusal on a page that is
     // the admin's to use.
     const requests = mockApi()
@@ -151,14 +127,16 @@ describe("OrganizationBudgetsPage", () => {
 
     const read = requests.map((request) => request.url)
     expect(
-      read.some((url) => url.includes("/v1/organizations/me/budgets")),
+      read.some((url) => url.includes(`${API_ROOT}/organizations/me/budgets`)),
     ).toBe(true)
     expect(
-      read.some((url) => url.includes("/v1/organizations/me/spend-ceilings")),
+      read.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      ),
     ).toBe(true)
     for (const url of read) {
-      expect(url).not.toMatch(/\/v1\/budgets/)
-      expect(url).not.toMatch(/\/v1\/scoped-budgets/)
+      expect(url).not.toMatch(/\/api\/v1\/budgets/)
+      expect(url).not.toMatch(/\/api\/v1\/scoped-budgets/)
     }
   })
 
@@ -212,14 +190,14 @@ describe("OrganizationBudgetsPage", () => {
         requests.some(
           (request) =>
             request.method === "POST" &&
-            request.url.includes("/v1/organizations/me/budgets"),
+            request.url.includes(`${API_ROOT}/organizations/me/budgets`),
         ),
       ).toBe(true),
     )
     const posted = requests.find(
       (request) =>
         request.method === "POST" &&
-        request.url.includes("/v1/organizations/me/budgets"),
+        request.url.includes(`${API_ROOT}/organizations/me/budgets`),
     )
     expect(posted?.body).toMatchObject({
       name: "Design",
@@ -338,14 +316,14 @@ describe("OrganizationBudgetsPage", () => {
         requests.some(
           (request) =>
             request.method === "POST" &&
-            request.url.includes("/v1/organizations/me/spend-ceilings"),
+            request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
         ),
       ).toBe(true),
     )
     const posted = requests.find(
       (request) =>
         request.method === "POST" &&
-        request.url.includes("/v1/organizations/me/spend-ceilings"),
+        request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
     )
     // The scope an admin reaches this page to set, held to the organization's
     // own first budget.
@@ -423,13 +401,13 @@ describe("OrganizationBudgetsPage", () => {
     // reading "A workspace") and never the cause.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/workspaces")) {
+      if (url.includes(`${API_ROOT}/workspaces`)) {
         return jsonResponse({ detail: "workspaces unavailable" }, 500)
       }
-      if (url.includes("/v1/organizations/me/spend-ceilings")) {
+      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes("/v1/organizations/me/budgets")) {
+      if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
         return jsonResponse({ data: [organizationBudget()], count: 1 })
       }
       return jsonResponse([])

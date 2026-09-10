@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
+import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
   useSelectedWorkspace,
@@ -68,7 +69,7 @@ function mockApi({
         const next = queue.length > 1 ? queue.shift() : queue[0]
         return Response.json(next)
       }
-      if (url.includes("/v1/models")) {
+      if (url.includes(`${API_ROOT}/models`)) {
         return Response.json({
           object: "list",
           data: models.map((id) => ({
@@ -110,7 +111,7 @@ function Switcher() {
 }
 
 function renderCard(
-  hasProviders = true,
+  canServeRequests = true,
   deployment: DeploymentBootstrap = bootstrap(),
 ) {
   const client = new QueryClient({
@@ -120,7 +121,7 @@ function renderCard(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={deployment}>
         <SelectedWorkspaceProvider>
-          <SetupGuideCard hasProviders={hasProviders} />
+          <SetupGuideCard canServeRequests={canServeRequests} />
           <Switcher />
         </SelectedWorkspaceProvider>
       </DeploymentProvider>
@@ -147,7 +148,7 @@ describe("SetupGuideCard", () => {
     ).toBeInTheDocument()
   })
 
-  it("holds back while the gateway has no provider to serve the request", async () => {
+  it("holds back while nothing can serve the request", async () => {
     // The Overview's own getting-started panel is the guide at that point, and
     // a key handed out here would be for a call that cannot succeed.
     mockApi()
@@ -188,12 +189,21 @@ describe("SetupGuideCard", () => {
 
     await user.click(screen.getByRole("button", { name: "Create a setup key" }))
 
-    expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
+    // Concealed until it is asked for, and so is the snippet carrying it: a
+    // key nobody has asked to see is not on screen (otari-ai#2111).
+    expect(await screen.findByLabelText("API key")).not.toHaveValue(KEY)
+    expect(
+      (screen.getByLabelText("curl") as HTMLTextAreaElement).value,
+    ).not.toContain(KEY)
+
+    await user.click(screen.getByRole("button", { name: "Show API key" }))
+    expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Show curl" }))
     const curl = screen.getByDisplayValue(
       new RegExp(`Otari-Key: ${KEY}`),
     ) as HTMLTextAreaElement
     expect(curl.value).toContain(
-      `${window.location.origin}/v1/chat/completions`,
+      `${window.location.origin}${API_ROOT}/chat/completions`,
     )
     // The model comes from the catalog, so the snippet runs as pasted.
     expect(curl.value).toContain("openai:gpt-4o-mini")
@@ -217,14 +227,16 @@ describe("SetupGuideCard", () => {
       await screen.findByRole("button", { name: "Create a setup key" }),
     )
 
-    const curl = (await screen.findByDisplayValue(
-      new RegExp(`Otari-Key: ${KEY}`),
-    )) as HTMLTextAreaElement
-    expect(curl.value).toContain("https://gateway.otari.ai/v1/chat/completions")
+    const curl = (await screen.findByLabelText("curl")) as HTMLTextAreaElement
+    expect(curl.value).toContain(
+      `https://gateway.otari.ai${API_ROOT}/chat/completions`,
+    )
     expect(curl.value).not.toContain(window.location.origin)
+    // Concealed, so the address it names is readable while the key is not.
+    expect(curl.value).not.toContain(KEY)
   })
 
-  it("shows the key but no snippet when a hosted deployment published no data plane", async () => {
+  it("offers the key but no snippet when a hosted deployment published no data plane", async () => {
     // Withheld rather than aimed at this host: a placeholder would be a URL
     // nobody reading it could replace, and the origin would be the bug itself.
     mockApi()
@@ -238,10 +250,8 @@ describe("SetupGuideCard", () => {
       await screen.findByRole("button", { name: "Create a setup key" }),
     )
 
-    expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
-    expect(
-      screen.queryByDisplayValue(new RegExp(`Otari-Key: ${KEY}`)),
-    ).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("API key")).toBeInTheDocument()
+    expect(screen.queryByLabelText("curl")).not.toBeInTheDocument()
     expect(
       screen.getByText(/has not published the gateway address/),
     ).toBeInTheDocument()
@@ -351,6 +361,9 @@ describe("SetupGuideCard", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create a setup key" }),
     )
+    await user.click(
+      await screen.findByRole("button", { name: "Show API key" }),
+    )
     expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "switch to Research" }))
@@ -358,6 +371,9 @@ describe("SetupGuideCard", () => {
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
     await user.click(
       await screen.findByRole("button", { name: "Create a setup key" }),
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Show API key" }),
     )
     expect(await screen.findByDisplayValue(OTHER_KEY)).toBeInTheDocument()
 

@@ -219,7 +219,7 @@ def _seed_float_rows(engine: Engine) -> list[tuple[str, dict[str, Any]]]:
             text(
                 "INSERT INTO usage_logs (id, workspace_id, timestamp, model, endpoint, source, "
                 "counts_toward_budget, cost, status) "
-                "VALUES ('row-1', :workspace, :now, 'openai:gpt-4o', '/v1/chat/completions', 'gateway', "
+                "VALUES ('row-1', :workspace, :now, 'openai:gpt-4o', '/api/v1/chat/completions', 'gateway', "
                 "1, 0.1234567, 'success')"
             ),
             {"workspace": "0" * 32, "now": now},

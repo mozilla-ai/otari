@@ -60,6 +60,7 @@ from urllib.parse import urlparse
 import httpx
 
 from gateway.core.config import (
+    API_ROOT,
     SEARCH_PROVIDERS,
     SEARCH_PROVIDERS_REQUIRING_API_KEY,
     GatewayConfig,
@@ -191,7 +192,7 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
         # was unfollowable on a deployment that has no config file (issue #601).
         msg = (
             "No search tools are configured. Add one on the dashboard's Tools & Guardrails page "
-            "(or POST /v1/search-tools), or declare one under 'search_tools' in your config file, "
+            f"(or POST {API_ROOT}/search-tools), or declare one under 'search_tools' in your config file, "
             "supplied directly or through OTARI_CONFIG_YAML / OTARI_CONFIG_B64."
         )
         raise SearchToolError(msg)
@@ -200,7 +201,7 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
         if len(configured) > 1:
             msg = (
                 "Several search tools are configured; name one in 'search_tool_name' or use "
-                f"POST /v1/search/{{tool}}. Available: {', '.join(sorted(configured))}."
+                f"POST {API_ROOT}/search/{{tool}}. Available: {', '.join(sorted(configured))}."
             )
             raise SearchToolError(msg)
         name = next(iter(configured))

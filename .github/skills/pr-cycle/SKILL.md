@@ -43,8 +43,12 @@ artifacts.
    because the repo squash-merges and git-cliff parses that title into the changelog. Keep the
    template's `## PR Type`, `## Checklist` and `## AI Usage` sections: `pr-template-check.yml`
    fails and labels the PR `missing-template` if any of the three is absent. Fill in AI Usage
-   honestly, including the AI-agent checkbox. No labels are required here. No em dashes in the
-   description (repo prose rule). Default to opening **ready for review**; open a **draft** only
+   honestly, including the AI-agent checkbox. Two further sections are expected on every PR
+   and are gated by nobody, which makes them the ones an agent drops: `## Description` in
+   plain English for a reader with no context on the area (what changes for someone using
+   Otari, and why, no file paths), and `## How to test it locally` with the steps a reviewer
+   runs plus the automated checks that already cover it. No labels are required here. No em
+   dashes in the description (repo prose rule). Default to opening **ready for review**; open a **draft** only
    if the user asked to see it first (confirm which if unsure).
 8. **Self-review.** Invoke the [`review`](../review/SKILL.md) skill on your own PR before anyone
    else reads it. Apply what is valid and push; skip nits that fight the repo's conventions, and

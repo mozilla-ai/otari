@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -48,15 +48,17 @@ def _claimed_and_verified(
     client: TestClient, master_key_header: dict[str, str], caplog: pytest.LogCaptureFixture, *, email: str
 ) -> None:
     assert client.post(
-        "/v1/organizations/me/members",
+        f"{API_ROOT}/organizations/me/members",
         json={"email": email, "role": "member"},
         headers=master_key_header,
     ).status_code == 201
 
-    signup = _with_logs(caplog, lambda: client.post("/v1/auth/signup", json={"email": email, "password": PASSWORD}))
+    signup = _with_logs(
+        caplog, lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})
+    )
     assert signup.status_code == 200, signup.text
     token = _extract_token(caplog.text)
-    assert client.post("/v1/auth/verify-email", json={"token": token}).status_code == 200
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
 
 
 def test_reset_request_then_confirm_then_sign_in(
@@ -72,18 +74,18 @@ def test_reset_request_then_confirm_then_sign_in(
     _claimed_and_verified(client, master_key_header, caplog, email="ada@example.com")
 
     requested = _with_logs(
-        caplog, lambda: client.post("/v1/auth/password/reset", json={"email": "ada@example.com"})
+        caplog, lambda: client.post(f"{API_ROOT}/auth/password/reset", json={"email": "ada@example.com"})
     )
     assert requested.status_code == 200, requested.text
     token = _extract_token(caplog.text)
 
     confirmed = client.post(
-        "/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
+        f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
     )
     assert confirmed.status_code == 204, confirmed.text
 
-    signed_in = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": NEW_PASSWORD})
     assert signed_in.status_code == 200, signed_in.text
 
-    stale = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+    stale = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
     assert stale.status_code == 401

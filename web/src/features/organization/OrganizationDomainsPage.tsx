@@ -1,10 +1,20 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button, Chip } from "@heroui/react"
 import { useState } from "react"
 
 import type {
   CreateOrganizationDomainRequest,
   OrganizationDomain,
 } from "@/client"
+import { CopyField } from "@/design-system/actions/CopyField"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Field } from "@/design-system/forms/Field"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   useCreateOrganizationDomain,
   useDeleteOrganizationDomain,
@@ -12,17 +22,7 @@ import {
   useOrganizationDomains,
   useUpdateOrganizationDomain,
   useVerifyOrganizationDomain,
-} from "@/shared/api/hooks"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
-import {
-  ConfirmButton,
-  CopyField,
-  ErrorBanner,
-  FilterSelect,
-  InfoBanner,
-  PageHeader,
-} from "@/shared/components/ui"
+} from "@/shared/api/organizations"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage, membershipLabel } from "./roles"
@@ -88,45 +88,45 @@ function ClaimForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <h2 className="text-title">Claim an email domain</h2>
-        <ErrorBanner error={create.error} />
-        <Field
-          label="Domain"
-          value={domain}
-          onChange={setDomain}
-          isRequired
-          autoFocus
-          placeholder="example.com"
-          description="The domain your colleagues' addresses end in. A whole address works too; only its domain is stored. Public providers like gmail.com can't be claimed."
-        />
-        <FilterSelect
-          label="They join as"
-          value={role}
-          onChange={setRole}
-          options={AUTO_JOIN_ROLE_OPTIONS}
-        />
-        <p className="text-caption">
-          Nothing happens until you publish the DNS record this creates and
-          verify it. Anyone who already has an account joins on their next
-          sign-in.
-        </p>
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={domain.trim() === ""}
-            isPending={create.isPending}
-            onPress={submit}
-          >
-            Claim domain
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <h2 className="text-title">Claim an email domain</h2>
+      <ErrorBanner error={create.error} />
+      <Field
+        label="Domain"
+        value={domain}
+        onChange={setDomain}
+        isRequired
+        autoFocus
+        placeholder="example.com"
+        description="The domain your colleagues' addresses end in. A whole address works too; only its domain is stored. Public providers like gmail.com can't be claimed."
+      />
+      <FilterSelect
+        label="They join as"
+        value={role}
+        onChange={setRole}
+        options={AUTO_JOIN_ROLE_OPTIONS}
+      />
+      <p className="text-caption">
+        Nothing happens until you publish the DNS record this creates and verify
+        it. Anyone who already has an account joins on their next sign-in.
+      </p>
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          isDisabled={domain.trim() === ""}
+          isPending={create.isPending}
+          onPress={submit}
+        >
+          Claim domain
+        </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -135,37 +135,42 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
   const verify = useVerifyOrganizationDomain()
   const expired = proofExpired(row)
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-title">
-            {expired ? `Re-verify ${row.domain}` : `Verify ${row.domain}`}
-          </h2>
-          <p className="text-caption">
-            {expired ? (
-              <>
-                This domain's proof has expired, so the claim has stopped
-                admitting anyone. Domains change hands, so a proof is good for a
-                limited time and is renewed by checking the record again. The
-                record has not changed: it should still be published at the apex
-                of <code>{row.domain}</code>.
-              </>
-            ) : (
-              <>
-                Publish this as a TXT record at the apex of{" "}
-                <code>{row.domain}</code>, then verify. Until then the claim
-                admits nobody. DNS changes can take a while to propagate, so a
-                first attempt that fails is normal.
-              </>
-            )}
-          </p>
-        </div>
-        <ErrorBanner error={verify.error} />
-        <CopyField
-          label={`TXT record for ${row.domain}`}
-          value={row.verification_record}
-        />
-        <div>
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="text-title">
+          {expired ? `Re-verify ${row.domain}` : `Verify ${row.domain}`}
+        </h2>
+        <p className="text-caption">
+          {expired ? (
+            <>
+              This domain's proof has expired, so the claim has stopped
+              admitting anyone. Domains change hands, so a proof is good for a
+              limited time and is renewed by checking the record again. The
+              record has not changed: it should still be published at the apex
+              of <code>{row.domain}</code>.
+            </>
+          ) : (
+            <>
+              Publish this as a TXT record at the apex of{" "}
+              <code>{row.domain}</code>, then verify. Until then the claim
+              admits nobody. DNS changes can take a while to propagate, so a
+              first attempt that fails is normal.
+            </>
+          )}
+        </p>
+      </div>
+      <ErrorBanner error={verify.error} />
+      {/* The verify action sits in the field's row rather than under it: the
+          record is one line an operator copies and then acts on, so the copy
+          affordance moved inside the field and the button it hands off to is
+          beside it. */}
+      <CopyField
+        label={`TXT record for ${row.domain}`}
+        value={row.verification_record}
+        action={
           <Button
             variant="primary"
             isPending={verify.isPending}
@@ -173,9 +178,9 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
           >
             {expired ? "Re-verify domain" : "Verify domain"}
           </Button>
-        </div>
-      </Card.Content>
-    </Card>
+        }
+      />
+    </Section>
   )
 }
 
@@ -186,6 +191,7 @@ export function OrganizationDomainsPage() {
   const update = useUpdateOrganizationDomain()
   const remove = useDeleteOrganizationDomain()
   const [adding, setAdding] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<OrganizationDomain>()
 
   const rows = domains.data?.data ?? []
   // Both states need the same card: one has never had a proof, the other's has
@@ -251,7 +257,7 @@ export function OrganizationDomainsPage() {
           {row.verified_at !== null ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
               isDisabled={update.isPending}
               onPress={() =>
                 update.mutate({
@@ -263,23 +269,22 @@ export function OrganizationDomainsPage() {
               {row.enabled ? "Pause" : "Resume"}
             </Button>
           ) : null}
-          <ConfirmButton
-            confirmLabel="Remove"
-            isPending={remove.isPending}
-            onConfirm={() => remove.mutate(row.id)}
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => setPendingDelete(row)}
           >
-            Remove
-          </ConfirmButton>
+            Remove domain
+          </Button>
         </div>
       ),
     })
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="flex flex-col">
+      <PageIntro
         title="Email domains"
-        description="Let colleagues join this organization automatically. Anyone who signs in with a verified address at a domain you have proven you control becomes a member, at the role you choose. A claim does nothing until its DNS record is verified."
         action={
           canEdit && !adding ? (
             <Button variant="primary" onPress={() => setAdding(true)}>
@@ -287,11 +292,14 @@ export function OrganizationDomainsPage() {
             </Button>
           ) : null
         }
-      />
+      >
+        Let colleagues join this organization automatically. Anyone who signs in
+        with a verified address at a domain you have proven you control becomes
+        a member, at the role you choose. A claim does nothing until its DNS
+        record is verified.
+      </PageIntro>
 
-      <ErrorBanner
-        error={context.error ?? domains.error ?? update.error ?? remove.error}
-      />
+      <ErrorBanner error={context.error ?? domains.error ?? update.error} />
 
       {/* Held back until the context has answered, so an admin is not told for
           one paint that they may not be here. */}
@@ -308,15 +316,43 @@ export function OrganizationDomainsPage() {
       ))}
 
       {canEdit || context.isPending ? (
-        <DataTable
-          ariaLabel="Organization email domains"
-          columns={columns}
-          rows={rows}
-          getRowKey={(row) => row.id}
-          isLoading={context.isPending || domains.isLoading}
-          emptyContent="No email domains yet. Claim one so colleagues join automatically instead of being added by hand."
-        />
+        <TableScrollFrame className="otari-domains-table">
+          <DataTable
+            ariaLabel="Organization email domains"
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.id}
+            isLoading={context.isPending || domains.isLoading}
+            emptyContent="No email domains yet. Claim one so colleagues join automatically instead of being added by hand."
+          />
+        </TableScrollFrame>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out: a refusal otherwise sits on the mutation and
+        // greets the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
+        heading="Remove email domain"
+        body={
+          pendingDelete
+            ? `${pendingDelete.domain} stops admitting anyone to this organization. Members who already joined through it keep their membership, and claiming it again means proving the DNS record over.`
+            : null
+        }
+        confirmLabel="Remove claim"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
     </div>
   )
 }

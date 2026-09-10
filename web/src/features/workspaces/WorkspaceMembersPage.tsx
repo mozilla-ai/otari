@@ -1,13 +1,14 @@
 import { Link } from "@tanstack/react-router"
-
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { OrganizationRosterCard } from "@/features/organization/OrganizationRosterCard"
 import { canManage, canManageWorkspace } from "@/features/organization/roles"
 import { WorkspaceMembersPanel } from "@/features/workspaces/WorkspaceMembersPanel"
 import {
   useOrganizationContext,
   useOrganizationMembers,
-} from "@/shared/api/hooks"
-import { EmptyState, ErrorBanner, PageHeader } from "@/shared/components/ui"
+} from "@/shared/api/organizations"
+import { PageHeader } from "@/shared/components/deprecated/PageHeader"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The roster of the workspace the switcher has selected, which is the one page

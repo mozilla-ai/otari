@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type {
@@ -6,10 +6,33 @@ import type {
   OrgProviderKey,
   UpdateOrgProviderKeyRequest,
 } from "@/client"
+import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import {
+  BYO_UNSUPPORTED_PROVIDERS,
+  type CredentialFieldValues,
+  credentialFieldsFor,
+  credentialSpecFor,
+  mergeCredentialFields,
+  splitClientArgs,
+  validateCredentialFields,
+} from "@/features/providers/providerCredentialFields"
 import {
   ClientArgsField,
   formatClientArgs,
   ProviderComboBox,
+  ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
 import {
@@ -22,17 +45,7 @@ import {
   useRestoreOrgProviderKey,
   useSetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
-} from "@/shared/api/hooks"
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Field } from "@/shared/components/Field"
-import { SecretField } from "@/shared/components/SecretField"
-import {
-  Checkbox,
-  ConfirmButton,
-  ErrorBanner,
-  InfoBanner,
-  PageHeader,
-} from "@/shared/components/ui"
+} from "@/shared/api/organizations"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage } from "./roles"
@@ -48,11 +61,11 @@ import { canManage } from "./roles"
 // (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
 // `src/gateway/api/routes/bootstrap.py`).
 //
-// What is deliberately absent is the per-workspace half of the same API
-// (`/v1/workspaces/{id}/provider-keys`: pin, disable, restrict to models). Those
-// are one workspace's departure from what this page sets, so they belong beside
-// that workspace rather than here, and the organization view would have to ask
-// "which workspace" before it could show any of it.
+// The per-workspace half of the same API (`/workspaces/{id}/provider-keys`:
+// pin, disable, restrict to models) is deliberately not here. Those are one
+// workspace's departure from what this page sets, so they belong beside that
+// workspace: `WorkspaceProviderKeys`, on the Workspaces page, which has already
+// asked "which workspace" before it shows any of it.
 
 /** A key's editable fields, seeded from a row when one is being edited. */
 interface KeyDraft {
@@ -60,7 +73,12 @@ interface KeyDraft {
   name: string
   apiKey: string
   apiBase: string
+  /** The JSON escape hatch: whatever the provider's typed fields do not own. */
   clientArgs: string
+  /** The typed `client_args` entries, keyed by SDK keyword argument. */
+  credentials: CredentialFieldValues
+  /** Typed secrets already stored, so blank means "keep it" rather than "clear it". */
+  redacted: string[]
 }
 
 const EMPTY_DRAFT: KeyDraft = {
@@ -69,9 +87,17 @@ const EMPTY_DRAFT: KeyDraft = {
   apiKey: "",
   apiBase: "",
   clientArgs: "",
+  credentials: {},
+  redacted: [],
 }
 
 function draftFrom(key: OrgProviderKey): KeyDraft {
+  // The registry's fields come out of the stored JSON and into their own
+  // controls; everything else stays in the textarea it was entered in.
+  const { typed, rest, redacted } = splitClientArgs(
+    credentialFieldsFor(key.provider),
+    key.client_args,
+  )
   return {
     provider: key.provider,
     name: key.name,
@@ -79,7 +105,9 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
     // so there is nothing to prefill with. Blank on save means "leave it".
     apiKey: "",
     apiBase: key.api_base ?? "",
-    clientArgs: formatClientArgs(key.client_args),
+    clientArgs: formatClientArgs(rest),
+    credentials: typed,
+    redacted,
   }
 }
 
@@ -99,20 +127,35 @@ function KeyForm({
 
   const parsedClientArgs = parseClientArgs(draft.clientArgs)
   const clientArgsError = parsedClientArgs.ok ? null : parsedClientArgs.error
+  const credentialFields = credentialFieldsFor(draft.provider)
+  const credentialErrors = validateCredentialFields(
+    credentialFields,
+    draft.credentials,
+    draft.redacted,
+  )
+  const spec = credentialSpecFor(draft.provider)
   const pending = create.isPending || update.isPending
   const canSubmit =
     parsedClientArgs.ok &&
+    Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
     (editing !== null || draft.provider !== "")
 
   const submit = () => {
     if (!parsedClientArgs.ok) return
     const apiBase = draft.apiBase.trim()
+    // The typed fields and the textarea are two views of one `client_args`
+    // object, so they are recombined before it goes out.
+    const clientArgs = mergeCredentialFields(
+      draft.credentials,
+      parsedClientArgs.value,
+      draft.redacted,
+    )
     if (editing) {
       const body: UpdateOrgProviderKeyRequest = {
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
-        client_args: parsedClientArgs.value,
+        client_args: clientArgs,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
       // null clears the stored credential, and "I did not retype the secret" is
@@ -126,87 +169,110 @@ function KeyForm({
       name: draft.name.trim(),
       api_key: draft.apiKey === "" ? null : draft.apiKey,
       api_base: apiBase === "" ? null : apiBase,
-      client_args: parsedClientArgs.value,
+      client_args: clientArgs,
     }
     create.mutate(body, { onSuccess: onClose })
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <h2 className="text-title">
-          {editing ? `Edit ${editing.name}` : "Add provider key"}
-        </h2>
-        <ErrorBanner error={create.error ?? update.error} />
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <h2 className="text-title">
+        {editing ? `Edit ${editing.name}` : "Add provider key"}
+      </h2>
+      <ErrorBanner error={create.error ?? update.error} />
 
-        {editing ? (
-          // The provider is part of the key's identity (it is half of the
-          // uniqueness constraint and the whole of what dispatch matches on),
-          // and the API's update body cannot change it.
-          <div className="flex flex-col gap-1">
-            <span className="text-body">Provider</span>
-            <span className="text-sm text-muted">
-              {editing.provider}. Create a second key to use another provider.
-            </span>
-          </div>
-        ) : (
-          <ProviderComboBox
-            label="Provider"
-            value={draft.provider}
-            onChange={(provider) => setDraft({ ...draft, provider })}
-            description="Which upstream this credential is for. The gateway matches it against the provider half of a model name."
-          />
-        )}
-
-        <Field
-          label="Name"
-          value={draft.name}
-          onChange={(name) => setDraft({ ...draft, name })}
-          isRequired
-          placeholder="Production"
-          description="What this key is called in the organization. Unique per provider, so a second OpenAI key needs a different name."
-        />
-
-        <SecretField
-          label="API key"
-          value={draft.apiKey}
-          onChange={(apiKey) => setDraft({ ...draft, apiKey })}
-          description={
-            editing
-              ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-              : "Encrypted at rest and never shown again; only the last 4 characters come back."
-          }
-        />
-
-        <Field
-          label="API base URL"
-          value={draft.apiBase}
-          onChange={(apiBase) => setDraft({ ...draft, apiBase })}
-          placeholder="https://api.example.com/v1"
-          description="Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
-        />
-
-        <ClientArgsField
-          value={draft.clientArgs}
-          onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
-          error={clientArgsError}
-        />
-
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={!canSubmit}
-            isPending={pending}
-            onPress={submit}
-          >
-            {editing ? "Save" : "Add provider key"}
-          </Button>
-          <Button variant="ghost" isDisabled={pending} onPress={onClose}>
-            Close
-          </Button>
+      {editing ? (
+        // The provider is part of the key's identity (it is half of the
+        // uniqueness constraint and the whole of what dispatch matches on),
+        // and the API's update body cannot change it.
+        <div className="flex flex-col gap-1">
+          <span className="text-body">Provider</span>
+          <span className="text-sm text-muted">
+            {editing.provider}. Create a second key to use another provider.
+          </span>
         </div>
-      </Card.Content>
-    </Card>
+      ) : (
+        <ProviderComboBox
+          label="Provider"
+          value={draft.provider}
+          // The typed fields belong to the provider, so a change to it drops
+          // values that no longer have a field to sit in.
+          onChange={(provider) =>
+            setDraft({ ...draft, provider, credentials: {}, redacted: [] })
+          }
+          excludeIds={BYO_UNSUPPORTED_PROVIDERS}
+          description="Which upstream this credential is for. The gateway matches it against the provider half of a model name."
+        />
+      )}
+
+      <Field
+        label="Name"
+        value={draft.name}
+        onChange={(name) => setDraft({ ...draft, name })}
+        isRequired
+        placeholder="Production"
+        description="What this key is called in the organization. Unique per provider, so a second OpenAI key needs a different name."
+      />
+
+      <SecretField
+        // Named for what the provider actually calls its credential, where that
+        // is not an opaque API key (Bedrock's is a bearer token).
+        label={spec?.apiKeyLabel ?? "API key"}
+        value={draft.apiKey}
+        onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+        description={[
+          editing
+            ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
+            : "Encrypted at rest and never shown again; only the last 4 characters come back.",
+          spec?.apiKeyHelpText,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      />
+
+      <Field
+        label="API base URL"
+        value={draft.apiBase}
+        onChange={(apiBase) => setDraft({ ...draft, apiBase })}
+        placeholder="https://api.example.com/v1"
+        description="Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+      />
+
+      {/* What this provider needs beyond a key, asked for by name rather than
+          left to the JSON below. */}
+      <ProviderCredentialFields
+        provider={draft.provider}
+        values={draft.credentials}
+        onChange={(credentials) => setDraft({ ...draft, credentials })}
+        errors={credentialErrors}
+        redacted={draft.redacted}
+      />
+
+      <ClientArgsField
+        value={draft.clientArgs}
+        onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
+        error={clientArgsError}
+      />
+
+      {/* Under a rule of its own, so the row that commits the form is divided
+          from the fields rather than floating after them. */}
+      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+        <Button variant="ghost" isDisabled={pending} onPress={onClose}>
+          Close
+        </Button>
+        <Button
+          variant="primary"
+          isDisabled={!canSubmit}
+          isPending={pending}
+          onPress={submit}
+        >
+          {editing ? "Save" : "Add provider key"}
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -239,6 +305,7 @@ export function OrganizationProviderKeysPage() {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<OrgProviderKey>()
 
   const editing = keys.data?.find((key) => key.id === editingId) ?? null
   const archivedCount = (keys.data ?? []).filter((key) =>
@@ -254,17 +321,23 @@ export function OrganizationProviderKeysPage() {
       header: "Name",
       isRowHeader: true,
       cell: (row) => (
-        <div className="flex items-center gap-2">
+        // The marker states what is true, not what is missing: a key that is
+        // the organization's default is marked, and one that is merely
+        // available carries nothing. Archived takes the subtle dot, because it
+        // is a row still present rather than a problem.
+        <div className="flex items-center gap-3">
           <span className="font-medium text-foreground">{row.name}</span>
           {row.is_org_default ? (
-            <Chip size="sm" color="accent">
-              default
-            </Chip>
+            <span className="flex items-center gap-2 text-mono-caption text-muted">
+              <Dot className="bg-accent" />
+              DEFAULT
+            </span>
           ) : null}
           {row.archived_at ? (
-            <Chip size="sm" color="default">
-              archived
-            </Chip>
+            <span className="flex items-center gap-2 text-mono-caption text-subtle">
+              <Dot className="bg-text-subtle" />
+              ARCHIVED
+            </span>
           ) : null}
         </div>
       ),
@@ -307,51 +380,41 @@ export function OrganizationProviderKeysPage() {
       header: "Actions",
       align: "end",
       cell: (row) => (
-        <div className="flex items-center justify-end gap-1.5">
+        <RowActionRow>
           {row.archived_at ? (
             <>
-              <Button
-                size="sm"
-                variant="outline"
+              <RowAction
                 isDisabled={restore.isPending}
                 onPress={() => restore.mutate(row.id)}
               >
                 Restore
-              </Button>
+              </RowAction>
               {/* Permanent, and the only place it is offered: the API
                     accepts a delete for an archived key alone. */}
-              <ConfirmButton
-                confirmLabel="Delete"
-                isPending={remove.isPending}
-                onConfirm={() => remove.mutate(row.id)}
-              >
+              <RowAction onPress={() => setPendingDelete(row)}>
                 Delete
-              </ConfirmButton>
+              </RowAction>
             </>
           ) : (
             <>
-              <Button
-                size="sm"
-                variant="outline"
+              <RowAction
                 isDisabled={row.is_org_default || setDefault.isPending}
                 onPress={() => setDefault.mutate(row.id)}
               >
                 Make default
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
+              </RowAction>
+              <RowAction
                 onPress={() => {
                   setAdding(false)
                   setEditingId(row.id)
                 }}
               >
                 Edit
-              </Button>
+              </RowAction>
               {/* Archive rather than delete: it is reversible, it is what
                     clears the default, and it is the step the API requires
                     before a key can be removed for good. */}
-              <ConfirmButton
+              <ConfirmRowAction
                 confirmLabel="Archive"
                 isPending={archive.isPending}
                 onConfirm={() =>
@@ -363,19 +426,18 @@ export function OrganizationProviderKeysPage() {
                 }
               >
                 Archive
-              </ConfirmButton>
+              </ConfirmRowAction>
             </>
           )}
-        </div>
+        </RowActionRow>
       ),
     })
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="flex flex-col">
+      <PageIntro
         title="Providers"
-        description="The organization's own upstream credentials. Every workspace in the organization can use them, and the default for a provider is the one a request gets when it names no instance. Keys are encrypted at rest and never shown again."
         action={
           canEdit && !adding ? (
             <Button
@@ -390,7 +452,12 @@ export function OrganizationProviderKeysPage() {
             </Button>
           ) : null
         }
-      />
+      >
+        The organization&rsquo;s own upstream credentials. Every workspace in
+        the organization can use them, and the default for a provider is the one
+        a request gets when it names no instance. Keys are encrypted at rest and
+        never shown again.
+      </PageIntro>
 
       <ErrorBanner
         error={
@@ -398,7 +465,6 @@ export function OrganizationProviderKeysPage() {
           keys.error ??
           archive.error ??
           restore.error ??
-          remove.error ??
           setDefault.error
         }
       />
@@ -438,10 +504,14 @@ export function OrganizationProviderKeysPage() {
         />
       ) : null}
 
+      {/* The page is a stack of bands that set their own spacing, so this one
+          carries its own air rather than taking it from a column gap. */}
       {archivedCount > 0 ? (
-        <Checkbox isSelected={showArchived} onChange={setShowArchived}>
-          Show archived ({archivedCount})
-        </Checkbox>
+        <div className="pb-3">
+          <Checkbox isSelected={showArchived} onChange={setShowArchived}>
+            Show archived ({archivedCount})
+          </Checkbox>
+        </div>
       ) : null}
 
       {/* Withheld from a member along with the read that fills it: the banner
@@ -452,15 +522,43 @@ export function OrganizationProviderKeysPage() {
           and withheld again if the context read is what failed, since neither
           an empty table nor a spinner is a true answer there. */}
       {canEdit || context.isPending ? (
-        <DataTable
-          ariaLabel="Organization provider keys"
-          columns={columns}
-          rows={rows}
-          getRowKey={(row) => row.id}
-          isLoading={context.isPending || keys.isLoading}
-          emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
-        />
+        <TableScrollFrame className="otari-provider-keys-table">
+          <DataTable
+            ariaLabel="Organization provider keys"
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.id}
+            isLoading={context.isPending || keys.isLoading}
+            emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
+          />
+        </TableScrollFrame>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out: a refusal otherwise sits on the mutation and
+        // greets the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
+        heading="Delete provider key"
+        body={
+          pendingDelete
+            ? `${pendingDelete.name} and its stored ${pendingDelete.provider} credential are removed for good. Archiving is the reversible step; this one cannot be undone.`
+            : null
+        }
+        confirmLabel="Delete permanently"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
     </div>
   )
 }

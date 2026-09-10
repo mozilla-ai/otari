@@ -18,6 +18,8 @@ import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 # The gateway-rejection gates are set up exactly as the tests that own them do,
 # so a gate whose fixture shape changes cannot drift between the two files.
 from .test_gateway_rejection_logging import _make_key, _make_user, _zero_budget
@@ -62,12 +64,12 @@ def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False, 
     body: dict[str, Any] = {"model": _MODEL, "messages": _MESSAGES, **overrides}
     if stream:
         body["stream"] = True
-    return int(client.post("/v1/chat/completions", json=body, headers=headers).status_code)
+    return int(client.post(f"{API_ROOT}/chat/completions", json=body, headers=headers).status_code)
 
 
 def _error_rows(client: TestClient, master_key_header: dict[str, str], **params: Any) -> list[dict[str, Any]]:
     query: dict[str, Any] = {"status": "error", **params}
-    response = client.get("/v1/usage", params=query, headers=master_key_header)
+    response = client.get(f"{API_ROOT}/usage", params=query, headers=master_key_header)
     assert response.status_code == 200
     rows: list[dict[str, Any]] = response.json()
     return rows
@@ -108,7 +110,7 @@ def test_upstream_credential_fault_is_classifiable_despite_the_generic_502(
     """
     with _upstream_fails(_StatusError(401)):
         response = client.post(
-            "/v1/chat/completions", json={"model": _MODEL, "messages": _MESSAGES}, headers=api_key_header
+            f"{API_ROOT}/chat/completions", json={"model": _MODEL, "messages": _MESSAGES}, headers=api_key_header
         )
     # What the caller is told: a generic 502, with no trace of the upstream 401.
     assert response.status_code == 502
@@ -168,7 +170,7 @@ def test_successful_request_records_no_status_code(
     with _upstream_succeeds():
         assert _chat(client, api_key_header) == 200
 
-    rows = client.get("/v1/usage", params={"status": "success"}, headers=master_key_header).json()
+    rows = client.get(f"{API_ROOT}/usage", params={"status": "success"}, headers=master_key_header).json()
     assert len(rows) == 1
     assert rows[0]["status_code"] is None
 
@@ -190,7 +192,7 @@ def test_status_code_filters_the_list_and_the_count(
     assert {row["status_code"] for row in rows} == {429}
 
     count = client.get(
-        "/v1/usage/count", params={"status_code": 429}, headers=master_key_header
+        f"{API_ROOT}/usage/count", params={"status_code": 429}, headers=master_key_header
     ).json()
     assert count["total"] == 2
 
@@ -211,7 +213,7 @@ def test_summary_groups_failures_by_status_code(
         with _upstream_fails(_StatusError(upstream)):
             _chat(client, api_key_header)
 
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     taxonomy = summary["errors_by_status_code"]
     assert taxonomy == [
         {"status_code": 429, "error_class": "rate_limit", "requests": 2},
@@ -245,7 +247,7 @@ def test_summary_taxonomy_answers_to_the_dimension_selector(
     with _upstream_fails(_StatusError(429)):
         _chat(client, api_key_header)
 
-    summary = client.get("/v1/usage/summary", params=params, headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", params=params, headers=master_key_header).json()
     assert len(summary["errors_by_status_code"]) == expected_rows
     # Either way the totals still count the failure: only the extra pass is skipped.
     assert summary["totals"]["error_count"] == 1
@@ -264,7 +266,7 @@ def test_summary_taxonomy_excludes_successful_requests(
     with _upstream_fails(_StatusError(429)):
         _chat(client, api_key_header)
 
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     assert summary["totals"]["request_count"] == 2
     assert summary["errors_by_status_code"] == [
         {"status_code": 429, "error_class": "rate_limit", "requests": 1}
@@ -286,16 +288,16 @@ def test_bare_status_code_filter_returns_only_failures(
     with _upstream_fails(_StatusError(429)):
         _chat(client, api_key_header)
 
-    rows = client.get("/v1/usage", params={"status_code": 429}, headers=master_key_header).json()
+    rows = client.get(f"{API_ROOT}/usage", params={"status_code": 429}, headers=master_key_header).json()
     assert [(row["status"], row["status_code"]) for row in rows] == [("error", 429)]
 
-    count = client.get("/v1/usage/count", params={"status_code": 429}, headers=master_key_header).json()
+    count = client.get(f"{API_ROOT}/usage/count", params={"status_code": 429}, headers=master_key_header).json()
     assert count["total"] == 1
 
     # An explicit status still wins, so the filter stays literal rather than
     # quietly overriding what the caller asked for.
     contradictory = client.get(
-        "/v1/usage", params={"status": "success", "status_code": 429}, headers=master_key_header
+        f"{API_ROOT}/usage", params={"status": "success", "status_code": 429}, headers=master_key_header
     ).json()
     assert contradictory == []
 
@@ -320,7 +322,7 @@ def test_passthrough_provider_failure_records_the_upstream_status(
         side_effect=_StatusError(429),
     ):
         response = client.post(
-            "/v1/embeddings",
+            f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hi"},
             headers=api_key_header,
         )
@@ -361,7 +363,7 @@ def test_batch_create_failure_records_the_upstream_status(
         ),
         patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
     ):
-        response = client.post("/v1/batches", json=body, headers=api_key_header)
+        response = client.post(f"{API_ROOT}/batches", json=body, headers=api_key_header)
     assert response.status_code == 502
     assert "SECRET" not in response.text
 
@@ -369,7 +371,7 @@ def test_batch_create_failure_records_the_upstream_status(
     assert len(rows) == 1
     assert rows[0]["status_code"] == 503
     # And it reaches the taxonomy as a provider fault rather than as "unknown".
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     assert summary["errors_by_status_code"] == [
         {"status_code": 503, "error_class": "provider_error", "requests": 1}
     ]
@@ -382,7 +384,7 @@ def _one_error_row(client: TestClient, master_key_header: dict[str, str]) -> dic
 
 
 def _embeddings(client: TestClient, headers: dict[str, str], model: str, **body: Any) -> int:
-    response = client.post("/v1/embeddings", json={"model": model, "input": "hi", **body}, headers=headers)
+    response = client.post(f"{API_ROOT}/embeddings", json={"model": model, "input": "hi", **body}, headers=headers)
     return int(response.status_code)
 
 
@@ -409,7 +411,7 @@ def test_over_budget_rejection_records_its_403(
     assert _chat(client, master_key_header, user="broke-user") == 403
 
     assert _one_error_row(client, master_key_header)["status_code"] == 403
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     assert summary["errors_by_status_code"] == [{"status_code": 403, "error_class": "auth", "requests": 1}]
 
 
@@ -454,7 +456,7 @@ def test_unresolvable_selector_rejection_records_its_400(
     assert _chat(client, master_key_header, model="nosuchprovider:some-model", user="curious-user") == 400
 
     assert _one_error_row(client, master_key_header)["status_code"] == 400
-    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     assert summary["errors_by_status_code"] == [{"status_code": 400, "error_class": "client_error", "requests": 1}]
 
 

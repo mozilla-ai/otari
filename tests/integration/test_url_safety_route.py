@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 _UNSAFE_URL = "http://169.254.169.254/latest/meta-data"
 
 
@@ -21,7 +23,7 @@ def test_unsafe_mcp_server_url_returns_400(
     api_key_header: dict[str, str],
 ) -> None:
     resp = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -39,7 +41,7 @@ def test_unsafe_guardrail_url_returns_400(
     api_key_header: dict[str, str],
 ) -> None:
     resp = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -62,7 +64,7 @@ def test_unsafe_output_only_guardrail_url_returns_400(
     check covers every configured guardrail regardless of `on` direction, not
     just the ones currently enforced."""
     resp = client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],

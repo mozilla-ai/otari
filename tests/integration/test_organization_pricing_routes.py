@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import APIKey, ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
@@ -45,7 +46,7 @@ from gateway.services.workspace_scope import (
     reset_key_workspace_cache,
 )
 
-_ENDPOINT = "/v1/organizations/me/pricing"
+_ENDPOINT = f"{API_ROOT}/organizations/me/pricing"
 _MODEL_KEY = "openai:gpt-4o"
 
 
@@ -410,7 +411,7 @@ def test_the_deployment_price_list_is_untouched_by_an_override(
 ) -> None:
     """The two surfaces are separate: an override is not a deployment price."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": _MODEL_KEY,
             "input_price_per_million": 10.0,
@@ -422,7 +423,7 @@ def test_the_deployment_price_list_is_untouched_by_an_override(
     created = client.post(_ENDPOINT, json=_body(), headers=master_key_header)
     assert created.status_code == status.HTTP_201_CREATED, created.text
 
-    deployment = client.get(f"/v1/pricing/{_MODEL_KEY}", headers=master_key_header)
+    deployment = client.get(f"{API_ROOT}/pricing/{_MODEL_KEY}", headers=master_key_header)
     assert deployment.status_code == status.HTTP_200_OK, deployment.text
     assert deployment.json()["input_price_per_million"] == 10.0
 

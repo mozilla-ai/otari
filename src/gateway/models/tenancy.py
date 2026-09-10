@@ -686,9 +686,9 @@ class ActiveOrganizationMemberPublic(SQLModel):
     ``attribution_user_id`` is the addition the platform has no counterpart for.
     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
     not to this UUID identity, so this carries the ``user_id`` a caller passes to
-    ``POST /v1/keys`` to give this member a key. It is null when no usable row
+    when minting a key for this member. It is null when no usable row
     exists (nobody minted one, or it was soft-deleted through
-    ``DELETE /v1/users``), which is the signal not to offer this member as a key
+    soft-deleted), which is the signal not to offer this member as a key
     owner: key creation would refuse. How the two ids converge is the open
     question in otari-ai#1727; this field is the join until it is answered, and
     is what lets either answer land without the dashboard changing.
@@ -1140,7 +1140,7 @@ class AcceptInvitationResultPublic(SQLModel):
 
     No session and no token: accepting resolves the membership to ``active``
     and stops there. The identity it resolves to is password-less on the roster
-    until it is claimed, so the next step is ``POST /v1/auth/signup`` on the
+    until it is claimed, so the next step is a sign-up on the
     invited address, not a sign-in.
     """
 
@@ -1265,6 +1265,11 @@ WEBAUTHN_CHALLENGE_TTL_SECONDS = 300
 # the ~20 bytes real authenticators emit: a row that cannot be written is a
 # passkey that cannot be registered, and the column is text either way.
 MAX_CREDENTIAL_ID_LENGTH = 1364
+# How long a pending OAuth authorization stays consumable: the window between
+# the browser leaving for a consent screen and coming back with a code. Long
+# enough for somebody to read the screen and pick an account, and no longer,
+# because until this expires the row is a live half of an in-flight sign-in.
+OAUTH_STATE_TTL_SECONDS = 600
 
 WebAuthnCeremony = Literal["registration", "authentication"]
 WEBAUTHN_CEREMONIES: set[str] = {"registration", "authentication"}
@@ -1431,6 +1436,55 @@ class WebAuthnChallenge(SQLModel, table=True):
         return _validate_membership(value, allowed=WEBAUTHN_CEREMONIES, kind="WebAuthn ceremony")
 
 
+class OAuthPendingState(SQLModel, table=True):
+    """One in-flight OAuth authorization, from consent-screen redirect to code exchange.
+
+    In the database for the reason ``WebAuthnChallenge`` is: a deployment runs
+    more than one worker, and the request that mints a state is rarely the one
+    that spends it. apron-auth ships a ``MemoryStateStore`` whose own docstring
+    says a multi-process deployment needs a shared store instead, and this is
+    that store.
+
+    **Keyed by the hash, not the value.** This differs from
+    ``WebAuthnChallenge``, which stores its challenge in the clear, and the
+    difference is that something *is* stored under this key: the PKCE
+    ``code_verifier``. A challenge row gives a reader of the database nothing
+    they could not already see in the browser, while a row here is half of a
+    live sign-in. Hashing means a reader of this table cannot present a state
+    back to the callback, because what they hold is the digest and the wire
+    carries the preimage.
+
+    ``code_verifier`` is nullable only because apron-auth's pending state models
+    it that way for providers that cannot do PKCE. Both providers this
+    deployment offers can, so in practice every row carries one.
+
+    The row is deleted as it is consumed, so a replayed state matches nothing.
+    """
+
+    __tablename__ = "oauth_pending_state"
+
+    state_hash: str = Field(primary_key=True, max_length=64)
+    # Compared after the row is claimed rather than added to the WHERE clause,
+    # the way ``WebAuthnChallenge.ceremony`` is: a state minted for Google and
+    # returned to GitHub's callback is a refusal that should say so, not one
+    # that collapses into "unknown state".
+    provider: str = Field(max_length=32)
+    # SHA-256 of the flow secret the browser holds in its cookie, so a row
+    # answers only to the browser that started it (RFC 9700, section 4.7.1).
+    # Hashed for the reason ``state_hash`` is.
+    flow_hash: str = Field(max_length=64)
+    code_verifier: str | None = Field(default=None, max_length=128)
+    # Kept rather than re-derived at exchange time so the URI sent with the
+    # exchange is the one the authorization request was actually built with,
+    # even across a ``public_base_url`` change mid-flight.
+    redirect_uri: str = Field(max_length=2048)
+    created_at: datetime = _timestamp_field(
+        default_factory=lambda: datetime.now(UTC),
+        column_kwargs={"server_default": func.now()},
+    )
+    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)  # type: ignore[call-overload]
+
+
 __all__ = [
     "DeploymentAdminAccessPublic",
     "DeploymentUserOrganizationPublic",
@@ -1442,6 +1496,7 @@ __all__ = [
     "INVITATION_STATUSES",
     "MAX_CREDENTIAL_ID_LENGTH",
     "MAX_WEBAUTHN_CREDENTIAL_NAME",
+    "OAUTH_STATE_TTL_SECONDS",
     "MANAGEMENT_ROLES",
     "MAX_ORGANIZATION_DOMAINS",
     "MAX_WORKSPACE_ASSIGNMENTS",
@@ -1470,6 +1525,7 @@ __all__ = [
     "InvitationUpdate",
     "InviteOrganizationMemberRequest",
     "InviteOrganizationMemberResultPublic",
+    "OAuthPendingState",
     "Organization",
     "OrganizationCreate",
     "OrganizationCreateRequest",

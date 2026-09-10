@@ -8,16 +8,17 @@
  *
  * The base URL is usually the browser's own origin, because the gateway serving
  * this dashboard is also the gateway serving the API: whatever address reached
- * this page is an address that reaches `/v1/chat/completions`, which is more
+ * this page is an address that reaches `/chat/completions`, which is more
  * reliable than anything a server behind a proxy could report about itself.
  *
  * A hosted control plane breaks that, which is what `resolveSnippetBaseUrl`
  * below exists for: it serves the dashboard and is deliberately not where
  * inference belongs (otari#823, otari#822), so it publishes the data-plane
- * gateway's address on `/v1/bootstrap` and the snippets are built from that.
+ * gateway's address on `/bootstrap` and the snippets are built from that.
  */
 
 import type { DeploymentBootstrap } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 
 /** Stands in for a model when the deployment has none to name yet. */
 export const SNIPPET_MODEL_PLACEHOLDER = "your-model"
@@ -75,7 +76,7 @@ export function buildCurlSnippet({
 }: RequestSnippetInput): string {
   const body = `{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`
   return [
-    `curl ${shellSingleQuoted(`${baseUrl}/v1/chat/completions`)} \\`,
+    `curl ${shellSingleQuoted(`${baseUrl}${API_ROOT}/chat/completions`)} \\`,
     `  -H "Otari-Key: ${apiKey}" \\`,
     `  -H "Content-Type: application/json" \\`,
     `  -d ${shellSingleQuoted(body)}`,
@@ -110,14 +111,14 @@ export function buildPythonSnippet({
  * say about itself from behind a proxy. A hosted control plane is the exception
  * the whole function exists for: it serves this dashboard, and customer
  * inference belongs on the data-plane gateway rather than on it, so it has to
- * name that address itself (`data_plane_url` on `/v1/bootstrap`).
+ * name that address itself (`data_plane_url` on `/bootstrap`).
  *
  * Undefined when a hosted deployment names none. Falling back to the origin
  * there is the bug this replaces: it hands somebody a runnable command aimed at
  * the one host their traffic should not reach. A placeholder host would be no
  * better, since nobody reading it can know what to put in its place, so the
  * caller shows no snippet and says why. Undefined and never `""`, so that a
- * caller cannot build `curl /v1/chat/completions` out of an origin that is not
+ * caller cannot build `curl /api/v1/chat/completions` out of an origin that is not
  * there; this is the boundary where the bootstrap's `null` becomes the absent
  * value the rest of the tree branches on.
  *

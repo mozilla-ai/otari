@@ -63,7 +63,7 @@ describe("SignupPage", () => {
       expect(window.location.hash).toBe("#/check-email?type=signup")
     })
     const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
-    expect(path).toBe("/v1/auth/signup")
+    expect(path).toBe("/auth/signup")
     expect(JSON.parse(String(init?.body))).toEqual({
       email: "ada@example.com",
       password: "correct-horse",

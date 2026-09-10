@@ -1,8 +1,8 @@
 import { Button, Input, Label, Modal, TextField } from "@heroui/react"
 import { useEffect, useState } from "react"
-
-import { Field } from "@/shared/components/Field"
-import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Field } from "@/design-system/forms/Field"
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
 // output are required; the cache rates are optional (blank folds those tokens

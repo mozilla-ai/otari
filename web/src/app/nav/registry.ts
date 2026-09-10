@@ -73,8 +73,8 @@ const BASE_NAV_SECTIONS = [
       //
       // Neither declares `operatorOnly` any more, and that is the point of
       // otari#837 rather than an oversight. They used to, because everything
-      // behind them was `/v1/usage` and a member was refused all of it; now the
-      // pages read `/v1/organizations/me/usage` for a caller who does not
+      // behind them was `/usage` and a member was refused all of it; now the
+      // pages read `/organizations/me/usage` for a caller who does not
       // operate the deployment, so both destinations serve every signed-in
       // identity something true. Tagging them would hide a page that works.
       {
@@ -177,7 +177,7 @@ const BASE_NAV_SECTIONS = [
     items: [
       // No `operatorOnly`, for the reason Activity and Usage dropped theirs
       // (otari-ai#1941 this time): the page reads and mints through
-      // `/v1/organizations/me/keys` for a caller who does not operate the
+      // `/organizations/me/keys` for a caller who does not operate the
       // deployment, so the destination serves every signed-in identity
       // something true, their own keys.
       {
@@ -332,8 +332,8 @@ const ORGANIZATION_NAV_SECTIONS = [
       // No `operatorOnly`, because the destination is two pages now: an
       // operator gets the deployment's budgets and an organization owner or
       // admin gets their own organization's (otari-ai#1943). The roles matrix
-      // has this row at Edit for an admin, and `/v1/organizations/me/budgets`
-      // plus `/v1/organizations/me/spend-ceilings` are what it edits. A plain
+      // has this row at Edit for an admin, and `/organizations/me/budgets`
+      // plus `/organizations/me/spend-ceilings` are what it edits. A plain
       // member is not offered it, because the organization rail opens only to a
       // caller who manages the organization.
       {
@@ -361,7 +361,7 @@ const ORGANIZATION_NAV_SECTIONS = [
         to: "/organization/pricing",
         label: "Model pricing",
         // `pricing`, not `settings`: the table and the refresh flow are
-        // `/v1/pricing`, its own router, and this page reads `/v1/settings` only
+        // `/pricing`, its own router, and this page reads `/settings` only
         // for the policy banner an operator sees. This gateway serves the
         // surfaces as one set, so the two are the same answer here; the axis
         // exists for the deployment where they come apart, and there this row
