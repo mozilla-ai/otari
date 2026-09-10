@@ -88,44 +88,54 @@ function ConnectionTestButton({
 }
 
 function ConnectionTestResult({ test }: { test: ConnectionTestState }) {
+  const answered = test.data ?? test.error
+  const ref = useRef<HTMLSpanElement | null>(null)
+  // The body scrolls, and this is its last child: on an `lg` dialog in an 800px
+  // window the custom tab's own fields already fill it, so a verdict rendered
+  // here can land below the fold with the footer button back to "Test
+  // connection" and nothing else, to a sighted operator, having happened.
+  useEffect(() => {
+    if (answered) ref.current?.scrollIntoView({ block: "nearest" })
+  }, [answered])
   return (
-    <div className="flex flex-col gap-1.5">
-      {/* aria-live so the connection outcome is announced to assistive tech. */}
-      <span role="status" aria-live="polite">
-        {test.isPending ? null : test.error ? (
-          <span className="text-xs text-danger">
-            {errorMessage(test.error)}
+    // No wrapper, and `empty:hidden` rather than a conditional render: the
+    // parent's `gap-4` would otherwise reserve a row before a test is ever run,
+    // and the live region has to exist before it has something to say.
+    <span
+      ref={ref}
+      role="status"
+      aria-live="polite"
+      className="flex flex-col gap-1.5 empty:hidden"
+    >
+      {test.isPending ? null : test.error ? (
+        <span className="text-xs text-danger">{errorMessage(test.error)}</span>
+      ) : test.data ? (
+        test.data.ok ? (
+          <span className="text-xs font-medium text-success">
+            Connected. {test.data.model_count} model
+            {test.data.model_count === 1 ? "" : "s"} available.
           </span>
-        ) : test.data ? (
-          test.data.ok ? (
-            <span className="text-xs font-medium text-success">
-              Connected. {test.data.model_count} model
-              {test.data.model_count === 1 ? "" : "s"} available.
-            </span>
-          ) : test.data.discovery_unsupported ? (
-            // No /v1/models on this backend: the test cannot confirm the key, but
-            // it is not evidence the key is wrong either (issue #447). The error is
-            // kept because this is the form where the operator just typed api_base,
-            // and a wrong one 404s exactly like an absent listing endpoint.
-            <span className="block max-w-md break-words text-xs text-warning">
-              This provider does not list models, so the key could not be
-              verified here. Save it and use the provider; declare its model ids
-              under <code>models:</code> to have them show up in the catalog. If
-              you did not expect this, check the provider's reply below.
-              {test.data.error ? (
-                <span className="mt-0.5 block text-muted">
-                  {test.data.error}
-                </span>
-              ) : null}
-            </span>
-          ) : (
-            <span className="block max-w-md break-words text-caption text-danger">
-              {test.data.error ?? "Connection failed."}
-            </span>
-          )
-        ) : null}
-      </span>
-    </div>
+        ) : test.data.discovery_unsupported ? (
+          // No /v1/models on this backend: the test cannot confirm the key, but
+          // it is not evidence the key is wrong either (issue #447). The error is
+          // kept because this is the form where the operator just typed api_base,
+          // and a wrong one 404s exactly like an absent listing endpoint.
+          <span className="block max-w-md break-words text-xs text-warning">
+            This provider does not list models, so the key could not be verified
+            here. Save it and use the provider; declare its model ids under{" "}
+            <code>models:</code> to have them show up in the catalog. If you did
+            not expect this, check the provider's reply below.
+            {test.data.error ? (
+              <span className="mt-0.5 block text-muted">{test.data.error}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="block max-w-md break-words text-caption text-danger">
+            {test.data.error ?? "Connection failed."}
+          </span>
+        )
+      ) : null}
+    </span>
   )
 }
 
@@ -175,6 +185,20 @@ function KnownProviderForm({
   const nameHasDelimiter = /[:/]/.test(name)
   // Require the key when the chosen provider says it needs one; keyless local
   // backends (Ollama, llama.cpp) can submit without it.
+  // One snapshot of everything the form owns, seeded on mount, rather than a
+  // list of fields: the list was two of six, so Advanced's rename, API base,
+  // client options and every typed credential (a Bedrock region) were invisible
+  // to the guard and went on Escape with nothing asked. `key={addOpenCount}`
+  // reseeds it per open. See feedback.md.
+  const draft = JSON.stringify({
+    providerId,
+    apiKey,
+    name,
+    apiBase,
+    clientArgsText,
+    credentials,
+  })
+  const seededDraft = useRef(draft)
   const canSubmit =
     providerId !== "" &&
     !nameHasDelimiter &&
@@ -225,7 +249,7 @@ function KnownProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={providerId !== "" || apiKey.trim() !== ""}
+      isDirty={draft !== seededDraft.current}
       error={create.error}
       footerStart={
         <ConnectionTestButton test={test} getPayload={buildPayload} />
@@ -348,6 +372,16 @@ function CustomProviderForm({
   const clientArgs = parseClientArgs(clientArgsText)
 
   const nameHasDelimiter = /[:/]/.test(name)
+  // Same snapshot as the known tab, for the same reason: this list had missed
+  // `providerType` and the client options.
+  const draft = JSON.stringify({
+    name,
+    providerType,
+    apiBase,
+    apiKey,
+    clientArgsText,
+  })
+  const seededDraft = useRef(draft)
   const canSubmit =
     name.trim() !== "" &&
     !nameHasDelimiter &&
@@ -381,9 +415,7 @@ function CustomProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={
-        name.trim() !== "" || apiBase.trim() !== "" || apiKey.trim() !== ""
-      }
+      isDirty={draft !== seededDraft.current}
       error={create.error}
       footerStart={
         <ConnectionTestButton

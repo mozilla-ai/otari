@@ -705,6 +705,81 @@ describe("ProvidersPage", () => {
     release()
   })
 
+  it("scrolls a connection-test verdict into view, since the body scrolls", async () => {
+    // The verdict is the body's last child, under fields that already fill an
+    // `lg` dialog on a laptop, so without this the footer button goes back to
+    // "Test connection" and nothing else visibly happens.
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView")
+    mockApi({
+      meta: [],
+      stored: [],
+      testResult: {
+        ok: true,
+        model_count: 3,
+        error: null,
+        discovery_unsupported: false,
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Custom endpoint" }))
+    await user.type(screen.getByLabelText(/^Name/), "my-local-llm")
+    await user.type(
+      screen.getByLabelText("API base"),
+      "http://localhost:8000/v1",
+    )
+    scrollIntoView.mockClear()
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+
+    const verdict = await screen.findByText(/Connected\. 3 models available\./)
+    // The live region, which is the element that carries the ref.
+    const region = verdict.closest('[role="status"]')
+    expect(scrollIntoView.mock.instances).toContain(region)
+  })
+
+  it("guards an Advanced rename on the known tab, with no provider chosen", async () => {
+    // The guard reads one snapshot of the whole draft. It used to read the
+    // provider and the key only, so a rename, an API base, a client_args blob
+    // and every typed credential went on Escape with nothing asked.
+    mockApi({ meta: [], stored: [] })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    )
+    await user.click(screen.getByRole("button", { name: /^Advanced/ }))
+    await user.type(screen.getByLabelText(/^Name/), "openai-eu")
+
+    await user.keyboard("{Escape}")
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+  })
+
+  it("guards client options typed on the custom tab, with nothing else filled", async () => {
+    mockApi({ meta: [], stored: [] })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Custom endpoint" }))
+    await user.type(screen.getByLabelText(/Client options/), '{{"timeout": 30}')
+
+    await user.keyboard("{Escape}")
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+  })
+
   it("renders a connection-test outcome in the body, not in the footer", async () => {
     // The unverified case is four lines plus the provider's reply. In the footer
     // it grows the one row feedback.md says never changes height and shoves the
