@@ -41,10 +41,27 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/**
+ * `value` is the picked option's `value` and the input shows its `label`, the
+ * same division `Select` makes. The field filters nothing: `onQueryChange`
+ * publishes what is in the input and the caller decides what matches.
+ */
 export const Default: Story = {
   render: (args) => {
     const [value, setValue] = useState("")
-    return <ComboBoxField {...args} value={value} onChange={setValue} />
+    const [query, setQuery] = useState("")
+    const match = query.trim().toLowerCase()
+    return (
+      <ComboBoxField
+        {...args}
+        value={value}
+        onChange={setValue}
+        onQueryChange={setQuery}
+        options={MODELS.filter((option) =>
+          option.label.toLowerCase().includes(match),
+        )}
+      />
+    )
   },
 }
 
@@ -63,11 +80,13 @@ export const WithDescription: Story = {
 
 /**
  * `hint` is the option's secondary line: text that identifies the label rather
- * than repeating it, such as the id a person is billed under.
+ * than repeating it, such as the id a person is billed under. The value here is
+ * an id, and the box shows the name it belongs to.
  */
 export const OptionHints: Story = {
   args: {
     label: "Owner",
+    value: "018f0000-0000-4000-8000-000000000001",
     placeholder: "Pick a user, or type a new id…",
     options: [
       {

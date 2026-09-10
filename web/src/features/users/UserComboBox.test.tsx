@@ -205,9 +205,10 @@ describe("UserComboBox", () => {
   })
 
   it("submits a typed id even when it is another owner's roster name", async () => {
-    // The collision: this member's roster name is exactly another user's id, and
-    // a member sorts ahead of it. Matching either field in one scan would
-    // resolve the typed id to the member's UUID and bill the key to them.
+    // The collision that used to need a tie-break rule: this member's roster
+    // name is exactly another user's id, and a member sorts ahead of it. What
+    // answers it now is that typed text is not looked up at all, so there is
+    // nothing for the two rows to compete over.
     mockRoster([member(UUID, "ci-bot")])
     const changes: string[] = []
     renderBox(
@@ -241,9 +242,8 @@ describe("UserComboBox", () => {
       await screen.findByRole("option", { name: `ci-bot (${UUID})` }),
     )
 
-    // The member, not the `ci-bot` owner. This is what the display-text echo
-    // would get wrong: the label reported after the id resolves by id first, and
-    // an id match on "ci-bot" is a different row than the one that was clicked.
+    // The member, not the `ci-bot` owner. A picked row reports its own id, so
+    // the row that was clicked is the only answer this can have.
     expect(changes.at(-1)).toBe(UUID)
   })
 
@@ -273,5 +273,26 @@ describe("UserComboBox", () => {
     // Resolving the label back to a row would always answer with the first one,
     // so the second person could never be picked.
     expect(changes.at(-1)).toBe(second)
+  })
+
+  it("does not turn a typed display name into the id it names", async () => {
+    mockRoster([member(UUID, "Alice Example")])
+    const changes: string[] = []
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={(id) => changes.push(id)}
+        users={[user(UUID)]}
+      />,
+    )
+
+    await userEvent.type(screen.getByRole("combobox"), "Alice Example")
+
+    // Deliberate, and the honest version of the two collisions above: picking
+    // the row is how an existing person is chosen, and a typed name is an id of
+    // its own. Resolving it to Alice's UUID would be a guess, since a roster
+    // puts no uniqueness rule on a name.
+    expect(changes.at(-1)).toBe("Alice Example")
+    expect(changes).not.toContain(UUID)
   })
 })

@@ -1,5 +1,4 @@
-import type { ReactNode } from "react"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 
 import type { User } from "@/client"
 import {
@@ -15,6 +14,10 @@ import { userOptionText } from "./userOptions"
 // know). This is the dashboard's user-first gate; it never mints an anonymous
 // virtual user the way an omitted id at the API would. Virtual users are left out
 // of the options: you attach keys to people/teams you name, not to key-shadows.
+//
+// `value` is the owner id, never the name shown for it. Picking a row is how an
+// existing person is chosen; typed text is an id of its own, so typing somebody's
+// display name names a new user rather than resolving to their UUID.
 export function UserComboBox({
   value,
   onChange,
@@ -55,43 +58,27 @@ export function UserComboBox({
       return a.label.localeCompare(b.label)
     })
 
-  const [text, setText] = useState(value)
-  const query = text.trim().toLowerCase()
+  // What is being searched for, reported by the field because it owns the
+  // input's text. Not the value: an id an operator types is a value, and a name
+  // they type is only ever a search.
+  const [query, setQuery] = useState("")
+  const q = query.trim().toLowerCase()
   const visible = options
     .filter(
       (o) =>
-        !query ||
-        o.value.toLowerCase().includes(query) ||
-        o.label.toLowerCase().includes(query),
+        !q ||
+        o.value.toLowerCase().includes(q) ||
+        o.label.toLowerCase().includes(q),
     )
     .slice(0, 50)
 
-  // What the operator types is not necessarily a user_id: it may be a label they
-  // copied, or an id for a user who does not exist yet. Resolve either form to
-  // the canonical id, or the submitted owner would be the label and the keys API
-  // would silently create a second user named after it.
-  const resolveId = (raw: string): string => {
-    const trimmed = raw.trim()
-    // An id match outranks a name match, and the order matters because a
-    // member's label is a free-form roster name rather than its own id: a roster
-    // name can equal another user's `user_id`, members sort to the front, and a
-    // single scan matching either field would then bill the key to whichever of
-    // the two came first. Only the typed path reaches here. Picking a row reports
-    // that row's id, because `ComboBoxField` swallows the display-text echo, so
-    // a label shared by two rows cannot resolve to the wrong one.
-    const byId = options.find((o) => o.value === trimmed)
-    if (byId) return byId.value
-    const byName = options.find((o) => o.label === trimmed)
-    return byName ? byName.value : trimmed
-  }
-
-  const selectedId = resolveId(text)
-  const known = options.some((o) => o.value === selectedId)
+  const ownerId = value.trim()
+  const isKnownOwner = options.some((o) => o.value === ownerId)
   const creatingHint =
-    selectedId !== "" && !known
+    ownerId !== "" && !isKnownOwner
       ? (unknownHint ?? (
           <span>
-            Creates a new user <code>{selectedId}</code>.
+            Creates a new user <code>{ownerId}</code>.
           </span>
         ))
       : (description ?? "Spend and budgets track against this user.")
@@ -99,11 +86,11 @@ export function UserComboBox({
   return (
     <ComboBoxField
       label={label}
-      value={text}
-      onChange={(next) => {
-        setText(next)
-        onChange(resolveId(next))
-      }}
+      value={value}
+      // Trimmed, because a pasted id often carries a space and every caller
+      // submits this as an owner id.
+      onChange={(next) => onChange(next.trim())}
+      onQueryChange={setQuery}
       options={visible}
       description={creatingHint}
       placeholder={placeholder}
