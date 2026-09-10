@@ -475,7 +475,7 @@ test.describe("the domain dialog", () => {
     await page.getByRole("button", { name: "Claim domain" }).first().click()
     const dialog = page.getByRole("dialog", { name: "New domain" })
     await expect(dialog.getByLabel(/^Domain/)).toBeVisible()
-    await captureScreenshot(page, "domains-claim-dialog")
+    await captureScreenshot(page, "organization-domains-claim-dialog")
   })
 })
 

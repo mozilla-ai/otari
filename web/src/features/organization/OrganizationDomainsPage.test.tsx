@@ -281,6 +281,18 @@ describe("OrganizationDomainsPage", () => {
     expect(
       screen.getByRole("button", { name: /They join as/ }),
     ).toHaveTextContent("Viewer")
+
+    // And the seed is per open, not per page: the ref lives below the key, so
+    // the next open starts clean. Held above it, or with the key dropped, the
+    // dialog would arrive already dirty and Escape would ask before closing an
+    // untouched form.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Claim domain" }))
+    await screen.findByRole("dialog")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("never offers a management role, because a DNS record must not mint admins", async () => {
