@@ -257,6 +257,43 @@ describe("the organization half of the scope switcher", () => {
     })
   })
 
+  it("retries only the switch when the switch after a create was refused", async () => {
+    // The create succeeded, so pressing the button again has to send the second
+    // call and not the first: a retry that repeats the pair leaves a second
+    // organization behind, and nothing in this menu removes one.
+    const requests = mockApi({ switchFails: true })
+    await renderSwitcher()
+
+    const { user, menu } = await openMenu()
+    await user.click(
+      within(menu).getByRole("button", { name: /Create organization/ }),
+    )
+    await user.type(await screen.findByLabelText(/Name/), "Research")
+    const form = await screen.findByRole("dialog")
+    await user.click(
+      within(form).getByRole("button", { name: "Create organization" }),
+    )
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      "Organization not found",
+    )
+
+    // The label is the retry: it names the one call that is left.
+    const retry = within(form).getByRole("button", {
+      name: "Switch to organization",
+    })
+    await user.click(retry)
+
+    const posts = requests.filter((request) => request.method === "POST")
+    expect(posts.map((request) => request.url)).toEqual([
+      "/organizations",
+      "/organizations/me/switch",
+      "/organizations/me/switch",
+    ])
+    expect(posts[2]?.body).toEqual({
+      organization_id: SECOND_ORGANIZATION_ID,
+    })
+  })
+
   it("offers Create organization whatever the caller's role in the one they are in", async () => {
     // No role in an organization gates creating one: it is not an action inside
     // a tenant, which is also why the server checks only the credential. Create
@@ -390,6 +427,34 @@ describe("the workspace half of the scope switcher", () => {
     expect(form).toHaveClass("otari-form-dialog")
     expect(form.querySelector(".otari-bleed")).toBeNull()
     expect(within(form).getByLabelText(/^Name/)).toBeInTheDocument()
+  })
+
+  it("offers a fresh draft on each open of the workspace form", async () => {
+    // Nothing here unmounts the form, so the remount on the way in is the only
+    // thing that clears it. Reset on the way out would blank the body while the
+    // dialog is still animating away.
+    mockApi({ context: startedInAWorkspace })
+    const user = userEvent.setup()
+    await renderSwitcherOnAPage({})
+
+    await fillCreateForm(user)
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch workspace/ }),
+    )
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Create workspace",
+      }),
+    )
+    const reopened = await screen.findByRole("dialog", {
+      name: "New workspace",
+    })
+    expect(within(reopened).getByLabelText(/^Name/)).toHaveValue("")
   })
 
   it("enters the workspace it just created", async () => {

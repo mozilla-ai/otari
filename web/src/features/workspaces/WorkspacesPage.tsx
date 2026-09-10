@@ -85,6 +85,11 @@ function DefaultBudgetPicker({
       label="Default member budget"
       value={value}
       onChange={onChange}
+      // No description and nothing that can be invalid, so there is no message
+      // this could ever hold. `FieldMessages` reserves the line by default, and
+      // `FilterSelect` reserved nothing, so the swap to `Select` brought ~23px
+      // of empty back with it.
+      reserveMessage={false}
       options={[
         { value: NO_DEFAULT, label: "No default" },
         ...budgetChoices(budgets),
@@ -338,6 +343,13 @@ export function CreateWorkspaceForm({
     }
   }, [])
   const trimmed = name.trim()
+  // One snapshot of everything the form owns, seeded on mount: dirty means
+  // "differs from what was seeded", and a field added to the form is added here
+  // or the guard cannot see it. A predicate of empties had already forgotten
+  // `budgetId`, so picking a default member budget and pressing Escape
+  // discarded it with no guard.
+  const draft = JSON.stringify({ name, description, budgetId })
+  const seededDraft = useRef(draft)
   // The submit promises the navigation only where it performs one, so the label
   // and the hold below are read off the same prop that does it. A form whose
   // button said "and open" while nothing opened would be the worse bug of the
@@ -379,8 +391,10 @@ export function CreateWorkspaceForm({
             // the list and the switcher will both show it, but the
             // operator said not to go there.
             if (!active.current) return
-            // No setHolding here: the form unmounts on close, and the
-            // failure paths below are what release the button.
+            // No setHolding here: nothing unmounts this form, so what
+            // releases the button is the remount on the next open, which both
+            // callers get by keying it on an open counter. The failure paths
+            // below release it in place.
             onClose()
             onCreated?.(workspace)
           }
@@ -417,7 +431,7 @@ export function CreateWorkspaceForm({
       onSubmit={submit}
       isPending={pending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={trimmed !== "" || description.trim() !== ""}
+      isDirty={draft !== seededDraft.current}
       // A refusal about the name is carried by the name, not by a block above
       // the form. What reaches the banner is what no field state can honestly
       // say: a failure the operator cannot retype their way out of, and the
@@ -704,7 +718,10 @@ export function WorkspacesPage() {
   const isOnlyWorkspace = workspaces.isSuccess && rows.length === 1
   const manages = canManage(context.data)
   const editingWorkspace = rows.find((row) => row.id === editing) ?? null
-  const showOnboarding = !workspaces.isLoading && rows.length === 0 && !creating
+  // Not gated on `creating`: unmounting the empty state when the dialog opens
+  // takes away the node react-aria restores focus to, so closing drops focus to
+  // `<body>`. `PageIntro`'s action is ungated for the same reason.
+  const showOnboarding = !workspaces.isLoading && rows.length === 0
 
   // The default-budget column is dropped, not emptied, for a caller who cannot
   // read the budget names it shows; see the note on `operates` above.

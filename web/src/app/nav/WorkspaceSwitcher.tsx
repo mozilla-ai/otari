@@ -93,6 +93,12 @@ export function WorkspaceSwitcher({
   // content while it animates out, so clearing on the way out would blank the
   // body in front of the operator. See feedback.md, "A draft is fresh on every
   // open and untouched through the exit".
+  const [creatingCount, setCreatingCount] = useState(0)
+  const openCreateWorkspace = () => {
+    setOpen(false)
+    setCreatingCount((n) => n + 1)
+    setCreating(true)
+  }
   const [creatingOrganizationCount, setCreatingOrganizationCount] = useState(0)
   const openCreateOrganization = () => {
     setCreatingOrganizationCount((n) => n + 1)
@@ -327,10 +333,7 @@ export function WorkspaceSwitcher({
               <button
                 type="button"
                 className={`${MENU_ROW} font-semibold text-muted hover:bg-surface-alt hover:text-foreground`}
-                onClick={() => {
-                  setOpen(false)
-                  setCreating(true)
-                }}
+                onClick={openCreateWorkspace}
               >
                 <PlusMark />
                 <span className="min-w-0 flex-1 truncate">
@@ -361,7 +364,13 @@ export function WorkspaceSwitcher({
       {/* Both entry points from this menu open the dialog every create in the
           dashboard opens in, rather than a Modal wrapped by hand here: the two
           forms were already the page's, and what was local was the frame. */}
+      {/* Keyed on an open counter like its sibling below: nothing here unmounts
+          either form, so the remount on the way in is what clears the draft,
+          and with it the `holding` flag a create that navigates leaves set. An
+          unkeyed mount leaves the next open spinning, its Cancel and Close
+          disabled. */}
       <CreateWorkspaceForm
+        key={creatingCount}
         isOpen={creating}
         onClose={() => setCreating(false)}
         // Creating from the scope switcher is a request to work in the new

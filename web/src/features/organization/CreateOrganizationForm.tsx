@@ -1,4 +1,5 @@
 import { useState } from "react"
+import type { Organization } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import {
@@ -22,6 +23,11 @@ export function CreateOrganizationForm({
   const create = useCreateOrganization()
   const switchTo = useSwitchOrganization()
   const [name, setName] = useState("")
+  // Only the second call is left to retry once the first has succeeded, so the
+  // organization it returned is held here and the submit becomes that call.
+  // Pressing the button again otherwise creates a second organization, which
+  // is the one failure of this pair an operator cannot undo from the menu.
+  const [created, setCreated] = useState<Organization | null>(null)
   const trimmed = name.trim()
   return (
     <FormDialog
@@ -32,19 +38,27 @@ export function CreateOrganizationForm({
       // One field, which is what `sm` is for.
       size="sm"
       title="New organization"
-      submitLabel="Create organization"
-      onSubmit={() =>
+      submitLabel={created ? "Switch to organization" : "Create organization"}
+      onSubmit={() => {
+        if (created) {
+          switchTo.mutate(created.id, { onSuccess: onClose })
+          return
+        }
         create.mutate(
           { name: trimmed },
           {
-            onSuccess: (organization) =>
-              switchTo.mutate(organization.id, { onSuccess: onClose }),
+            onSuccess: (organization) => {
+              setCreated(organization)
+              switchTo.mutate(organization.id, { onSuccess: onClose })
+            },
           },
         )
-      }
+      }}
       isPending={create.isPending || switchTo.isPending}
-      isSubmitDisabled={trimmed === ""}
-      isDirty={trimmed !== ""}
+      isSubmitDisabled={created === null && trimmed === ""}
+      // Closing after the create succeeded discards nothing: the organization
+      // exists, and the menu it was started from lists it.
+      isDirty={created === null && trimmed !== ""}
       error={create.error ?? switchTo.error}
     >
       <Field
@@ -54,6 +68,8 @@ export function CreateOrganizationForm({
         placeholder="Research"
         isRequired
         autoFocus
+        // Editing it after the create would change nothing the retry sends.
+        isDisabled={created !== null}
         description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
         reserveMessage
       />
