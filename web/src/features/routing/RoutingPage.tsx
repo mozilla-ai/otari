@@ -705,7 +705,10 @@ export function PolicyForm({
             ) : null}
           </>
         ) : (
-          "What callers send as `model`, and the model that answers it."
+          <>
+            What callers send as <code>model</code>, and the model that answers
+            it.
+          </>
         )
       }
       submitLabel={editing ? "Save" : "Create policy"}
@@ -759,9 +762,14 @@ export function PolicyForm({
                   keeps the old one.
                 </span>
               ) : editing ? (
-                "What callers send as `model`. Change it to rename the policy."
+                <>
+                  What callers send as <code>model</code>. Change it to rename
+                  the policy.
+                </>
               ) : (
-                "What callers send as `model`."
+                <>
+                  What callers send as <code>model</code>.
+                </>
               )
             }
           />
