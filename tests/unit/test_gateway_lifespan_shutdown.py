@@ -19,12 +19,15 @@ land and is not reproducible on demand.
 """
 
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 
+from gateway.container import BackgroundTaskContribution, Container
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.main import _REFRESHER_STOP_TIMEOUT_SECONDS, _create_lifespan, _stop_refresher, _stop_refreshers
 
 
@@ -147,11 +150,124 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
         master_key="sk-test-master",
     )
     lifespan = _create_lifespan()
-    app = FastAPI()
-    app.state.config = config
+    app = _app_for(config)
 
     # No asyncio.timeout wrapper: if shutdown regresses this hangs, and the
     # suite-wide pytest timeout reports it. A short bound here would be
     # indistinguishable from the fix under test.
     async with lifespan(app):
         pass
+
+
+def _standalone_config(tmp_path: Path) -> GatewayConfig:
+    return GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'lifespan.db'}",
+        master_key="sk-test-master",
+    )
+
+
+def _hybrid_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> GatewayConfig:
+    """A gateway attached to a control plane, so the lifespan skips init_db and the core refreshers."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
+    return GatewayConfig(
+        mode="hybrid",
+        database_url=f"sqlite:///{tmp_path / 'lifespan.db'}",
+        platform={"base_url": "http://platform.test"},
+    )
+
+
+def _app_for(config: GatewayConfig, *contributions: BackgroundTaskContribution) -> FastAPI:
+    """A bare app carrying what the lifespan reads off ``app.state``, as ``create_app`` attaches it."""
+    app = FastAPI()
+    app.state.config = config
+    container = Container()
+    for contribution in contributions:
+        container.contribute_background_task(contribution)
+    app.state.container = container
+    return app
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["standalone", "hybrid"])
+async def test_a_contributed_task_is_started_with_the_config_and_cancelled_at_shutdown(
+    mode: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In both modes: hybrid skips the core refreshers, and a plugin may extend the data plane too."""
+    config = _standalone_config(tmp_path) if mode == "standalone" else _hybrid_config(tmp_path, monkeypatch)
+    seen: list[tuple[GatewayConfig, asyncio.Task[None]]] = []
+
+    async def records(received: GatewayConfig) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        seen.append((received, task))
+        await asyncio.sleep(3600)
+
+    lifespan = _create_lifespan()
+    app = _app_for(config, BackgroundTaskContribution(name="probe", start=records))
+
+    async with lifespan(app):
+        await asyncio.sleep(0)  # let the contributed task reach its first await
+        assert len(seen) == 1
+        assert seen[0][0] is config
+        assert not seen[0][1].done()
+
+    assert seen[0][1].cancelled()
+
+
+@pytest.mark.asyncio
+async def test_a_contributed_task_that_ignores_cancellation_is_abandoned_under_the_shared_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin task cannot hang shutdown any more than a core refresher can."""
+    handles: list[asyncio.Task[None]] = []
+
+    async def stubborn(_config: GatewayConfig) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        handles.append(task)
+        await _absorbs_cancellation()
+
+    lifespan = _create_lifespan()
+    app = _app_for(_hybrid_config(tmp_path, monkeypatch), BackgroundTaskContribution(name="stubborn", start=stubborn))
+
+    async with lifespan(app):
+        await asyncio.sleep(0)
+        started = asyncio.get_running_loop().time()
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 2
+    (task,) = handles
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_a_contributed_task_that_raises_is_logged_by_name_and_does_not_break_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def explodes(_config: GatewayConfig) -> None:
+        raise RuntimeError("plugin blew up")
+
+    lifespan = _create_lifespan()
+    app = _app_for(
+        _hybrid_config(tmp_path, monkeypatch), BackgroundTaskContribution(name="budget alerts", start=explodes)
+    )
+
+    # The gateway logger does not propagate, so attach the capture handler to it directly.
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        async with lifespan(app):
+            await asyncio.sleep(0)  # let it die before shutdown looks at it
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert "contributed budget alerts refresher stopped with an unexpected error" in caplog.text
+    assert "plugin blew up" in caplog.text

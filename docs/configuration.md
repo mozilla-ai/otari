@@ -306,10 +306,33 @@ usage-report timeout and retries, and first-chunk fallback timeout. See
 ## Extending Otari with a bootstrap module
 
 `bootstrap` or `OTARI_BOOTSTRAP` names a trusted `module:callable` loaded
-inside the gateway process. The callable can rebind extension ports and
-contribute capability-gated routers. Most deployments should leave it unset.
+inside the gateway process. The callable can rebind extension ports,
+contribute capability-gated routers, and contribute background tasks. Most
+deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
+
+A background task is a coroutine function that receives the gateway config.
+Otari starts it beside its own periodic refreshers, in every mode, and cancels
+it at shutdown under the same bounded wait, so a task that never yields cannot
+hold the process open:
+
+```python
+from gateway.container import BackgroundTaskContribution, Container
+
+
+async def run_alert_evaluator(config) -> None:
+    while True:
+        ...
+        await asyncio.sleep(60)
+
+
+def register(container: Container) -> None:
+    container.contribute_background_task(BackgroundTaskContribution(name="budget alerts", start=run_alert_evaluator))
+```
+
+Names are unique per container; a second task registered under a taken name
+fails startup.

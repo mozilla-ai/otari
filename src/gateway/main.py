@@ -15,7 +15,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.container import build_container
+from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -332,6 +332,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config
+        container: Container = app.state.container
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
@@ -465,8 +466,16 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
+        contributed_tasks: list[tuple[asyncio.Task[None], str]] = []
         log_writer_started = False
         try:
+            # A bootstrap's own workers, after Otari's and in every mode, since
+            # a plugin may extend the data plane as much as the control plane.
+            # Inside the try for the same reason as the writer: a start that
+            # raises must still cancel every task created before it.
+            for contribution in container.background_task_contributions():
+                task = asyncio.create_task(contribution.start(config))
+                contributed_tasks.append((task, f"contributed {contribution.name}"))
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
@@ -483,7 +492,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 (catalog_refresher, "models.dev catalog"),
                 (reservation_sweeper, "budget reservation sweep"),
             ]
-            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
+            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None] + contributed_tasks)
             if alias_refresher is not None:
                 reset_alias_cache()
             if policy_refresher is not None:
