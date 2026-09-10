@@ -6,7 +6,7 @@ import ipaddress
 import ssl
 import tracemalloc
 import zlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -607,11 +607,31 @@ def test_nonredirect_statuses(status: int) -> None:
 
 @pytest.mark.asyncio
 async def test_network_deadline_is_shared_across_operations() -> None:
-    deadline = NetworkDeadline(0.05)
+    clock = [0.0]
+    deadline = NetworkDeadline(0.05, now=lambda: clock[0])
 
-    await deadline.run(asyncio.sleep(0.03))
+    await deadline.run(lambda: asyncio.sleep(0))
+    clock[0] = 0.06
     with pytest.raises(NetworkDeadlineExceeded):
-        await deadline.run(asyncio.sleep(0.03))
+        await deadline.run(lambda: asyncio.sleep(0))
+
+
+@pytest.mark.asyncio
+async def test_expired_network_deadline_does_not_create_operation() -> None:
+    clock = [0.0]
+    deadline = NetworkDeadline(0.05, now=lambda: clock[0])
+    operation_created = False
+
+    def operation() -> Awaitable[None]:
+        nonlocal operation_created
+        operation_created = True
+        return asyncio.sleep(0)
+
+    clock[0] = 0.06
+    with pytest.raises(NetworkDeadlineExceeded):
+        await deadline.run(operation)
+
+    assert not operation_created
 
 
 @pytest.mark.asyncio
