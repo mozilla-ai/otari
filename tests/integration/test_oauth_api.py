@@ -32,7 +32,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import User
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
-from gateway.services.oauth_service import FLOW_COOKIE_NAME, OAuthIdentity
+from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH, OAuthIdentity
 
 ORIGIN = "http://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -605,7 +605,7 @@ def test_authorize_sets_the_flow_cookie_the_callback_requires(
     cookie = started.headers["set-cookie"]
     assert cookie.startswith(f"{FLOW_COOKIE_NAME}=")
     assert "HttpOnly" in cookie
-    assert "Path=/v1/auth/oauth" in cookie
+    assert f"Path={FLOW_COOKIE_PATH}" in cookie
     assert "samesite=lax" in cookie.lower()
 
 
