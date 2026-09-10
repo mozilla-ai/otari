@@ -2133,6 +2133,43 @@ main {
   overflow: visible;
 }
 
+/* FormDialog's geometry, which cannot live at its call site.
+ *
+ * The `.modal__dialog` rule above is unlayered, so it outranks
+ * `@layer utilities` and a `w-[32.5rem]` on the dialog compiles, lints, ships
+ * and loses; its `min-width` would beat that class even where the width landed,
+ * which is what makes the 440px size unreachable rather than merely fragile.
+ * Both were read out of the emitted stylesheet. So the size travels as a value the
+ * component sets inline (`--form-dialog-width`) and the geometry is settled
+ * here, beside the rule it has to outrank.
+ *
+ * `--visual-viewport-height` is HeroUI's own, already on the container, so the
+ * height budget follows a phone's keyboard rather than the layout viewport.
+ * 15rem is the 120px offset the dialog sits at, twice: what is left is where
+ * the body starts scrolling and the header and footer stay put. */
+.otari-form-dialog {
+  width: var(--form-dialog-width);
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(var(--visual-viewport-height, 100dvh) - 15rem);
+}
+
+/* Below 640px every size is a full-screen sheet: a centered box with a phone's
+ * margins around it wastes the only axis a form needs, and the keyboard takes
+ * half of what is left. The footer clears the home indicator. */
+@media (max-width: 639px) {
+  .otari-form-dialog {
+    width: 100%;
+    max-width: none;
+    height: var(--visual-viewport-height, 100dvh);
+    max-height: none;
+    border: 0;
+  }
+  .otari-form-dialog > form > footer {
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+}
+
 /* Backdrop dimming — HeroUI's default backdrop variant is `opaque`, and that
  * modifier applies `bg-backdrop` at full strength. `--color-backdrop` is pure
  * black in both themes on purpose (see its comment above: a fixed alpha then

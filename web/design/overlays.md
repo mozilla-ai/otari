@@ -75,18 +75,21 @@ says the same about React Aria popovers under "Checks".
 
 ## Dialog
 
-Modal and centered. `Dialog` is the shell; `ConfirmDialog` is its
-specialization for a destructive action, with the two buttons and the error line
-built in.
+Modal and centered. Three of them, and the question sorts them:
 
-Reach for `ConfirmDialog` when the dialog's whole job is "are you sure", which
-includes every delete of a record, and for `Dialog` when it holds a form.
+- **`FormDialog`** when the operator is creating or editing an object. Every
+  create flow in the product, no exceptions. See [feedback.md](feedback.md).
+- **`ConfirmDialog`** when the dialog's whole job is "are you sure", which
+  includes every delete of a record.
+- **`Dialog`** is the bare `AlertDialog` shell the other pattern was built from.
+  It has no call sites; a form wants `FormDialog`, which is a `Modal`, because
+  an alert interrupts to ask one question and a form is a place to work.
 
-Both are controlled only, because a dialog opens from something elsewhere on the
-page (a row's Edit, a toolbar's Add) rather than from a trigger inside itself.
-Both mount their body only while open, which is not an optimization: the body of
-a form dialog holds controlled inputs, and leaving them mounted carries one
-row's draft into the next row's dialog.
+All three are controlled only, because a dialog opens from something elsewhere
+on the page (a row's Edit, a heading row's Create) rather than from a trigger
+inside itself. All three mount their body only while open, which is not an
+optimization: the body of a form dialog holds controlled inputs, and leaving
+them mounted carries one row's draft into the next row's dialog.
 
 `isDismissable` is on by default. Turning it off takes away Escape and the
 outside click, and the only honest reason is unsaved work that would be lost;

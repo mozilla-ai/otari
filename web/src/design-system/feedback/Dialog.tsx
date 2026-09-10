@@ -13,7 +13,10 @@ import type { ReactNode } from "react"
  *
  * `ConfirmDialog` is the specialization of this for a destructive action, with
  * the two buttons and the error line built in. Reach for that one when the
- * dialog's whole job is "are you sure"; reach for this one when it holds a form.
+ * dialog's whole job is "are you sure", and for `FormDialog` when it holds a
+ * form: that one is a `Modal` rather than an `AlertDialog`, because an alert
+ * interrupts to ask one question and a form is a place to work. This shell has
+ * no call sites of its own.
  *
  * Controlled only. A dialog opens because something happened elsewhere on the
  * page (a row's Edit, a toolbar's Add), so an uncontrolled variant would need a

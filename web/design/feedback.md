@@ -29,6 +29,8 @@ Does the action delete a record?
  └── ConfirmDialog          (always, one row or many; see actions.md)
 Is it destructive but deletes nothing (regenerate, archive, reset)?
  └── ConfirmButton          (the two-step confirm; see actions.md)
+Is the operator creating or editing an object?
+ └── FormDialog             (every one of them; see the placement rule in actions.md)
 ```
 
 ## Signatures
@@ -43,6 +45,9 @@ PageLoading: { label = "Loading…" }
 PageError: { error: unknown, children? }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
+FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
+  submitLabel, onSubmit, isPending, error?, isDirty?, footerStart?, tabs?,
+  children }
 ErrorBoundary: { children, resetKey? }
 ```
 
@@ -116,6 +121,61 @@ behind the backdrop they are looking at.
 
 `ConfirmButton`'s two-step is what is left, for a destructive action that deletes
 nothing. See [actions.md](actions.md) for both.
+
+## FormDialog
+
+Every create and every edit opens here. Not a panel that appears under the
+table, not a section appended to the page: one surface, so an operator who has
+created a key knows what adding a provider will do.
+
+Built on HeroUI's `Modal` rather than `AlertDialog`, and that is the difference
+between the two dialogs rather than a detail of them. An alert interrupts to ask
+one question; a form is a place to work.
+
+```tsx
+// Correct: the title names the object, the submit repeats the trigger
+<FormDialog
+  isOpen={isCreating}
+  onOpenChange={setCreating}
+  title="New key"
+  description="The secret is shown once, right after you create it."
+  submitLabel="Create key"
+  onSubmit={submit}
+  isPending={create.isPending}
+  error={create.error}
+  isDirty={name !== ""}
+>
+  <Field label="Key name" value={name} onChange={setName} reserveMessage />
+</FormDialog>
+
+// Incorrect: the title restates the button, and nothing says what was made
+<FormDialog title="Create key" submitLabel="Save" …>
+```
+
+**Sizes.** `sm` 440 for one or two fields, `md` 520 by default, `lg` 640 for
+tabs or six fields and up. Below a 640px viewport every size is a full-screen
+sheet. Those widths cannot be spelled as a class: `globals.css` pins
+`.modal__dialog` unlayered, which outranks `@layer utilities` and puts a 448px
+floor under it, so the component sets `--form-dialog-width` inline and the
+geometry is settled beside the rule it has to beat.
+
+**Fields go in with `reserveMessage` on**, so a validation message opens a line
+that was already there instead of moving the footer. The first field takes
+`autoFocus`.
+
+**The footer's height never changes.** `isPending` keeps the primary at its
+resting width, because the spinner replaces the label in place rather than
+sitting beside it; Cancel and the close control are disabled for the same
+duration. HeroUI's own `isPending` draws no spinner, so this one is the
+component's, not the library's.
+
+**`isDirty` arms a guard in the footer, not a second dialog.** Escape and a
+click outside swap the actions for "Unsaved changes · Keep editing · Discard".
+A dialog never opens a dialog.
+
+**The success step is not a prop.** When a mutation has something to hand back
+(a key's secret), the caller swaps the children and the submit label to "Done"
+and the frame stays where it was. `footerStart` is where "Create another" goes.
 
 ## Copy
 
