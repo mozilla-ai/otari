@@ -341,6 +341,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/**
+ * The page's own create action, resolved while the dialog is shut.
+ *
+ * That is the only time it is unambiguous: the dialog's submit says "Create
+ * policy" too, and both are on screen together once it is open, which is why
+ * every reference to the submit below is scoped to the dialog.
+ */
+const createTrigger = () =>
+  screen.findByRole("button", { name: "Create policy" })
+
 describe("RoutingPage", () => {
   it("lists policies with what they serve and where they come from", async () => {
     mockApi()
@@ -374,12 +384,94 @@ describe("RoutingPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("keeps the page's create action visible while the dialog is open", async () => {
+    // It used to hide itself while the inline form was on the page. The form is
+    // over the page now, so hiding the control that opened it would take the
+    // heading's action away mid-task for no reason.
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const trigger = await createTrigger()
+    await user.click(trigger)
+    await screen.findByRole("dialog")
+    expect(trigger).toBeInTheDocument()
+  })
+
+  it("offers the same dialog from the empty state", async () => {
+    // The empty state's explanation is the page's onboarding and stays; what it
+    // gained is the action, so a first policy does not have to be started from
+    // the heading a reader has already scrolled past.
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    // Two of them on screen deliberately, the heading's and this one, so the
+    // press is scoped to the empty state rather than picked by position.
+    const empty = (
+      await screen.findByRole("heading", {
+        name: "No routing policies yet",
+      })
+    ).closest("div")!.parentElement!
+    await user.click(
+      within(empty).getByRole("button", { name: "Create policy" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveAccessibleName("New policy")
+  })
+
+  it("names the object in the title and the policy in the description when editing", async () => {
+    // `title` is a string, so the old heading's `<code>` name moved into the
+    // description rather than being dropped: it is the policy's identity and it
+    // is what tells an operator which row they pressed Edit on.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const fastRow = (await screen.findByText("fast")).closest("tr")!
+    await user.click(within(fastRow).getByRole("button", { name: "Edit" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveAccessibleName("Edit policy")
+    expect(dialog).toHaveTextContent("fast")
+    expect(
+      within(dialog).getByRole("button", { name: "Save" }),
+    ).toBeInTheDocument()
+  })
+
+  it("guards a half-built policy against a stray Escape", async () => {
+    // This form grows a fallback chain, a condition tier and a guardrail list as
+    // they are asked for, so it is exactly the one where ten minutes of work sits
+    // behind one keystroke.
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "cheap",
+    )
+    await user.keyboard("{Escape}")
+
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveTextContent("Unsaved changes")
+    expect(
+      within(dialog).getByRole("button", { name: "Keep editing" }),
+    ).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Keep editing" }),
+    )
+    expect(
+      within(dialog).getByRole("button", { name: "Create policy" }),
+    ).toBeInTheDocument()
+  })
+
   it("creates a one-target policy from three fields", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "cheap",
@@ -390,7 +482,11 @@ describe("RoutingPage", () => {
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create policy" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
 
     const post = calls.find((call) => call.method === "POST")
     expect(post).toBeDefined()
@@ -406,7 +502,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     // Naming one model must stay a short task, so neither section is present yet.
     expect(screen.queryByText("If that fails, try")).not.toBeInTheDocument()
     expect(screen.queryByText("Always check")).not.toBeInTheDocument()
@@ -429,7 +525,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     const add = await screen.findByRole("button", { name: /Add guardrails/ })
 
     // Disabled, and never silently: the reason and the route to fixing it sit next
@@ -448,7 +544,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "openai:gpt-4o",
@@ -460,7 +556,11 @@ describe("RoutingPage", () => {
     await user.keyboard("{Escape}")
 
     expect(screen.getByText(/cannot contain/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create policy" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    ).toBeDisabled()
   })
 
   it("warns when a guardrail makes the guardrails service a hard dependency", async () => {
@@ -468,7 +568,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.click(screen.getByRole("button", { name: /Add guardrails/ }))
 
     // block + block is the honest default, and its cost has to be visible where
@@ -483,7 +583,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "thrifty",
@@ -504,7 +604,11 @@ describe("RoutingPage", () => {
     // The budget gate refuses the request before selection at 100%, so such a rule
     // is dead config. Saying so here beats a 400 from the server.
     expect(screen.getByText("Must be under 100.")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Create policy" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    ).toBeDisabled()
   })
 
   it("renames a policy through the name field, sending rename_from", async () => {
@@ -521,7 +625,9 @@ describe("RoutingPage", () => {
     const nameField = screen.getByRole("textbox", { name: /policy name/i })
     await user.clear(nameField)
     await user.type(nameField, "speedy")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -551,7 +657,9 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("fast")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -597,7 +705,9 @@ describe("RoutingPage", () => {
     await user.type(nameField, "openai:gpt-5")
 
     expect(screen.getByText(/cannot contain/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    ).toBeDisabled()
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
@@ -808,7 +918,9 @@ describe("RoutingPage", () => {
     // Saving it as a policy would leave the alias row behind under the same name,
     // and the API refuses that collision, so the form says so instead of failing.
     expect(screen.getByText(/An alias holds one target/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    ).toBeDisabled()
   })
 
   it("summarises a learned policy by its pool rather than as an opaque dynamic row", async () => {
@@ -867,7 +979,9 @@ describe("RoutingPage", () => {
     await user.click(
       screen.getAllByRole("radio", { name: /serves when unsure/i })[0],
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -895,7 +1009,9 @@ describe("RoutingPage", () => {
     expect(screen.getByRole("combobox", { name: /model 1/i })).toHaveValue(
       "openai:gpt-5-nano",
     )
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -915,7 +1031,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "smart",
@@ -931,7 +1047,11 @@ describe("RoutingPage", () => {
     await user.click(screen.getAllByRole("button", { name: "Remove" })[1])
 
     expect(screen.getByText(/at least two models/i)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Create policy" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
@@ -953,7 +1073,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "balanced",
@@ -981,7 +1101,11 @@ describe("RoutingPage", () => {
     await user.type(shares[1], "30")
     // Relative weights are hard to read, so the form says what they come to.
     expect(screen.getByText("70% of requests")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Create policy" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -1017,7 +1141,9 @@ describe("RoutingPage", () => {
     expect(
       screen.getByText(/No weighted traffic; still tried if another fails/),
     ).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -1051,18 +1177,24 @@ describe("RoutingPage", () => {
     expect(
       screen.getByText(/Every share is a number of zero or more/),
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    ).toBeDisabled()
 
     await user.clear(shares[0])
     await user.type(shares[0], "-5")
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    ).toBeDisabled()
 
     // The decimal has to survive the round trip, not only the keystroke: a field
     // that renders "7.5" but posts 7 would be the same bug one layer down.
     await user.clear(shares[0])
     await user.type(shares[0], "7.5")
     expect(shares[0]).toHaveValue("7.5")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -1103,7 +1235,9 @@ describe("RoutingPage", () => {
     // gateway would have resolved it to anyway.
     const shares = screen.getAllByRole("textbox", { name: /share/i })
     expect(shares[0]).toHaveValue("70")
-    await user.click(screen.getByRole("button", { name: "Save" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
 
     const post = calls.find(
       (call) =>
@@ -1137,7 +1271,9 @@ describe("RoutingPage", () => {
     expect(
       screen.getByText(/at least one model a share above zero/i),
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    ).toBeDisabled()
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
@@ -1172,7 +1308,9 @@ describe("RoutingPage", () => {
     await user.keyboard("{Escape}")
 
     expect(screen.getByText(/name each model once/i)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    ).toBeDisabled()
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 
@@ -1372,7 +1510,7 @@ describe("RoutingPage", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "wide",
@@ -1577,7 +1715,7 @@ describe("RoutingPage for an organization admin", () => {
     const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     await user.type(
       screen.getByRole("textbox", { name: /policy name/i }),
       "tenant-fast",
@@ -1588,7 +1726,11 @@ describe("RoutingPage for an organization admin", () => {
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create policy" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
 
     const written = calls.find(
       (call) =>
@@ -1615,7 +1757,7 @@ describe("RoutingPage for an organization admin", () => {
     const user = userEvent.setup()
     renderInWorkspace(<RoutingPage />)
 
-    await user.click(await screen.findByRole("button", { name: "New policy" }))
+    await user.click(await createTrigger())
     expect(
       await screen.findByText(/applies to everyone in the selected workspace/i),
     ).toBeInTheDocument()

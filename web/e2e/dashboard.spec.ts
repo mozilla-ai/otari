@@ -201,15 +201,19 @@ test.describe("dashboard core flows", () => {
   test("create a routing policy", async ({ page }) => {
     await login(page)
     await openNested(page, "Routing", "Policies")
-    await page.getByRole("button", { name: "New policy" }).click()
+    // `.first()` is the heading's action. An empty routing list also offers
+    // the same words from its empty state, and a press has to name which.
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    // Scoped from here: the dialog's submit says "Create policy" too.
+    const dialog = page.getByRole("dialog")
     // Role-scoped for the same reason as the user form: policy rows carry a
     // "Copy policy name" control.
-    await page.getByRole("textbox", { name: /Policy name/ }).fill("fast")
+    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("fast")
     // "Serves" is a model combobox (allows custom values); type the selector, then
     // close the popover so it does not aria-hide the submit button.
-    await page.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
+    await dialog.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
     await page.keyboard.press("Escape")
-    await page.getByRole("button", { name: "Create policy" }).click()
+    await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // The policy name is the table's row-header cell (react-aria rowheader).
     await expect(page.getByRole("rowheader", { name: "fast" })).toBeVisible()
@@ -218,20 +222,24 @@ test.describe("dashboard core flows", () => {
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
     await openNested(page, "Routing", "Policies")
-    await page.getByRole("button", { name: "New policy" }).click()
-    await page.getByRole("textbox", { name: /Policy name/ }).fill("chained")
-    await page.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
+    // `.first()` is the heading's action. An empty routing list also offers
+    // the same words from its empty state, and a press has to name which.
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    // Scoped from here: the dialog's submit says "Create policy" too.
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("chained")
+    await dialog.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
     await page.keyboard.press("Escape")
 
     // The failure chain is summoned, not presented, so naming one model stays a
     // short task.
     await expect(page.getByText("If that fails, try")).toBeHidden()
-    await page.getByRole("button", { name: /Add a fallback chain/ }).click()
+    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
     await page
       .getByRole("combobox", { name: /Fallback 1/ })
       .fill("anthropic:claude-3-5-haiku-latest")
     await page.keyboard.press("Escape")
-    await page.getByRole("button", { name: "Create policy" }).click()
+    await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // Scoped to the row this test created: "+1 on failure" anywhere on the page
     // would also be satisfied by another policy's chain, so a `chained` saved
@@ -262,8 +270,10 @@ test.describe("dashboard core flows", () => {
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
     await chained.getByRole("button", { name: "Edit" }).click()
-    await page.getByRole("textbox", { name: /Policy name/ }).fill("renamed")
-    await page.getByRole("button", { name: "Save" }).click()
+    // The edit opens the same dialog, so its fields are scoped the same way.
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("textbox", { name: /Policy name/ }).fill("renamed")
+    await dialog.getByRole("button", { name: "Save" }).click()
 
     // A rename moves the row rather than copying it, so the old name has to be
     // gone: two rows would mean callers could still reach the policy either way.

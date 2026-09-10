@@ -1,6 +1,6 @@
 import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 
 import type {
   AliasResponse,
@@ -14,12 +14,12 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
@@ -394,7 +394,7 @@ function ModeToggle({
  *  until summoned rather than collapsed-and-empty, which keeps naming one model a
  *  three-field task.
  */
-function PolicyForm({
+export function PolicyForm({
   existing,
   initialTarget = "",
   workspaceId,
@@ -597,6 +597,24 @@ function PolicyForm({
     ],
   )
 
+  // Everything the operator can change, against what it was seeded with. A guard
+  // that watched only the name would be worse than none on a form this long,
+  // where a stray Escape can land ten minutes into building a fallback chain.
+  const draft = JSON.stringify({
+    name,
+    userId,
+    target,
+    chain,
+    conditions,
+    guardrails,
+    candidates,
+    safeIndex,
+    backend,
+    weights,
+  })
+  const seeded = useRef(draft)
+  const isDirty = draft !== seeded.current
+
   // An alias has exactly one target, so growing one a chain, a condition, or a
   // guardrail makes it a policy. Saving it as a policy alone would leave the alias
   // row in place under the same name, and the API refuses that collision, so the
@@ -658,621 +676,611 @@ function PolicyForm({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <Section
-        className="border-y border-border py-5"
-        contentClassName="flex flex-col gap-5"
-      >
-        {/* A heading, not a styled div: this panel is a section of the page and
-            the type role is what it looks like, not what it is. */}
-        <h2 className="text-title">
-          {editing ? (
-            <>
-              Edit {existing.kind === "alias" ? "alias" : "policy"}{" "}
-              <code>{existing.name}</code>
-              {existing.user_id ? (
-                <>
-                  {" "}
-                  for user <code>{existing.user_id}</code>
-                </>
-              ) : null}
-            </>
-          ) : (
-            "New routing policy"
-          )}
-        </h2>
-        {/* All four writers, not two: an organization-scoped save fails through
-            its own mutation, and with those two missing the refusal was
-            swallowed and the panel just sat there. */}
-        <ErrorBanner
-          error={
-            save.error ??
-            saveAlias.error ??
-            saveOrgPolicy.error ??
-            saveOrgAlias.error
-          }
-        />
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          {editingAlias ? (
-            <div className="flex flex-col gap-1">
-              <span className="text-body">Alias name</span>
-              <code className="text-sm text-muted">{previousName}</code>
-              <span className="text-xs text-muted">
-                An alias name is its key and cannot be changed here. Delete and
-                recreate to change it.
-              </span>
-            </div>
-          ) : (
-            <Field
-              label="Policy name"
-              value={name}
-              onChange={setName}
-              placeholder="fast"
-              isRequired
-              // Only on create. Dropping an operator who clicked Edit to change a
-              // target into the name box invites a typo in the one field that is
-              // the policy's identity.
-              autoFocus={!editing}
-              description={
-                nameHasDelimiter ? (
-                  <span className="text-danger">
-                    A policy name cannot contain “:” or “/”.
-                  </span>
-                ) : renaming ? (
-                  <span>
-                    Renames <code>{previousName}</code> on save. Callers have to
-                    send the new name from then on, and usage already recorded
-                    keeps the old one.
-                  </span>
-                ) : editing ? (
-                  "What callers send as `model`. Change it to rename the policy."
-                ) : (
-                  "What callers send as `model`."
-                )
-              }
-            />
-          )}
-          {routed ? (
-            <div className="flex flex-col gap-1">
-              <span className="text-body">Serves</span>
-              <span className="text-sm text-foreground">
-                {effectiveTarget.trim() === "" ? (
-                  <span className="text-muted">
-                    whichever model you mark below
-                  </span>
-                ) : (
-                  <code>{effectiveTarget}</code>
-                )}
-              </span>
-              <span className="text-xs text-muted">
-                {weighted
-                  ? "The split picks per request, so this policy has no single target. The model marked below is what serves a caller who opts out."
-                  : "A router picks per request, so this policy has no single target. The model marked below is what serves when the router does not choose."}
-              </span>
-            </div>
-          ) : (
-            <ModelComboBox
-              label="Serves"
-              value={target}
-              onChange={setTarget}
-              isRequired
-              description="The model that serves a normal request. Callers never see it."
-            />
-          )}
-        </div>
-
-        {editing ? (
-          <p className="text-caption">
-            Who this applies to is the other half of the key. It cannot be
-            changed here: delete and recreate to move it between scopes.
-          </p>
-        ) : tenantScoped ? (
-          // Withheld rather than disabled: a user id is a deployment-wide
-          // identifier, so the tenant-scoped writer refuses one outright and
-          // an organization's entries are workspace-wide. Offering the picker
-          // here would take a value the API is going to reject.
-          <p className="text-caption">
-            This applies to everyone in the selected workspace.
-          </p>
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg` on every routing dialog: this form grows a fallback chain, a
+      // condition tier, a weighted split and a guardrail list as they are asked
+      // for, and a frame that changed width while an operator built one up
+      // would read as a different dialog each time.
+      size="lg"
+      title={
+        editing
+          ? `Edit ${existing.kind === "alias" ? "alias" : "policy"}`
+          : "New policy"
+      }
+      // The policy's identity, in the mono face that says it is a value rather
+      // than prose. Here rather than in the title because `title` is a string.
+      description={
+        editing ? (
+          <>
+            <code>{existing.name}</code>
+            {existing.user_id ? (
+              <>
+                {" "}
+                for user <code>{existing.user_id}</code>
+              </>
+            ) : null}
+          </>
         ) : (
-          <ScopePicker userId={userId} onChange={setUserId} />
+          "What callers send as `model`, and the model that answers it."
+        )
+      }
+      submitLabel={editing ? "Save" : "Create policy"}
+      onSubmit={submit}
+      isPending={pending}
+      isSubmitDisabled={!canSubmit || outgrewAlias}
+      isDirty={isDirty}
+      // All four writers, not two: an organization-scoped save fails through its
+      // own mutation, and with those two missing the refusal was swallowed and
+      // the panel just sat there.
+      error={
+        save.error ??
+        saveAlias.error ??
+        saveOrgPolicy.error ??
+        saveOrgAlias.error
+      }
+      footerStart={
+        <p className="text-caption">In effect for new requests within 30s.</p>
+      }
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        {editingAlias ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-body">Alias name</span>
+            <code className="text-sm text-muted">{previousName}</code>
+            <span className="text-xs text-muted">
+              An alias name is its key and cannot be changed here. Delete and
+              recreate to change it.
+            </span>
+          </div>
+        ) : (
+          <Field
+            label="Policy name"
+            value={name}
+            onChange={setName}
+            placeholder="fast"
+            isRequired
+            // Only on create. Dropping an operator who clicked Edit to change a
+            // target into the name box invites a typo in the one field that is
+            // the policy's identity.
+            autoFocus={!editing}
+            description={
+              nameHasDelimiter ? (
+                <span className="text-danger">
+                  A policy name cannot contain “:” or “/”.
+                </span>
+              ) : renaming ? (
+                <span>
+                  Renames <code>{previousName}</code> on save. Callers have to
+                  send the new name from then on, and usage already recorded
+                  keeps the old one.
+                </span>
+              ) : editing ? (
+                "What callers send as `model`. Change it to rename the policy."
+              ) : (
+                "What callers send as `model`."
+              )
+            }
+          />
         )}
+        {routed ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-body">Serves</span>
+            <span className="text-sm text-foreground">
+              {effectiveTarget.trim() === "" ? (
+                <span className="text-muted">
+                  whichever model you mark below
+                </span>
+              ) : (
+                <code>{effectiveTarget}</code>
+              )}
+            </span>
+            <span className="text-xs text-muted">
+              {weighted
+                ? "The split picks per request, so this policy has no single target. The model marked below is what serves a caller who opts out."
+                : "A router picks per request, so this policy has no single target. The model marked below is what serves when the router does not choose."}
+            </span>
+          </div>
+        ) : (
+          <ModelComboBox
+            label="Serves"
+            value={target}
+            onChange={setTarget}
+            isRequired
+            description="The model that serves a normal request. Callers never see it."
+          />
+        )}
+      </div>
 
-        {/* Conditional tier-down */}
-        {conditions.length > 0 ? (
-          <div className="flex flex-col gap-3 border border-control-border p-3">
-            <ControlField
-              label="Instead, when the budget fills up"
-              description="Checked before the model above. A threshold must be under 100: the budget gate refuses a request before selection once the cap is reached, so a rule at 100 could never fire."
-            />
-            {conditions.map((condition, index) => (
-              <div key={index} className="flex flex-wrap items-end gap-3">
-                <Field
-                  label="Budget used at least (%)"
-                  value={String(condition.threshold)}
+      {editing ? (
+        <p className="text-caption">
+          Who this applies to is the other half of the key. It cannot be changed
+          here: delete and recreate to move it between scopes.
+        </p>
+      ) : tenantScoped ? (
+        // Withheld rather than disabled: a user id is a deployment-wide
+        // identifier, so the tenant-scoped writer refuses one outright and
+        // an organization's entries are workspace-wide. Offering the picker
+        // here would take a value the API is going to reject.
+        <p className="text-caption">
+          This applies to everyone in the selected workspace.
+        </p>
+      ) : (
+        <ScopePicker userId={userId} onChange={setUserId} />
+      )}
+
+      {/* Conditional tier-down */}
+      {conditions.length > 0 ? (
+        <div className="flex flex-col gap-3 border border-control-border p-3">
+          <ControlField
+            label="Instead, when the budget fills up"
+            description="Checked before the model above. A threshold must be under 100: the budget gate refuses a request before selection once the cap is reached, so a rule at 100 could never fire."
+          />
+          {conditions.map((condition, index) => (
+            <div key={index} className="flex flex-wrap items-end gap-3">
+              <Field
+                label="Budget used at least (%)"
+                value={String(condition.threshold)}
+                onChange={(value) =>
+                  setConditions((prev) =>
+                    prev.map((c, i) =>
+                      i === index ? { ...c, threshold: Number(value) || 0 } : c,
+                    ),
+                  )
+                }
+                description={
+                  condition.threshold >= 100 ? (
+                    <span className="text-danger">Must be under 100.</span>
+                  ) : undefined
+                }
+              />
+              <div className="min-w-56 flex-1">
+                <ModelComboBox
+                  label="Use instead"
+                  value={condition.target}
                   onChange={(value) =>
                     setConditions((prev) =>
                       prev.map((c, i) =>
-                        i === index
-                          ? { ...c, threshold: Number(value) || 0 }
-                          : c,
+                        i === index ? { ...c, target: value } : c,
                       ),
                     )
                   }
-                  description={
-                    condition.threshold >= 100 ? (
-                      <span className="text-danger">Must be under 100.</span>
-                    ) : undefined
-                  }
+                  isRequired
                 />
-                <div className="min-w-56 flex-1">
-                  <ModelComboBox
-                    label="Use instead"
-                    value={condition.target}
-                    onChange={(value) =>
-                      setConditions((prev) =>
-                        prev.map((c, i) =>
-                          i === index ? { ...c, target: value } : c,
-                        ),
-                      )
-                    }
-                    isRequired
-                  />
-                </div>
-                <FieldAction>
-                  <Button
-                    variant="ghost"
-                    onPress={() =>
-                      setConditions((prev) =>
-                        prev.filter((_, i) => i !== index),
-                      )
-                    }
-                  >
-                    Remove
-                  </Button>
-                </FieldAction>
               </div>
-            ))}
-          </div>
-        ) : null}
+              <FieldAction>
+                <Button
+                  variant="ghost"
+                  onPress={() =>
+                    setConditions((prev) => prev.filter((_, i) => i !== index))
+                  }
+                >
+                  Remove
+                </Button>
+              </FieldAction>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
-        {/* The routed pool: one control for both backends, because both are "these
+      {/* The routed pool: one control for both backends, because both are "these
               models, one of them per request". What differs is who decides, and
               whether a share sits next to each entry. */}
-        {candidates.length > 0 ? (
-          <div className="flex flex-col gap-3 border border-control-border p-3">
-            <ControlField
-              label={
-                weighted
-                  ? "Split traffic between"
-                  : "The router chooses between"
-              }
-              description={
-                weighted
-                  ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
-                  : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
-              }
-            />
-            {candidates.map((entry, index) => (
-              <div key={index} className="flex flex-wrap items-end gap-3">
-                <div className="min-w-56 flex-1">
-                  <ModelComboBox
-                    label={`Model ${index + 1}`}
-                    value={entry}
-                    onChange={(value) =>
-                      setCandidates((prev) =>
-                        prev.map((c, i) => (i === index ? value : c)),
-                      )
-                    }
-                    isRequired
-                  />
-                </div>
-                {weighted ? (
-                  <div className="flex items-end gap-2">
-                    <Field
-                      label="Share"
-                      value={weights[index] ?? ""}
-                      onChange={(value) =>
-                        setWeights((prev) =>
-                          prev.map((weight, i) =>
-                            i === index ? value : weight,
-                          ),
-                        )
-                      }
-                      // The percentage, not the number they typed: relative weights
-                      // are easy to write and hard to read, and this is the line
-                      // that says a zero-weight model is drained rather than gone.
-                      description={
-                        !Number.isFinite(weightValues[index] ?? Number.NaN) ||
-                        (weightValues[index] ?? 0) < 0
-                          ? "A number, zero or more"
-                          : (weightValues[index] ?? 0) > 0
-                            ? `${Math.round(shares[index] ?? 0)}% of requests`
-                            : "No weighted traffic; still tried if another fails"
-                      }
-                    />
-                  </div>
-                ) : null}
-                <FieldAction>
-                  <label className="flex items-center gap-2 text-body">
-                    <input
-                      type="radio"
-                      name="router-safe-choice"
-                      checked={safeIndex === index}
-                      onChange={() => setSafeIndex(index)}
-                    />
-                    {weighted ? "Serves on opt-out" : "Serves when unsure"}
-                  </label>
-                </FieldAction>
-                <FieldAction>
-                  <Button
-                    variant="ghost"
-                    onPress={() => {
-                      setCandidates((prev) =>
-                        prev.filter((_, i) => i !== index),
-                      )
-                      setWeights((prev) => prev.filter((_, i) => i !== index))
-                      // Keep the mark on the same model where possible; if the marked
-                      // one went, fall back to the first, never to nothing.
-                      setSafeIndex((prev) =>
-                        index < prev ? prev - 1 : index === prev ? 0 : prev,
-                      )
-                    }}
-                  >
-                    Remove
-                  </Button>
-                </FieldAction>
+      {candidates.length > 0 ? (
+        <div className="flex flex-col gap-3 border border-control-border p-3">
+          <ControlField
+            label={
+              weighted ? "Split traffic between" : "The router chooses between"
+            }
+            description={
+              weighted
+                ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
+                : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
+            }
+          />
+          {candidates.map((entry, index) => (
+            <div key={index} className="flex flex-wrap items-end gap-3">
+              <div className="min-w-56 flex-1">
+                <ModelComboBox
+                  label={`Model ${index + 1}`}
+                  value={entry}
+                  onChange={(value) =>
+                    setCandidates((prev) =>
+                      prev.map((c, i) => (i === index ? value : c)),
+                    )
+                  }
+                  isRequired
+                />
               </div>
-            ))}
-            <p className="text-caption">
               {weighted ? (
-                <>
-                  The marked model serves a caller who sends{" "}
-                  <code>Otari-Router: off</code>, which is the way to pin
-                  traffic to one provider during an incident. A model that fails
-                  before responding moves the request to another model in this
-                  pool, by the same shares, before any fallback below.
-                </>
-              ) : (
-                <>
-                  The marked model serves whenever the router does not choose:
-                  too few scored examples, a weakly supported pick, a request
-                  carrying tools, or a caller sending{" "}
-                  <code>Otari-Router: off</code>. Mark the one you would have
-                  picked without a router.
-                </>
-              )}
-            </p>
-            {candidates.length < 2 ? (
-              <p className="text-caption text-danger">
-                Name at least two models.{" "}
-                {weighted ? "Splitting traffic one way" : "Ranking one"} is not
-                a routing decision.
-              </p>
-            ) : null}
-            {duplicateCandidate ? (
-              <p className="text-caption text-danger">
-                Name each model once.{" "}
-                {weighted
-                  ? "A model listed twice has one share, not two, so the split saved would not be the one shown."
-                  : "A pool that repeats a model is refused."}
-              </p>
-            ) : null}
-            {weighted && !weightsWellFormed ? (
-              <p className="text-caption text-danger">
-                Every share is a number of zero or more. Use 0 to drain a model
-                without removing it.
-              </p>
-            ) : weighted && !splitReady ? (
-              <p className="text-caption text-danger">
-                Give at least one model a share above zero, or this policy can
-                never send traffic anywhere but its marked model.
-              </p>
-            ) : null}
-            <div className="flex flex-wrap items-baseline gap-2">
-              <button
-                type="button"
-                disabled={atCandidateCap}
-                className={
-                  atCandidateCap
-                    ? "cursor-not-allowed text-sm text-muted opacity-60"
-                    : "text-sm text-link hover:underline"
-                }
-                onClick={() => {
-                  setCandidates((prev) => [...prev, ""])
-                  // Zero, not an invented share: adding a provider must not move
-                  // traffic onto it before the operator says how much.
-                  setWeights((prev) => [...prev, "0"])
-                }}
-              >
-                + Another model
-              </button>
-              {atCandidateCap ? (
-                <span className="text-xs text-muted">
-                  A policy dispatches at most {MAX_CANDIDATES} models, counting
-                  the fallback chain. Remove a fallback to add another.
-                </span>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {/* Failure chain */}
-        {chain.length > 0 ? (
-          <div className="flex flex-col gap-3 border border-control-border p-3">
-            <ControlField
-              label="If that fails, try"
-              description="Tried in order after a retryable failure. Not tried once tokens have started streaming, or after a 400/401/403, which every provider would reject the same way."
-            />
-            {chain.map((entry, index) => (
-              <div key={index} className="flex flex-wrap items-end gap-3">
-                <div className="min-w-56 flex-1">
-                  <ModelComboBox
-                    label={`Fallback ${index + 1}`}
-                    value={entry}
+                <div className="flex items-end gap-2">
+                  <Field
+                    label="Share"
+                    value={weights[index] ?? ""}
                     onChange={(value) =>
-                      setChain((prev) =>
-                        prev.map((e, i) => (i === index ? value : e)),
+                      setWeights((prev) =>
+                        prev.map((weight, i) => (i === index ? value : weight)),
                       )
                     }
-                    isRequired
+                    // The percentage, not the number they typed: relative weights
+                    // are easy to write and hard to read, and this is the line
+                    // that says a zero-weight model is drained rather than gone.
+                    description={
+                      !Number.isFinite(weightValues[index] ?? Number.NaN) ||
+                      (weightValues[index] ?? 0) < 0
+                        ? "A number, zero or more"
+                        : (weightValues[index] ?? 0) > 0
+                          ? `${Math.round(shares[index] ?? 0)}% of requests`
+                          : "No weighted traffic; still tried if another fails"
+                    }
                   />
                 </div>
+              ) : null}
+              <FieldAction>
+                <label className="flex items-center gap-2 text-body">
+                  <input
+                    type="radio"
+                    name="router-safe-choice"
+                    checked={safeIndex === index}
+                    onChange={() => setSafeIndex(index)}
+                  />
+                  {weighted ? "Serves on opt-out" : "Serves when unsure"}
+                </label>
+              </FieldAction>
+              <FieldAction>
+                <Button
+                  variant="ghost"
+                  onPress={() => {
+                    setCandidates((prev) => prev.filter((_, i) => i !== index))
+                    setWeights((prev) => prev.filter((_, i) => i !== index))
+                    // Keep the mark on the same model where possible; if the marked
+                    // one went, fall back to the first, never to nothing.
+                    setSafeIndex((prev) =>
+                      index < prev ? prev - 1 : index === prev ? 0 : prev,
+                    )
+                  }}
+                >
+                  Remove
+                </Button>
+              </FieldAction>
+            </div>
+          ))}
+          <p className="text-caption">
+            {weighted ? (
+              <>
+                The marked model serves a caller who sends{" "}
+                <code>Otari-Router: off</code>, which is the way to pin traffic
+                to one provider during an incident. A model that fails before
+                responding moves the request to another model in this pool, by
+                the same shares, before any fallback below.
+              </>
+            ) : (
+              <>
+                The marked model serves whenever the router does not choose: too
+                few scored examples, a weakly supported pick, a request carrying
+                tools, or a caller sending <code>Otari-Router: off</code>. Mark
+                the one you would have picked without a router.
+              </>
+            )}
+          </p>
+          {candidates.length < 2 ? (
+            <p className="text-caption text-danger">
+              Name at least two models.{" "}
+              {weighted ? "Splitting traffic one way" : "Ranking one"} is not a
+              routing decision.
+            </p>
+          ) : null}
+          {duplicateCandidate ? (
+            <p className="text-caption text-danger">
+              Name each model once.{" "}
+              {weighted
+                ? "A model listed twice has one share, not two, so the split saved would not be the one shown."
+                : "A pool that repeats a model is refused."}
+            </p>
+          ) : null}
+          {weighted && !weightsWellFormed ? (
+            <p className="text-caption text-danger">
+              Every share is a number of zero or more. Use 0 to drain a model
+              without removing it.
+            </p>
+          ) : weighted && !splitReady ? (
+            <p className="text-caption text-danger">
+              Give at least one model a share above zero, or this policy can
+              never send traffic anywhere but its marked model.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-baseline gap-2">
+            <button
+              type="button"
+              disabled={atCandidateCap}
+              className={
+                atCandidateCap
+                  ? "cursor-not-allowed text-sm text-muted opacity-60"
+                  : "text-sm text-link hover:underline"
+              }
+              onClick={() => {
+                setCandidates((prev) => [...prev, ""])
+                // Zero, not an invented share: adding a provider must not move
+                // traffic onto it before the operator says how much.
+                setWeights((prev) => [...prev, "0"])
+              }}
+            >
+              + Another model
+            </button>
+            {atCandidateCap ? (
+              <span className="text-xs text-muted">
+                A policy dispatches at most {MAX_CANDIDATES} models, counting
+                the fallback chain. Remove a fallback to add another.
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Failure chain */}
+      {chain.length > 0 ? (
+        <div className="flex flex-col gap-3 border border-control-border p-3">
+          <ControlField
+            label="If that fails, try"
+            description="Tried in order after a retryable failure. Not tried once tokens have started streaming, or after a 400/401/403, which every provider would reject the same way."
+          />
+          {chain.map((entry, index) => (
+            <div key={index} className="flex flex-wrap items-end gap-3">
+              <div className="min-w-56 flex-1">
+                <ModelComboBox
+                  label={`Fallback ${index + 1}`}
+                  value={entry}
+                  onChange={(value) =>
+                    setChain((prev) =>
+                      prev.map((e, i) => (i === index ? value : e)),
+                    )
+                  }
+                  isRequired
+                />
+              </div>
+              <FieldAction>
+                <Button
+                  variant="ghost"
+                  onPress={() =>
+                    setChain((prev) => prev.filter((_, i) => i !== index))
+                  }
+                >
+                  Remove
+                </Button>
+              </FieldAction>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-baseline gap-2">
+            <button
+              type="button"
+              disabled={atCandidateCap}
+              className={
+                atCandidateCap
+                  ? "cursor-not-allowed text-sm text-muted opacity-60"
+                  : "text-sm text-link hover:underline"
+              }
+              onClick={() => setChain((prev) => [...prev, ""])}
+            >
+              + Another fallback
+            </button>
+            {atCandidateCap ? (
+              <span className="text-xs text-muted">
+                A policy dispatches at most {MAX_CANDIDATES} models in total.
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Guardrails */}
+      {guardrails.length > 0 ? (
+        <div className="flex flex-col gap-3 border border-control-border p-3">
+          <div>
+            <span className="text-body">Always check</span>
+            <p className="text-caption">
+              Runs on every request through this policy. Callers can add their
+              own guardrails but cannot weaken these.
+            </p>
+            {guardrails_.configured ? null : (
+              <p className="mt-1 text-caption text-warning">
+                No guardrails service is configured, so these cannot run. With
+                `if the service is down` set to block, every request through
+                this policy is refused until one is configured.{" "}
+                <Link to="/tools" className="underline">
+                  Set one up
+                </Link>
+                , or remove the guardrail.
+              </p>
+            )}
+          </div>
+          {guardrails.map((guardrail, index) => (
+            <div key={index} className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <Field
+                  label="Profile"
+                  value={guardrail.profile}
+                  onChange={(value) =>
+                    setGuardrails((prev) =>
+                      prev.map((g, i) =>
+                        i === index ? { ...g, profile: value } : g,
+                      ),
+                    )
+                  }
+                  placeholder="prompt-injection"
+                  isRequired
+                  description="A profile configured on the guardrails service."
+                />
+                <ModeToggle
+                  label="Mode"
+                  value={guardrail.mode}
+                  onChange={(mode) =>
+                    setGuardrails((prev) =>
+                      prev.map((g, i) => (i === index ? { ...g, mode } : g)),
+                    )
+                  }
+                  hint="block rejects a flagged request; monitor records it and serves anyway."
+                />
+                <ModeToggle
+                  label="If the service is down"
+                  value={guardrail.on_unavailable ?? "block"}
+                  onChange={(mode) =>
+                    setGuardrails((prev) =>
+                      prev.map((g, i) =>
+                        i === index ? { ...g, on_unavailable: mode } : g,
+                      ),
+                    )
+                  }
+                  hint="block fails closed, so a guardrails outage refuses every request through this policy."
+                />
                 <FieldAction>
                   <Button
                     variant="ghost"
                     onPress={() =>
-                      setChain((prev) => prev.filter((_, i) => i !== index))
+                      setGuardrails((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      )
                     }
                   >
                     Remove
                   </Button>
                 </FieldAction>
               </div>
-            ))}
-            <div className="flex flex-wrap items-baseline gap-2">
-              <button
-                type="button"
-                disabled={atCandidateCap}
-                className={
-                  atCandidateCap
-                    ? "cursor-not-allowed text-sm text-muted opacity-60"
-                    : "text-sm text-link hover:underline"
-                }
-                onClick={() => setChain((prev) => [...prev, ""])}
-              >
-                + Another fallback
-              </button>
-              {atCandidateCap ? (
-                <span className="text-xs text-muted">
-                  A policy dispatches at most {MAX_CANDIDATES} models in total.
-                </span>
+              {guardrail.mode === "block" &&
+              (guardrail.on_unavailable ?? "block") === "block" ? (
+                <div className="text-caption text-warning">
+                  With both set to block, a guardrails-service outage rejects
+                  every request through this policy, ahead of any fallback
+                  above.
+                </div>
               ) : null}
             </div>
-          </div>
-        ) : null}
+          ))}
+        </div>
+      ) : null}
 
-        {/* Guardrails */}
-        {guardrails.length > 0 ? (
-          <div className="flex flex-col gap-3 border border-control-border p-3">
-            <div>
-              <span className="text-body">Always check</span>
-              <p className="text-caption">
-                Runs on every request through this policy. Callers can add their
-                own guardrails but cannot weaken these.
-              </p>
-              {guardrails_.configured ? null : (
-                <p className="mt-1 text-caption text-warning">
-                  No guardrails service is configured, so these cannot run. With
-                  `if the service is down` set to block, every request through
-                  this policy is refused until one is configured.{" "}
-                  <Link to="/tools" className="underline">
-                    Set one up
-                  </Link>
-                  , or remove the guardrail.
-                </p>
-              )}
-            </div>
-            {guardrails.map((guardrail, index) => (
-              <div key={index} className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-end gap-3">
-                  <Field
-                    label="Profile"
-                    value={guardrail.profile}
-                    onChange={(value) =>
-                      setGuardrails((prev) =>
-                        prev.map((g, i) =>
-                          i === index ? { ...g, profile: value } : g,
-                        ),
-                      )
-                    }
-                    placeholder="prompt-injection"
-                    isRequired
-                    description="A profile configured on the guardrails service."
-                  />
-                  <ModeToggle
-                    label="Mode"
-                    value={guardrail.mode}
-                    onChange={(mode) =>
-                      setGuardrails((prev) =>
-                        prev.map((g, i) => (i === index ? { ...g, mode } : g)),
-                      )
-                    }
-                    hint="block rejects a flagged request; monitor records it and serves anyway."
-                  />
-                  <ModeToggle
-                    label="If the service is down"
-                    value={guardrail.on_unavailable ?? "block"}
-                    onChange={(mode) =>
-                      setGuardrails((prev) =>
-                        prev.map((g, i) =>
-                          i === index ? { ...g, on_unavailable: mode } : g,
-                        ),
-                      )
-                    }
-                    hint="block fails closed, so a guardrails outage refuses every request through this policy."
-                  />
-                  <FieldAction>
-                    <Button
-                      variant="ghost"
-                      onPress={() =>
-                        setGuardrails((prev) =>
-                          prev.filter((_, i) => i !== index),
-                        )
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </FieldAction>
-                </div>
-                {guardrail.mode === "block" &&
-                (guardrail.on_unavailable ?? "block") === "block" ? (
-                  <div className="text-caption text-warning">
-                    With both set to block, a guardrails-service outage rejects
-                    every request through this policy, ahead of any fallback
-                    above.
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {/* Complexity is summoned, never presented: naming one model stays a
+      {/* Complexity is summoned, never presented: naming one model stays a
               three-field task. */}
-        <div className="flex flex-wrap gap-3 text-sm">
-          {conditions.length === 0 ? (
-            <button
-              type="button"
-              className="text-link hover:underline"
-              onClick={() => setConditions([{ threshold: 80, target: "" }])}
-            >
-              + Tier down when the budget fills up
-            </button>
-          ) : null}
-          {chain.length === 0 ? (
-            <button
-              type="button"
-              className="text-link hover:underline"
-              onClick={() => setChain([""])}
-            >
-              + Add a fallback chain
-            </button>
-          ) : null}
-          {candidates.length === 0 ? (
-            <button
-              type="button"
-              className="text-link hover:underline"
-              // Seeded with the policy's own target, marked as the safe choice, so
-              // the pool starts from the model this policy already serves and the
-              // operator adds the cheaper one rather than restating everything.
-              onClick={() => {
-                setBackend(KNN_BACKEND)
-                setCandidates([target.trim() || "", ""])
-                setWeights([])
-                setSafeIndex(0)
-              }}
-            >
-              + Let a router pick the cheapest good-enough model
-            </button>
-          ) : null}
-          {candidates.length === 0 ? (
-            <button
-              type="button"
-              className="text-link hover:underline"
-              // An even split of the policy's own target with one more provider:
-              // the neutral starting point for load balancing, which the operator
-              // then skews. Seeding 90/10 would be guessing at a canary.
-              onClick={() => {
-                setBackend(WEIGHTED_BACKEND)
-                setCandidates([target.trim() || "", ""])
-                setWeights(["50", "50"])
-                setSafeIndex(0)
-              }}
-            >
-              + Split traffic across providers by weight
-            </button>
-          ) : null}
-          {guardrails.length === 0 ? (
-            // Disabled rather than hidden, and never disabled silently: a hidden
-            // control teaches nothing, and a greyed-out one with no explanation
-            // is worse. The reason sits next to it with the route to fixing it,
-            // as text rather than a tooltip so it is readable on touch and by a
-            // screen reader.
-            <span className="flex flex-wrap items-baseline gap-2">
-              <button
-                type="button"
-                disabled={!guardrails_.configured}
-                aria-describedby={
-                  guardrails_.configured ? undefined : "guardrails-unavailable"
-                }
-                className={
-                  guardrails_.configured
-                    ? "text-link hover:underline"
-                    : "cursor-not-allowed text-muted opacity-60"
-                }
-                onClick={() =>
-                  setGuardrails([
-                    { profile: "", mode: "block", on_unavailable: "block" },
-                  ])
-                }
-              >
-                + Add guardrails
-              </button>
-              {guardrails_.configured ? null : (
-                <span id="guardrails-unavailable" className="text-caption">
-                  No guardrails service is configured, so there would be nothing
-                  to call.{" "}
-                  <Link to="/tools" className="text-link hover:underline">
-                    Set one up in Tools &amp; Guardrails
-                  </Link>
-                  .
-                </span>
-              )}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button
-            variant="primary"
-            isDisabled={!canSubmit || pending || outgrewAlias}
-            onPress={submit}
+      <div className="flex flex-wrap gap-3 text-sm">
+        {conditions.length === 0 ? (
+          <button
+            type="button"
+            className="text-link hover:underline"
+            onClick={() => setConditions([{ threshold: 80, target: "" }])}
           >
-            {pending ? "Saving…" : editing ? "Save" : "Create policy"}
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-          <span className="text-xs text-muted">
-            In effect for new requests within 30s.
+            + Tier down when the budget fills up
+          </button>
+        ) : null}
+        {chain.length === 0 ? (
+          <button
+            type="button"
+            className="text-link hover:underline"
+            onClick={() => setChain([""])}
+          >
+            + Add a fallback chain
+          </button>
+        ) : null}
+        {candidates.length === 0 ? (
+          <button
+            type="button"
+            className="text-link hover:underline"
+            // Seeded with the policy's own target, marked as the safe choice, so
+            // the pool starts from the model this policy already serves and the
+            // operator adds the cheaper one rather than restating everything.
+            onClick={() => {
+              setBackend(KNN_BACKEND)
+              setCandidates([target.trim() || "", ""])
+              setWeights([])
+              setSafeIndex(0)
+            }}
+          >
+            + Let a router pick the cheapest good-enough model
+          </button>
+        ) : null}
+        {candidates.length === 0 ? (
+          <button
+            type="button"
+            className="text-link hover:underline"
+            // An even split of the policy's own target with one more provider:
+            // the neutral starting point for load balancing, which the operator
+            // then skews. Seeding 90/10 would be guessing at a canary.
+            onClick={() => {
+              setBackend(WEIGHTED_BACKEND)
+              setCandidates([target.trim() || "", ""])
+              setWeights(["50", "50"])
+              setSafeIndex(0)
+            }}
+          >
+            + Split traffic across providers by weight
+          </button>
+        ) : null}
+        {guardrails.length === 0 ? (
+          // Disabled rather than hidden, and never disabled silently: a hidden
+          // control teaches nothing, and a greyed-out one with no explanation
+          // is worse. The reason sits next to it with the route to fixing it,
+          // as text rather than a tooltip so it is readable on touch and by a
+          // screen reader.
+          <span className="flex flex-wrap items-baseline gap-2">
+            <button
+              type="button"
+              disabled={!guardrails_.configured}
+              aria-describedby={
+                guardrails_.configured ? undefined : "guardrails-unavailable"
+              }
+              className={
+                guardrails_.configured
+                  ? "text-link hover:underline"
+                  : "cursor-not-allowed text-muted opacity-60"
+              }
+              onClick={() =>
+                setGuardrails([
+                  { profile: "", mode: "block", on_unavailable: "block" },
+                ])
+              }
+            >
+              + Add guardrails
+            </button>
+            {guardrails_.configured ? null : (
+              <span id="guardrails-unavailable" className="text-caption">
+                No guardrails service is configured, so there would be nothing
+                to call.{" "}
+                <Link to="/tools" className="text-link hover:underline">
+                  Set one up in Tools &amp; Guardrails
+                </Link>
+                .
+              </span>
+            )}
           </span>
-          {routed && !weighted ? (
-            <span className="text-xs text-muted">
-              A new router serves the model above until it has scored examples.
-              Recording them is an API job for now (
-              <code>POST /api/v1/routing/preferences/rank</code>); open{" "}
-              <b>Examples</b> on the row afterwards to watch it warm up.
-            </span>
-          ) : null}
-          {weighted ? (
-            <span className="text-xs text-muted">
-              Each request is drawn independently, so the shares hold over
-              traffic rather than over any ten requests, and they behave the
-              same behind any number of replicas.
-            </span>
-          ) : null}
-          {outgrewAlias ? (
-            <span className="text-xs text-warning">
-              An alias holds one target. To add a fallback, a condition, or a
-              guardrail, delete this alias and create a policy with the same
-              name.
-            </span>
-          ) : null}
-        </div>
-      </Section>
-    </div>
+        ) : null}
+      </div>
+
+      {/* Each of these explains a mode chosen above it, so it belongs beside
+          that choice. The footer's caption is the one sentence about the save
+          itself. */}
+      {routed && !weighted ? (
+        <p className="text-caption">
+          A new router serves the model above until it has scored examples.
+          Recording them is an API job for now (
+          <code>POST /api/v1/routing/preferences/rank</code>); open{" "}
+          <b>Examples</b> on the row afterwards to watch it warm up.
+        </p>
+      ) : null}
+      {weighted ? (
+        <p className="text-caption">
+          Each request is drawn independently, so the shares hold over traffic
+          rather than over any ten requests, and they behave the same behind any
+          number of replicas.
+        </p>
+      ) : null}
+      {outgrewAlias ? (
+        <p className="text-warning text-xs">
+          An alias holds one target. To add a fallback, a condition, or a
+          guardrail, delete this alias and create a policy with the same name.
+        </p>
+      ) : null}
+    </FormDialog>
   )
 }
 
@@ -1567,17 +1575,19 @@ export function RoutingPage() {
       <PageIntro
         title="Routing"
         action={
-          !canEdit || isAdding || editing !== null ? undefined : (
+          canEdit ? (
             <Button
+              // Visible while the dialog is open: the dialog is over the page,
+              // so there is nothing for hiding this to prevent.
               variant="primary"
               onPress={() => {
                 setEditing(null)
                 setAdding(true)
               }}
             >
-              New policy
+              Create policy
             </Button>
-          )
+          ) : undefined
         }
       >
         {/* Three readings of the same page, because what a caller may do here
@@ -1621,9 +1631,16 @@ export function RoutingPage() {
         />
       ) : null}
 
-      {rows.length === 0 && !isListLoading && !isAdding ? (
+      {rows.length === 0 && !isListLoading ? (
         canEdit ? (
-          <EmptyState title="No routing policies yet">
+          <EmptyState
+            title="No routing policies yet"
+            actionLabel="Create policy"
+            onAction={() => {
+              setEditing(null)
+              setAdding(true)
+            }}
+          >
             <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
               <li>
                 Create a policy and point it at the model that should normally
