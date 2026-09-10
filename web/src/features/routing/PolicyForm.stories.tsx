@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
-import type { PolicySpec } from "@/client/local"
+import type { PolicySpec } from "@/client"
 import { API_ROOT } from "@/shared/api/client"
 import { PolicyForm } from "./RoutingPage"
 
@@ -50,6 +50,9 @@ const meta = {
     api: {
       [`${API_ROOT}/models/discoverable`]: CATALOG,
       [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
+      // `ScopePicker` asks for the roster on every render, so without this the
+      // mock answers its deliberate 501 rather than the network's 404.
+      [`${API_ROOT}/users`]: [],
     },
   },
   args: {
@@ -122,6 +125,7 @@ export const WithoutGuardrailsService: Story = {
     api: {
       [`${API_ROOT}/models/discoverable`]: CATALOG,
       [`${API_ROOT}/tool-settings`]: { fields: [] },
+      [`${API_ROOT}/users`]: [],
     },
   },
 }

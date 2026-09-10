@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -105,6 +105,8 @@ function mockApi(
     }[]
     // What a delete of a deployment-wide policy answers, for the error path.
     deleteBody?: { status: number; detail: string }
+    // The same for a save, which is the path the form's own banner reports.
+    saveBody?: { status: number; detail: string }
   } = {},
 ) {
   let list = [...policies]
@@ -225,6 +227,16 @@ function mockApi(
       }
       if (url.includes(`${API_ROOT}/routing/policies`)) {
         if (method === "POST") {
+          if (opts.saveBody) {
+            // Not `jsonResponse`, which is a 200 by construction.
+            return new Response(
+              JSON.stringify({ detail: opts.saveBody.detail }),
+              {
+                status: opts.saveBody.status,
+                headers: { "Content-Type": "application/json" },
+              },
+            )
+          }
           // An upsert, like the real endpoint: appending would put two rows under
           // one name and scope, which is a state the API cannot produce. And
           // `rename_from` moves the row rather than keying on `name`, so the old
@@ -831,6 +843,77 @@ describe("RoutingPage", () => {
 
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
     expect(screen.getByText("fast")).toBeInTheDocument()
+  })
+
+  it("returns focus to the page's action when the empty state's dialog closes", async () => {
+    // Creating the first policy fills the table, so the empty state unmounts and
+    // the node react-aria stored for focus restoration is gone: focus resets to
+    // `document.body` and the next Tab starts at the top of the document. The
+    // page's own trigger is where it lands instead.
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const empty = (
+      await screen.findByRole("heading", { name: "No routing policies yet" })
+    ).closest("div")!.parentElement!
+    await user.click(
+      within(empty).getByRole("button", { name: "Create your first policy" }),
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "cheap",
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /^serves$/i }),
+      "openai:gpt-5-nano",
+    )
+    await user.keyboard("{Escape}")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
+
+    const trigger = await createTrigger()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("reports a refused save inside the dialog, leaving the form filled", async () => {
+    // The failure this guards against is the silent one: the mutation refuses,
+    // the dialog stays, and nothing on screen says why. Its delete equivalent
+    // is below; a page-level banner is no use here, because the operator is
+    // looking at the modal and a message behind the backdrop is unread.
+    mockApi([], "http://guardrails:8000", [], {
+      saveBody: { status: 400, detail: "cheap already names an alias" },
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "cheap",
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /^serves$/i }),
+      "openai:gpt-5-nano",
+    )
+    await user.keyboard("{Escape}")
+    const dialog = screen.getByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create policy" }),
+    )
+
+    expect(
+      await within(dialog).findByText(/already names an alias/),
+    ).toBeVisible()
+    // Still open with the work intact, so the operator can correct the name
+    // rather than retyping the policy.
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: /policy name/i })).toHaveValue(
+      "cheap",
+    )
   })
 
   it("reports a refused delete inside the dialog, leaving the row", async () => {

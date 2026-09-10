@@ -1094,9 +1094,9 @@ export function PolicyForm({
             </p>
             {guardrails_.configured ? null : (
               <p className="mt-1 text-caption text-warning">
-                No guardrails service is configured, so these cannot run. With
-                `if the service is down` set to block, every request through
-                this policy is refused until one is configured.{" "}
+                No guardrails service is configured, so these cannot run. With{" "}
+                <code>if the service is down</code> set to block, every request
+                through this policy is refused until one is configured.{" "}
                 <Link to="/tools" className="underline">
                   Set one up
                 </Link>
@@ -1353,6 +1353,22 @@ export function RoutingPage() {
   // A deep link may pre-fill the add form with ?target=provider:model.
   const initialTarget = useUrlValue("target")
   const [adding, setAdding] = useState(initialTarget !== "")
+  // Where focus goes when nothing else claims it. React Aria restores focus to
+  // whatever had it when the dialog opened, which is right for the heading's own
+  // button and wrong for the empty state's: creating the first policy fills the
+  // table, so the empty state unmounts and the node react-aria stored is gone.
+  // Focus resets to `document.body` and the next Tab starts at the top of the
+  // document. A frame later anything with a claim has had its turn, and an empty
+  // `document.body` means nothing took it.
+  const createButtonRef = useRef<HTMLButtonElement | null>(null)
+  const closeCreate = () => {
+    setAdding(false)
+    requestAnimationFrame(() => {
+      if (document.activeElement === document.body) {
+        createButtonRef.current?.focus()
+      }
+    })
+  }
   const [editing, setEditing] = useState<RoutingRow | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
   // Readiness opens inline under its own row (DataTable's accordion), because it
@@ -1585,6 +1601,7 @@ export function RoutingPage() {
         action={
           canEdit ? (
             <Button
+              ref={createButtonRef}
               // Visible while the dialog is open: the dialog is over the page,
               // so there is nothing for hiding this to prevent.
               variant="primary"
@@ -1626,7 +1643,7 @@ export function RoutingPage() {
           existing={null}
           initialTarget={initialTarget}
           workspaceId={writeWorkspaceId}
-          onClose={() => setAdding(false)}
+          onClose={closeCreate}
         />
       ) : null}
       {editing !== null ? (
