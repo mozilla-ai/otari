@@ -91,17 +91,26 @@ a screenshot entry so the page is covered when the suite becomes a gate.
 
 ## What CI runs on a PR, and the two ways it silently does not
 
-Every substantive workflow is declared `pull_request: branches: [ main ]`
+Every substantive workflow but one is declared `pull_request: branches: [ main ]`
 (`otari-dashboard.yml`, `otari-dashboard-parity.yml`, `otari-design-system.yml`,
-`otari-tests.yml`), and that filter is on the **base** branch. Two situations therefore leave a
+`otari-tests.yml`), and that filter is on the **base** branch. The exception is
+`otari-sdk-codegen-check.yml`, which declares `pull_request` with a `paths` filter and no
+`branches` key at all, so it matches any base: a stacked PR touching
+`docs/public/openapi.json` or `scripts/sdk_codegen/**` runs its four-language generate matrix
+and can go red where this section otherwise promises nothing. Two situations therefore leave a
 PR with almost no CI, and neither of them reports anything:
 
 - **A base that is not `main`.** A PR stacked on another feature branch matches no workflow, so
-  it gets only the two `pull_request_target` checks, `Lint PR title` and `PR Template Check`.
-  Retargeting a stacked PR onto its parent branch is what usually causes this, and the trade is
-  invisible in the direction you are looking: the diff gets smaller and the check count drops
-  from seven to one. Keep a stacked PR on base `main` and live with the inherited diff until its
-  parent merges.
+  it gets only the `pull_request_target` checks. Retargeting a stacked PR onto its parent branch
+  is what usually causes this, and the trade is invisible in the direction you are looking: the
+  diff gets smaller and the check count drops from seven to one or two. Both ends of that range
+  depend on when you look, and it is worth knowing why: `otari-pr-title.yml` lists `synchronize`, so
+  `Lint PR title` re-runs on every push and is attached to the current head, while
+  `pr-template-check.yml` lists only `opened` and `edited`, so `check-template` stays attached to
+  the sha the PR was opened (or last edited) at. So the ceiling is seven on that sha and six on
+  every head after a push, and the floor is two and then one. Measured on four stacked heads: one
+  row each, `Lint PR title`, with no `check-template` on any of them. Keep a stacked PR on base `main` and
+  live with the inherited diff until its parent merges.
 - **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
   PR has none, so nothing runs until the conflict is resolved. The tell is
   `mergeStateStatus: DIRTY` beside a check count that has stopped growing.
@@ -111,17 +120,21 @@ unsquashed commits and the squash on `main` are the same content twice.
 `git rebase --onto origin/main <the parent's old head>` drops the absorbed commits and clears it.
 
 **"Green" means the full expected set is present and none of it is pending**, which is not the
-same as nothing being pending. Both situations above produce a `gh pr checks` that lists one
-passing row, and one passing row reads as a clean result to anyone who does not already know
+same as nothing being pending. Both situations above produce a `gh pr checks` that lists one or
+two passing rows, and a passing row reads as a clean result to anyone who does not already know
 what the set should be. Check the names rather than only the buckets: on a dashboard change the
 substantive ones are `build`, `dashboard`, `e2e`, `catalog` and `serving`, and a run without
 them has covered nothing.
 
 A small set is not always one of the two faults above, though. Every one of these workflows also
 carries a `paths` filter, so a change that touches nothing they watch correctly runs almost
-nothing: a PR editing only `.github/skills/` or a file under `docs/` gets the template and title
-checks and no more, and that is the right answer rather than a symptom. The question to ask is
-whether the set matches the change, not whether the set is large.
+nothing: a PR editing only `.github/skills/`, or a `docs/` file other than `dashboard.md` and
+`public/openapi.json`, gets the title and template checks and no more, and that is the right
+answer rather than a symptom. Those two `docs/` paths are the exception, watched by
+`otari-dashboard.yml`, `otari-dashboard-parity.yml`, `otari-dashboard-serving.yml` and
+`otari-docker-build.yml` because the dashboard bundles the guide and generates its client from
+the spec, so a one-line edit to either runs `dashboard`, `e2e`, `serving` and `build`. The
+question to ask is whether the set matches the change, not whether the set is large.
 
 ## Generated artifacts a PR can owe
 
@@ -198,9 +211,10 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   issues sharing a file are **sequenced**, with the later ones rebasing once the earlier lands.
 - **Order within a wave:** small and low-risk first, large refactors later, so the rebase surface
   stays small.
-- **A stacked PR loses two protections, so stack deliberately.** Basing a PR on a topic branch
-  instead of `main` buys a clean diff (only your own commits, not the parent's) and costs both of
-  the things that would otherwise catch a mistake. `protect-main` applies to the default branch
+- **A stacked PR loses three protections, so stack deliberately.** Basing a PR on a topic branch
+  instead of `main` buys a clean diff (only your own commits, not the parent's) and costs the
+  things that would otherwise catch a mistake. CI is the third and it has its own section above
+  ("What CI runs on a PR"); the other two: `protect-main` applies to the default branch
   only, so the child reports `mergeStateStatus: CLEAN` and can be merged into its base with **no
   approval and no thread resolution**, silently folding two reviews into one. And
   `.coderabbit.yaml` sets `base_branches: ["main"]`, so **CodeRabbit skips the child entirely**
