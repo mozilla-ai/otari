@@ -1,10 +1,9 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
+import { Button } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
-import { Field } from "@/design-system/forms/Field"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import {
@@ -12,6 +11,7 @@ import {
   useUpdateOrganization,
 } from "@/shared/api/organizations"
 
+import { RenameOrganizationDialog } from "./RenameOrganizationDialog"
 import { canManage } from "./roles"
 
 // The organization this deployment is, and the one thing an operator does to
@@ -25,25 +25,26 @@ import { canManage } from "./roles"
 // (Members), which is how otari.ai splits the same surface.
 
 /**
- * The form band: a rule above it, a rule below it, and a third rule dividing
- * the fields from the row that commits them. No card, because a page with one
- * form on it does not need a box to say where the form is; the rules already
- * do, and the box was the only thing making this page look like a different
- * page from Keys, which has the same shape.
+ * The detail band: a rule above it, a rule below it, and a third rule dividing
+ * what the organization is from the button that changes it. No card, because a
+ * page with one band on it does not need a box to say where the band is; the
+ * rules already do, and the box was the only thing making this page look like a
+ * different page from Keys, which has the same shape.
+ *
+ * The values read rather than edit: a name in an open input is one stray
+ * keystroke from being changed, so the rename is a dialog away.
  */
 function OrganizationDetails({
   name,
   slug,
   canEdit,
+  onRename,
 }: {
   name: string
   slug: string
   canEdit: boolean
+  onRename: () => void
 }) {
-  const update = useUpdateOrganization()
-  const [draft, setDraft] = useState(name)
-  const trimmed = draft.trim()
-  const isUnchanged = trimmed === name
   return (
     <Section
       aria-labelledby="organization-details-title"
@@ -53,31 +54,25 @@ function OrganizationDetails({
       <h2 id="organization-details-title" className="text-title">
         Details
       </h2>
-      <ErrorBanner error={update.error} />
-      <Field
-        label="Organization name"
-        value={draft}
-        onChange={setDraft}
-        isRequired
-        isDisabled={!canEdit}
-        description="What this deployment's tenant is called across the dashboard. The slug below is set when the organization is provisioned and does not follow a rename."
-      />
-      <div className="flex flex-col gap-1">
-        <span className="text-body">Slug</span>
-        <CopyableValue value={slug} label="organization slug">
-          <code className="text-xs text-muted">{slug}</code>
-        </CopyableValue>
-      </div>
-      {/* The actions sit under a rule of their own, so the row that commits the
-          form is divided from the fields rather than floating after them. */}
+      <dl className="grid items-baseline gap-x-6 gap-y-3 sm:grid-cols-[10rem_1fr]">
+        <dt className="text-muted">Organization name</dt>
+        <dd className="text-emphasis">{name}</dd>
+        <dt className="text-muted">Slug</dt>
+        <dd className="flex flex-col gap-1">
+          <CopyableValue value={slug} label="organization slug">
+            <code className="text-xs text-muted">{slug}</code>
+          </CopyableValue>
+          <span className="text-caption text-subtle">
+            Set when the organization is provisioned. It does not follow a
+            rename.
+          </span>
+        </dd>
+      </dl>
+      {/* The action sits under a rule of its own, so the control that changes
+          the organization is divided from what the organization is. */}
       <div className="flex items-center justify-end border-t border-border pt-4">
-        <Button
-          variant="primary"
-          isDisabled={!canEdit || isUnchanged || trimmed === ""}
-          isPending={update.isPending}
-          onPress={() => update.mutate({ name: trimmed })}
-        >
-          Save name
+        <Button variant="primary" isDisabled={!canEdit} onPress={onRename}>
+          Change organization name
         </Button>
       </div>
     </Section>
@@ -86,6 +81,8 @@ function OrganizationDetails({
 
 export function OrganizationGeneralPage() {
   const context = useOrganizationContext()
+  const update = useUpdateOrganization()
+  const [isRenaming, setIsRenaming] = useState(false)
 
   if (context.isLoading) {
     return <PageLoading label="Loading organization…" />
@@ -117,13 +114,27 @@ export function OrganizationGeneralPage() {
         </InfoBanner>
       )}
 
-      {/* Keyed on the organization so a change of tenant reseeds the name
-          draft, which is seeded on mount only. */}
       <OrganizationDetails
-        key={organization.id}
         name={organization.name}
         slug={organization.slug}
         canEdit={canEdit}
+        onRename={() => {
+          // A rejected attempt must not be waiting in the dialog the next time
+          // it opens.
+          update.reset()
+          setIsRenaming(true)
+        }}
+      />
+
+      <RenameOrganizationDialog
+        isOpen={isRenaming}
+        onOpenChange={setIsRenaming}
+        currentName={organization.name}
+        isPending={update.isPending}
+        error={update.error}
+        onSubmit={(name) =>
+          update.mutate({ name }, { onSuccess: () => setIsRenaming(false) })
+        }
       />
     </div>
   )
