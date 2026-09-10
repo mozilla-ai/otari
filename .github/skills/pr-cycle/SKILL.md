@@ -89,6 +89,34 @@ The dashboard has its own, which `make lint` does not touch: `pnpm --dir web run
 that suite runs on demand, so a PR that moves a page owes no PNGs; a PR that **adds** a page owes
 a screenshot entry so the page is covered when the suite becomes a gate.
 
+## What CI runs on a PR, and the two ways it silently does not
+
+Every substantive workflow is declared `pull_request: branches: [ main ]`
+(`otari-dashboard.yml`, `otari-dashboard-parity.yml`, `otari-design-system.yml`,
+`otari-tests.yml`), and that filter is on the **base** branch. Two situations therefore leave a
+PR with almost no CI, and neither of them reports anything:
+
+- **A base that is not `main`.** A PR stacked on another feature branch matches no workflow, so
+  it gets only the two `pull_request_target` checks, `Lint PR title` and `PR Template Check`.
+  Retargeting a stacked PR onto its parent branch is what usually causes this, and the trade is
+  invisible in the direction you are looking: the diff gets smaller and the check count drops
+  from seven to one. Keep a stacked PR on base `main` and live with the inherited diff until its
+  parent merges.
+- **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
+  PR has none, so nothing runs until the conflict is resolved. The tell is
+  `mergeStateStatus: DIRTY` beside a check count that has stopped growing.
+
+A child PR hits the second case as soon as its parent is squash-merged, because its own
+unsquashed commits and the squash on `main` are the same content twice.
+`git rebase --onto origin/main <the parent's old head>` drops the absorbed commits and clears it.
+
+**"Green" means the full expected set is present and none of it is pending**, which is not the
+same as nothing being pending. Both situations above produce a `gh pr checks` that lists one
+passing row, and one passing row reads as a clean result to anyone who does not already know
+what the set should be. Check the names rather than only the buckets: on a dashboard change the
+substantive ones are `build`, `dashboard`, `e2e`, `catalog` and `serving`, and a run without
+them has covered nothing.
+
 ## Generated artifacts a PR can owe
 
 - A route, a schema, **or a route docstring**: run `uv run python scripts/generate_openapi.py`,
@@ -220,7 +248,9 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   its branch deleted **closes child B permanently**: B's base is gone and GitHub refuses to
   reopen a PR whose base branch was deleted (`422 "state cannot be changed"`), even if you
   recreate the branch. So `gh pr edit B --base main` **while A's branch still exists**, then merge
-  A. If B already closed this way, the only recovery is a fresh PR from B's head branch, linking
+  A. Base `main` is also what gets B any CI at all (see
+  [What CI runs on a PR](#what-ci-runs-on-a-pr-and-the-two-ways-it-silently-does-not)), so it is
+  where a stacked PR should have been sitting all along. If B already closed this way, the only recovery is a fresh PR from B's head branch, linking
   the old one for its review history.
 
 ## Non-negotiables
