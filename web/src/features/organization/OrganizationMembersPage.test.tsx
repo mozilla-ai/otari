@@ -287,8 +287,9 @@ describe("OrganizationMembersPage", () => {
     await pickOption(user, "Role", "Admin")
     // Ticked by default, since a member in no workspace can reach nothing.
     expect(await screen.findByLabelText("Production")).toBeChecked()
-    // The header action hides itself while the form is open, so the remaining
-    // button of this name is the form's own submit.
+    // The header action stays on screen but the open dialog hides the page
+    // behind it from the accessibility tree, so the one button of this name
+    // left to find is the dialog's own submit.
     await user.click(screen.getByRole("button", { name: "Add member" }))
 
     const post = requests.find((request) => request.method === "POST")
@@ -298,6 +299,60 @@ describe("OrganizationMembersPage", () => {
       role: "admin",
       workspace_assignments: [{ workspace_id: "ws-1", role: "member" }],
     })
+  })
+
+  it("keeps both header triggers on screen while a dialog is open", async () => {
+    // The dialog sits over the page rather than replacing the pair, so neither
+    // control vanishes from under the pointer while one of them is open.
+    mockApi({ members: [OWNER] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    const add = await screen.findByRole("button", { name: "Add member" })
+    const invite = screen.getByRole("button", { name: "Invite member" })
+    await user.click(add)
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(add).toBeVisible()
+    expect(invite).toBeVisible()
+  })
+
+  it("opens each dialog on a blank draft, not on the last one typed", async () => {
+    // Reset on the way in: clearing on the way out would blank the fields
+    // while the dialog is still animating away.
+    mockApi({ members: [OWNER] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    // A draft this far along is dirty, so the way out is through the guard.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Add member" }))
+    expect(await screen.findByLabelText("Email address")).toHaveValue("")
+  })
+
+  it("reads nothing on its own account for the two closed dialogs", async () => {
+    // Both forms are mounted from the first paint now, so anything they read
+    // would be read on page load. Today they read only the workspace list the
+    // page itself needs, which is why one GET serves all three.
+    const requests = mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByRole("button", { name: "Add member" })
+    await waitFor(() =>
+      expect(
+        requests.filter((request) =>
+          request.url.startsWith(`${API_ROOT}/workspaces?`),
+        ),
+      ).toHaveLength(1),
+    )
   })
 
   it("leaves the default alone once the operator has cleared it", async () => {
@@ -391,8 +446,11 @@ describe("OrganizationMembersPage", () => {
     })
 
     // mail_sent is false in the mocked response, so the link is offered to
-    // share by hand rather than the form just closing.
-    expect(await screen.findByText("Invitation sent")).toBeInTheDocument()
+    // share by hand rather than the form just closing, and the dialog says the
+    // email did not go out rather than claiming it did.
+    expect(
+      await screen.findByText(/Otari did not send the email/),
+    ).toBeInTheDocument()
     expect(
       screen.getByText("/#/accept-invitation?token=abc123"),
     ).toBeInTheDocument()

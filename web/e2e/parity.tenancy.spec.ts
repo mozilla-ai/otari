@@ -118,9 +118,12 @@ test.describe("standalone tenancy", () => {
     await openPage(page, "Members & roles", "Members")
 
     await page.getByRole("button", { name: "Add member" }).click()
-    await page.getByLabel("Email address").fill(MEMBER_EMAIL)
-    await pickOption(page, "Role", "Member")
-    await page.getByRole("button", { name: "Add member" }).click()
+    // Scoped: the heading's trigger and the dialog's submit both say "Add
+    // member", so an unscoped press is ambiguous.
+    const addDialog = page.getByRole("dialog", { name: "New member" })
+    await addDialog.getByLabel("Email address").fill(MEMBER_EMAIL)
+    await pickOption(page, "Role", "Member", addDialog)
+    await addDialog.getByRole("button", { name: "Add member" }).click()
 
     // Nothing is emailed and nothing has to be accepted: this edition answers
     // on the "active" arm of the platform's result union, so the row is live
@@ -149,8 +152,9 @@ test.describe("standalone tenancy", () => {
     // second one, which is also what lets this spec run twice against one
     // gateway.
     await page.getByRole("button", { name: "Add member" }).click()
-    await page.getByLabel("Email address").fill(MEMBER_EMAIL)
-    await page.getByRole("button", { name: "Add member" }).click()
+    const readdDialog = page.getByRole("dialog", { name: "New member" })
+    await readdDialog.getByLabel("Email address").fill(MEMBER_EMAIL)
+    await readdDialog.getByRole("button", { name: "Add member" }).click()
     await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(1)
 
     // Leave the roster as this spec found it.

@@ -21,6 +21,7 @@ import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
@@ -164,7 +165,13 @@ function StatusMark({ status }: { status: string }) {
 // drop them into in the same request. A local identity is created for an address
 // nothing else knows yet, which is the handle a future sign-in flow claims it
 // by; until then the row is a place to hang a role, which is the point.
-function AddMemberForm({ onClose }: { onClose: () => void }) {
+function AddMemberForm({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) {
   const add = useAddOrganizationMember()
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
@@ -218,12 +225,19 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="New member"
+      submitLabel="Add member"
+      onSubmit={submit}
+      isPending={add.isPending}
+      isSubmitDisabled={trimmed === ""}
+      isDirty={trimmed !== ""}
+      error={add.error}
     >
-      <div className="text-title">Add member</div>
-      <ErrorBanner error={add.error} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Email address"
@@ -268,20 +282,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
           ))}
         </fieldset>
       ) : null}
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={trimmed === ""}
-          isPending={add.isPending}
-          onPress={submit}
-        >
-          Add member
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -290,7 +291,13 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
 // from AddMemberForm rather than a toggle on it: the two produce different
 // results (`mail_sent`, `accept_link`) and this one has something to show
 // after it succeeds, which AddMemberForm's immediate close does not.
-function InviteMemberForm({ onClose }: { onClose: () => void }) {
+function InviteMemberForm({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) {
   const invite = useInviteOrganizationMember()
   const workspaces = useWorkspaces()
   const { mail_ready } = useDeployment()
@@ -339,11 +346,20 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
   // to share by hand when it was not (or when mail is unconfigured entirely).
   if (result) {
     return (
-      <Section
-        className="border-y border-border py-5"
-        contentClassName="flex flex-col gap-4"
+      <FormDialog
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) onClose()
+        }}
+        title="Invitation"
+        // Dismissable only once the email carried the link. When it did not,
+        // this is the only place the link is shown, so the acknowledgement is
+        // the way out rather than one of two.
+        isDismissable={result.mail_sent}
+        submitLabel="Done"
+        onSubmit={onClose}
+        isPending={false}
       >
-        <div className="text-title">Invitation sent</div>
         {result.mail_sent ? (
           <InfoBanner>
             An email with an accept link was sent to{" "}
@@ -364,22 +380,24 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
             </div>
           </InfoBanner>
         )}
-        <div className="flex gap-2">
-          <Button variant="primary" onPress={onClose}>
-            Done
-          </Button>
-        </div>
-      </Section>
+      </FormDialog>
     )
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="Invitation"
+      submitLabel="Send invitation"
+      onSubmit={submit}
+      isPending={invite.isPending}
+      isSubmitDisabled={trimmed === ""}
+      isDirty={trimmed !== ""}
+      error={invite.error}
     >
-      <div className="text-title">Invite member</div>
-      <ErrorBanner error={invite.error} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Email address"
@@ -420,20 +438,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
           ))}
         </fieldset>
       ) : null}
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={trimmed === ""}
-          isPending={invite.isPending}
-          onPress={submit}
-        >
-          Send invitation
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -802,6 +807,8 @@ export function OrganizationMembersPage() {
   const [revoking, setRevoking] = useState<OrganizationMember | null>(null)
   const [adding, setAdding] = useState(false)
   const [inviting, setInviting] = useState(false)
+  const [addCount, setAddCount] = useState(0)
+  const [inviteCount, setInviteCount] = useState(0)
 
   const rows = useMemo(() => members.data ?? [], [members.data])
   const userByAttribution = useMemo(
@@ -1156,12 +1163,26 @@ export function OrganizationMembersPage() {
       <PageIntro
         title="Members"
         action={
-          manages && !adding && !inviting ? (
+          manages ? (
+            // Both stay on screen while their dialog is open: the dialog is
+            // over the page rather than in place of the action.
             <div className="flex gap-2">
-              <Button variant="ghost" onPress={() => setAdding(true)}>
+              <Button
+                variant="ghost"
+                onPress={() => {
+                  setAddCount((count) => count + 1)
+                  setAdding(true)
+                }}
+              >
                 Add member
               </Button>
-              <Button variant="primary" onPress={() => setInviting(true)}>
+              <Button
+                variant="primary"
+                onPress={() => {
+                  setInviteCount((count) => count + 1)
+                  setInviting(true)
+                }}
+              >
                 Invite member
               </Button>
             </div>
@@ -1204,10 +1225,19 @@ export function OrganizationMembersPage() {
         </InfoBanner>
       )}
 
-      {adding ? <AddMemberForm onClose={() => setAdding(false)} /> : null}
-      {inviting ? (
-        <InviteMemberForm onClose={() => setInviting(false)} />
-      ) : null}
+      {/* Keyed on the open count, so each open remounts a blank form. Clearing
+          the draft on close instead would blank the fields while the dialog is
+          still animating away. */}
+      <AddMemberForm
+        key={`add-${addCount}`}
+        isOpen={adding}
+        onClose={() => setAdding(false)}
+      />
+      <InviteMemberForm
+        key={`invite-${inviteCount}`}
+        isOpen={inviting}
+        onClose={() => setInviting(false)}
+      />
 
       {/* Keyed on the row so switching which member is edited remounts the
           form: its fields seed from the member on mount only. */}
