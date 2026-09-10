@@ -137,15 +137,22 @@ _UNAUTHENTICATED_PATHS = frozenset(
 
 
 def _operation_id(route: APIRoute) -> str:
-    """Name an operation by its tag and handler, so moving a path renames nothing.
+    """Name an operation by its first tag and handler, so moving a path renames nothing.
 
-    The id is what a generated SDK calls the method, so it must survive a
-    change of mount root. A route with no tag is named by its handler alone.
-    Two routes that share a tag and a handler collide; the one at the second
-    path needs a ``name`` or an ``operation_id`` of its own.
+    The id is what a generated SDK calls the method, so the tag and the handler
+    name are published contract: renaming either renames the method. A tag given
+    at mount time comes before the router's own and wins. A route with no tag is
+    named by its handler alone.
+
+    The id carries no HTTP method. A published route must declare one method,
+    because a route with several would carry one id for all of them, and neither
+    ``name`` nor ``operation_id`` can split it. Two routes that share a tag and a
+    handler collide too; the second needs a ``name`` of its own.
     """
-    tag = route.tags[0] if route.tags else None
-    return f"{tag}-{route.name}" if tag else route.name
+    if not route.tags:
+        return route.name
+    tag = route.tags[0]
+    return f"{getattr(tag, 'value', tag)}-{route.name}"
 
 
 def _under(path: str, prefixes: tuple[str, ...]) -> bool:
