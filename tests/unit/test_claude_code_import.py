@@ -386,7 +386,7 @@ def test_a_run_posts_the_batch_to_the_external_events_endpoint(
     assert result.exit_code == 0, result.output
     assert len(fake_httpx.posted) == 1
     sent = fake_httpx.posted[0]
-    assert sent["url"] == "http://gateway.test/v1/usage/external-events"
+    assert sent["url"] == "http://gateway.test/api/v1/usage/external-events"
     assert sent["headers"]["Authorization"] == "Bearer gw-test"
     assert sent["body"]["source"] == "claude_code"
     assert sent["body"]["user_id"] == "alice"
