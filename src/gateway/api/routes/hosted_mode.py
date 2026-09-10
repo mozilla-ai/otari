@@ -21,7 +21,7 @@ mode is why.
 
 Naming the address is the other half of that. "Send it to your Otari gateway" is
 what the caller already believed they were doing, so where the deployment knows
-its data plane (``data_plane_url``, the same value ``GET /api/v1/bootstrap`` hands
+its data plane (``data_plane_url``, the same value ``GET /api/api/v1/bootstrap`` hands
 the dashboard) the refusal says which host to use. Left unset it falls back to
 the generic sentence, matching what bootstrap already treats as unconfigured.
 

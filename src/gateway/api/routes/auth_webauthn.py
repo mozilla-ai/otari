@@ -102,7 +102,7 @@ class AuthenticatePasskeyRequest(BaseModel):
 class PasskeySessionResponse(BaseModel):
     """A dashboard session minted by a passkey (the token travels only in the cookie).
 
-    The same three fields ``POST /v1/auth/session`` answers, deliberately: the
+    The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
     dashboard's sign-in path does not care which credential got it here.
     """
 

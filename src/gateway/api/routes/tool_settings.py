@@ -1,12 +1,12 @@
 """Built-in tool & guardrail configuration for the admin dashboard.
 
-The service-endpoint and web-search fields that ``/v1/settings`` keeps
+The service-endpoint and web-search fields that ``/api/v1/settings`` keeps
 display-only (the ``*_url`` fields and the web-search knobs are excluded there on
 SSRF grounds) are made editable here, on their own page, with structural URL
 validation and per-service reachability tests. Standalone-only and master-key
 gated, mirroring the other management routers.
 
-* ``GET /v1/tool-settings`` returns each field's effective value (the value a
+* ``GET /api/v1/tool-settings`` returns each field's effective value (the value a
   request would actually use), grouped by service, with URL passwords masked. It
   is the one verb here a non-operator may call, because the roles matrix has the
   Tools pages at View for a member (otari-ai#1969): a member is told what the
@@ -14,10 +14,10 @@ gated, mirroring the other management routers.
   withheld from them entirely rather than masked. Masking a URL still publishes
   the host, which is internal infrastructure and the input to the SSRF gates on
   the Settings page.
-* ``PATCH /v1/tool-settings`` persists overrides (an explicit ``null`` clears a
+* ``PATCH /api/v1/tool-settings`` persists overrides (an explicit ``null`` clears a
   field back to the configured env/YAML default; an omitted field is unchanged)
   and applies them to the running worker.
-* ``POST /v1/tool-settings/{service}/test`` structurally validates a (typically
+* ``POST /api/v1/tool-settings/{service}/test`` structurally validates a (typically
   unsaved) URL and probes it for reachability, returning ``{ok, reason}``.
 """
 

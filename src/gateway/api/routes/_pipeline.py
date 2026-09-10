@@ -306,7 +306,7 @@ WEB_SEARCH_UNREACHABLE_DETAIL = (
 UNPRICED_TOOL_DETAIL_TEMPLATE = (
     "The gateway tool '{tool}' has no pricing, and this gateway runs with "
     "require_pricing enabled, so it will not run work it cannot bill. Set a "
-    "per-request price for model_key '{key}' (POST /v1/pricing, or the dashboard's "
+    "per-request price for model_key '{key}' (POST /api/v1/pricing, or the dashboard's "
     "Tools & Guardrails screen), or set require_pricing to false to serve it unpriced."
 )
 
@@ -1891,7 +1891,7 @@ async def resolve_request_context(
                 # The key's own workspace, not the resolved one: a master-key
                 # request has no key and resolves to the default workspace, which
                 # would narrow an operator's file references to it. `fetch_file`
-                # reads None as "every workspace", matching the /v1/files routes.
+                # reads None as "every workspace", matching the /api/v1/files routes.
                 post_chars, vision_usage = await normalize_messages(
                     user_id,
                     gate_impl,
@@ -2497,7 +2497,7 @@ async def prepare_gateway_tools(
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
         # hybrid mode when the backend IS the platform (its URL is under the
         # platform base URL the gateway already trusts this token with for resolve):
-        # the platform-hosted /v1/sandbox proxy authenticates the caller's workspace
+        # the platform-hosted /api/v1/sandbox proxy authenticates the caller's workspace
         # token and derives tenancy + per-workspace code-exec policy from it. Never
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
@@ -2517,7 +2517,7 @@ async def prepare_gateway_tools(
             # Platform owns the per-workspace code-exec policy: 403 if the workspace
             # has it off, otherwise apply the workspace defaults (per-request values
             # win) — the default purpose hint and the loop-iteration ceiling. The
-            # tools allow-list + exec timeout are re-enforced by the /v1/sandbox proxy.
+            # tools allow-list + exec timeout are re-enforced by the /api/v1/sandbox proxy.
             policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
             # Fail closed on a malformed policy: a non-bool `enabled` is a cross-service
             # contract break, not a "disabled" signal — surface it as 502, never run.
@@ -3083,7 +3083,7 @@ async def _apply_tool_charges(
     for tool in unpriced:
         logger.warning(
             "Gateway tool '%s' ran %d time(s) but has no pricing; recorded without cost. "
-            "Price it with POST /v1/pricing using model_key '%s'.",
+            "Price it with POST /api/v1/pricing using model_key '%s'.",
             tool,
             billable[tool],
             gateway_tool_pricing_key(tool),

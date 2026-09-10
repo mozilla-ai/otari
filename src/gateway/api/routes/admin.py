@@ -72,7 +72,7 @@ async def list_deployment_users(
 ) -> DeploymentUsersPublic:
     """List every account on this deployment, with the organizations each belongs to.
 
-    Deployment-wide, so it is not the same list as ``GET /v1/organizations/me/members``:
+    Deployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:
     that one is the caller's organization roster and drops a suspended
     membership, while this one carries every identity at whatever standing,
     including one whose memberships are all suspended. Each row also reports when

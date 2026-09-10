@@ -1,6 +1,6 @@
 """Discovery for the tools Otari runs itself.
 
-``GET /v1/tools`` answers "what can I put in ``tools[]`` and have the gateway
+``GET /api/v1/tools`` answers "what can I put in ``tools[]`` and have the gateway
 execute?". Without it the contract is undiscoverable: a client has to read the
 docs to learn that ``otari_web_search`` exists, and cannot tell whether this
 deployment has a backend wired up for it.

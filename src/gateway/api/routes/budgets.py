@@ -92,7 +92,7 @@ class BudgetResponse(BaseModel):
     budget_id: str
     # Null for the deployment's own, and a tenant's organization when set. Carried
     # so a caller can tell the two apart before offering one: an organization's is
-    # listed here for the operator to see, and `POST /v1/users` refuses to cap a
+    # listed here for the operator to see, and `POST /api/v1/users` refuses to cap a
     # gateway user at it (mozilla-ai/otari#881).
     organization_id: uuid.UUID | None
     name: str | None
@@ -431,7 +431,7 @@ async def delete_budget(
                 f"This budget is enforced by {enforcing} spend "
                 f"{'ceiling' if enforcing == 1 else 'ceilings'}. A member's ceiling is "
                 "changed on Members & roles (Edit > Workspace access); others are managed "
-                "through /v1/scoped-budgets."
+                "through /api/v1/scoped-budgets."
             ),
         )
 

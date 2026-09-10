@@ -157,7 +157,7 @@ async def run_passthrough(
     reconcile (success) or refund (failure) the reservation.
 
     Args:
-        endpoint: Path recorded on usage log rows (e.g. ``"/v1/embeddings"``).
+        endpoint: Path recorded on usage log rows (e.g. ``"/api/v1/embeddings"``).
         raw_request: Incoming request, used for rate limiting.
         response: When given, rate-limit headers are set on it. Routes that
             return their own response object pass ``None`` and read

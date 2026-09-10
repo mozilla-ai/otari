@@ -11,7 +11,7 @@ API key that authenticated it and never from a header, exactly as every other
 request-plane row does (``services/workspace_scope``). A keyed request is confined
 to its own key's workspace on every verb; a master-key request is the operator
 acting deployment-wide and sees every workspace, narrowable on the listing with
-``workspace_id``, matching ``GET /v1/keys``.
+``workspace_id``, matching ``GET /api/v1/keys``.
 """
 
 import mimetypes

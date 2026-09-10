@@ -91,10 +91,10 @@ _COOKIE_AUTH_PREFIXES = (f"{API_ROOT}/auth/session",)
 # schemes this stamps everything else with). Matched exactly rather than by
 # prefix, unlike the two tuples above: a prefix would exempt any future route
 # mounted under it too, by inheritance rather than by decision (an operator-only
-# resend or list-pending endpoint, say; `/v1/auth/session` and
-# `/v1/auth/password` both live under `/v1/auth` and do require a credential),
-# and `/v1/auth/password/reset` is already a prefix of
-# `/v1/auth/password/reset/confirm`, so the inheritance is not hypothetical.
+# resend or list-pending endpoint, say; `/api/v1/auth/session` and
+# `/api/v1/auth/password` both live under `/api/v1/auth` and do require a credential),
+# and `/api/v1/auth/password/reset` is already a prefix of
+# `/api/v1/auth/password/reset/confirm`, so the inheritance is not hypothetical.
 # Listed separately from _PUBLIC_PREFIXES because these still get
 # the no-store cache headers: each answer is specific to the caller or the
 # request's own token, and bootstrap's changes with the deployment's
@@ -337,7 +337,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # supplied it at all.
                 if missing_backend_url := config.search_tools_without_backend_url():
                     logger.warning(
-                        "No backend URL for search tool(s): %s. POST /v1/search refuses them with a 400 until "
+                        "No backend URL for search tool(s): %s. POST /api/v1/search refuses them with a 400 until "
                         "each declares an 'api_base' or a web-search URL is set (web_search_url, "
                         "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
                         ", ".join(sorted(missing_backend_url)),
@@ -467,7 +467,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
-            # POST /v1/search dispatches on one pooled client for the process, so
+            # POST /api/v1/search dispatches on one pooled client for the process, so
             # shutdown owns closing it. A no-op when no search was ever served.
             await close_search_client()
             # After the log writer, whose final flush is the last thing to need
@@ -508,7 +508,7 @@ async def _validation_error_handler(_: Request, exc: Exception) -> Response:
     """Render a request-validation failure without echoing what was sent.
 
     Pydantic v2 puts the rejected value on every error entry, and FastAPI's
-    default handler serializes it straight back. On ``POST /v1/auth/session``
+    default handler serializes it straight back. On ``POST /api/v1/auth/session``
     that value is the credential: a password longer than the field's ceiling
     comes back in full, and a body carrying both credentials comes back with the
     master key in it. The dashboard renders the whole ``detail`` into its error
@@ -627,7 +627,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
             query the provider appended.
 
             It holds no credential and decides nothing: the code in that query
-            is spent by ``POST /v1/auth/oauth/{provider}/callback``, which the
+            is spent by ``POST /api/v1/auth/oauth/{provider}/callback``, which the
             page reaches only after checking the state against the value the
             browser stored. 303 rather than 307, so a browser that followed a
             POST here would not repeat it against a page.
@@ -660,7 +660,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         )
 
     # The same bundle is the root in both modes, because the mode is not this
-    # process's decision to make in the filesystem: the page reads /v1/bootstrap
+    # process's decision to make in the filesystem: the page reads /api/v1/bootstrap
     # and renders either the management shell (standalone) or the data-plane
     # landing page (hybrid), which is what keeps "which surfaces exist here" in
     # one answer rather than two. A hybrid gateway still hosts no management API;

@@ -307,7 +307,7 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
 
     HTTPExceptions already carrying the Anthropic ``detail`` dict (raised via
     ``_anthropic_error``) pass through unchanged, so this is safe to apply to any
-    HTTPException on the ``/v1/messages`` path, including format-agnostic ones
+    HTTPException on the ``/api/v1/messages`` path, including format-agnostic ones
     raised by the hybrid preamble (platform resolve/auth) and the shared
     execution runners.
     """

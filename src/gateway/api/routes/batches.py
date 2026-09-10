@@ -712,7 +712,7 @@ async def retrieve_batch_results(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"Batch '{batch_id}' is not yet complete (status: {e.batch_status}). "
-                f"Call GET /v1/batches/{batch_id}?provider={provider} to check the current status."
+                f"Call GET /api/v1/batches/{batch_id}?provider={provider} to check the current status."
             ),
         ) from e
     except Exception as e:

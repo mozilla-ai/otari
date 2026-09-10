@@ -39,7 +39,7 @@ GATEWAY_TOKEN_HEADER = "X-Gateway-Token"
 
 # The OAuth providers a deployment may configure dashboard sign-in with, in the
 # spelling that appears in a config key (``oauth_google_client_id``), on the
-# wire (``GET /v1/bootstrap``'s ``oauth_providers``, the route path segment),
+# wire (``GET /api/v1/bootstrap``'s ``oauth_providers``, the route path segment),
 # and in the ``user.oauth_provider`` column. One vocabulary rather than four,
 # and it lives here because the config fields are what make a provider real on
 # a deployment; ``services.oauth_service`` holds what each one means.
@@ -63,7 +63,7 @@ CONVERSATION_HEADER = "Otari-Conversation-Id"
 # influence it. Submit the matching label via the /rank task_id.
 ROUTER_TASK_HEADER = "Otari-Router-Task"
 API_ROOT = "/api/v1"
-# Base only: OTel exporters append /v1/traces and the other signal paths.
+# Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 # Where a hybrid gateway's control plane lives for a person, as opposed to
@@ -128,7 +128,7 @@ ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Search providers the standalone POST /v1/search endpoint can dispatch to.
+# Search providers the standalone POST /api/v1/search endpoint can dispatch to.
 # Declared here rather than in the adapter module so startup validation can
 # reject an unknown ``search_tools.<name>.provider`` without the config layer
 # importing the service layer.
@@ -168,13 +168,13 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
     """Validate one ``search_tools`` entry, raising ``ValueError`` on any problem.
 
     Module-level rather than a method so the runtime CRUD path
-    (``/v1/search-tools``) can hold a dashboard-written tool to the same rules
+    (``/api/v1/search-tools``) can hold a dashboard-written tool to the same rules
     the config file is held to at startup, instead of restating them.
 
     A tool on a provider that authenticates with an API key is rejected here
     without one, rather than at request time as an opaque upstream 401; a keyless
     provider (a self-hosted SearXNG or an adapter fronting one) is allowed to
-    declare none. The tool name doubles as a ``/v1/search/{tool}`` path segment,
+    declare none. The tool name doubles as a ``/api/v1/search/{tool}`` path segment,
     so it must not contain a slash.
 
     A missing backend URL is deliberately not fatal here; see
@@ -480,7 +480,7 @@ class GatewayConfig(BaseSettings):
         ge=1,
         description=(
             "Maximum calls per client IP per minute to the app's unauthenticated "
-            "surfaces (None disables this limit): failed POST /v1/auth/session "
+            "surfaces (None disables this limit): failed POST /api/v1/auth/session "
             "attempts (a correct master key is never throttled there), every call "
             "to the two public invitation-accept routes, and every call to the "
             "signup, verification and password-reset routes, counted whether they "
@@ -538,7 +538,7 @@ class GatewayConfig(BaseSettings):
         description=(
             "Where this deployment's inference traffic belongs, as an absolute http(s) URL "
             "with no trailing slash and no '/v1' path segment anywhere in it, not even as part "
-            "of a full endpoint like '/v1/chat/completions' (e.g. 'https://gateway.otari.ai'): "
+            "of a full endpoint like '/api/v1/chat/completions' (e.g. 'https://gateway.otari.ai'): "
             "the dashboard appends that path itself. It carries no credential either, so no "
             "query string, fragment, or user:password. Only a hosted control "
             "plane needs it: a standalone gateway and a hybrid one both serve inference at "
@@ -546,7 +546,7 @@ class GatewayConfig(BaseSettings):
             "stays unset. A control plane serving many organizations does not, so it has to "
             "say where the data-plane gateway is or the dashboard has nothing runnable to "
             "hand somebody with a new key. Unlike platform.management_url, which is a human "
-            "link target, this is the base URL a client suffixes with /v1."
+            "link target, this is the base URL a client suffixes with the API root."
         ),
     )
     webauthn_rp_id: str | None = Field(
@@ -657,7 +657,7 @@ class GatewayConfig(BaseSettings):
             "instances of one implementation (e.g. real OpenAI plus a self-hosted "
             "OpenAI-compatible backend), give each a distinct instance name and set "
             "'provider_type' to the underlying implementation. An optional 'models' "
-            "list declares model ids for instances whose backend has no /v1/models."
+            "list declares model ids for instances whose backend has no /api/v1/models."
         ),
     )
     aliases: dict[str, str] = Field(
@@ -665,7 +665,7 @@ class GatewayConfig(BaseSettings):
         description=(
             "Model name aliases (display name -> target selector). A request naming an alias "
             "is routed to its target ('instance:model' or 'provider:model'), and the alias is "
-            "what users see in GET /v1/models and in response 'model' fields, so the underlying "
+            "what users see in GET /api/v1/models and in response 'model' fields, so the underlying "
             "provider/model can stay hidden. Pricing, budgets, and usage logs key on the resolved "
             "target. Standalone-mode only (hybrid resolves models against the platform)."
         ),
@@ -752,8 +752,8 @@ class GatewayConfig(BaseSettings):
     search_tools: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
-            "Search tools served by POST /v1/search, keyed by the name callers pass as "
-            "'search_tool_name' (or in the /v1/search/{tool} path). Each entry may declare a "
+            "Search tools served by POST /api/v1/search, keyed by the name callers pass as "
+            "'search_tool_name' (or in the /api/v1/search/{tool} path). Each entry may declare a "
             "'provider' (one of: exa, searxng; defaults to the tool name), an 'api_key' "
             "(required for exa), an 'api_base' (required for searxng unless web_search_url is "
             "set, which it then inherits), a 'timeout' in seconds, and an 'options' mapping of "
@@ -825,8 +825,8 @@ class GatewayConfig(BaseSettings):
         description=(
             "When True (default), content-free coding-agent telemetry is stored as agent_telemetry "
             "rows: behavioral log events (tool_result, tool_decision, user_prompt, api_error) "
-            "received at POST /v1/logs, and outcome-metric data points (lines of code, commits, "
-            "pull requests, active time) received at POST /v1/metrics. When False, both are "
+            "received at POST /otlp/v1/logs, and outcome-metric data points (lines of code, commits, "
+            "pull requests, active time) received at POST /otlp/v1/metrics. When False, both are "
             "discarded before storage; usage capture and billing are unaffected either way. This "
             "is the deployment-wide default: an individual key can override it in either direction "
             "with its own capture_agent_telemetry (null inherits this setting)."
@@ -887,8 +887,8 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description=(
             "Idle interval in milliseconds after which a streaming response emits a transport "
-            "keepalive while it waits on the provider: a 'ping' event on /v1/messages, an SSE "
-            "comment line on /v1/chat/completions and /v1/responses. Keeps an intermediary with a "
+            "keepalive while it waits on the provider: a 'ping' event on /api/v1/messages, an SSE "
+            "comment line on /api/v1/chat/completions and /api/v1/responses. Keeps an intermediary with a "
             "read timeout (Cloudflare's default Proxy Read Timeout is 125s) from severing a connection "
             "during a long time-to-first-token. Does not extend any first-chunk or failover deadline. "
             "0 disables."
@@ -896,7 +896,7 @@ class GatewayConfig(BaseSettings):
     )
     model_discovery: bool = Field(
         default=True,
-        description="Enable auto-discovery of models from configured providers via GET /v1/models",
+        description="Enable auto-discovery of models from configured providers via GET /api/v1/models",
     )
     model_cache_ttl_seconds: int = Field(
         default=300,
@@ -939,14 +939,14 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description=(
             "TTL in seconds for the cached models.dev catalog, and the interval at which a "
-            "background task refetches it (floored at 5 minutes). Above 0, GET /v1/models/metadata "
+            "background task refetches it (floored at 5 minutes). Above 0, GET /api/v1/models/metadata "
             "answers from the cache instead of waiting on the fetch; a failed fetch is held for one "
             "minute rather than the refresh interval. 0 disables caching, so every read fetches."
         ),
     )
     files_enabled: bool = Field(
         default=True,
-        description="Enable the /v1/files upload/storage endpoints (standalone mode).",
+        description="Enable the /api/v1/files upload/storage endpoints (standalone mode).",
     )
     files_backend: str = Field(
         default="local",
@@ -1113,7 +1113,7 @@ class GatewayConfig(BaseSettings):
     web_search_backend_token: str | None = Field(
         default=None,
         description=(
-            "Shared secret GET /v1/web-search/search requires as X-Gateway-Token. Set on a hosted "
+            "Shared secret GET /api/v1/web-search/search requires as X-Gateway-Token. Set on a hosted "
             "control plane so its data-plane gateway can search through it; without it the route "
             "is not served, because it spends the deployment's own search quota. The gateway "
             "presents its platform token (OTARI_AI_TOKEN) and nothing else, so this must be that "
@@ -1186,8 +1186,8 @@ class GatewayConfig(BaseSettings):
             "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
             "values are master-key gated and the home-lab / self-hosted use case depends on private "
             "endpoints. Set to false to make provider connection tests, model discovery, and the "
-            "credential write path (POST /v1/provider-credentials and PATCH /v1/provider-credentials/{instance}) "
-            "refuse an internal api_base. "
+            "credential write path (POST /api/v1/provider-credentials and PATCH "
+            "/api/v1/provider-credentials/{instance}) refuse an internal api_base. "
             "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
             "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
@@ -1349,7 +1349,7 @@ class GatewayConfig(BaseSettings):
         """Which settings stand between this deployment and a delivered link, in config order.
 
         Empty exactly when :attr:`mail_ready` is true. Reported to the operator
-        (``GET /v1/settings/mail``) so "mail is unavailable" names what to set
+        (``GET /api/v1/settings/mail``) so "mail is unavailable" names what to set
         rather than leaving them to guess, which is the whole difference between
         an honest no-transport mode and an opaque one.
         """
@@ -1376,7 +1376,7 @@ class GatewayConfig(BaseSettings):
 
         None is a deployment that did not configure this provider, which is a
         setting and not a failure: the sign-in screen simply does not offer it
-        (``GET /v1/bootstrap``'s ``oauth_providers``).
+        (``GET /api/v1/bootstrap``'s ``oauth_providers``).
 
         ``public_base_url`` is part of being configured rather than a separate
         check, because the redirect URI is derived from it
@@ -1741,7 +1741,7 @@ class GatewayConfig(BaseSettings):
         annotation would otherwise reject with a type error. Normalize it to
         ``{}``, which means "this instance is configured, with no settings": the
         instance is then routable and, since discovery is scoped to the configured
-        instances, also discoverable in ``GET /v1/models`` (issue #389).
+        instances, also discoverable in ``GET /api/v1/models`` (issue #389).
 
         A ``providers:`` block with no entries at all gets the same treatment, so
         commenting out every entry reads as "no providers" rather than the same
@@ -1870,7 +1870,7 @@ class GatewayConfig(BaseSettings):
         if self.web_search_backend_token and not self.web_search_provider_configured():
             logger.warning(
                 "web_search_backend_token is set but no web-search provider is configured, so "
-                "GET /v1/web-search/search is not served. Set web_search_provider and "
+                "GET /api/v1/web-search/search is not served. Set web_search_provider and "
                 "web_search_provider_api_key on the process that holds the search key."
             )
         if bool(self.web_search_provider) == bool(self.web_search_provider_api_key):
@@ -1961,7 +1961,7 @@ class GatewayConfig(BaseSettings):
         request from it rather than following it.
 
         Userinfo is the one refusal these three fields share with ``data_plane_url``, and
-        they share it for its reason rather than theirs: ``GET /v1/bootstrap``
+        they share it for its reason rather than theirs: ``GET /api/v1/bootstrap``
         is unauthenticated, so a credential written into any of these would
         reach every browser that asked, which no redaction in the operator-gated
         config viewer would cover.
@@ -1996,7 +1996,7 @@ class GatewayConfig(BaseSettings):
 
         A query string or a fragment is refused for the same reason, and it is
         the case a scheme check alone would miss: this is a base URL a client
-        appends to, so ``https://host?trace=1`` would put ``/v1/chat/completions``
+        appends to, so ``https://host?trace=1`` would put ``/api/v1/chat/completions``
         inside the query value rather than in the path, and the snippet would
         reach the deployment's root with a very strange parameter. Unlike
         ``docs_url``, which is a link a person follows, nothing downstream can
@@ -2006,11 +2006,11 @@ class GatewayConfig(BaseSettings):
         two: everywhere else a client meets one, "base URL" means the ``/v1``
         address (the OpenAI SDK's own ``base_url`` includes it), so writing that
         here is the natural error, and it renders a snippet posting to
-        ``/v1/v1/chat/completions``, which looks right and 404s on first use.
+        ``/api/v1/v1/chat/completions``, which looks right and 404s on first use.
         Refused rather than stripped, because stripping would be silent and
         would be wrong for a gateway genuinely mounted under such a path, while
         refusing costs one edit. Any segment counts and not just the last, so
-        pasting the whole endpoint (``https://host/v1/chat/completions``, the
+        pasting the whole endpoint (``https://host/api/v1/chat/completions``, the
         likelier copy-paste of the two) is refused as well rather than rendering
         that path twice. Any other prefix is left alone: a gateway proxied at
         ``https://api.example.com/otari`` is a real deployment.
@@ -2026,7 +2026,7 @@ class GatewayConfig(BaseSettings):
             msg = f"data_plane_url must carry no query string or fragment, got '{value}'"
             raise ValueError(msg)
         # Userinfo is refused rather than redacted downstream, because this value
-        # is published *unauthenticated*: `GET /v1/bootstrap` hands it to any
+        # is published *unauthenticated*: `GET /api/v1/bootstrap` hands it to any
         # browser that asks, which no redaction in the operator-gated config
         # viewer would cover. A credential has no business here either way, since
         # the snippet built from this puts the whole address in a curl command
@@ -2172,7 +2172,7 @@ class GatewayConfig(BaseSettings):
         :meth:`validate_webauthn_relying_party`: nothing here is *wrong*, and
         refusing to boot would take a gateway offline over a sign-in method
         that is optional. But the failure is otherwise completely silent. The
-        provider is absent from ``GET /v1/bootstrap``, the sign-in screen simply
+        provider is absent from ``GET /api/v1/bootstrap``, the sign-in screen simply
         does not draw its button, and an operator who set two of the three
         settings has nothing anywhere telling them why the button they
         configured never appeared.

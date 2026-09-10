@@ -2,10 +2,10 @@
 
 Thin composition over `gateway.services.tenancy.org_provider_key_service`.
 Two routers, because the surface has two scopes: an organization's own keys
-(created, archived, defaulted) under ``/v1/organizations/me/provider-keys`,
+(created, archived, defaulted) under ``/api/v1/organizations/me/provider-keys`,
 matching `organizations.py`'s ``/me`` convention, and one workspace's view of
 those keys (override, model-restrict) under
-``/v1/workspaces/{workspace_id}/provider-keys``, matching `workspaces.py`'s
+``/api/v1/workspaces/{workspace_id}/provider-keys``, matching `workspaces.py`'s
 path-scoped convention. A caller manages several workspaces in one
 organization, so the workspace surface takes ``workspace_id`` as a path
 parameter the way `workspaces.py` does, unlike the organization surface's

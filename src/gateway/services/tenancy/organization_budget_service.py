@@ -171,7 +171,7 @@ class OrganizationBudgetUpdate(OrganizationBudgetRates):
     """Replace a budget's label, figure and period.
 
     Every field is optional and keyed on ``model_fields_set``, matching
-    ``PATCH /v1/budgets/{id}``'s own: an *omitted* field is left alone, and an
+    the deployment-wide budget update's own: an *omitted* field is left alone, and an
     explicit null clears it, so sending ``max_budget: null`` takes a budget back
     to uncapped, which is what the dashboard's dialog does. The period pair is
     still mutually exclusive, and setting one does not clear the other, which is
@@ -272,7 +272,7 @@ class OrganizationScopedBudgetUpdate(BaseModel):
     """Relabel a ceiling, or point it at a different budget of this organization's.
 
     The scope and the provider narrowing are not editable, for the reason
-    ``PATCH /v1/scoped-budgets/{id}`` gives: changing either moves the ceiling to
+    the deployment-wide ceiling update gives: changing either moves the ceiling to
     a different identity while carrying its spend, which is a delete and a
     create, not an update.
     """

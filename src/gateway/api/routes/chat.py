@@ -102,7 +102,7 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
     # "auto"/"standard_only" on Anthropic) and grows independently of this
     # gateway, so the provider is the right place to reject an unknown value.
-    # ``ResponsesParams`` already declares it, so /v1/responses never had the gap.
+    # ``ResponsesParams`` already declares it, so /api/v1/responses never had the gap.
     #
     # Stopgap: remove this declaration once ``CompletionParams`` models the param
     # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until

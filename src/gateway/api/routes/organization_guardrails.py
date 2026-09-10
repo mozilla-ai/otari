@@ -11,7 +11,7 @@ Scoped to ``/me`` for the reason `routes/organization_pricing.py` and
 organization and the caller's identity already points at it, so a request cannot
 name one. Multi-organization administration is the overlay's to contribute.
 
-These entries sit *above* ``/v1/tool-settings``, which stays the deployment's own
+These entries sit *above* ``/api/v1/tool-settings``, which stays the deployment's own
 guardrail configuration. ``guardrails_url`` there is still what a guardrail
 without an endpoint of its own is sent to, and an organization with no entries
 changes nothing about how a request is checked.
