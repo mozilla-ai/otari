@@ -1,4 +1,4 @@
-import { Button, Modal } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useCallback, useState } from "react"
@@ -8,7 +8,6 @@ import type { CatalogModelDetail, CatalogOffering } from "@/client"
 import {
   CAPABILITY_LABELS,
   credentialLabel,
-  defaultOffering,
   MODALITY_LABELS,
   priceSourceLabel,
 } from "@/features/models/catalog"
@@ -39,15 +38,12 @@ import {
   buildPythonSnippet,
   resolveSnippetBaseUrl,
 } from "@/shared/helpers/requestSnippets"
-import { useUrlValue } from "@/shared/helpers/urlState"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
-// One model, on a page of its own: the header with its facts, then the
-// sections a reader scrolls through, with a rail on the left that jumps to
-// each. Providers is the one that matters most and comes first: every
+// One model, on a page of its own: the header with its facts, then every
 // offering of the model this viewer may call, cheapest first, with the price
-// they would be charged and where it came from. Pricing rolls up what the
-// organization actually paid. "Use this model" opens the request to copy.
+// they would be charged and where it came from. A row opens for the selector
+// to send and the request that sends it.
 //
 // Read-only for everyone (otari-ai#2095, #2096): a rate is edited on Model
 // pricing, which the operator's link here points at, so the page that compares
@@ -440,143 +436,13 @@ function OfferingDetail({
   )
 }
 
-const SECTIONS = [
-  { id: "providers", label: "Providers" },
-  { id: "pricing", label: "Pricing" },
-  { id: "use", label: "Quick start" },
-]
-
-function jumpTo(id: string) {
-  document
-    .getElementById(id)
-    ?.scrollIntoView({ behavior: "smooth", block: "start" })
-}
-
-/** The request to copy, as a dialog: an API key first, then the call. */
-function QuickStart({
-  selector,
-  isOpen,
-  onOpenChange,
-  publicView,
-}: {
-  selector: string
-  isOpen: boolean
-  onOpenChange: (open: boolean) => void
-  publicView: boolean
-}) {
-  const deployment = useDeployment()
-  const baseUrl = resolveSnippetBaseUrl(deployment)
-  const [language, setLanguage] = useState("curl")
-  const input = {
-    baseUrl: baseUrl ?? "",
-    apiKey: "$OTARI_API_KEY",
-    model: selector,
-  }
-  return (
-    <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Trigger className="hidden">Open quick start</Modal.Trigger>
-      <Modal.Backdrop className="bg-backdrop/50">
-        <Modal.Container placement="center" size="lg">
-          <Modal.Dialog aria-label="Use this model" className="p-0">
-            <div className="flex flex-col gap-5 p-6">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-heading">Quick start</h2>
-                <p className="text-sm text-muted">
-                  Drop-in code to call this model through the gateway's
-                  OpenAI-compatible API.
-                </p>
-              </div>
-              <div className="flex flex-col gap-2">
-                <h3 className="text-title">1. Get an API key</h3>
-                <p className="text-sm text-muted">
-                  {publicView ? (
-                    <>
-                      <a href="#/" className="text-link hover:text-link-hover">
-                        Sign in
-                      </a>{" "}
-                      and create a key on API keys, then set it as an
-                      environment variable.
-                    </>
-                  ) : (
-                    <>
-                      Create a key on{" "}
-                      <Link
-                        to="/keys"
-                        className="text-link hover:text-link-hover"
-                      >
-                        API keys
-                      </Link>{" "}
-                      and set it as an environment variable.
-                    </>
-                  )}
-                </p>
-                <CopyField
-                  label="Environment"
-                  value="export OTARI_API_KEY=sk-…"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <h3 className="text-title">2. Make your first request</h3>
-                <p className="text-sm text-muted">
-                  Send <code className="text-mono-caption">{selector}</code> as
-                  the model.
-                </p>
-                {baseUrl === undefined ? (
-                  <p className="text-sm text-muted">
-                    This deployment has not published its gateway address, so
-                    there is no request to copy yet.
-                  </p>
-                ) : (
-                  <>
-                    <TabRow>
-                      <Tab
-                        isActive={language === "curl"}
-                        onPress={() => setLanguage("curl")}
-                      >
-                        cURL
-                      </Tab>
-                      <Tab
-                        isActive={language === "python"}
-                        onPress={() => setLanguage("python")}
-                      >
-                        Python (OpenAI SDK)
-                      </Tab>
-                    </TabRow>
-                    <CopyField
-                      label={language === "curl" ? "cURL" : "Python"}
-                      value={
-                        language === "curl"
-                          ? buildCurlSnippet(input)
-                          : buildPythonSnippet(input)
-                      }
-                      multiline
-                    />
-                  </>
-                )}
-              </div>
-              <div className="flex justify-end">
-                <Button variant="ghost" onPress={() => onOpenChange(false)}>
-                  Close
-                </Button>
-              </div>
-            </div>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
-    </Modal>
-  )
-}
-
 export function ModelDetailView({
   modelId,
   publicView = false,
-  initialQuickStart = false,
 }: {
   modelId: string
   /** Ahead of a session: nothing to link through, and the rates are the deployment's list. */
   publicView?: boolean
-  /** Open on the request to copy, as `?view=api` asks. */
-  initialQuickStart?: boolean
 }) {
   const organization = useOrganizationContext(!publicView)
   const canPrice = !publicView && isDeploymentOperator(organization.data)
@@ -584,7 +450,6 @@ export function ModelDetailView({
   const catalog = useCatalog()
   const selected = useCatalogModel(modelId)
   const [quantization, setQuantization] = useState("all")
-  const [quickStart, setQuickStart] = useState(initialQuickStart)
   const [opened, setOpened] = useState<string | null>(null)
   const [sort, setSort] = useState<{
     column: OfferingSortColumn
@@ -628,7 +493,6 @@ export function ModelDetailView({
     }))
     .sort(compareOfferings(sort.column, sort.direction))
   const withUsage = !publicView && hasUsage(model.offerings)
-  const first = defaultOffering(model.offerings)
   const unpriced = model.offerings.filter((o) => o.pricing === null).length
   const defaultPricing = catalog.data?.default_pricing
   const capabilities = CAPABILITY_LABELS.filter(
@@ -644,16 +508,6 @@ export function ModelDetailView({
         o.pricing?.output_price_per_million,
         o.metadata_output_price_per_million,
       ) !== null,
-  )
-  const used = model.offerings.filter((o) => o.usage_30d)
-  const spend = used.reduce((sum, o) => sum + (o.usage_30d?.spend_usd ?? 0), 0)
-  const requests = used.reduce(
-    (sum, o) => sum + (o.usage_30d?.requests ?? 0),
-    0,
-  )
-  const tokens = used.reduce(
-    (sum, o) => sum + (o.usage_30d?.total_tokens ?? 0),
-    0,
   )
   const modalities = (list: string[]) =>
     list.length === 0
@@ -720,11 +574,6 @@ export function ModelDetailView({
                 Model pricing
               </Link>
             ) : null}
-            {first ? (
-              <Button variant="primary" onPress={() => setQuickStart(true)}>
-                Use this model
-              </Button>
-            ) : null}
           </div>
         </div>
         {model.description ? (
@@ -781,249 +630,107 @@ export function ModelDetailView({
 
       <div className="border-t border-border" />
 
-      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-10">
-        <nav aria-label="Sections" className="lg:sticky lg:top-4 lg:self-start">
-          <div className="lg:hidden">
-            <TabRow>
-              {SECTIONS.map((section) => (
-                <Tab
-                  key={section.id}
-                  isActive={false}
-                  onPress={() => jumpTo(section.id)}
-                >
-                  {section.label}
-                </Tab>
-              ))}
-            </TabRow>
+      <div className="flex min-w-0 flex-col gap-10">
+        <section
+          id="providers"
+          aria-labelledby="providers-title"
+          className="flex scroll-mt-4 flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1">
+            <h2 id="providers-title" className="text-heading">
+              Providers
+            </h2>
+            <p className="max-w-prose text-sm text-muted">
+              Several providers serve the same model. Each row is one offering:
+              what {publicView ? "this deployment lists it at" : "you pay"} and
+              where that price comes from; open a row for the selector to send
+              and the request that sends it. {model.offering_count} on{" "}
+              {model.provider_count}{" "}
+              {model.provider_count === 1 ? "provider" : "providers"}, cheapest
+              first.
+            </p>
           </div>
-          <ul className="hidden flex-col gap-1 lg:flex">
-            {SECTIONS.map((section) => (
-              <li key={section.id}>
-                <button
-                  type="button"
-                  onClick={() => jumpTo(section.id)}
-                  className="flex min-h-9 w-full items-center px-2 text-left text-sm text-muted hover:bg-surface-subtle hover:text-foreground"
-                >
-                  {section.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        <div className="flex min-w-0 flex-col gap-10">
-          <section
-            id="providers"
-            aria-labelledby="providers-title"
-            className="flex scroll-mt-4 flex-col gap-3"
-          >
-            <div className="flex flex-col gap-1">
-              <h2 id="providers-title" className="text-heading">
-                Providers
-              </h2>
-              <p className="max-w-prose text-sm text-muted">
-                Several providers serve the same model. Each row is one
-                offering: what{" "}
-                {publicView ? "this deployment lists it at" : "you pay"} and
-                where that price comes from; open a row for the selector to send
-                and the request that sends it. {model.offering_count} on{" "}
-                {model.provider_count}{" "}
-                {model.provider_count === 1 ? "provider" : "providers"},
-                cheapest first.
-              </p>
-            </div>
-            <div className="flex flex-col gap-3 border border-border bg-surface p-3">
-              {quantizations.length > 0 ? (
-                <div className="otari-toolbar flex flex-wrap items-center gap-2">
-                  <FilterSelect
-                    ariaLabel="Filter quantization"
-                    value={quantization}
-                    onChange={setQuantization}
-                    options={[
-                      { value: "all", label: "Any quantization" },
-                      ...quantizations.map((q) => ({ value: q, label: q })),
-                    ]}
-                  />
-                </div>
-              ) : null}
-              <TableScrollFrame className="otari-offerings-table">
-                <DataTable
-                  ariaLabel={`Offerings of ${model.name}`}
-                  columns={offeringColumns({
-                    canPrice,
-                    canOverride,
-                    withUsage,
-                  })}
-                  rows={rows}
-                  getRowKey={(row) => row.offering.selector}
-                  onRowAction={(key) =>
-                    setOpened((current) => (current === key ? null : key))
-                  }
-                  detailKey={opened}
-                  renderDetail={renderDetail}
-                  sortDescriptor={sortDescriptor}
-                  onSortChange={(descriptor) =>
-                    setSort({
-                      column: String(descriptor.column) as OfferingSortColumn,
-                      direction:
-                        descriptor.direction === "ascending" ? "asc" : "desc",
-                    })
-                  }
-                  emptyContent="No provider you can use serves this model."
+          <div className="flex flex-col gap-3 border border-border bg-surface p-3">
+            {quantizations.length > 0 ? (
+              <div className="otari-toolbar flex flex-wrap items-center gap-2">
+                <FilterSelect
+                  ariaLabel="Filter quantization"
+                  value={quantization}
+                  onChange={setQuantization}
+                  options={[
+                    { value: "all", label: "Any quantization" },
+                    ...quantizations.map((q) => ({ value: q, label: q })),
+                  ]}
                 />
-              </TableScrollFrame>
-            </div>
-            {unpriced > 0 && defaultPricing === false ? (
-              <p className="text-caption">
-                Default pricing is off, so an offering with no stored rate is
-                unpriced here even where genai-prices publishes one.
-                {canPrice ? " Both switches live on Settings." : ""}
-              </p>
+              </div>
             ) : null}
-            {listPriceDiffers ? (
-              <InfoBanner>
-                A rate marked <em>list</em> differs from the price the provider
-                publishes on models.dev. What is metered here is the rate shown;
-                the list price is what the provider would charge you directly.
-              </InfoBanner>
-            ) : null}
-            {model.also_available_from.length > 0 ? (
-              <p className="text-caption">
-                Also served by {elsewhere(model.also_available_from)}, which{" "}
-                {model.also_available_from.length === 1 ? "is" : "are"} not
-                configured here.
-                {canPrice ? (
-                  <>
-                    {" "}
-                    <Link
-                      to="/providers"
-                      className="text-link hover:text-link-hover"
-                    >
-                      Add a provider
-                    </Link>
-                    .
-                  </>
-                ) : null}
-              </p>
-            ) : null}
-          </section>
-
-          <section
-            id="pricing"
-            aria-labelledby="pricing-title"
-            className="flex scroll-mt-4 flex-col gap-3"
-          >
-            <div className="flex flex-col gap-1">
-              <h2 id="pricing-title" className="text-heading">
-                Pricing
-              </h2>
-              <p className="max-w-prose text-sm text-muted">
-                {publicView
-                  ? "The cheapest listed rates for this model on this deployment."
-                  : "What your organization actually paid for this model over the last 30 days, beside the rates providers list. Cache reads and tiers mean the price paid is often below the listed one."}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Stat
-                label="Cheapest input"
-                value={
-                  model.min_input_price_per_million == null
-                    ? "—"
-                    : `${formatRate(model.min_input_price_per_million)} /M`
+            <TableScrollFrame className="otari-offerings-table">
+              <DataTable
+                ariaLabel={`Offerings of ${model.name}`}
+                columns={offeringColumns({
+                  canPrice,
+                  canOverride,
+                  withUsage,
+                })}
+                rows={rows}
+                getRowKey={(row) => row.offering.selector}
+                onRowAction={(key) =>
+                  setOpened((current) => (current === key ? null : key))
                 }
-              />
-              <Stat
-                label="Cheapest output"
-                value={
-                  model.min_output_price_per_million == null
-                    ? "—"
-                    : `${formatRate(model.min_output_price_per_million)} /M`
+                detailKey={opened}
+                renderDetail={renderDetail}
+                sortDescriptor={sortDescriptor}
+                onSortChange={(descriptor) =>
+                  setSort({
+                    column: String(descriptor.column) as OfferingSortColumn,
+                    direction:
+                      descriptor.direction === "ascending" ? "asc" : "desc",
+                  })
                 }
+                emptyContent="No provider you can use serves this model."
               />
-              {!publicView ? (
+            </TableScrollFrame>
+          </div>
+          {unpriced > 0 && defaultPricing === false ? (
+            <p className="text-caption">
+              Default pricing is off, so an offering with no stored rate is
+              unpriced here even where genai-prices publishes one.
+              {canPrice ? " Both switches live on Settings." : ""}
+            </p>
+          ) : null}
+          {listPriceDiffers ? (
+            <InfoBanner>
+              A rate marked <em>list</em> differs from the price the provider
+              publishes on models.dev. What is metered here is the rate shown;
+              the list price is what the provider would charge you directly.
+            </InfoBanner>
+          ) : null}
+          {model.also_available_from.length > 0 ? (
+            <p className="text-caption">
+              Also served by {elsewhere(model.also_available_from)}, which{" "}
+              {model.also_available_from.length === 1 ? "is" : "are"} not
+              configured here.
+              {canPrice ? (
                 <>
-                  <Stat
-                    label="Your effective price, 30d"
-                    value={
-                      tokens > 0
-                        ? `${formatRate((spend / tokens) * 1_000_000)} /M`
-                        : "no usage"
-                    }
-                  />
-                  <Stat
-                    label="Your spend, 30d"
-                    value={
-                      requests > 0
-                        ? `${formatRate(spend)} · ${requests} req`
-                        : "no usage"
-                    }
-                  />
+                  {" "}
+                  <Link
+                    to="/providers"
+                    className="text-link hover:text-link-hover"
+                  >
+                    Add a provider
+                  </Link>
+                  .
                 </>
               ) : null}
-            </div>
-          </section>
-
-          <section
-            id="use"
-            aria-labelledby="use-title"
-            className="flex scroll-mt-4 flex-col gap-3"
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <h2 id="use-title" className="text-heading">
-                Quick start
-              </h2>
-              {first ? (
-                <span className="text-caption">
-                  Send{" "}
-                  <code className="text-mono-caption">
-                    {model.selector ?? first.short_selector ?? first.selector}
-                  </code>
-                  {model.selector ? " for the cheapest offering" : ""}
-                  {model.offerings.length > 1 && !publicView ? (
-                    <>
-                      , or{" "}
-                      <Link
-                        to="/routing"
-                        className="text-link hover:text-link-hover"
-                      >
-                        route across the offerings
-                      </Link>
-                    </>
-                  ) : null}
-                </span>
-              ) : null}
-            </div>
-            {first ? (
-              <p className="max-w-prose text-sm text-muted">
-                Open an offering above for its selector and a request that sends
-                it. "Use this model" at the top of the page does the same for
-                the cheapest one, with the API key step first.
-              </p>
-            ) : (
-              <p className="text-sm text-muted">
-                No provider you can use serves this model.
-              </p>
-            )}
-          </section>
-        </div>
+            </p>
+          ) : null}
+        </section>
       </div>
-
-      {first ? (
-        <QuickStart
-          selector={model.selector ?? first.short_selector ?? first.selector}
-          isOpen={quickStart}
-          onOpenChange={setQuickStart}
-          publicView={publicView}
-        />
-      ) : null}
     </div>
   )
 }
 
 /** The model page on the router. */
 export function ModelDetailPage({ modelId }: { modelId: string }) {
-  const view = useUrlValue("view")
-  return (
-    <ModelDetailView modelId={modelId} initialQuickStart={view === "api"} />
-  )
+  return <ModelDetailView modelId={modelId} />
 }

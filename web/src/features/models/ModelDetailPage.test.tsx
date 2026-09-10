@@ -250,24 +250,6 @@ describe("ModelDetailPage", () => {
     expect(within(grid).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
   })
 
-  it("hands over the request to copy, naming the cheapest offering", async () => {
-    mockApi()
-    renderPage(<ModelDetailPage modelId="glm-5-3" />)
-    const user = userEvent.setup()
-
-    await user.click(
-      await screen.findByRole("button", { name: "Use this model" }),
-    )
-
-    const dialog = await screen.findByRole("dialog", { name: "Use this model" })
-    const curl = within(dialog).getByLabelText("cURL") as HTMLTextAreaElement
-    // The slug itself, since the gateway resolves it to the cheapest offering.
-    expect(curl.value).toContain('"model": "glm-5-3"')
-    expect(
-      within(dialog).getByRole("link", { name: "API keys" }),
-    ).toHaveAttribute("href", "/keys")
-  })
-
   it("links an operator to Model pricing to edit a rate, and nobody else", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="glm-5-3" />)
@@ -299,7 +281,7 @@ describe("ModelDetailPage", () => {
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
   })
 
-  it("shows what the organization was charged for an offering, and rolls it up", async () => {
+  it("shows what the organization was charged for an offering", async () => {
     mockApi()
     GLM_DETAIL.offerings[0] = offering({
       usage_30d: {
@@ -321,8 +303,6 @@ describe("ModelDetailPage", () => {
         within(grid).getByRole("columnheader", { name: "Yours, 30d" }),
       ).toBeInTheDocument()
       expect(within(grid).getByText("42 req · cache 25%")).toBeInTheDocument()
-      expect(screen.getByText("$0.40 /M")).toBeInTheDocument()
-      expect(screen.getByText("$0.40 · 42 req")).toBeInTheDocument()
     } finally {
       GLM_DETAIL.offerings[0] = offering({})
     }
