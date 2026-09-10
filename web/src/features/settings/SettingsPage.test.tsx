@@ -13,8 +13,8 @@ import type {
 } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { fieldMatches, SettingsPage } from "@/features/settings/SettingsPage"
-import { pickOption } from "@/tests/select"
 import { API_ROOT } from "@/shared/api/client"
+import { pickOption } from "@/tests/select"
 
 describe("fieldMatches", () => {
   const field: ConfigField = {

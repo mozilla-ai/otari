@@ -1,13 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-
+import { API_ROOT } from "@/shared/api/client"
 import {
   organizationContext,
   workspace,
   workspaceCodeExecutionPolicy,
 } from "@/tests/fixtures"
-
 import { WorkspaceCodeExecutionPolicyCard } from "./WorkspaceCodeExecutionPolicyCard"
-import { API_ROOT } from "@/shared/api/client"
 
 /**
  * A workspace's stance on code execution, plus the ceilings it may narrow.
@@ -40,7 +38,9 @@ const policyPath = `${API_ROOT}/workspaces/${WORKSPACE_ID}/code-execution-policy
 function api(policy: ReturnType<typeof workspaceCodeExecutionPolicy>) {
   return {
     [`${API_ROOT}/organizations/me`]: CONTEXT,
-    [`${API_ROOT}/workspaces`]: [workspace({ id: WORKSPACE_ID, name: "Platform" })],
+    [`${API_ROOT}/workspaces`]: [
+      workspace({ id: WORKSPACE_ID, name: "Platform" }),
+    ],
     [policyPath]: policy,
   }
 }

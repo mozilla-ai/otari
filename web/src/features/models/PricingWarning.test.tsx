@@ -5,9 +5,9 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { GatewaySettings, OrganizationContext } from "@/client"
 import { PricingWarning } from "@/features/models/PricingWarning"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 const BASE: GatewaySettings = {
   mode: "standalone",
@@ -115,7 +115,8 @@ describe("PricingWarning", () => {
 
     const patch = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes(`${API_ROOT}/settings`) && (init?.method ?? "") === "PATCH",
+        String(u).includes(`${API_ROOT}/settings`) &&
+        (init?.method ?? "") === "PATCH",
     )
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
       default_pricing: true,
@@ -235,7 +236,9 @@ describe("PricingWarning", () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     expect(
-      fetchMock.mock.calls.some(([u]) => String(u).includes(`${API_ROOT}/usage/count`)),
+      fetchMock.mock.calls.some(([u]) =>
+        String(u).includes(`${API_ROOT}/usage/count`),
+      ),
     ).toBe(false)
   })
 
@@ -252,7 +255,9 @@ describe("PricingWarning", () => {
 
     await settleContext(client)
     expect(
-      fetchMock.mock.calls.some(([u]) => String(u).includes(`${API_ROOT}/settings`)),
+      fetchMock.mock.calls.some(([u]) =>
+        String(u).includes(`${API_ROOT}/settings`),
+      ),
     ).toBe(false)
     expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
   })

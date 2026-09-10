@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
+import { API_ROOT } from "@/shared/api/client"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { AppProviders } from "@/tests/providers"
 import { identify, recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
-import { API_ROOT } from "@/shared/api/client"
 
 // The telemetry seam, replaced the way a superset build's alias replaces it, so
 // the sign-out this provider records is observable at all: the base module is a

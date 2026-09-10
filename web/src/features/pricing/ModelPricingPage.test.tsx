@@ -10,9 +10,9 @@ import type {
   PricingResponse,
 } from "@/client"
 import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 const SETTINGS: GatewaySettings = {
   mode: "standalone",
@@ -79,10 +79,16 @@ function mockApi(
     .mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.includes(`${API_ROOT}/pricing/refresh/confirm`) && method === "POST") {
+      if (
+        url.includes(`${API_ROOT}/pricing/refresh/confirm`) &&
+        method === "POST"
+      ) {
         return jsonResponse({ applied: true })
       }
-      if (url.includes(`${API_ROOT}/pricing/refresh/reject`) && method === "POST") {
+      if (
+        url.includes(`${API_ROOT}/pricing/refresh/reject`) &&
+        method === "POST"
+      ) {
         return new Response(null, { status: 204 })
       }
       if (url.includes(`${API_ROOT}/pricing/refresh`) && method === "POST") {
@@ -96,7 +102,8 @@ function mockApi(
       }
       if (url.includes(`${API_ROOT}/settings`)) return jsonResponse(settings)
       if (url.includes(`${API_ROOT}/pricing`)) return jsonResponse(pricing)
-      if (url.includes(`${API_ROOT}/organizations/me`)) return jsonResponse(context)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(context)
       return jsonResponse([])
     })
 }
@@ -323,8 +330,12 @@ describe("ModelPricingPage", () => {
     // `require_deployment_operator`, so firing them would put a 403 banner on a
     // page that is the admin's to use (the shape otari#838 removed elsewhere).
     const asked = fetchMock.mock.calls.map(([url]) => String(url))
-    expect(asked.some((url) => url.includes(`${API_ROOT}/settings`))).toBe(false)
-    expect(asked.some((url) => url.includes(`${API_ROOT}/pricing/refresh`))).toBe(false)
+    expect(asked.some((url) => url.includes(`${API_ROOT}/settings`))).toBe(
+      false,
+    )
+    expect(
+      asked.some((url) => url.includes(`${API_ROOT}/pricing/refresh`)),
+    ).toBe(false)
   })
 
   it("does not point an admin at an editor they would be refused", async () => {

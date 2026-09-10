@@ -1,8 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
-
-import { ModelComboBox } from "./ModelComboBox"
 import { API_ROOT } from "@/shared/api/client"
+import { ModelComboBox } from "./ModelComboBox"
 
 /**
  * A flat, searchable `provider:model` picker over what the providers actually
@@ -94,7 +93,9 @@ export const WithDescription: Story = {
 
 /** Model discovery is off, or no provider is configured: nothing to suggest. */
 export const NoModels: Story = {
-  parameters: { api: { [`${API_ROOT}/models/discoverable`]: { providers: [] } } },
+  parameters: {
+    api: { [`${API_ROOT}/models/discoverable`]: { providers: [] } },
+  },
   render: (args) => (
     <div className="w-[24rem]">
       <ModelComboBox {...args} placeholder="provider:model" />

@@ -1,9 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-
-import { user } from "@/tests/fixtures"
-
-import { RouterReadiness } from "./RouterReadiness"
 import { API_ROOT } from "@/shared/api/client"
+import { user } from "@/tests/fixtures"
+import { RouterReadiness } from "./RouterReadiness"
 
 /**
  * How warm a learned routing policy is, for one user at a time.

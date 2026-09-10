@@ -11,9 +11,9 @@ import type {
   ToolsResponse,
 } from "@/client"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
-import { API_ROOT } from "@/shared/api/client"
 
 const FIELDS: ToolSettingField[] = [
   {
@@ -692,7 +692,7 @@ describe("ToolsGuardrailsPage tool status", () => {
 })
 
 // otari-ai#1930: the Tools group is member-visible, but the service settings,
-// the pricing row, and the /v1/search tools are operator-only reads, so for
+// the pricing row, and the /api/v1/search tools are operator-only reads, so for
 // everyone else the page was a 403 banner, and the empty field list also
 // dropped the member-appropriate workspace cards nested under it.
 describe("ToolsGuardrailsPage by caller role", () => {
@@ -724,7 +724,9 @@ describe("ToolsGuardrailsPage by caller role", () => {
       screen.queryByRole("heading", { name: "Search tools" }),
     ).not.toBeInTheDocument()
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
-    expect(urls.some((url) => url.includes(`${API_ROOT}/search-tools`))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/search-tools`))).toBe(
+      false,
+    )
   })
 
   it("renders a non-operator's tool settings as values rather than controls", async () => {

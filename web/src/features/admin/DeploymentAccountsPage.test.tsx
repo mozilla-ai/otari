@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentUser } from "@/client"
 import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, deploymentUser } from "@/tests/fixtures"
-import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -268,7 +268,9 @@ describe("DeploymentAccountsPage", () => {
 
     await screen.findByText("Accounts is not available to you")
     expect(
-      requests.some((request) => request.url.includes(`${API_ROOT}/admin/users`)),
+      requests.some((request) =>
+        request.url.includes(`${API_ROOT}/admin/users`),
+      ),
     ).toBe(false)
   })
 })

@@ -13,6 +13,7 @@ import type {
   WorkspaceMember,
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
+import { API_ROOT } from "@/shared/api/client"
 import {
   budget,
   organizationContext,
@@ -21,7 +22,6 @@ import {
   workspaceBudgetDefault,
   workspaceMember,
 } from "@/tests/fixtures"
-import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -46,7 +46,7 @@ function mockApi(
     // Keyed by workspace id, so a test can give one workspace a default and
     // leave another without one.
     budgetDefaults?: Record<string, WorkspaceBudgetDefault[]>
-    /** A refusal for `POST /v1/workspaces`, for the error paths. */
+    /** A refusal for `POST ${API_ROOT}/workspaces`, for the error paths. */
     createRefusal?: { status: number; detail: string }
   } = {},
 ) {
@@ -75,7 +75,8 @@ function mockApi(
     }
     if (url.includes("provider-keys")) {
       if (url.includes("/models")) return jsonResponse({ models: [] })
-      if (url.includes(`${API_ROOT}/workspaces/`)) return jsonResponse({ data: [] })
+      if (url.includes(`${API_ROOT}/workspaces/`))
+        return jsonResponse({ data: [] })
       return jsonResponse({ data: [], count: 0 })
     }
     if (url.includes("member-budget-policies")) {

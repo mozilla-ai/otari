@@ -3,6 +3,7 @@ import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMembersPage } from "@/features/workspaces/WorkspaceMembersPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
   organizationContext,
@@ -11,7 +12,6 @@ import {
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { pickOption } from "@/tests/select"
-import { API_ROOT } from "@/shared/api/client"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const USER = "33333333-3333-3333-3333-333333333333"

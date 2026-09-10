@@ -13,9 +13,9 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

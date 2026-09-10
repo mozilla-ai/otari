@@ -1365,9 +1365,7 @@ describe("ModelsPage", () => {
 
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
     expect(urls.some((url) => url.includes("/settings"))).toBe(false)
-    expect(urls.some((url) => url.includes("/models/discoverable"))).toBe(
-      false,
-    )
+    expect(urls.some((url) => url.includes("/models/discoverable"))).toBe(false)
     expect(urls.some((url) => url.includes("/models/metadata"))).toBe(false)
   })
 

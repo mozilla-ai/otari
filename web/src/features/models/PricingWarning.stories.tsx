@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-
-import { PricingWarning } from "./PricingWarning"
 import { API_ROOT } from "@/shared/api/client"
+import { PricingWarning } from "./PricingWarning"
 
 /**
  * The shell-level warning that requests are being refused for want of a price.

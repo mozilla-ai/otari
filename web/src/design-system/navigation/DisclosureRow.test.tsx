@@ -10,7 +10,7 @@ function Harness() {
   return (
     <DisclosureRow
       label="Configure search tools"
-      help="None configured, so POST /v1/search refuses every request."
+      help="None configured, so POST /api/v1/search refuses every request."
       trailing={<span>0 tools</span>}
       isOpen={isOpen}
       onToggle={() => setIsOpen((open) => !open)}

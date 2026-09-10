@@ -3,11 +3,11 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PasswordCard } from "@/features/account/PasswordCard"
+import { API_ROOT } from "@/shared/api/client"
 import { useOrganizationMembers } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
-import { API_ROOT } from "@/shared/api/client"
 
 // Which of the two forms this card renders comes from the bootstrap, so every
 // render goes through a DeploymentProvider. `master_key` is the unclaimed

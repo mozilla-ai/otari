@@ -1,8 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
-
-import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
 import { API_ROOT } from "@/shared/api/client"
+import { accessLabel, ModelScopeControl } from "./ModelScopeControl"
 
 /**
  * The allow-list editor: either any model, or an explicit list.

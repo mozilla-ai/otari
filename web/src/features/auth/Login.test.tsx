@@ -4,12 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
-import { API_ROOT } from "@/shared/api/client"
 
 // The telemetry seam, replaced the way a superset build's alias replaces it.
 // The base module records nothing, so the funnel this screen fires is only
@@ -891,7 +891,9 @@ describe("Login with a passkey", () => {
     await user.keyboard("{Enter}")
 
     expect(
-      fetchMock.mock.calls.some(([url]) => String(url) === `${API_ROOT}/auth/session`),
+      fetchMock.mock.calls.some(
+        ([url]) => String(url) === `${API_ROOT}/auth/session`,
+      ),
     ).toBe(false)
 
     releaseCeremony(assertion())

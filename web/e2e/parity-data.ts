@@ -1,7 +1,6 @@
 import { expect, type Page } from "@playwright/test"
-
-import { authHeaders, expectOk } from "./helpers"
 import { API_ROOT } from "@/shared/api/client"
+import { authHeaders, expectOk } from "./helpers"
 
 // The fixture the behavioral-parity specs read.
 //

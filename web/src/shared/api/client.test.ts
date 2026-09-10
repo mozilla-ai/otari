@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-
-import { ApiError, apiFetch, createSession, deleteSession } from "./client"
 import { API_ROOT } from "@/shared/api/client"
+import { ApiError, apiFetch, createSession, deleteSession } from "./client"
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -61,7 +60,9 @@ describe("apiFetch", () => {
       json: () => Promise.reject(new DOMException("timed out", "TimeoutError")),
     } as unknown as Response)
 
-    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toBeInstanceOf(ApiError)
+    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toBeInstanceOf(
+      ApiError,
+    )
     await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       status: 0,
       message: expect.stringContaining("did not respond within 30s"),
@@ -103,7 +104,9 @@ describe("apiFetch", () => {
       new TypeError("Failed to fetch"),
     )
 
-    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toBeInstanceOf(ApiError)
+    await expect(apiFetch(`${API_ROOT}/models`)).rejects.toBeInstanceOf(
+      ApiError,
+    )
     await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       message: expect.stringContaining("could not reach the gateway"),
     })

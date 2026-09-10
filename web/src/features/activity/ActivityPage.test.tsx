@@ -6,10 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
-import { API_ROOT } from "@/shared/api/client"
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
   const row = {
@@ -284,7 +284,9 @@ function listCalls(calls: FetchCall[]): string[] {
 
 function countCalls(calls: FetchCall[]): string[] {
   return calls
-    .filter((c) => c.method === "GET" && c.url.includes(`${API_ROOT}/usage/count`))
+    .filter(
+      (c) => c.method === "GET" && c.url.includes(`${API_ROOT}/usage/count`),
+    )
     .map((c) => c.url)
 }
 
@@ -612,7 +614,8 @@ describe("ActivityPage", () => {
       if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse({ detail: "summary exploded" }, 500)
       }
-      if (url.includes(`${API_ROOT}/usage/count`)) return jsonResponse({ total: 1 })
+      if (url.includes(`${API_ROOT}/usage/count`))
+        return jsonResponse({ total: 1 })
       if (url.includes(`${API_ROOT}/usage/in-flight`))
         return jsonResponse({ requests: [], total: 0 })
       if (url.includes(`${API_ROOT}/usage`)) return jsonResponse([entry()])
@@ -1152,7 +1155,9 @@ describe("ActivityPage", () => {
 
     // The count the operator confirmed was taken under the same scope, which is
     // what makes "all 5 matching" mean the same set on both sides.
-    const counts = calls.filter((c) => c.url.includes(`${API_ROOT}/usage/count`))
+    const counts = calls.filter((c) =>
+      c.url.includes(`${API_ROOT}/usage/count`),
+    )
     expect(
       counts.some((c) => c.url.includes(`workspace_id=${workspaceId}`)),
     ).toBe(true)
@@ -1198,7 +1203,9 @@ describe("ActivityPage", () => {
     })
 
     // The count that sized "all matching" was scoped to the same two models.
-    const counts = calls.filter((c) => c.url.includes(`${API_ROOT}/usage/count`))
+    const counts = calls.filter((c) =>
+      c.url.includes(`${API_ROOT}/usage/count`),
+    )
     expect(
       counts.some(
         (c) =>
@@ -1234,7 +1241,8 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const priceCall = calls.find(
-        (c) => c.url.includes(`${API_ROOT}/usage/set-price`) && c.method === "POST",
+        (c) =>
+          c.url.includes(`${API_ROOT}/usage/set-price`) && c.method === "POST",
       )
       expect(priceCall).toBeTruthy()
       expect(priceCall!.body).toContain("imp-1")
@@ -1298,7 +1306,9 @@ describe("ActivityPage", () => {
       })
     })
     // Setting the model's price must not rewrite what logged rows were billed.
-    expect(calls.some((c) => c.url.includes(`${API_ROOT}/usage/set-price`))).toBe(false)
+    expect(
+      calls.some((c) => c.url.includes(`${API_ROOT}/usage/set-price`)),
+    ).toBe(false)
   })
 
   it("does not offer model pricing on a request that was costed", async () => {
@@ -1444,7 +1454,8 @@ describe("ActivityPage", () => {
     expect(
       calls.some(
         (c) =>
-          c.url.includes(`${API_ROOT}/usage/summary`) && c.url.includes("start_date="),
+          c.url.includes(`${API_ROOT}/usage/summary`) &&
+          c.url.includes("start_date="),
       ),
     ).toBe(true)
   })
@@ -1988,7 +1999,11 @@ describe("ActivityPage filter serialization", () => {
 
     await screen.findByText("gpt-4o")
     const requested = calls.map((c) => c.url)
-    for (const path of [`${API_ROOT}/usage?`, `${API_ROOT}/usage/count`, `${API_ROOT}/usage/summary`]) {
+    for (const path of [
+      `${API_ROOT}/usage?`,
+      `${API_ROOT}/usage/count`,
+      `${API_ROOT}/usage/summary`,
+    ]) {
       const hit = requested.find((url) => url.includes(path))
       expect(hit, `no request to ${path}`).toBeDefined()
       expect(hit, `${path} dropped the tool filter`).toContain(
@@ -2012,8 +2027,12 @@ describe("ActivityPage table-scan avoidance", () => {
 
     await screen.findByText("gpt-4o")
     const requested = calls.map((c) => c.url)
-    expect(requested.some((url) => url.includes(`${API_ROOT}/users`))).toBe(false)
-    expect(requested.some((url) => url.includes(`${API_ROOT}/keys`))).toBe(false)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/users`))).toBe(
+      false,
+    )
+    expect(requested.some((url) => url.includes(`${API_ROOT}/keys`))).toBe(
+      false,
+    )
   })
 
   it("labels an API key column from the row, not a client-side lookup", async () => {
@@ -2055,7 +2074,9 @@ describe("ActivityPage suggestion scoping", () => {
     // See the drill-down cases above: the label paints from the URL, so the wait
     // has to be on the summaries this assertion actually reads.
     const summariesSoFar = () =>
-      calls.map((c) => c.url).filter((url) => url.includes(`${API_ROOT}/usage/summary`))
+      calls
+        .map((c) => c.url)
+        .filter((url) => url.includes(`${API_ROOT}/usage/summary`))
     await waitFor(() =>
       expect(
         summariesSoFar().some((url) => url.includes("dimensions=user")),
@@ -2234,7 +2255,8 @@ describe("ActivityPage live traffic", () => {
           ? jsonResponse({ detail: "gateway restarting" }, 503)
           : jsonResponse({ requests: [inFlightRequest()], total: 1 })
       }
-      if (url.includes(`${API_ROOT}/usage/count`)) return jsonResponse({ total: 0 })
+      if (url.includes(`${API_ROOT}/usage/count`))
+        return jsonResponse({ total: 0 })
       if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse({
           by_model: [],
@@ -2358,7 +2380,8 @@ describe("ActivityPage live traffic", () => {
       expect(panel).not.toBeNull()
 
       const polls = () =>
-        calls.filter((c) => c.url.includes(`${API_ROOT}/usage/in-flight`)).length
+        calls.filter((c) => c.url.includes(`${API_ROOT}/usage/in-flight`))
+          .length
       const before = polls()
       await vi.advanceTimersByTimeAsync(5_000)
       await waitFor(() => expect(polls()).toBeGreaterThan(before + 1))
@@ -2622,7 +2645,7 @@ describe("ActivityPage when the organization context fails", () => {
   })
 
   it("still asks for usage, and reports the refusal rather than painting an empty log", async () => {
-    // The usage hooks wait on `GET /v1/organizations/me` to learn which surface
+    // The usage hooks wait on `GET /api/v1/organizations/me` to learn which surface
     // this caller may read. An errored context must not read as "keep waiting":
     // that issues no request at all, and the page then states, with no banner,
     // that a gateway serving traffic has none (otari#837).

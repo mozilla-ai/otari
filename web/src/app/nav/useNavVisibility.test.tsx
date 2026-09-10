@@ -2,16 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-
+import { API_ROOT } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
 import { EntitlementProvider } from "@/shared/hooks/useEntitlements"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
-
 import type { NavItem } from "./types"
 import { useNavVisibility } from "./useNavVisibility"
-import { API_ROOT } from "@/shared/api/client"
 
 // The composition is what this covers, so the items are made up rather than
 // taken from the registry: the base build gates nothing on a capability, and a

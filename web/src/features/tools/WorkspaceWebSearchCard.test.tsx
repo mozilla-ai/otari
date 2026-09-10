@@ -102,7 +102,7 @@ describe("WorkspaceWebSearchCard", () => {
     await renderLoaded()
 
     expect(selectTrigger(STANCE)).toHaveTextContent(
-      "Blocked (tool and /v1/search)",
+      "Blocked (tool and /api/v1/search)",
     )
     expect(screen.getByLabelText("Max results")).toHaveValue("3")
     expect(screen.getByLabelText("Allowed domains")).toHaveValue(
@@ -315,12 +315,12 @@ describe("WorkspaceWebSearchCard", () => {
 
     // Both halves: the capability ceiling is about the in-loop backend only, so
     // the banner must not claim the workspace's switch does nothing. It still
-    // gates POST /v1/search, which runs off the search tools and not this URL.
+    // gates POST /api/v1/search, which runs off the search tools and not this URL.
     expect(
       await screen.findByText(/no in-loop search backend configured/i),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/still takes effect on POST \/v1\/search/i),
+      screen.getByText(/still takes effect on POST \/api\/v1\/search/i),
     ).toBeInTheDocument()
   })
 

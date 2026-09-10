@@ -4,12 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { OAuthCallbackPage } from "@/features/auth/OAuthCallbackPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
-import { API_ROOT } from "@/shared/api/client"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")

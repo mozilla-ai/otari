@@ -11,9 +11,9 @@ import type {
   User,
 } from "@/client"
 import { BudgetsPage } from "@/features/budgets/BudgetsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
-import { API_ROOT } from "@/shared/api/client"
 
 function testUser(user_id: string): User {
   return {
@@ -134,7 +134,8 @@ function mockApi(
       if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes(`${API_ROOT}/organizations/me`)) return jsonResponse(context)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(context)
       return jsonResponse([])
     })
 }
@@ -272,7 +273,8 @@ describe("BudgetsPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes(`${API_ROOT}/budgets`) && (init?.method ?? "") === "POST",
+        String(u).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: "team-free-tier",
@@ -350,7 +352,8 @@ describe("BudgetsPage", () => {
 
     const budgetPosts = fetchMock.mock.calls.filter(
       ([url, init]) =>
-        String(url).includes(`${API_ROOT}/budgets`) && (init?.method ?? "") === "POST",
+        String(url).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(budgetPosts).toHaveLength(1)
   })
@@ -429,7 +432,8 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).includes(`${API_ROOT}/budgets`) && (init?.method ?? "") === "POST",
+          String(u).includes(`${API_ROOT}/budgets`) &&
+          (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
   })
@@ -454,7 +458,8 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).includes(`${API_ROOT}/budgets`) && (init?.method ?? "") === "POST",
+          String(u).includes(`${API_ROOT}/budgets`) &&
+          (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
   })
@@ -497,7 +502,8 @@ describe("BudgetsPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes(`${API_ROOT}/budgets`) && (init?.method ?? "") === "POST",
+        String(u).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: null,
@@ -600,7 +606,8 @@ describe("BudgetsPage", () => {
 
     const del = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes(`${API_ROOT}/budgets/`) && (init?.method ?? "") === "DELETE",
+        String(u).includes(`${API_ROOT}/budgets/`) &&
+        (init?.method ?? "") === "DELETE",
     )
     expect(del).toBeDefined()
     expect(screen.queryByText("11111111")).not.toBeInTheDocument()
@@ -659,9 +666,11 @@ describe("BudgetsPage", () => {
 
     // Withheld at the request, not only in the markup.
     const read = requests.mock.calls.map(([url]) => String(url))
-    expect(read.some((url) => /\/v1\/budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/v1\/scoped-budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/v1\/users/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(
+      false,
+    )
+    expect(read.some((url) => /\/api\/v1\/users/.test(url))).toBe(false)
   })
 
   it("keeps the deployment page for an operator", async () => {

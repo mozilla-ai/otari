@@ -10,10 +10,10 @@ import type {
   RoutingPolicyResponse,
 } from "@/client"
 import { RoutingPage } from "@/features/routing/RoutingPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 const policy = (
   name: string,
@@ -512,7 +512,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const body = post!.body as {
       name: string
@@ -541,7 +542,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     expect((post!.body as { rename_from?: string }).rename_from).toBeUndefined()
   })
@@ -856,7 +858,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[1]).toEqual({ default: "openai:gpt-5-nano" })
@@ -883,7 +886,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -968,7 +972,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1003,7 +1008,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1047,7 +1053,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0].weights).toEqual({
@@ -1087,7 +1094,8 @@ describe("RoutingPage", () => {
 
     const post = calls.find(
       (call) =>
-        call.method === "POST" && call.url.includes(`${API_ROOT}/routing/policies`),
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
     )
     const spec = (post!.body as { spec: PolicySpec }).spec
     expect(spec.select[0]).toEqual({
@@ -1316,7 +1324,7 @@ describe("RoutingPage", () => {
     await user.click(within(row).getByRole("button", { name: "Examples" }))
 
     expect(
-      await screen.findByText(/POST \/v1\/routing\/preferences\/rank/),
+      await screen.findByText(/POST \/api\/v1\/routing\/preferences\/rank/),
     ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /teach it/i })).toBeInTheDocument()
     // No write affordance anywhere in it.
@@ -1483,9 +1491,13 @@ describe("RoutingPage", () => {
     await screen.findByText("fast")
 
     const urls = calls.map((call) => call.url)
-    expect(urls.some((url) => url.endsWith(`${API_ROOT}/routing/policies`))).toBe(false)
+    expect(
+      urls.some((url) => url.endsWith(`${API_ROOT}/routing/policies`)),
+    ).toBe(false)
     expect(urls.some((url) => url.includes(`${API_ROOT}/aliases`))).toBe(false)
-    expect(urls.some((url) => url.includes(`${API_ROOT}/tool-settings`))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/tool-settings`))).toBe(
+      false,
+    )
     expect(urls.some((url) => url.includes(`${API_ROOT}/users`))).toBe(false)
   })
 
@@ -1577,7 +1589,8 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       calls.some(
         (call) =>
-          call.method === "POST" && call.url.endsWith(`${API_ROOT}/routing/policies`),
+          call.method === "POST" &&
+          call.url.endsWith(`${API_ROOT}/routing/policies`),
       ),
     ).toBe(false)
   })
@@ -1611,7 +1624,9 @@ describe("RoutingPage for an organization admin", () => {
     )
 
     const deleted = calls.find((call) => call.method === "DELETE")
-    expect(deleted?.url).toContain(`${API_ROOT}/organizations/me/routing-policies/`)
+    expect(deleted?.url).toContain(
+      `${API_ROOT}/organizations/me/routing-policies/`,
+    )
     expect(deleted?.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
   })
 

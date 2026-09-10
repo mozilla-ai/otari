@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { OrgProviderKey, WorkspaceProviderKeyOverride } from "@/client"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
+import { API_ROOT } from "@/shared/api/client"
 import { orgProviderKey, workspaceProviderKeyOverride } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
-import { API_ROOT } from "@/shared/api/client"
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const OPENAI_KEY = "66666666-6666-6666-6666-666666666666"

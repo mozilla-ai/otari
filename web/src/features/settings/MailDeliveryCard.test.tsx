@@ -52,7 +52,8 @@ function mockApi(
           ? jsonResponse({ detail: testResult.detail }, testResult.status)
           : jsonResponse(testResult)
       }
-      if (url.includes(`${API_ROOT}/settings/mail`)) return jsonResponse(settings)
+      if (url.includes(`${API_ROOT}/settings/mail`))
+        return jsonResponse(settings)
       return jsonResponse([])
     })
 }

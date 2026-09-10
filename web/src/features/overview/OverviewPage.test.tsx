@@ -11,6 +11,7 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -25,7 +26,6 @@ import {
   workspaceMember,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -120,7 +120,7 @@ function mockApi(b: Bodies) {
     // The rail's roster is per workspace, so the id in the path picks the
     // answer. A `Paged` envelope and not a bare array: this one goes through
     // `fetchAllPaged`, which reads `body.data` and pages until a short one.
-    const roster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
+    const roster = url.match(/\/api\/v1\/workspaces\/([^/?]+)\/members/)
     if (roster) {
       return jsonResponse({ data: b.workspaceMembers?.[roster[1]] ?? [] })
     }
@@ -141,7 +141,8 @@ function mockApi(b: Bodies) {
         b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null },
       )
     }
-    if (url.includes(`${API_ROOT}/budgets`)) return jsonResponse(b.budgets ?? [])
+    if (url.includes(`${API_ROOT}/budgets`))
+      return jsonResponse(b.budgets ?? [])
     if (url.includes(`${API_ROOT}/keys`)) return jsonResponse(b.keys ?? [])
     if (url.includes(`${API_ROOT}/users`)) return jsonResponse(b.users ?? [])
     if (url.includes(`${API_ROOT}/providers`))
@@ -767,7 +768,8 @@ describe("OverviewIndex routing", () => {
           checked_at: null,
         })
       }
-      if (url.includes(`${API_ROOT}/usage/summary`)) return jsonResponse(summary({}))
+      if (url.includes(`${API_ROOT}/usage/summary`))
+        return jsonResponse(summary({}))
       if (url.includes(`${API_ROOT}/providers`))
         return jsonResponse({ detail: "providers exploded" }, 500)
       return jsonResponse([])
@@ -801,7 +803,8 @@ describe("OverviewIndex routing", () => {
           checked_at: null,
         })
       }
-      if (url.includes(`${API_ROOT}/usage/summary`)) return jsonResponse(summary({}))
+      if (url.includes(`${API_ROOT}/usage/summary`))
+        return jsonResponse(summary({}))
       if (url.includes(`${API_ROOT}/providers`)) {
         return failProviders
           ? jsonResponse({ detail: "providers exploded" }, 500)
@@ -858,7 +861,7 @@ function mockScopedApi(b: Bodies): string[] {
     if (url.includes(`${API_ROOT}/organizations/me/keys`)) {
       return jsonResponse(b.keys ?? [])
     }
-    const scopedRoster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
+    const scopedRoster = url.match(/\/api\/v1\/workspaces\/([^/?]+)\/members/)
     if (scopedRoster) {
       return jsonResponse({ data: b.workspaceMembers?.[scopedRoster[1]] ?? [] })
     }
@@ -914,9 +917,9 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     // page made is under /v1/organizations/me. A bare /v1/usage, /v1/budgets or
     // /v1/keys read here would be a deployment-wide one the server refuses, so
     // the page must not even attempt it, and neither must it ask the gate.
-    expect(requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`))).toBe(
-      false,
-    )
+    expect(
+      requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
+    ).toBe(false)
     const scoped = requested.filter(
       (url) => !url.endsWith(`${API_ROOT}/organizations/me`),
     )
@@ -1074,7 +1077,9 @@ describe("the tenant Overview's budget signal", () => {
     ).toBe(true)
     // And never /api/v1/budgets, the operator cell's endpoint, which is
     // deployment-wide and answers 403 to this caller.
-    expect(requested.some((url) => url.includes(`${API_ROOT}/budgets`))).toBe(false)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/budgets`))).toBe(
+      false,
+    )
   })
 
   it("counts a ceiling this organization cannot edit", async () => {
@@ -1220,7 +1225,9 @@ describe("the tenant Overview's chart and rail", () => {
     // Their own key list, which is the surface otari-ai#1941 gave them, and not
     // the deployment-wide /api/v1/keys the operator page reads.
     expect(
-      requested.some((url) => url.includes(`${API_ROOT}/organizations/me/keys`)),
+      requested.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/keys`),
+      ),
     ).toBe(true)
   })
 
@@ -1297,9 +1304,9 @@ describe("OverviewIndex operator-ness", () => {
         "At-a-glance spend, traffic, and health across the gateway.",
       ),
     ).toBeInTheDocument()
-    expect(requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`))).toBe(
-      false,
-    )
+    expect(
+      requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
+    ).toBe(false)
   })
 
   it("lands a failed context on the scoped page, where its tiles already read", async () => {
@@ -1343,7 +1350,8 @@ describe("OverviewIndex operator-ness", () => {
     // ask again without end. The tiles asserted above are what such a page never
     // reaches, and this is the request storm underneath it.
     expect(
-      requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`)).length,
+      requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`))
+        .length,
     ).toBeLessThan(4)
 
     // And it asked nothing the deployment-wide page would have: not the gate,
@@ -1358,7 +1366,9 @@ describe("OverviewIndex operator-ness", () => {
     // The ceilings among them: an errored context names no role, and the page
     // withholds a read the server may refuse rather than painting its refusal.
     expect(
-      asked.some((url) => url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)),
+      asked.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      ),
     ).toBe(false)
   })
 })
@@ -1389,8 +1399,12 @@ describe("the setup guide on either Overview", () => {
     ).not.toBeInTheDocument()
     // And its gate came from the catalog, which this caller may read, and not
     // from the operator-gated provider list.
-    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(true)
-    expect(requested.some((url) => url.endsWith(`${API_ROOT}/providers`))).toBe(false)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
+      true,
+    )
+    expect(requested.some((url) => url.endsWith(`${API_ROOT}/providers`))).toBe(
+      false,
+    )
   })
 
   it("still offers it to an operator", async () => {
@@ -1436,7 +1450,9 @@ describe("the setup guide on either Overview", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
     })
-    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(true)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
+      true,
+    )
     expect(
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()

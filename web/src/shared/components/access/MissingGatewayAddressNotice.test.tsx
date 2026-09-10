@@ -1,8 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-
-import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 import { API_ROOT } from "@/shared/api/client"
+import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 
 describe("MissingGatewayAddressNotice", () => {
   it("says why there is no snippet and what to ask for instead", () => {

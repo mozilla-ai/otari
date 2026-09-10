@@ -92,9 +92,12 @@ export const authHeaders = {
  * fine.
  */
 export async function dismissSetupGuide(page: Page): Promise<void> {
-  const listed = await page.request.get(`${API_ROOT}/workspaces?skip=0&limit=1000`, {
-    headers: authHeaders,
-  })
+  const listed = await page.request.get(
+    `${API_ROOT}/workspaces?skip=0&limit=1000`,
+    {
+      headers: authHeaders,
+    },
+  )
   await expectOk(listed, "list workspaces")
   const { data, count } = (await listed.json()) as {
     data: { id: string }[]

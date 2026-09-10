@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-
-import { MailDeliveryCard } from "./MailDeliveryCard"
 import { API_ROOT } from "@/shared/api/client"
+import { MailDeliveryCard } from "./MailDeliveryCard"
 
 /**
  * Mail transport status, and a send-a-test-message form.

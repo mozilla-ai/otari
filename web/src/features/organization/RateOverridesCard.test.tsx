@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext, OrganizationPricingOverride } from "@/client"
 import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 interface RecordedRequest {
   url: string

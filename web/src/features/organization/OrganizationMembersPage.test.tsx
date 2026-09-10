@@ -15,6 +15,7 @@ import type {
   WorkspaceMember,
 } from "@/client"
 import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
@@ -27,7 +28,6 @@ import {
   workspaceMember,
 } from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
-import { API_ROOT } from "@/shared/api/client"
 
 interface Request {
   url: string
@@ -590,7 +590,8 @@ describe("OrganizationMembersPage", () => {
 
     const ceiling = requests.find(
       (r) =>
-        r.method === "PATCH" && r.url.includes(`${API_ROOT}/scoped-budgets/ceiling-1`),
+        r.method === "PATCH" &&
+        r.url.includes(`${API_ROOT}/scoped-budgets/ceiling-1`),
     )
     expect(ceiling?.body).toEqual({ budget_id: "bud-large" })
 
@@ -622,9 +623,15 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     // asked for nothing at all.
     await screen.findByText("Analyst")
     expect(
-      requests.some((r) => r.url.includes(`${API_ROOT}/organizations/me/members`)),
+      requests.some((r) =>
+        r.url.includes(`${API_ROOT}/organizations/me/members`),
+      ),
     ).toBe(true)
-    for (const path of [`${API_ROOT}/users`, `${API_ROOT}/budgets`, `${API_ROOT}/scoped-budgets`]) {
+    for (const path of [
+      `${API_ROOT}/users`,
+      `${API_ROOT}/budgets`,
+      `${API_ROOT}/scoped-budgets`,
+    ]) {
       expect(
         requests.filter((r) => r.method === "GET" && r.url.includes(path)),
       ).toHaveLength(0)
@@ -689,9 +696,9 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     await actor.click(screen.getByRole("button", { name: "Save changes" }))
 
     await waitFor(() =>
-      expect(requests.some((r) => r.url.includes(`${API_ROOT}/scoped-budgets`))).toBe(
-        false,
-      ),
+      expect(
+        requests.some((r) => r.url.includes(`${API_ROOT}/scoped-budgets`)),
+      ).toBe(false),
     )
   })
 

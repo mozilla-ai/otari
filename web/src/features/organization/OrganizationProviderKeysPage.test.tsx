@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext, OrgProviderKey } from "@/client"
 import { OrganizationProviderKeysPage } from "@/features/organization/OrganizationProviderKeysPage"
-import { organizationContext, orgProviderKey } from "@/tests/fixtures"
 import { API_ROOT } from "@/shared/api/client"
+import { organizationContext, orgProviderKey } from "@/tests/fixtures"
 
 interface Request {
   url: string

@@ -7,11 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, seriesPoint, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
-import { API_ROOT } from "@/shared/api/client"
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   return {
@@ -611,7 +611,9 @@ describe("UsagePage", () => {
     const calls = fetchMock.mock.calls.map(([u]) => String(u))
     expect(
       calls.some(
-        (u) => u.includes(`${API_ROOT}/usage/series`) && u.includes("group_by=model"),
+        (u) =>
+          u.includes(`${API_ROOT}/usage/series`) &&
+          u.includes("group_by=model"),
       ),
     ).toBe(true)
   })
@@ -633,7 +635,8 @@ describe("UsagePage", () => {
       }
       if (url.includes(`${API_ROOT}/usage/series`))
         return jsonResponse({ detail: "Not Found" }, 404)
-      if (url.includes(`${API_ROOT}/usage/summary`)) return jsonResponse(summary())
+      if (url.includes(`${API_ROOT}/usage/summary`))
+        return jsonResponse(summary())
       return jsonResponse([])
     })
     renderPage(<UsagePage />)

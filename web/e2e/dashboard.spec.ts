@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-
+import { API_ROOT } from "@/shared/api/client"
 import {
   dismissComboBox,
   login,
@@ -9,7 +9,6 @@ import {
   openOrganization,
   pageHeading,
 } from "./helpers"
-import { API_ROOT } from "@/shared/api/client"
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
 test.describe.configure({ mode: "serial" })
@@ -244,9 +243,12 @@ test.describe("dashboard core flows", () => {
     // The rename target has to be free for the 409 not to fire. serve.sh wipes the
     // database, so it is on a first run; a re-run against a warm one still carries
     // the `renamed` this test left behind, and would fail on its own leftovers.
-    const dropped = await page.request.delete(`${API_ROOT}/routing/policies/renamed`, {
-      headers: { Authorization: `Bearer ${MASTER_KEY}` },
-    })
+    const dropped = await page.request.delete(
+      `${API_ROOT}/routing/policies/renamed`,
+      {
+        headers: { Authorization: `Bearer ${MASTER_KEY}` },
+      },
+    )
     expect([204, 404]).toContain(dropped.status())
 
     await login(page)
@@ -295,24 +297,27 @@ test.describe("dashboard core flows", () => {
     // A re-run against a warm DB is fine; only a genuine failure should fail here.
     expect([200, 201, 400, 409]).toContain(created.status())
 
-    const seeded = await page.request.post(`${API_ROOT}/usage/external-events`, {
-      headers: auth,
-      data: {
-        source: "e2e-seed",
-        user_id: owner,
-        events: Array.from({ length: 12 }, (_, i) => ({
-          source_event_id: `share-seed-${i}`,
-          timestamp: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
-          provider: i % 2 === 0 ? "openai" : "groq",
-          // A fully-qualified selector, so the card's name collapsing is exercised
-          // on the shape that motivated it.
-          model: i % 2 === 0 ? "gpt-4o" : "fireworks/accounts/llama-3.3-70b",
-          input_tokens: 1000 + i * 50,
-          output_tokens: 200 + i * 10,
-          duration_ms: 400 + i,
-        })),
+    const seeded = await page.request.post(
+      `${API_ROOT}/usage/external-events`,
+      {
+        headers: auth,
+        data: {
+          source: "e2e-seed",
+          user_id: owner,
+          events: Array.from({ length: 12 }, (_, i) => ({
+            source_event_id: `share-seed-${i}`,
+            timestamp: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
+            provider: i % 2 === 0 ? "openai" : "groq",
+            // A fully-qualified selector, so the card's name collapsing is exercised
+            // on the shape that motivated it.
+            model: i % 2 === 0 ? "gpt-4o" : "fireworks/accounts/llama-3.3-70b",
+            input_tokens: 1000 + i * 50,
+            output_tokens: 200 + i * 10,
+            duration_ms: 400 + i,
+          })),
+        },
       },
-    })
+    )
     expect(seeded.ok(), await seeded.text()).toBe(true)
 
     await login(page)

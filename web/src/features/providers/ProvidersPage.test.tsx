@@ -14,10 +14,10 @@ import type {
   TestProviderResult,
 } from "@/client"
 import { ProvidersPage } from "@/features/providers/ProvidersPage"
+import { API_ROOT } from "@/shared/api/client"
 import { PROVIDER_HEALTH_REFRESH_MS } from "@/shared/api/providers"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 const CAPS = {
   streaming: false,

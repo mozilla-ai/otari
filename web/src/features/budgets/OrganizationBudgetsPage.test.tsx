@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationBudget, OrganizationSpendCeiling } from "@/client"
 import { OrganizationBudgetsPage } from "@/features/budgets/OrganizationBudgetsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
@@ -12,7 +13,6 @@ import {
   organizationSpendCeiling as spendCeiling,
   workspace,
 } from "@/tests/fixtures"
-import { API_ROOT } from "@/shared/api/client"
 
 interface RecordedRequest {
   url: string
@@ -130,11 +130,13 @@ describe("OrganizationBudgetsPage", () => {
       read.some((url) => url.includes(`${API_ROOT}/organizations/me/budgets`)),
     ).toBe(true)
     expect(
-      read.some((url) => url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)),
+      read.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      ),
     ).toBe(true)
     for (const url of read) {
-      expect(url).not.toMatch(/\/v1\/budgets/)
-      expect(url).not.toMatch(/\/v1\/scoped-budgets/)
+      expect(url).not.toMatch(/\/api\/v1\/budgets/)
+      expect(url).not.toMatch(/\/api\/v1\/scoped-budgets/)
     }
   })
 

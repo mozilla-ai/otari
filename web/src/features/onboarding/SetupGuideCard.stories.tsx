@@ -1,13 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-
+import { API_ROOT } from "@/shared/api/client"
 import {
   activationAttempt,
   organizationContext,
   workspaceActivation,
 } from "@/tests/fixtures"
-
 import { SetupGuideCard } from "./SetupGuideCard"
-import { API_ROOT } from "@/shared/api/client"
 
 /**
  * The first-request guide: mint a setup key, copy two curl calls, watch for the

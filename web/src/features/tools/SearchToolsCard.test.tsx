@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { SearchProviderInfo, SearchToolsResponse } from "@/client"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
-import { pickOption } from "@/tests/select"
 import { API_ROOT } from "@/shared/api/client"
+import { pickOption } from "@/tests/select"
 
 const PROVIDERS: SearchProviderInfo[] = [
   {
@@ -139,7 +139,7 @@ describe("SearchToolsCard", () => {
 
   it("does not read a failed request as an empty deployment", async () => {
     // `isLoading` goes false with no data behind it, so the fallback would
-    // otherwise claim no tools are configured and that POST /v1/search refuses
+    // otherwise claim no tools are configured and that POST /api/v1/search refuses
     // every request, on a read that never answered.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)

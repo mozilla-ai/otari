@@ -9,6 +9,7 @@ import type {
   DeploymentBootstrap,
   GatewaySettings,
 } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
@@ -24,7 +25,6 @@ import {
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
-import { API_ROOT } from "@/shared/api/client"
 
 // The telemetry seam, replaced the way a superset build's alias replaces it: the
 // base module records nothing, so a navigation is only observable through a
@@ -569,7 +569,7 @@ describe("AppShell surface gating", () => {
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
     // Awaited, not assumed: two of these rows declare `operatorOnly`, so neither
-    // exists until `GET /v1/organizations/me` answers. Taking the snapshot
+    // exists until `GET /api/v1/organizations/me` answers. Taking the snapshot
     // without waiting is a race that passes on a fast machine and fails on CI,
     // which is what it did. One await covers both, because the caller axis is
     // one read and they appear in the same paint.
@@ -971,7 +971,7 @@ describe("AppShell entitlement gating", () => {
   it("withholds Create workspace from a role the server would refuse", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
-    // `POST /v1/workspaces` is owners and admins only, and the Workspaces page
+    // `POST /api/v1/workspaces` is owners and admins only, and the Workspaces page
     // gates its own create control on the same predicate. Offering it here would
     // hand a member the whole form and report the refusal as a 403 after they
     // had typed a name.

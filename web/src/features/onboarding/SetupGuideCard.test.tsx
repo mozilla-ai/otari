@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
+import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
   useSelectedWorkspace,
@@ -17,7 +18,6 @@ import {
   workspaceActivation,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
-import { API_ROOT } from "@/shared/api/client"
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
@@ -203,7 +203,7 @@ describe("SetupGuideCard", () => {
       new RegExp(`Otari-Key: ${KEY}`),
     ) as HTMLTextAreaElement
     expect(curl.value).toContain(
-      `${window.location.origin}/v1/chat/completions`,
+      `${window.location.origin}${API_ROOT}/chat/completions`,
     )
     // The model comes from the catalog, so the snippet runs as pasted.
     expect(curl.value).toContain("openai:gpt-4o-mini")
@@ -228,7 +228,9 @@ describe("SetupGuideCard", () => {
     )
 
     const curl = (await screen.findByLabelText("curl")) as HTMLTextAreaElement
-    expect(curl.value).toContain("https://gateway.otari.ai/v1/chat/completions")
+    expect(curl.value).toContain(
+      `https://gateway.otari.ai${API_ROOT}/chat/completions`,
+    )
     expect(curl.value).not.toContain(window.location.origin)
     // Concealed, so the address it names is readable while the key is not.
     expect(curl.value).not.toContain(KEY)
