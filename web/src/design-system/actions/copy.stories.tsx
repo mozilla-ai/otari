@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { useRef } from "react"
 
 import { CopyButton } from "./CopyButton"
-import { CopyableValue, CopyField } from "./CopyField"
+import { CONCEALED_SECRET, CopyableValue, CopyField } from "./CopyField"
 
 /**
  * The three ways a value an operator has to paste elsewhere is handed over.
@@ -129,4 +130,71 @@ export const Button: Story = {
       <CopyButton value="https://gateway.example.com/v1" label="base URL" />
     </span>
   ),
+}
+
+/**
+ * `concealed` hands a credential over without putting it on screen.
+ *
+ * The plaintext reaches the DOM only once the operator asks for it, while Copy
+ * copies the real value either way. So a key can be pasted elsewhere without
+ * ever being read off the screen, which is the point: a screen share or a
+ * screenshot of this page does not leak it.
+ *
+ * `CONCEALED_SECRET` is the stand-in, and it is one fixed run rather than a
+ * bullet per character. The length of a key is itself something not to show.
+ *
+ * A snippet passes the same snippet built around the stand-in, so what is
+ * hidden is the key rather than the request that explains it.
+ */
+export const Concealed: Story = {
+  render: () => (
+    <div className="flex w-[34rem] flex-col gap-4">
+      <CopyField
+        label="API key"
+        value="sk-otari-4f8a2c9e1b7d3a6f5e0c8b2d"
+        concealed={CONCEALED_SECRET}
+      />
+      <CopyField
+        label="Example request"
+        multiline
+        value={`curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer sk-otari-4f8a2c9e1b7d3a6f5e0c8b2d"`}
+        concealed={`curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer ${CONCEALED_SECRET}"`}
+      />
+    </div>
+  ),
+}
+
+/**
+ * `fieldRef` hands the field's element to the caller, so something outside it
+ * can put the caret in the value.
+ *
+ * The Keys page uses it for the one-time reveal: the key appears and the field
+ * is selected, so Ctrl/Cmd-C works without aiming at the button. That matters
+ * because the Clipboard API is undefined on the non-secure origins this
+ * dashboard is routinely served from, which is the same reason the field
+ * selects on click.
+ */
+export const WithFieldRef: Story = {
+  render: () => {
+    const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
+    return (
+      <div className="flex w-[34rem] flex-col gap-3">
+        <CopyField
+          label="API key"
+          value="sk-otari-4f8a2c9e1b7d3a6f5e0c8b2d"
+          fieldRef={fieldRef}
+        />
+        <button
+          type="button"
+          className="min-h-11 self-start border border-control-border px-3 text-body"
+          onClick={() => {
+            fieldRef.current?.focus()
+            fieldRef.current?.select()
+          }}
+        >
+          Select the value from outside the field
+        </button>
+      </div>
+    )
+  },
 }

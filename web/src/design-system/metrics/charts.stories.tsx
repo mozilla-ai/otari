@@ -238,3 +238,43 @@ export const Tooltips: Story = {
     </div>
   ),
 }
+
+/**
+ * `xTickInterval` and `yTickCount` set the axis density, and both exist because
+ * recharts' defaults are wrong for a strip this shape.
+ *
+ * The x default is `"preserveStartEnd"`, which thins labels by pixel gap, so the
+ * density becomes a function of the window width rather than of the data: the
+ * same chart shows every other day on a wide screen and every fifth on a narrow
+ * one. A number pins it to the data instead. The y default is 5, which is more
+ * gridlines than a short strip earns.
+ *
+ * Compare the rows: same data, three densities.
+ */
+export const AxisDensity: Story = {
+  render: () => (
+    <div className="flex w-[48rem] flex-col gap-6">
+      {(
+        [
+          ["recharts' defaults", undefined, undefined],
+          ["xTickInterval 1, yTickCount 3", 1, 3],
+          ["xTickInterval 6, yTickCount 2", 6, 2],
+        ] as const
+      ).map(([label, xTickInterval, yTickCount]) => (
+        <div key={label} className="flex flex-col gap-1">
+          <span className="text-overline">{label}</span>
+          <TrendChart
+            data={STACK}
+            series={STACK_SERIES}
+            formatValue={count}
+            formatXTick={day}
+            ariaLabel={`Requests per day, ${label}`}
+            showYAxis
+            xTickInterval={xTickInterval}
+            yTickCount={yTickCount}
+          />
+        </div>
+      ))}
+    </div>
+  ),
+}

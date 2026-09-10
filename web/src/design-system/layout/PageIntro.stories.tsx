@@ -79,3 +79,35 @@ export const DocsLinkAndAction: Story = {
     action: <Button variant="primary">Create key</Button>,
   },
 }
+
+/**
+ * `descriptionClassName` overrides the description's measure, and one caller
+ * uses it: the guide, whose own prose is 560px. On the one page whose subject is
+ * the measure, the widest line should not be the scanning-size paragraph
+ * introducing it.
+ *
+ * The default measure is wider, so the two below differ only in where the
+ * sentence wraps.
+ */
+export const NarrowerDescription: Story = {
+  render: () => (
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-1">
+        <span className="text-overline">default measure</span>
+        <PageIntro title="User guide">
+          A reference for operating this dashboard, bundled with and
+          version-matched to the running gateway.
+        </PageIntro>
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-overline">
+          descriptionClassName="max-w-[35rem]"
+        </span>
+        <PageIntro title="User guide" descriptionClassName="max-w-[35rem]">
+          A reference for operating this dashboard, bundled with and
+          version-matched to the running gateway.
+        </PageIntro>
+      </div>
+    </div>
+  ),
+}

@@ -85,3 +85,16 @@ export const InForm: Story = {
     )
   },
 }
+
+/**
+ * `autoFocus` puts the caret in the field on mount, for the one field a dialog
+ * or a first-run form exists to collect. Reload the story to see it take: focus
+ * happens once, so switching to this story from another one does not repeat it.
+ *
+ * One per screen. Two fields both claiming the caret means the second wins and
+ * the first looks broken, and a page that steals focus on every render takes it
+ * away from whatever the operator was doing.
+ */
+export const AutoFocused: Story = {
+  args: { autoFocus: true, description: "The caret starts here." },
+}

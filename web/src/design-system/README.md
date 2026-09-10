@@ -48,6 +48,13 @@ deliberately not built.
    only last a rule into HeroUI's DOM, with a comment saying why nothing above
    reached it.
 5. A `.stories.tsx` beside it covering each variant, each state, and both themes
-   where the tokens differ. The published catalog renders every one on each PR,
-   so a story is the component's test that it still paints.
+   where the tokens differ. **Every prop has to be passed by some story**, which
+   `src/styles/foundation.test.ts` checks: an optional prop is the one thing that
+   can fall outside the catalog without anything noticing, because the typecheck
+   is happy and the story simply never mentions it. A prop whose effect cannot be
+   put on screen goes in that gate's `CANNOT_BE_SHOWN` with the reason, rather
+   than being passed somewhere to satisfy the check.
+
+   Coverage counts across the whole catalog, not per file: `Field`'s `isInvalid`
+   is exercised by `FieldMessages.stories.tsx`, which is the right place for it.
 6. A `.test.tsx` beside it for behavior you changed.

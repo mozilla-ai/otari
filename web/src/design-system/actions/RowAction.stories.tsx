@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { useState } from "react"
 
 import { RowAction, RowActionRow } from "./RowAction"
 
@@ -88,4 +89,35 @@ export const InContext: Story = {
       ))}
     </div>
   ),
+}
+
+/**
+ * The danger ink, and the rule about when it may appear.
+ *
+ * `src/styles/dotRamp.test.ts` rejects a call site that paints it
+ * unconditionally: a table whose every row carries a red "Delete" reads as a
+ * table of problems, so the hue is spent on the armed step of a confirm rather
+ * than at rest. The prop below is bound to an armed flag, which is the only
+ * shape that gate allows and also the only one worth showing.
+ *
+ * `ConfirmRowAction` is what a row should actually reach for. This story exists
+ * because the prop is public, so the catalog owes a picture of what it does.
+ */
+export const ArmedPaintsDanger: Story = {
+  render: () => {
+    const [armed, setArmed] = useState(false)
+    return (
+      <div className="flex flex-col gap-3">
+        <RowActionRow>
+          <RowAction onPress={() => {}}>Edit</RowAction>
+          <RowAction isDanger={armed} onPress={() => setArmed(!armed)}>
+            {armed ? "Confirm remove" : "Remove"}
+          </RowAction>
+        </RowActionRow>
+        <p className="text-caption">
+          Press Remove: the ink is neutral at rest and danger once armed.
+        </p>
+      </div>
+    )
+  },
 }

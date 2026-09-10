@@ -154,3 +154,35 @@ export const LargeOptionList: Story = {
     )
   },
 }
+
+/**
+ * `maxVisible` caps how many options the list renders, defaulting to 50.
+ *
+ * The cap is why this control can sit on a page listing thousands of models: it
+ * narrows as you type rather than rendering the catalog. Set low here so the cap
+ * is visible with a list short enough to count. Type to narrow past it.
+ */
+export const CappedList: Story = {
+  render: () => {
+    const [values, setValues] = useState<string[]>([])
+    const options = Array.from({ length: 40 }, (_, index) => ({
+      value: `model-${index}`,
+      label: `provider:model-${String(index).padStart(2, "0")}`,
+    }))
+    return (
+      <div className="flex w-[26rem] flex-col gap-2">
+        <FilterMultiComboBox
+          label="Models"
+          values={values}
+          onChange={setValues}
+          options={options}
+          maxVisible={5}
+        />
+        <p className="text-caption">
+          40 options, maxVisible 5. The list shows five until the query narrows
+          it.
+        </p>
+      </div>
+    )
+  },
+}
