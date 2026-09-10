@@ -47,7 +47,7 @@ from gateway.services.provider_kwargs import normalize_pricing_key
 # says a request is the operator's, the membership says whether that identity may
 # change what the organization is billed.
 router = APIRouter(
-    prefix="/v1/organizations/me/pricing",
+    prefix="/organizations/me/pricing",
     tags=["organization-pricing"],
     dependencies=[Depends(verify_master_key)],
 )

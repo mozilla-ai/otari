@@ -52,13 +52,13 @@ from gateway.services.tenancy.organization_budget_service import (
 # says a request is authenticated, the membership says whether that identity may
 # set what this organization's members are allowed to spend.
 budgets_router = APIRouter(
-    prefix="/v1/organizations/me/budgets",
+    prefix="/organizations/me/budgets",
     tags=["organization-budgets"],
     dependencies=[Depends(verify_master_key)],
 )
 
 ceilings_router = APIRouter(
-    prefix="/v1/organizations/me/spend-ceilings",
+    prefix="/organizations/me/spend-ceilings",
     tags=["organization-budgets"],
     dependencies=[Depends(verify_master_key)],
 )

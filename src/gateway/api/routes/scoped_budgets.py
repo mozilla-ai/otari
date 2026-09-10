@@ -32,7 +32,7 @@ from gateway.services.scoped_budget_service import ScopeType, period_window
 # future one that forgot the decorator would be unauthenticated with nothing
 # to notice.
 router = APIRouter(
-    prefix="/v1/scoped-budgets",
+    prefix="/scoped-budgets",
     tags=["scoped-budgets"],
     dependencies=[Depends(require_deployment_operator)],
 )

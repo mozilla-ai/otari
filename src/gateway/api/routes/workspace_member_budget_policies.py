@@ -28,7 +28,7 @@ from gateway.services.tenancy.workspace_budget_default_service import (
 # handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/member-budget-policies",
+    prefix="/workspaces/{workspace_id}/member-budget-policies",
     tags=["workspace-member-budget-policies"],
     dependencies=[Depends(verify_master_key)],
 )

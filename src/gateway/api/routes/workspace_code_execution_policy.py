@@ -27,7 +27,7 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
 # every handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/code-execution-policy",
+    prefix="/workspaces/{workspace_id}/code-execution-policy",
     tags=["workspace-code-execution-policy"],
     dependencies=[Depends(verify_master_key)],
 )

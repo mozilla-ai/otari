@@ -61,12 +61,12 @@ if TYPE_CHECKING:
 # a parameter because they use what it resolves; ``Depends`` caching means it
 # still runs once per request.
 operator_router = APIRouter(
-    prefix="/v1",
+    prefix="",
     tags=["models"],
     dependencies=[Depends(require_deployment_operator)],
 )
 catalog_router = APIRouter(
-    prefix="/v1",
+    prefix="",
     tags=["models"],
     dependencies=[Depends(verify_catalog_reader)],
 )

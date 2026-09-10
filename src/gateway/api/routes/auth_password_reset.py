@@ -20,7 +20,7 @@ from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import request_password_reset, reset_password
 
-router = APIRouter(prefix="/v1/auth/password", tags=["auth"])
+router = APIRouter(prefix="/auth/password", tags=["auth"])
 
 # Same reasoning as ``auth_signup``'s bounds: a sanity ceiling on the request
 # body, not the policy, which is enforced (and whose message is preserved) in

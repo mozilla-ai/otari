@@ -57,12 +57,12 @@ from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
 # router names its own rule, so adding a route to either one inherits a gate
 # rather than none.
 operator_router = APIRouter(
-    prefix="/v1/usage",
+    prefix="/usage",
     tags=["usage"],
     dependencies=[Depends(require_deployment_operator)],
 )
 ingest_router = APIRouter(
-    prefix="/v1/usage",
+    prefix="/usage",
     tags=["usage"],
     dependencies=[Depends(verify_api_key_or_master_key)],
 )

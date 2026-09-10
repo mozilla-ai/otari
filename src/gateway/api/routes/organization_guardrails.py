@@ -38,7 +38,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 # says a request is the operator's, the membership says whether that identity may
 # change what every workspace of the organization is checked against.
 router = APIRouter(
-    prefix="/v1/organizations/me/guardrails",
+    prefix="/organizations/me/guardrails",
     tags=["organization-guardrails"],
     dependencies=[Depends(verify_master_key)],
 )

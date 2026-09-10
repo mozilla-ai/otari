@@ -34,7 +34,7 @@ from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password
 from gateway.services.tenancy.webauthn_service import has_any_credential
 
-router = APIRouter(prefix="/v1/bootstrap", tags=["bootstrap"])
+router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
 DeploymentType = Literal["standalone", "hosted", "hybrid"]
 SessionType = Literal["local_operator", "hosted_user", "none"]

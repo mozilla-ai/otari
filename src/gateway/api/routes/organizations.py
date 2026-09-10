@@ -61,7 +61,7 @@ from gateway.services.tenancy import OrganizationDomainService, OrganizationServ
 # every handler here happens to take one today, and a future handler that did
 # not would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/organizations",
+    prefix="/organizations",
     tags=["organizations"],
     dependencies=[Depends(verify_master_key)],
 )

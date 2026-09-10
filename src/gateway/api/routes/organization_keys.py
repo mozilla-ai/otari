@@ -70,7 +70,7 @@ from gateway.services.tenancy.errors import WorkspaceNotFoundError
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
-    prefix="/v1/organizations/me/keys",
+    prefix="/organizations/me/keys",
     tags=["organization-keys"],
     # Authentication only, like the rest of the ``/v1/organizations/me`` surface.
     # What the caller may touch is decided per request by the owner predicate and

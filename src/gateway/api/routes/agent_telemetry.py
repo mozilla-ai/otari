@@ -61,7 +61,7 @@ from gateway.services.agent_telemetry_service import (
 )
 
 router = APIRouter(
-    prefix="/v1/agent-telemetry",
+    prefix="/agent-telemetry",
     tags=["agent-telemetry"],
     dependencies=[Depends(require_deployment_operator)],
 )

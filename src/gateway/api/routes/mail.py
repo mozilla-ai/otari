@@ -29,7 +29,7 @@ from gateway.log_config import logger
 from gateway.services.mail import Mailer, MailNotConfiguredError, normalized_address
 
 router = APIRouter(
-    prefix="/v1/settings/mail",
+    prefix="/settings/mail",
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )

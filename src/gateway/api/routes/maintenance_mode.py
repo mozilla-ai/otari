@@ -30,7 +30,7 @@ from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode, stage_maintenance_mode
 
 router = APIRouter(
-    prefix="/v1/settings/maintenance-mode",
+    prefix="/settings/maintenance-mode",
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )

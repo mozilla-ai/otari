@@ -24,7 +24,7 @@ from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_bud
 from gateway.services.scoped_budget_service import ResetAlignment
 
 router = APIRouter(
-    prefix="/v1/budgets",
+    prefix="/budgets",
     tags=["budgets"],
     dependencies=[Depends(require_deployment_operator)],
 )

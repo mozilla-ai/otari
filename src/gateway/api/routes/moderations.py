@@ -20,7 +20,7 @@ from gateway.types.moderation import ModerationResponse
 # Locked phrasing — cross-SDK error contract. Do not reword.
 UNSUPPORTED_MODERATION_SUBSTRING = "does not support moderation"
 
-router = APIRouter(prefix="/v1", tags=["moderations"])
+router = APIRouter(prefix="", tags=["moderations"])
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/moderations"

@@ -60,7 +60,7 @@ from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get
 from gateway.services.routing.knn import KnnRoutingMemory
 
 router = APIRouter(
-    prefix="/v1/routing",
+    prefix="/routing",
     tags=["routing"],
     dependencies=[Depends(require_deployment_operator)],
 )

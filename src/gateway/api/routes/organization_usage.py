@@ -92,7 +92,7 @@ from gateway.services.tenancy.authorization import (
 )
 
 router = APIRouter(
-    prefix="/v1/organizations/me/usage",
+    prefix="/organizations/me/usage",
     tags=["organization-usage"],
     # Authentication only, like the rest of the ``/v1/organizations/me`` surface.
     # What the caller may read is decided per request by the scope below, which

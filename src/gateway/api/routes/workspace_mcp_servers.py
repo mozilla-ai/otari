@@ -32,7 +32,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 # handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/mcp-servers",
+    prefix="/workspaces/{workspace_id}/mcp-servers",
     tags=["mcp-servers"],
     dependencies=[Depends(verify_master_key)],
 )

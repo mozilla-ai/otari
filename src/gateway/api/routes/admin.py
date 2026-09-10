@@ -33,7 +33,7 @@ from gateway.services.tenancy.deployment_user_service import DeploymentUserServi
 # top, inside the service, because it is about who the caller *is* rather than
 # whether they authenticated.
 router = APIRouter(
-    prefix="/v1/admin",
+    prefix="/admin",
     tags=["admin"],
     dependencies=[Depends(verify_master_key)],
 )

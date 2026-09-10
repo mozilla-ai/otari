@@ -33,7 +33,7 @@ from gateway.services.tenancy.workspace_activation_service import (
 )
 
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/activation",
+    prefix="/workspaces/{workspace_id}/activation",
     tags=["workspace-activation"],
     dependencies=[Depends(verify_master_key)],
 )

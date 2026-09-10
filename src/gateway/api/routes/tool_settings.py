@@ -53,12 +53,12 @@ from gateway.services.url_safety import redact_url_secrets
 # The reader declares ``verify_master_key`` and then decides how much to return
 # from the caller's standing, exactly as the tenant-scoped routers do.
 operator_router = APIRouter(
-    prefix="/v1/tool-settings",
+    prefix="/tool-settings",
     tags=["tool-settings"],
     dependencies=[Depends(require_deployment_operator)],
 )
 reader_router = APIRouter(
-    prefix="/v1/tool-settings",
+    prefix="/tool-settings",
     tags=["tool-settings"],
     dependencies=[Depends(verify_master_key)],
 )

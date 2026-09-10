@@ -66,7 +66,7 @@ from gateway.services.tenancy.user_service import set_password, update_password
 _MAX_SUBMITTED_PASSWORD = 1024
 
 router = APIRouter(
-    prefix="/v1/auth/password",
+    prefix="/auth/password",
     tags=["auth"],
     dependencies=[Depends(verify_master_key)],
 )

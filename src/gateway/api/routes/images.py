@@ -18,7 +18,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import per_image_cost
 from gateway.services.provider_kwargs import ResolvedProvider
 
-router = APIRouter(prefix="/v1", tags=["images"])
+router = APIRouter(prefix="", tags=["images"])
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/images/generations"

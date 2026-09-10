@@ -56,7 +56,7 @@ from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
-router = APIRouter(prefix="/v1/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"])
 
 # The label written to a usage-log row. An identifier, not a URL: it stays as
 # it is so new rows compare with old ones.

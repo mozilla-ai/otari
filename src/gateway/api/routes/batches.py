@@ -50,7 +50,7 @@ from gateway.services.workspace_scope import (
     workspace_for_key_id,
 )
 
-router = APIRouter(prefix="/v1/batches", tags=["batches"])
+router = APIRouter(prefix="/batches", tags=["batches"])
 
 # See chat.USAGE_ENDPOINT.
 USAGE_ENDPOINT = "/v1/batches"

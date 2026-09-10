@@ -70,7 +70,7 @@ from gateway.services.tenancy.organization_domain_service import OrganizationDom
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
 
-router = APIRouter(prefix="/v1/auth/session", tags=["auth"])
+router = APIRouter(prefix="/auth/session", tags=["auth"])
 
 MASTER_KEY_SIGN_IN_RETIRED = (
     "Master-key sign-in is retired on this deployment: it has been claimed with a password. "

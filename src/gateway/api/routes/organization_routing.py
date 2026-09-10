@@ -98,13 +98,13 @@ from gateway.services.tenancy.organization_model_access import resolve_session_m
 # pattern the tenant-scoped routers already follow and the reason the deployment
 # operator gate does not belong here.
 policies_router = APIRouter(
-    prefix="/v1/organizations/me/routing-policies",
+    prefix="/organizations/me/routing-policies",
     tags=["routing"],
     dependencies=[Depends(verify_master_key)],
 )
 
 aliases_router = APIRouter(
-    prefix="/v1/organizations/me/aliases",
+    prefix="/organizations/me/aliases",
     tags=["aliases"],
     dependencies=[Depends(verify_master_key)],
 )

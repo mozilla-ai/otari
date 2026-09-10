@@ -49,7 +49,7 @@ from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
 
 router = APIRouter(
-    prefix="/v1/routing/policies",
+    prefix="/routing/policies",
     tags=["routing"],
     dependencies=[Depends(require_deployment_operator)],
 )

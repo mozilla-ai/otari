@@ -27,7 +27,7 @@ _KEY_EXCEEDS_USER_DETAIL = (
 )
 
 router = APIRouter(
-    prefix="/v1/keys",
+    prefix="/keys",
     tags=["keys"],
     dependencies=[Depends(require_deployment_operator)],
 )

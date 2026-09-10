@@ -30,12 +30,12 @@ from gateway.services.provider_kwargs import normalize_pricing_key, provider_key
 # declared on. See ``api/deps.verify_catalog_reader`` for why the reads are open
 # at all.
 operator_router = APIRouter(
-    prefix="/v1/pricing",
+    prefix="/pricing",
     tags=["pricing"],
     dependencies=[Depends(require_deployment_operator)],
 )
 catalog_router = APIRouter(
-    prefix="/v1/pricing",
+    prefix="/pricing",
     tags=["pricing"],
     dependencies=[Depends(verify_catalog_reader)],
 )

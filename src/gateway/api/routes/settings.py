@@ -50,7 +50,7 @@ from gateway.services.url_safety import redact_url_secrets
 from gateway.version import __version__
 
 router = APIRouter(
-    prefix="/v1/settings",
+    prefix="/settings",
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )

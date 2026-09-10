@@ -28,7 +28,7 @@ from gateway.models.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService
 
-router = APIRouter(prefix="/v1/invitations", tags=["invitations"])
+router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
 def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:

@@ -54,7 +54,7 @@ from gateway.services.secret_box import (
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 router = APIRouter(
-    prefix="/v1",
+    prefix="",
     tags=["providers"],
     dependencies=[Depends(require_deployment_operator)],
 )

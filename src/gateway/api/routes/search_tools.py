@@ -56,7 +56,7 @@ from gateway.services.secret_box import (
 from gateway.services.tool_settings_service import validate_url
 
 router = APIRouter(
-    prefix="/v1/search-tools",
+    prefix="/search-tools",
     tags=["search-tools"],
     dependencies=[Depends(require_deployment_operator)],
 )

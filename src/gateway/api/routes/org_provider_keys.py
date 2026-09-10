@@ -36,13 +36,13 @@ from gateway.services.tenancy import OrgProviderKeyService
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # see organizations.py/workspaces.py for the same note.
 org_router = APIRouter(
-    prefix="/v1/organizations/me/provider-keys",
+    prefix="/organizations/me/provider-keys",
     tags=["provider-keys"],
     dependencies=[Depends(verify_master_key)],
 )
 
 workspace_router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/provider-keys",
+    prefix="/workspaces/{workspace_id}/provider-keys",
     tags=["provider-keys"],
     dependencies=[Depends(verify_master_key)],
 )

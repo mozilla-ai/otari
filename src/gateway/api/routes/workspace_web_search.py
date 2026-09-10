@@ -27,7 +27,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
 # every handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/web-search",
+    prefix="/workspaces/{workspace_id}/web-search",
     tags=["workspace-web-search"],
     dependencies=[Depends(verify_master_key)],
 )
