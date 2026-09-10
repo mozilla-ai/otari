@@ -44,8 +44,7 @@ type Story = StoryObj<typeof meta>
 /**
  * `value` is the picked option's `value` and the input shows its `label`, the
  * same division `Select` makes. The field filters nothing: `onQueryChange`
- * publishes what is in the input and the caller decides what matches, which is
- * what lets one field match on an id and another cap a long list.
+ * publishes what is in the input and the caller decides what matches.
  */
 export const Default: Story = {
   render: (args) => {

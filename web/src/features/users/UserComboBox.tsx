@@ -87,7 +87,9 @@ export function UserComboBox({
     <ComboBoxField
       label={label}
       value={value}
-      onChange={onChange}
+      // Trimmed, because a pasted id often carries a space and every caller
+      // submits this as an owner id.
+      onChange={(next) => onChange(next.trim())}
       onQueryChange={setQuery}
       options={visible}
       description={creatingHint}

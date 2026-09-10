@@ -148,6 +148,16 @@ export function ComboBoxField({
   // an id in the box.
   const [typed, setTyped] = useState<string>()
 
+  // The value as this field last saw it, which is what tells a value the caller
+  // moved from one this field reported. The first kind leaves whatever is in the
+  // box stale: a list of these fields that drops a row moves a value under a
+  // field that is still mounted.
+  const [seen, setSeen] = useState(value)
+  if (value !== seen) {
+    setSeen(value)
+    if (value !== typed) setTyped(undefined)
+  }
+
   const setQuery = (next: string | undefined) => {
     setTyped(next)
     onQueryChange?.(next ?? "")
@@ -172,10 +182,10 @@ export function ComboBoxField({
       selectedKey={selected && typed === undefined ? selected.value : null}
       onInputChange={(next) => {
         setQuery(next)
-        // Only a field offering the list as suggestions can report what was
-        // typed. Elsewhere the value stays whichever row is selected, and
-        // react-aria reports the selection back on commit.
-        if (allowsCustomValue) onChange(next)
+        // A field offering the list as suggestions reports what was typed.
+        // Elsewhere the value stays whichever row is selected, except that an
+        // emptied box is how that selection is cleared.
+        if (allowsCustomValue || next === "") onChange(next)
       }}
       onSelectionChange={(key) => {
         // The input goes back to showing the value, which after a pick is that

@@ -56,9 +56,8 @@ describe("ComboBoxField", () => {
       await screen.findByRole("option", { name: "Ada Lovelace" }),
     )
 
-    // One report, and it is the id: a label identifies no row, since two rows
-    // may share one and one row's label may be another row's id. The label is
-    // what the box shows, which is the whole division of labor here.
+    // One report, and it is the id. The label is what the box shows, which is
+    // the whole division of labor here.
     expect(seen).toEqual(["018f-0001"])
     expect(field).toHaveValue("Ada Lovelace")
   })
@@ -88,6 +87,49 @@ describe("ComboBoxField", () => {
     )
 
     expect(field).toHaveValue("Ada Lovelace")
+  })
+
+  it("repaints when the caller moves the value out from under it", async () => {
+    const props = {
+      label: "Serves" as const,
+      onChange: () => {},
+      options: OPTIONS,
+      allowsCustomValue: true,
+    }
+    const { rerender } = render(
+      <ComboBoxField {...props} value="openai:gpt-4o" />,
+    )
+
+    const field = screen.getByRole("combobox", { name: "Serves" })
+    await userEvent.type(field, "!")
+
+    rerender(<ComboBoxField {...props} value="anthropic:claude-sonnet-4-5" />)
+
+    // A row of these fields whose neighbor is removed hands a mounted field
+    // somebody else's value, so a value the field did not report wins over the
+    // text left in the box.
+    expect(field).toHaveValue("anthropic:claude-sonnet-4-5")
+  })
+
+  it("clears the value when the box is emptied", async () => {
+    const seen: string[] = []
+    render(
+      <Harness
+        options={[{ value: "018f-0001", label: "Ada Lovelace" }]}
+        onValue={(value) => seen.push(value)}
+      />,
+    )
+
+    const field = screen.getByRole("combobox", { name: "Serves" })
+    await userEvent.click(field)
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Ada Lovelace" }),
+    )
+    await userEvent.clear(field)
+
+    // Emptying the box is the one edit a whitelist reports, since it is the
+    // only way to take a selection back.
+    expect(seen).toEqual(["018f-0001", ""])
   })
 
   it("still reports text the operator edits after picking a row", async () => {

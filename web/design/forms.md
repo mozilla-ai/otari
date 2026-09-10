@@ -120,14 +120,11 @@ beyond it. See its docstring for the contract; four things are worth knowing at
 a call site.
 
 **`value` is the option's `value`, exactly as in `Select`**, and the input shows
-that option's `label`. An id and a name point at the same thing, so identity
-travels as the id and the label is only displayed; the field never reports a
-label, because a label maps back to no single id (two rows may share one, and
-one row's label may be another row's id). `allowsCustomValue` is the one
-addition: text matching no row is reported as the value too, as itself rather
-than as a lookup. So typing somebody's name names a new id rather than
-resolving to theirs, and `description` is where a field says what typing will
-do (`UserComboBox`'s `unknownHint`).
+that option's `label`. The field never reports a label; the docstring says why.
+`allowsCustomValue` is the one addition: text matching no row is reported as the
+value too, as itself rather than as a lookup. So typing somebody's name names a
+new id rather than resolving to theirs, which is what `description` is for
+(`UserComboBox`'s `unknownHint` says the id will be created).
 
 **It filters nothing.** `options` is what the popover holds, already matched and
 capped by the caller, because what counts as a match differs per field (an id as
