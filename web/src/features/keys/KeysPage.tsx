@@ -554,11 +554,17 @@ function CreateKeyDialog({
     return (
       <FormDialog
         isOpen={isOpen}
-        onOpenChange={close}
+        // Guarded the same way the form step is: a truthy `open` is forwarded
+        // straight through, so taking `close` bare here made any request to
+        // open this dialog close it instead. Nothing sends one today, since the
+        // only source is the hidden trigger, but this is the step where being
+        // wrong loses the key.
+        onOpenChange={(open) => (open ? onOpenChange(true) : close())}
         size="lg"
         // A dismiss here loses the key for good, so there is one way out and it
         // is the acknowledgement. `FormDialog` drops its close control and its
-        // Cancel to match.
+        // Cancel to match, and `isDismissable` does not reach the line above:
+        // it guards `requestClose`, not a forwarded open.
         isDismissable={false}
         title="Key created"
         // The strip's own words, not "Done": this control is an
