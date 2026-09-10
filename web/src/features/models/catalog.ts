@@ -62,8 +62,8 @@ export const CAPABILITY_FILTERS: {
   },
 ]
 
-/** The input modalities the rail offers, in the order they are listed. */
-export const INPUT_MODALITIES = ["text", "image", "pdf", "audio", "video"]
+/** The modalities the rail offers, in the order they are listed. */
+export const MODALITIES = ["text", "image", "pdf", "audio", "video"]
 
 export const CONTEXT_OPTIONS = [
   { value: "0", label: "Any context" },
@@ -124,9 +124,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface CatalogFilters {
   query: string
-  /** An output modality the tab row picks; "all" for every model. */
-  output: string
   inputModalities: string[]
+  outputModalities: string[]
   /** Provider instances; empty for any. The Providers page links here with one. */
   providers: string[]
   vendors: string[]
@@ -143,8 +142,8 @@ export interface CatalogFilters {
 
 export const EMPTY_FILTERS: CatalogFilters = {
   query: "",
-  output: "all",
   inputModalities: [],
+  outputModalities: [],
   providers: [],
   vendors: [],
   capabilities: [],
@@ -159,6 +158,7 @@ export const EMPTY_FILTERS: CatalogFilters = {
 export function activeFilterCount(filters: CatalogFilters): number {
   return (
     filters.inputModalities.length +
+    filters.outputModalities.length +
     filters.providers.length +
     filters.vendors.length +
     filters.capabilities.length +
@@ -219,15 +219,17 @@ export function filterModels(
   return models.filter((model) => {
     if (query && !matchesQuery(model, query)) return false
     if (
-      filters.output !== "all" &&
-      !model.output_modalities.includes(filters.output)
+      filters.inputModalities.length > 0 &&
+      !filters.inputModalities.every((modality) =>
+        model.input_modalities.includes(modality),
+      )
     ) {
       return false
     }
     if (
-      filters.inputModalities.length > 0 &&
-      !filters.inputModalities.every((modality) =>
-        model.input_modalities.includes(modality),
+      filters.outputModalities.length > 0 &&
+      !filters.outputModalities.every((modality) =>
+        model.output_modalities.includes(modality),
       )
     ) {
       return false
@@ -346,29 +348,6 @@ export const SORT_OPTIONS: {
     direction: "desc",
   },
 ]
-
-/** The tab row across the top: every model, then one tab per output modality served. */
-export function outputTabs(
-  models: CatalogModelSummary[],
-): { value: string; label: string; count: number }[] {
-  const counts = new Map<string, number>()
-  for (const model of models) {
-    for (const modality of model.output_modalities) {
-      counts.set(modality, (counts.get(modality) ?? 0) + 1)
-    }
-  }
-  const order = ["text", "image", "audio", "video", "pdf"]
-  const known = order.filter((m) => counts.has(m))
-  const rest = [...counts.keys()].filter((m) => !order.includes(m)).sort()
-  return [
-    { value: "all", label: "All", count: models.length },
-    ...[...known, ...rest].map((modality) => ({
-      value: modality,
-      label: MODALITY_LABELS[modality] ?? modality,
-      count: counts.get(modality) ?? 0,
-    })),
-  ]
-}
 
 /** Vendors present, with the unknown bucket named, for the rail. */
 export function vendorOptions(

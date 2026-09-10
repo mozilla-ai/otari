@@ -16,9 +16,8 @@ import {
   compareModels,
   EMPTY_FILTERS,
   filterModels,
-  INPUT_MODALITIES,
+  MODALITIES,
   MODALITY_LABELS,
-  outputTabs,
   PRICE_OPTIONS,
   PRICING_OPTIONS,
   providerOptions,
@@ -43,7 +42,6 @@ import { Badge } from "@/shared/components/indicators/Badge"
 import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { Segmented } from "@/shared/components/navigation/Segmented"
-import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 import {
   formatContext,
   formatRate,
@@ -53,8 +51,7 @@ import {
 import { useUrlValue } from "@/shared/helpers/urlState"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
-// right a search, a sort, a row of tabs by what the model produces, and one
-// card per model. A card is a link to the model's own page, `/models/$modelId`,
+// right a search, a sort, and one card per model. A card is a link to the model's own page, `/models/$modelId`,
 // where its offerings are compared. Below `lg` the rail folds behind a
 // "Filters" button.
 //
@@ -196,7 +193,7 @@ function FilterRail({
         count={filters.inputModalities.length}
         defaultOpen
       >
-        {INPUT_MODALITIES.map((modality) => (
+        {MODALITIES.map((modality) => (
           <Checkbox
             key={modality}
             isSelected={filters.inputModalities.includes(modality)}
@@ -204,6 +201,25 @@ function FilterRail({
               set(
                 "inputModalities",
                 toggle(filters.inputModalities, modality, on),
+              )
+            }
+          >
+            {MODALITY_LABELS[modality] ?? modality}
+          </Checkbox>
+        ))}
+      </FilterGroup>
+      <FilterGroup
+        label="Output modalities"
+        count={filters.outputModalities.length}
+      >
+        {MODALITIES.map((modality) => (
+          <Checkbox
+            key={modality}
+            isSelected={filters.outputModalities.includes(modality)}
+            onChange={(on) =>
+              set(
+                "outputModalities",
+                toggle(filters.outputModalities, modality, on),
               )
             }
           >
@@ -633,25 +649,6 @@ export function ModelCatalogView({
                   ? `Filters (${activeCount})`
                   : "Filters"}
             </Button>
-          </div>
-
-          <div className="border-b border-border">
-            <TabRow>
-              {outputTabs(models).map((tab) => (
-                <Tab
-                  key={tab.value}
-                  isActive={filters.output === tab.value}
-                  onPress={() =>
-                    updateFilters({ ...filters, output: tab.value })
-                  }
-                >
-                  {tab.label}{" "}
-                  <span className="text-mono-micro text-subtle">
-                    {tab.count}
-                  </span>
-                </Tab>
-              ))}
-            </TabRow>
           </div>
 
           {catalog.isPending && !catalog.data ? (

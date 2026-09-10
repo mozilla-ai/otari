@@ -6,7 +6,6 @@ import {
   compareModels,
   EMPTY_FILTERS,
   filterModels,
-  outputTabs,
   priceSourceLabel,
   providerOptions,
   ratesAtContext,
@@ -231,30 +230,25 @@ describe("options", () => {
     ])
   })
 
-  it("tabs the list by what a model produces, every model first", () => {
+  it("narrows by what a model produces", () => {
     const image = model({ id: "painter", output_modalities: ["image"] })
-    expect(outputTabs([GLM, KIMI, image])).toEqual([
-      { value: "all", label: "All", count: 3 },
-      { value: "text", label: "Text", count: 2 },
-      { value: "image", label: "Image", count: 1 },
-    ])
     expect(
-      filterModels([GLM, KIMI, image], { ...ANY, output: "image" }),
+      filterModels([GLM, KIMI, image], { ...ANY, outputModalities: ["image"] }),
     ).toEqual([image])
   })
 
-  it("counts the choices in force, and not the search or the tab", () => {
+  it("counts the choices in force, and not the search", () => {
     expect(activeFilterCount(ANY)).toBe(0)
     expect(
       activeFilterCount({
         ...ANY,
         query: "glm",
-        output: "text",
+        outputModalities: ["text"],
         providers: ["nebius", "fireworks"],
         minContext: 32_000,
         pricing: "custom",
       }),
-    ).toBe(4)
+    ).toBe(5)
   })
 })
 

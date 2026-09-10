@@ -251,7 +251,7 @@ describe("ModelCatalogPage", () => {
     expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
   })
 
-  it("tabs by what a model produces", async () => {
+  it("narrows by what a model produces", async () => {
     mockApi({
       catalog: {
         ...CATALOG,
@@ -262,7 +262,10 @@ describe("ModelCatalogPage", () => {
     const user = userEvent.setup()
 
     await screen.findByRole("list", { name: "Models" })
-    await user.click(screen.getByRole("button", { name: /^Image/ }))
+    await user.click(screen.getByRole("button", { name: "Output modalities" }))
+    // Two groups offer "Image"; the second is the output one.
+    const image = screen.getAllByRole("checkbox", { name: "Image" })[1]
+    await user.click(image as HTMLElement)
 
     const list = screen.getByRole("list", { name: "Models" })
     expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
