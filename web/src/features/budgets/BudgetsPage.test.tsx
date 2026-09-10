@@ -67,6 +67,8 @@ function mockApi(
     budgets?: Budget[]
     resetLogs?: BudgetResetLog[]
     users?: User[]
+    /** What a create answers with, for the case that drives a refusal. */
+    createBudget?: () => Response
     failedUserUpdates?: string[]
     updateUser?: (userId: string) => Response | Promise<Response>
     // Who is asking, which is what decides which of the two pages this route
@@ -105,6 +107,7 @@ function mockApi(
           return jsonResponse(resetLogs)
         }
         if (method === "POST") {
+          if (opts.createBudget) return opts.createBudget()
           const body = JSON.parse(String(init?.body)) as Partial<Budget>
           const row = budget({
             budget_id: "new-budget-id-0000-0000-000000000000",
@@ -383,6 +386,43 @@ describe("BudgetsPage", () => {
       screen.getByRole("button", { name: "Create your first budget" }),
     )
     expect(screen.getByLabelText("Name (optional)")).toHaveValue("")
+  })
+
+  it("does not greet the next open with the last one's refusal", async () => {
+    // The create mutation lives below the dialog's key, so it is remounted with
+    // the form: a 409 from one attempt cannot still be on screen when the
+    // dialog is opened again. Left above the key, the banner survives, and the
+    // second open reads as though this attempt had already failed.
+    mockApi({
+      budgets: [],
+      createBudget: () =>
+        jsonResponse({ detail: "A budget named team-a already exists" }, 409),
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "team-a")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create budget",
+      }),
+    )
+    expect(
+      await screen.findByText(/A budget named team-a already exists/),
+    ).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(
+      screen.queryByText(/A budget named team-a already exists/),
+    ).toBeNull()
   })
 
   it("keeps failed initial assignments retryable without creating another budget", async () => {
