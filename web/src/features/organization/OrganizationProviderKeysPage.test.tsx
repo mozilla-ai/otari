@@ -77,6 +77,21 @@ afterEach(() => {
 })
 
 describe("OrganizationProviderKeysPage", () => {
+  it("keeps the page's add action visible while the dialog is open", async () => {
+    // It used to hide while the form was a band on the page. The form is over
+    // the page now, and the trigger is where focus returns when it closes.
+    mockApi({})
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    const trigger = await screen.findByRole("button", {
+      name: "Add provider key",
+    })
+    await user.click(trigger)
+    await screen.findByRole("dialog", { name: "New provider key" })
+    expect(trigger).toBeInTheDocument()
+  })
+
   it("lists the organization's keys with the default marked", async () => {
     mockApi({
       keys: [

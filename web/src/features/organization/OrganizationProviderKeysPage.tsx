@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import type {
   CreateOrgProviderKeyRequest,
@@ -11,13 +11,13 @@ import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   BYO_UNSUPPORTED_PROVIDERS,
@@ -112,9 +112,11 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
 }
 
 function KeyForm({
+  isOpen,
   editing,
   onClose,
 }: {
+  isOpen: boolean
   /** The key being edited, or null when the form is creating one. */
   editing: OrgProviderKey | null
   onClose: () => void
@@ -135,6 +137,10 @@ function KeyForm({
   )
   const spec = credentialSpecFor(draft.provider)
   const pending = create.isPending || update.isPending
+  // The whole draft against what the form was seeded with, so a guard cannot
+  // miss a field the form grows later.
+  const seeded = useRef(JSON.stringify(draft))
+  const isDirty = JSON.stringify(draft) !== seeded.current
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
@@ -175,15 +181,22 @@ function KeyForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title={editing ? "Edit provider key" : "New provider key"}
+      // The key it is about, where the title used to carry it inline. A dialog
+      // title is a noun phrase.
+      description={editing ? editing.name : undefined}
+      submitLabel={editing ? "Save" : "Add provider key"}
+      onSubmit={submit}
+      isPending={pending}
+      isSubmitDisabled={!canSubmit}
+      isDirty={isDirty}
+      error={create.error ?? update.error}
     >
-      <h2 className="text-title">
-        {editing ? `Edit ${editing.name}` : "Add provider key"}
-      </h2>
-      <ErrorBanner error={create.error ?? update.error} />
-
       {editing ? (
         // The provider is part of the key's identity (it is half of the
         // uniqueness constraint and the whole of what dispatch matches on),
@@ -256,23 +269,7 @@ function KeyForm({
         onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
         error={clientArgsError}
       />
-
-      {/* Under a rule of its own, so the row that commits the form is divided
-          from the fields rather than floating after them. */}
-      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
-        <Button variant="ghost" isDisabled={pending} onPress={onClose}>
-          Close
-        </Button>
-        <Button
-          variant="primary"
-          isDisabled={!canSubmit}
-          isPending={pending}
-          onPress={submit}
-        >
-          {editing ? "Save" : "Add provider key"}
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -439,8 +436,11 @@ export function OrganizationProviderKeysPage() {
       <PageIntro
         title="Providers"
         action={
-          canEdit && !adding ? (
+          canEdit ? (
             <Button
+              // Visible while the dialog is open; disabled rather than hidden
+              // without a server secret key, which is the rule for a control
+              // that carries its own reason nearby.
               variant="primary"
               isDisabled={!secretKeyConfigured}
               onPress={() => {
@@ -491,14 +491,17 @@ export function OrganizationProviderKeysPage() {
         </InfoBanner>
       ) : null}
 
-      {adding && secretKeyConfigured ? (
-        <KeyForm editing={null} onClose={() => setAdding(false)} />
-      ) : null}
+      <KeyForm
+        isOpen={adding && secretKeyConfigured}
+        editing={null}
+        onClose={() => setAdding(false)}
+      />
       {editing ? (
         // Remounted per row: the draft is seeded from the key once, so editing a
         // second key would otherwise open with the first one's values.
         <KeyForm
           key={editing.id}
+          isOpen
           editing={editing}
           onClose={() => setEditingId(null)}
         />
