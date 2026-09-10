@@ -18,6 +18,7 @@
  */
 
 import type { DeploymentBootstrap } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 
 /** Stands in for a model when the deployment has none to name yet. */
 export const SNIPPET_MODEL_PLACEHOLDER = "your-model"
@@ -75,7 +76,7 @@ export function buildCurlSnippet({
 }: RequestSnippetInput): string {
   const body = `{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`
   return [
-    `curl ${shellSingleQuoted(`${baseUrl}/v1/chat/completions`)} \\`,
+    `curl ${shellSingleQuoted(`${baseUrl}${API_ROOT}/chat/completions`)} \\`,
     `  -H "Otari-Key: ${apiKey}" \\`,
     `  -H "Content-Type: application/json" \\`,
     `  -d ${shellSingleQuoted(body)}`,
@@ -117,7 +118,7 @@ export function buildPythonSnippet({
  * the one host their traffic should not reach. A placeholder host would be no
  * better, since nobody reading it can know what to put in its place, so the
  * caller shows no snippet and says why. Undefined and never `""`, so that a
- * caller cannot build `curl /v1/chat/completions` out of an origin that is not
+ * caller cannot build `curl /api/v1/chat/completions` out of an origin that is not
  * there; this is the boundary where the bootstrap's `null` becomes the absent
  * value the rest of the tree branches on.
  *

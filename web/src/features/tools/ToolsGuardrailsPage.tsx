@@ -296,7 +296,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // below. Of the deployment-wide reads above them, only the tool settings now
   // answer a tenant, without the service endpoints in them (otari-ai#1969), so
   // that one is asked unconditionally and rendered read-only. The pricing rows
-  // and the /v1/search tools stay operator-only on the server, so they are
+  // and the /api/v1/search tools stay operator-only on the server, so they are
   // still gated on the same answer the sidebar uses rather than fired into a 403.
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
@@ -307,7 +307,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const update = useUpdateToolSettings()
   const [toast, showToast] = useSaveToast()
 
-  // Latest rate per key. /v1/pricing is history-shaped (one row per
+  // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force.
   const currentRates = new Map<string, number>()
   for (const row of pricing.data ?? []) {
@@ -377,7 +377,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 ...(group.catchAll ? unlisted : []),
               ]
               // Operator-only inside a group a member also sees: the rate
-              // comes from /v1/pricing, whose read is still operator-gated, so
+              // comes from /api/v1/pricing, whose read is still operator-gated, so
               // a member would get an editable "unpriced" row that can only
               // fail on save.
               const pricingKey =
@@ -443,9 +443,9 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the
                 one set just above it. Operator-only, like those settings: its
-                rows are the deployment's own /v1/search credentials. The
+                rows are the deployment's own /api/v1/search credentials. The
                 workspace group goes below both, because it narrows the backend
-                above it and the /v1/search tools beside it. */}
+                above it and the /api/v1/search tools beside it. */}
             {service.key === "web_search" ? (
               <>
                 {isOperator ? (

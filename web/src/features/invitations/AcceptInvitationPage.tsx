@@ -22,7 +22,7 @@
  * configures no OAuth provider that ending is a genuine dead end, so it names
  * the setting an operator has to fill in rather than an action nobody can
  * take. Nothing here asks whether the invited identity has a password yet, and
- * nothing may: that is the enumeration answer `POST /v1/auth/signup` withholds
+ * nothing may: that is the enumeration answer `POST /api/v1/auth/signup` withholds
  * by design, so the claim and the sign-in are both offered and the visitor
  * picks. A session is treated the same way, as this browser's state rather
  * than proof of who is reading: accepting takes no identity, so a signed-in
@@ -162,7 +162,7 @@ export function AcceptInvitationPage() {
           ) : (
             <>
               {/* Never "ask an administrator to set your password": there is
-                      no endpoint for that. `PUT /v1/auth/password` only ever
+                      no endpoint for that. `PUT /api/v1/auth/password` only ever
                       acts on the caller's own identity, so that advice named
                       something nobody on this deployment can do. */}
               <p className="text-center text-xs text-muted">

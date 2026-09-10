@@ -48,9 +48,7 @@ export function useOrganizationRoutingPolicies(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_ROUTING_POLICIES],
     queryFn: () =>
-      apiFetch<RoutingPolicyResponse[]>(
-        "/organizations/me/routing-policies",
-      ),
+      apiFetch<RoutingPolicyResponse[]>("/organizations/me/routing-policies"),
     staleTime: 60_000,
     enabled,
   })

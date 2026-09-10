@@ -30,8 +30,7 @@ export function useDiscoverableModels(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [DISCOVERABLE],
-    queryFn: () =>
-      apiFetch<DiscoverableModelsResponse>("/models/discoverable"),
+    queryFn: () => apiFetch<DiscoverableModelsResponse>("/models/discoverable"),
     staleTime: 5 * 60_000,
     enabled,
   })

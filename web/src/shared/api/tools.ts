@@ -116,13 +116,10 @@ export function useUpdateSearchTool() {
       name: string
       body: UpdateSearchToolRequest
     }) =>
-      apiFetch<StoredSearchTool>(
-        `/search-tools/${encodeURIComponent(name)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        },
-      ),
+      apiFetch<StoredSearchTool>(`/search-tools/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
   })

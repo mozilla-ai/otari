@@ -89,8 +89,7 @@ export function usePreviewPricingRefresh() {
 export function useConfirmPricingRefresh() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () =>
-      apiFetch("/pricing/refresh/confirm", { method: "POST" }),
+    mutationFn: () => apiFetch("/pricing/refresh/confirm", { method: "POST" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
@@ -132,9 +131,7 @@ export function useOrganizationPricing(enabled = true) {
     // `fetchAllPaged` carries the same hard page cap the rest of the tenancy
     // surface uses, so a backend that ignored `skip` cannot spin this.
     queryFn: () =>
-      fetchAllPaged<OrganizationPricingOverride>(
-        "/organizations/me/pricing",
-      ),
+      fetchAllPaged<OrganizationPricingOverride>("/organizations/me/pricing"),
     staleTime: 60_000,
     enabled,
   })

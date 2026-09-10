@@ -23,7 +23,7 @@ import {
 } from "@/shared/api/tools"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
-// Search tools are what POST /v1/search dispatches against. They used to be
+// Search tools are what POST /api/v1/search dispatches against. They used to be
 // declarable only in a config file, so a deployment configured entirely through
 // the dashboard could not use that endpoint at all. This is the route in:
 // stored tools are editable here, config-file tools are shown read-only so the
@@ -331,7 +331,7 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
 }
 
 /**
- * The named tools behind `POST /v1/search`, as a row that drills in.
+ * The named tools behind `POST /api/v1/search`, as a row that drills in.
  *
  * A searxng tool that declares no backend URL of its own inherits the
  * deployment's web-search URL, which is why this sits directly under the
@@ -357,7 +357,7 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
     <SettingsGroup
       bounded
       title="Search tools"
-      description="Named tools behind the direct endpoint, POST /v1/search. A searxng tool with no URL of its own reuses the backend above."
+      description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
       docsHref={docsHref}
     >
       {tools.error || providers.error ? (
@@ -375,8 +375,8 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
             : !answered
               ? "Reading the tools this deployment serves."
               : count === 0
-                ? "None configured, so POST /v1/search refuses every request."
-                : "Callers name one in search_tool_name, or in the /v1/search/{tool} path."
+                ? "None configured, so POST /api/v1/search refuses every request."
+                : "Callers name one in search_tool_name, or in the /api/v1/search/{tool} path."
         }
         isOpen={isOpen}
         onToggle={() => setIsOpen((open) => !open)}

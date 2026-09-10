@@ -152,10 +152,9 @@ export function useDeleteStoredProvider() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (instance: string) =>
-      apiFetch<void>(
-        `/provider-credentials/${encodeURIComponent(instance)}`,
-        { method: "DELETE" },
-      ),
+      apiFetch<void>(`/provider-credentials/${encodeURIComponent(instance)}`, {
+        method: "DELETE",
+      }),
     onSuccess: () => invalidateProviderViews(queryClient),
   })
 }

@@ -292,10 +292,10 @@ export function useCreateOrganizationSpendCeiling() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationSpendCeiling) =>
-      apiFetch<OrganizationSpendCeiling>(
-        "/organizations/me/spend-ceilings",
-        { method: "POST", body: JSON.stringify(body) },
-      ),
+      apiFetch<OrganizationSpendCeiling>("/organizations/me/spend-ceilings", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
   })
 }
