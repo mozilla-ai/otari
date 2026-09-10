@@ -2205,6 +2205,44 @@ main {
     max-height: none;
     border: 0;
   }
+  /* The footer stacks. Two 36px buttons and a caption sharing one row fit a
+   * desktop and not a 390px sheet: the routing dialog's caption wrapped to three
+   * lines beside them. Primary on top, Cancel under it, each the sheet's full
+   * width at the 44px touch floor. Drawn on artboard 07.
+   *
+   * Cancel is first in the DOM, where it belongs beside the primary on a
+   * desktop, so `order` moves it rather than the markup: reading order on a
+   * desktop and stacking order on a phone are different questions. */
+  .otari-form-dialog__footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  }
+  .otari-form-dialog__actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  /* `width`, not the footer's `align-items: stretch`: `.button` is
+   * `width: fit-content`, so its cross size is never `auto` and stretch cannot
+   * reach it. Measured, the two buttons stayed 110px and 83px in a 373px
+   * column. HeroUI's `fullWidth` prop is the other way to get here and it is a
+   * prop, so it would take the desktop with it. */
+  .otari-form-dialog__actions > button {
+    width: 100%;
+  }
+  /* Full width earns the same press suppression `.button` already gives
+   * `.w-full` and HeroUI's `fullWidth` class: the transform displaces a wide
+   * button by 7.07px, and this one spans the sheet. */
+  .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]) {
+    transform: none;
+  }
+  .otari-form-dialog__cancel {
+    order: 1;
+  }
+  .otari-form-dialog__footer button {
+    min-height: 2.75rem;
+  }
 }
 
 /* Backdrop dimming — HeroUI's default backdrop variant is `opaque`, and that
