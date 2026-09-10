@@ -8,6 +8,7 @@ on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
 import logging
+import re
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -719,6 +720,8 @@ def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
 @pytest.mark.parametrize(
     "configured",
     [
+        f"https://gateway.otari.ai{API_ROOT}",
+        f"https://gateway.otari.ai{API_ROOT}/",
         "https://gateway.otari.ai/v1",
         "https://gateway.otari.ai/v1/",
         "https://gateway.otari.ai/V1",
@@ -727,20 +730,23 @@ def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
         # what a curl example on this very page shows. Caught because any
         # segment counts, not only the last one, which an earlier version of
         # this guard got wrong and let render the path twice over.
+        f"https://gateway.otari.ai{API_ROOT}/chat/completions",
         "https://gateway.otari.ai/v1/chat/completions",
         "https://gateway.otari.ai/v1/messages",
     ],
 )
-def test_a_data_plane_url_that_already_names_v1_is_refused(configured: str) -> None:
+def test_a_data_plane_url_that_already_carries_the_api_root_is_refused(configured: str) -> None:
     """The likelier mistake, refused where it is cheap.
 
-    Everywhere else a client meets one, "base URL" means the ``/v1`` address, so
-    writing that here is the natural error, and it renders a snippet posting to
-    ``/v1/v1/chat/completions``: it looks right and 404s on first use. Refused
-    rather than stripped, because stripping would be silent and would be wrong
-    for a gateway genuinely mounted under such a path.
+    Everywhere else a client meets one, "base URL" means the ``/api/v1``
+    address, so writing that here is the natural error, and it renders a
+    snippet posting to ``/api/v1/api/v1/chat/completions``: it looks right and
+    404s on first use. Refused rather than stripped, because stripping would be
+    silent and would be wrong for a gateway genuinely mounted under such a path.
+    A bare ``/v1`` is refused for the same reason; it is the root every SDK's
+    ``base_url`` ends with.
     """
-    with pytest.raises(ValidationError, match="must not contain a /v1 segment"):
+    with pytest.raises(ValidationError, match=rf"API root \({re.escape(API_ROOT)}\).*appends that path itself"):
         GatewayConfig(data_plane_url=configured)
 
 
@@ -748,6 +754,7 @@ def test_a_data_plane_url_that_already_names_v1_is_refused(configured: str) -> N
     "configured",
     [
         "https://api.example.com/otari",
+        "https://api.example.com/otari/",
         # Not a ``v1`` segment, so it survives: the guard matches whole segments
         # rather than a prefix, or a real deployment would be refused for the
         # first three characters of its path.
@@ -760,7 +767,7 @@ def test_a_path_that_does_not_name_v1_is_left_alone(configured: str) -> None:
     The guard has to stay narrow enough that it cannot cost an operator a
     deployment shape the gateway otherwise supports.
     """
-    assert GatewayConfig(data_plane_url=configured).data_plane_url == configured
+    assert GatewayConfig(data_plane_url=configured).data_plane_url == configured.rstrip("/")
 
 
 def test_a_trailing_slash_is_trimmed_from_the_data_plane_url() -> None:

@@ -541,10 +541,10 @@ class GatewayConfig(BaseSettings):
         default=None,
         description=(
             "Where this deployment's inference traffic belongs, as an absolute http(s) URL "
-            "with no trailing slash and no '/v1' path segment anywhere in it, not even as part "
-            "of a full endpoint like '/api/v1/chat/completions' (e.g. 'https://gateway.otari.ai'): "
-            "the dashboard appends that path itself. It carries no credential either, so no "
-            "query string, fragment, or user:password. Only a hosted control "
+            f"with no trailing slash and no '{API_ROOT}' or '/v1' path segment anywhere in it, not "
+            f"even as part of a full endpoint like '{API_ROOT}/chat/completions' (e.g. "
+            "'https://gateway.otari.ai'): the dashboard appends that path itself. It carries no "
+            "credential either, so no query string, fragment, or user:password. Only a hosted control "
             "plane needs it: a standalone gateway and a hybrid one both serve inference at "
             "their own address, so whatever reached the dashboard reaches the API, and this "
             "stays unset. A control plane serving many organizations does not, so it has to "
@@ -1995,8 +1995,8 @@ class GatewayConfig(BaseSettings):
         command an operator copies and cannot explain.
 
         The trailing slash is normalized away here so no consumer has to: the
-        dashboard suffixes this with ``/v1``, and ``https://host//v1`` is a
-        different path on a strict router.
+        dashboard suffixes this with ``/api/v1``, and ``https://host//api/v1``
+        is a different path on a strict router.
 
         A query string or a fragment is refused for the same reason, and it is
         the case a scheme check alone would miss: this is a base URL a client
@@ -2006,17 +2006,17 @@ class GatewayConfig(BaseSettings):
         ``docs_url``, which is a link a person follows, nothing downstream can
         recover from that.
 
-        A ``/v1`` suffix is refused too, and it is the likelier mistake of the
-        two: everywhere else a client meets one, "base URL" means the ``/v1``
-        address (the OpenAI SDK's own ``base_url`` includes it), so writing that
-        here is the natural error, and it renders a snippet posting to
-        ``/api/v1/v1/chat/completions``, which looks right and 404s on first use.
-        Refused rather than stripped, because stripping would be silent and
-        would be wrong for a gateway genuinely mounted under such a path, while
-        refusing costs one edit. Any segment counts and not just the last, so
-        pasting the whole endpoint (``https://host/api/v1/chat/completions``, the
-        likelier copy-paste of the two) is refused as well rather than rendering
-        that path twice. Any other prefix is left alone: a gateway proxied at
+        A path carrying the API root is refused too, and it is the likelier
+        mistake of the two: everywhere else a client meets one, "base URL"
+        means the ``/api/v1`` address (the OpenAI SDK's own ``base_url``
+        includes it), so writing it here is the natural error, and it renders
+        a snippet posting to ``/api/v1/api/v1/chat/completions``, which looks
+        right and 404s on first use. Refused rather than stripped, because
+        stripping would be silent and wrong for a gateway genuinely mounted
+        under such a path, while refusing costs one edit. Any ``v1`` segment
+        counts, not just a trailing root, so a pasted endpoint
+        (``https://host/api/v1/chat/completions``) is refused as well. Any
+        other prefix is left alone: a gateway proxied at
         ``https://api.example.com/otari`` is a real deployment.
         """
         normalized = (value or "").strip().rstrip("/")
@@ -2047,9 +2047,9 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
         if any(segment.lower() == "v1" for segment in parsed.path.split("/")):
             msg = (
-                "data_plane_url must not contain a /v1 segment: the dashboard appends that path "
-                f"itself, so give the gateway's own address (for example 'https://gateway.otari.ai'). "
-                f"Got '{value}'"
+                f"data_plane_url must not carry the API root ({API_ROOT}) or any /v1 segment: the "
+                "dashboard appends that path itself, so give the gateway's own address (for example "
+                f"'https://gateway.otari.ai'). Got '{value}'"
             )
             raise ValueError(msg)
         return normalized
