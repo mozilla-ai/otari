@@ -104,8 +104,10 @@ export const LongestPolicy: Story = {
             router: "weighted",
             candidates: ["openai:gpt-4o", "anthropic:claude-sonnet-4-5"],
             weights: { "openai:gpt-4o": 70, "anthropic:claude-sonnet-4-5": 30 },
-            default: "openai:gpt-4o",
           },
+          // The fallthrough is its own entry and it is last, which is the shape
+          // the form writes: an entry after the default can never be reached.
+          { default: "openai:gpt-4o" },
         ],
         on_failure: ["anthropic:claude-sonnet-4-5", "openai:gpt-4o-mini"],
         guardrails: [

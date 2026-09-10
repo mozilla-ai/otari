@@ -1,9 +1,38 @@
 import { Modal, Spinner } from "@heroui/react"
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react"
 import { FiX } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
 import { ErrorBanner } from "./ErrorBanner"
+
+/**
+ * Moves focus to `target` when it unmounts, if nothing else took it.
+ *
+ * Rendered inside the overlay subtree, so its cleanup runs when the frame is
+ * actually gone rather than when it was asked to close: react-aria keeps that
+ * subtree mounted through the exit animation, and the dialog holds focus for
+ * every one of those ~100ms.
+ */
+function RestoreFocus({ target }: { target: RefObject<HTMLElement | null> }) {
+  useEffect(
+    () => () => {
+      // A frame, because the overlay's own `FocusScope` restores on its way out
+      // too; this has to read what focus settled on, not what it was mid-teardown.
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body) target.current?.focus()
+      })
+    },
+    [target],
+  )
+  return null
+}
 
 /** `sm` 440px, `md` 520px (the default), `lg` 640px. */
 export type FormDialogSize = "sm" | "md" | "lg"
@@ -40,6 +69,19 @@ export interface FormDialogProps {
    * gone forever, so the acknowledgement is the only way out.
    */
   isDismissable?: boolean
+  /**
+   * Where focus goes if the frame's own restore has nowhere to land.
+   *
+   * react-aria returns focus to the control that opened the dialog, which is
+   * enough until that control is the thing the dialog removed: a page whose
+   * empty state disappears after the first create has no trigger left to
+   * restore to, and focus falls to `<body>`, where the next Tab starts at the
+   * top of the document. Pass the control that survives (a page heading's
+   * action). Checked when the frame actually goes away rather than on a timer:
+   * the overlay subtree lives through its ~100ms exit, so a `requestAnimationFrame`
+   * at close time finds the dialog still holding focus and does nothing.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>
   /**
    * Whether the form is not yet in a state that can be submitted.
    *
@@ -84,6 +126,7 @@ export function FormDialog({
   error,
   isDirty = false,
   isDismissable = true,
+  returnFocusRef,
   isSubmitDisabled = false,
   footerStart,
   tabs,
@@ -171,6 +214,7 @@ export function FormDialog({
             aria-describedby={description ? descriptionId : undefined}
             className={`otari-form-dialog otari-form-dialog--${size} flex flex-col p-0`}
           >
+            {returnFocusRef ? <RestoreFocus target={returnFocusRef} /> : null}
             <header
               className={`flex shrink-0 items-start justify-between gap-4 px-6 pt-5 ${
                 tabs ? "" : "pb-4"

@@ -1695,6 +1695,8 @@ describe("the catalog shows every prop", () => {
   const CANNOT_BE_SHOWN: Record<string, string> = {
     "actions/CopyButton.selectOnFailure":
       "the fallback for a refused clipboard write, which a story cannot provoke without breaking the clipboard",
+    "feedback/FormDialog.returnFocusRef":
+      "where focus lands after the frame is gone, which needs the trigger to unmount with it: a story could pass the prop and would demonstrate nothing",
   }
 
   // Not props: the first two are every component's, and a leading underscore is

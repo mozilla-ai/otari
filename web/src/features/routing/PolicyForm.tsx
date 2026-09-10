@@ -7,11 +7,11 @@
  * lives in `policyModel.ts`.
  */
 
-import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
-import { useMemo, useRef, useState } from "react"
+import { type RefObject, useMemo, useRef, useState } from "react"
 
 import type { PolicyGuardrail, PolicySpec } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
@@ -103,8 +103,10 @@ function ScopePicker({
   /**
    * Whether the dialog holding this is open.
    *
-   * The form stays mounted while closed so the frame can play its exit, which
-   * would otherwise leave the roster fetching on every render of the page.
+   * This picker renders inside the modal, which is `null` while closed, so the
+   * roster never fetches with the dialog shut whatever this says. What the gate
+   * buys is the exit: the subtree lives for the ~100ms fade, and a refetch
+   * landing in it would be work for a form already leaving.
    */
   enabled: boolean
 }) {
@@ -197,6 +199,7 @@ export function PolicyForm({
   existing,
   initialTarget = "",
   isOpen = true,
+  returnFocusRef,
   workspaceId,
   onClose,
 }: {
@@ -208,10 +211,13 @@ export function PolicyForm({
    * The create path passes it and stays mounted while it goes false, so the
    * frame can play its exit with the content intact; HeroUI drives that off
    * `data-exiting`, which needs the component still there. The edit path mounts
-   * on the row it is editing and keyed on its id, the way the keys page does,
-   * so it takes the default.
+   * on the row it is editing, keyed on what identifies that row (a policy has
+   * no id, so the page keys on kind, scope and name), so it takes the default.
    */
   isOpen?: boolean
+  /** Passed through: see `FormDialog`'s own prop. The create path's empty-state
+   *  trigger is gone by the time the dialog closes. */
+  returnFocusRef?: RefObject<HTMLElement | null>
   /**
    * The workspace a tenant admin's write lands in, or null for an operator.
    *
@@ -233,6 +239,9 @@ export function PolicyForm({
   // model_aliases, and silently rewriting it as a policy would leave the original
   // behind under the same name.
   const editingAlias = existing?.kind === "alias"
+  // Gated on the dialog being open, and this is the read where that matters:
+  // it sits in the form's own body rather than inside the modal, so without the
+  // gate it would fetch for every render of the page behind a closed dialog.
   const guardrails_ = useGuardrailsConfigured(isOpen)
 
   const [name, setName] = useState(existing?.name ?? "")
@@ -488,6 +497,7 @@ export function PolicyForm({
   return (
     <FormDialog
       isOpen={isOpen}
+      returnFocusRef={returnFocusRef}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -652,6 +662,11 @@ export function PolicyForm({
                 description={
                   condition.threshold >= 100 ? (
                     <span className="text-danger">Must be under 100.</span>
+                  ) : condition.threshold <= 0 ? (
+                    // Clearing the box coerces to 0 through the `onChange`
+                    // above, which blocks the submit; without this the button
+                    // dies with nothing on screen saying why.
+                    <span className="text-danger">Must be over 0.</span>
                   ) : undefined
                 }
               />

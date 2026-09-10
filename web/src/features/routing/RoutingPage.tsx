@@ -229,10 +229,9 @@ export function RoutingPage() {
   // Where focus goes when nothing else claims it. React Aria restores focus to
   // whatever had it when the dialog opened, which is right for the heading's own
   // button and wrong for the empty state's: creating the first policy fills the
-  // table, so the empty state unmounts and the node react-aria stored is gone.
-  // Focus resets to `document.body` and the next Tab starts at the top of the
-  // document. A frame later anything with a claim has had its turn, and an empty
-  // `document.body` means nothing took it.
+  // table, so the empty state unmounts and the node react-aria stored is gone,
+  // leaving focus on `document.body` where the next Tab starts at the top of the
+  // document. `FormDialog` checks for that when the frame is actually gone.
   const createButtonRef = useRef<HTMLButtonElement | null>(null)
   const [createCount, setCreateCount] = useState(0)
   const openCreate = () => {
@@ -240,14 +239,7 @@ export function RoutingPage() {
     setCreateCount((n) => n + 1)
     setAdding(true)
   }
-  const closeCreate = () => {
-    setAdding(false)
-    requestAnimationFrame(() => {
-      if (document.activeElement === document.body) {
-        createButtonRef.current?.focus()
-      }
-    })
-  }
+  const closeCreate = () => setAdding(false)
   const [editing, setEditing] = useState<RoutingRow | null>(null)
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
   // Readiness opens inline under its own row (DataTable's accordion), because it
@@ -427,10 +419,11 @@ export function RoutingPage() {
             {isEditableInForm(policy.spec) ? (
               <RowAction
                 onPress={() => {
-                  // The table stays mounted while the create form is open, so
-                  // Edit is still reachable from it. Closing the other panels
-                  // keeps this to one form: two stacked forms do not recover on
-                  // their own, since each only closes when cancelled.
+                  // `setAdding(false)` cannot fire while the create dialog is
+                  // open (its backdrop covers the table and `ariaHideOutside`
+                  // takes the rows out of the accessibility tree), so this is
+                  // belt and braces for a future surface that reaches a row
+                  // without going through the modal.
                   setAdding(false)
                   setEditing(policy)
                 }}
@@ -522,11 +515,20 @@ export function RoutingPage() {
         existing={null}
         initialTarget={initialTarget}
         isOpen={isAdding}
+        // The empty state's "Create your first policy" is gone by the time
+        // this closes, since creating one is what makes the page non-empty, so
+        // the frame's own restore has nothing to land on. The heading's action
+        // survives.
+        returnFocusRef={createButtonRef}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
       />
       {editing !== null ? (
         <PolicyForm
+          // Keyed on the row: the fields seed from `existing` once, through
+          // mount-only state, so without this a second row's Edit would open
+          // with the first row's draft and save it under the second one's name.
+          key={rowKeyOf(editing)}
           existing={editing}
           workspaceId={
             isOperator ? null : (editing.workspace_id ?? writeWorkspaceId)
