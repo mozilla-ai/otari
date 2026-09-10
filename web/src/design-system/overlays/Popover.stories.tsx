@@ -10,9 +10,9 @@ import { Popover } from "./Popover"
  *
  * The line against `Tooltip`: a tooltip labels, a popover holds content an
  * operator interacts with, so this one takes focus and is dismissed
- * deliberately. The line against `Dialog`: a dialog is modal and centered
- * because it wants the whole screen, a popover stays anchored because what it
- * says is about the thing it points at.
+ * deliberately. The line against `Dialog`: a dialog is modal because it wants
+ * the whole screen, a popover stays anchored because what it says is about the
+ * thing it points at.
  *
  * Uncontrolled by default, which is the opposite of `Dialog` and deliberate: a
  * popover's trigger is inside it, so it can own that state.

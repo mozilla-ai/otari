@@ -11,7 +11,7 @@ Does the operator need to interact with what appears?
       ├── Is it about the control that opened it?
       │    └── Yes -> Popover      (anchored, takes focus, not modal)
       └── Does it want the whole screen's attention?
-           └── Yes -> Dialog       (modal, centered, dismissed deliberately)
+           └── Yes -> Dialog       (modal, dismissed deliberately)
 ```
 
 `Dialog` lives in [feedback.md](feedback.md)'s directory rather than this one,
