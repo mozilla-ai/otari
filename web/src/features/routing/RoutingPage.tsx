@@ -1643,7 +1643,7 @@ export function RoutingPage() {
         canEdit ? (
           <EmptyState
             title="No routing policies yet"
-            actionLabel="Create policy"
+            actionLabel="Create your first policy"
             onAction={() => {
               setEditing(null)
               setAdding(true)

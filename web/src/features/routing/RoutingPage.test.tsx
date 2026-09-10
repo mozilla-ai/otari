@@ -344,16 +344,18 @@ afterEach(() => {
 /**
  * The page's own create action, scoped to the heading's own header.
  *
- * Scoped rather than resolved by name, because "Create policy" is on screen up
- * to three times: this one, the dialog's submit, and the empty state's action,
- * which repeats the trigger's words where every sibling page deliberately does
- * not ("Create your first key", "Create a workspace").
+ * Scoped rather than resolved by name, because "Create policy" is on screen
+ * twice once the dialog is open: this one and the submit.
  *
- * Unscoped, these calls passed by racing the list. They ran while it was still
- * loading, so the empty state had not rendered and the name was momentarily
- * unique; awaiting the empty state before any one of them turned it red with
- * "Found multiple elements". The inner query awaits too, because the action is
- * gated on a query and so arrives after the heading.
+ * It was three until the empty state's action took its own words
+ * ("Create your first policy", matching keys and budgets), and that third copy
+ * is why these calls were passing by accident: they ran while the list was
+ * still loading, so the empty state had not rendered and the name was
+ * momentarily unique. Awaiting the empty state before any one of them turned it
+ * red with "Found multiple elements". The label fix removes that copy and the
+ * scoping removes the dependence on when anything renders, which is why both
+ * are here. The inner query awaits as well, because the action is gated on a
+ * query and so arrives after the heading.
  */
 const createTrigger = async () => {
   const heading = await screen.findByRole("heading", { name: "Routing" })
@@ -418,14 +420,16 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     // Two of them on screen deliberately, the heading's and this one, so the
-    // press is scoped to the empty state rather than picked by position.
+    // press is scoped to the empty state rather than picked by position, which
+    // it no longer strictly needs now that its label is its own, and which is
+    // kept because scoping is the right query either way.
     const empty = (
       await screen.findByRole("heading", {
         name: "No routing policies yet",
       })
     ).closest("div")!.parentElement!
     await user.click(
-      within(empty).getByRole("button", { name: "Create policy" }),
+      within(empty).getByRole("button", { name: "Create your first policy" }),
     )
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveAccessibleName("New policy")
