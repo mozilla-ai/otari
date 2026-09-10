@@ -1202,10 +1202,13 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
     hit an outage and may retry now, which is the opposite instruction. Covers
     ``raise_all_streaming_attempts_failed``'s rate-limit branch."""
 
+    upstream_calls: list[str] = []
+
     class _RateLimited(Exception):
-        def __init__(self) -> None:
+        def __init__(self, retry_after: str) -> None:
             super().__init__("Quota exceeded. Please retry in 34.6s.")
             self.status_code = 429
+            self.response = httpx.Response(429, headers={"Retry-After": retry_after})
 
     async def fake_post_platform(
         url: str,
@@ -1244,7 +1247,10 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
         return httpx.Response(204)
 
     async def fake_acompletion(**kwargs: Any) -> Any:
-        raise _RateLimited()
+        upstream_calls.append(str(kwargs.get("model", "")))
+        # A different window per attempt, so the header assertion pins which
+        # failure's window an exhausted route forwards.
+        raise _RateLimited("12" if len(upstream_calls) == 1 else "34")
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
@@ -1261,6 +1267,11 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
 
     assert response.status_code == 429
     assert response.json() == {"detail": "All upstream providers rate-limited this request"}
+    # A 429 advances the plan, so both attempts really ran: the aggregate is
+    # reached by exhausting the route, not by one attempt failing outright.
+    assert len(upstream_calls) == 2
+    # The final failure's window, not the first attempt's.
+    assert response.headers["Retry-After"] == "34"
 
 
 def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
