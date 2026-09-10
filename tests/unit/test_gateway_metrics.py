@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
-from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, API_VERSION, OTLP_ROOT, GatewayConfig
 from gateway.metrics import (
     REGISTRY,
     MetricsMiddleware,
@@ -236,8 +236,17 @@ def test_the_endpoint_label_does_not_carry_the_api_root() -> None:
     # name and an OTel signal path belongs to OTel.
     assert endpoint_for("/metrics") == ("/metrics", "")
     assert endpoint_for(f"{OTLP_ROOT}/v1/traces") == (f"{OTLP_ROOT}/v1/traces", "")
-    # A sibling root is not silently folded into this one.
-    assert endpoint_for("/api/v2/chat/completions")[0] != "/chat/completions"
+    # A sibling root is not silently folded into this one, or a v2 rollout would
+    # be invisible: both versions would sum into one series.
+    assert endpoint_for("/api/v2/chat/completions") == ("/api/v2/chat/completions", "")
+    # The root is matched on the segment boundary, not as a byte prefix. This is
+    # the bug class that has bitten this migration more than once.
+    assert endpoint_for(f"{API_ROOT}beta/chat") == (f"{API_ROOT}beta/chat", "")
+    assert endpoint_for(f"{API_ROOT}-internal/x") == (f"{API_ROOT}-internal/x", "")
+    # The root itself is a resource, not an empty label.
+    assert endpoint_for(API_ROOT) == ("/", API_VERSION)
+    # The version reported is the one the app was built with, not a literal.
+    assert endpoint_for(f"{API_ROOT}/chat/completions")[1] == API_VERSION
 
 
 def test_middleware_skips_metrics_endpoint() -> None:

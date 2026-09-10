@@ -62,7 +62,11 @@ CONVERSATION_HEADER = "Otari-Conversation-Id"
 # pass-through until that partition alone is warm; records from other tasks never
 # influence it. Submit the matching label via the /rank task_id.
 ROUTER_TASK_HEADER = "Otari-Router-Task"
-API_ROOT = "/api/v1"
+# The version this deployment's API is served under. The root is built from it
+# rather than parsed back out of it, so nothing has to guess where the version
+# segment sits in a path.
+API_VERSION = "v1"
+API_ROOT = f"/api/{API_VERSION}"
 # Base only: OTel exporters append /otlp/v1/traces and the other signal paths.
 OTLP_ROOT = "/otlp"
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"

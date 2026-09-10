@@ -15,7 +15,7 @@ from prometheus_client import (
 )
 from starlette.responses import Response
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, API_VERSION
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -127,12 +127,7 @@ LOG_WRITER_ROWS = Counter(
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 _UNMATCHED_ENDPOINT = "unmatched"
-
-
-# The version segment of the API root, carried as its own label rather than
-# inside the endpoint one.
-_API_VERSION = API_ROOT.rsplit("/", 1)[-1]
-# What a request that is not under the API root reports for its version.
+# What a request outside the API root reports for its version.
 _NO_VERSION = ""
 
 
@@ -156,9 +151,9 @@ def _endpoint_label(scope: Scope) -> tuple[str, str]:
     if not isinstance(template, str) or not template:
         return _UNMATCHED_ENDPOINT, _NO_VERSION
     if template == API_ROOT:
-        return "/", _API_VERSION
+        return "/", API_VERSION
     if template.startswith(f"{API_ROOT}/"):
-        return template[len(API_ROOT) :], _API_VERSION
+        return template[len(API_ROOT) :], API_VERSION
     return template, _NO_VERSION
 
 
