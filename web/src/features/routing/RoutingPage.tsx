@@ -1669,10 +1669,8 @@ export function RoutingPage() {
 
       <ConfirmDialog
         isOpen={pendingDelete !== undefined}
-        // Cleared on the way out rather than on the way in, so the trigger in
-        // the row stays a bare `setPendingDelete` and the column memo keeps its
-        // per-row cache: a refusal otherwise sits on the mutation and greets
-        // the next row's confirm as if that row had failed.
+        // Cleared on the way out: a refusal otherwise sits on the mutation and
+        // greets the next row's confirm as if that row had failed.
         onOpenChange={(open) => {
           if (open) return
           setPendingDelete(undefined)
