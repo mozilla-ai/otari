@@ -106,7 +106,7 @@ def test_chat_rate_limit_falls_back_when_the_provider_said_nothing(
         side_effect=_Silent(),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )
@@ -136,7 +136,7 @@ def test_chat_forwards_the_upstream_retry_after(
         side_effect=_RateLimited(),
     ):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:nonexistent-model-xyz", "messages": [{"role": "user", "content": "Hi"}]},
             headers=api_key_header,
         )

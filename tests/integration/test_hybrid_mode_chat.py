@@ -1258,7 +1258,7 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
