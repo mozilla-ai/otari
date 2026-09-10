@@ -17,12 +17,13 @@ On the worker's PostgreSQL like the rest of ``tests/integration``, because
 """
 
 import re
+from collections import Counter
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 
-from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, OTLP_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 from gateway.main import (
     _COOKIE_AUTH_PREFIXES,
     _GATEWAY_TOKEN_PATHS,
@@ -82,6 +83,16 @@ def standalone(postgres_url: str) -> FastAPI:
 @pytest.fixture(scope="module")
 def hosted(postgres_url: str) -> FastAPI:
     return create_app(_config(postgres_url, "hosted"))
+
+
+@pytest.fixture(scope="module")
+def hybrid(postgres_url: str) -> FastAPI:
+    # The token is read once, while the config loads, so it need only be in
+    # the environment for the construction. Left set, it would make the next
+    # standalone app built in this process refuse to start.
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv(PLATFORM_TOKEN_ENV_VAR, "test-platform-token")
+        return create_app(_config(postgres_url, "hybrid", platform={"base_url": "http://localhost:8100/api/v1"}))
 
 
 def _under(path: str, root: str) -> bool:
@@ -151,6 +162,30 @@ def test_generated_document_stamps_security_as_the_allowlists_say(standalone: Fa
                 assert operation.get("security") == [{"GatewayTokenAuth": []}], (
                     f"{method.upper()} {path} must be stamped GatewayTokenAuth only"
                 )
+
+
+def _operation_ids(app: FastAPI) -> Counter[str]:
+    ids = Counter(
+        operation["operationId"]
+        for path_item in app.openapi()["paths"].values()
+        for operation in path_item.values()
+        if isinstance(operation, dict)
+    )
+    assert ids, "the generated document has no operations"
+    return ids
+
+
+def test_no_operation_id_names_a_mount_root(standalone: FastAPI, hosted: FastAPI, hybrid: FastAPI) -> None:
+    """The id is the method name a generated SDK exposes, so it must outlive a path move.
+
+    FastAPI's default folds the whole path into the id, which is how every
+    operation was renamed when the root moved. The roots are looked for in the
+    form that default writes them, with every non-word character an underscore.
+    """
+    roots = tuple(re.sub(r"\W", "_", root) for root in (API_ROOT, OTLP_ROOT))
+    for mode, app in (("standalone", standalone), ("hosted", hosted), ("hybrid", hybrid)):
+        stray = sorted(op for op in _operation_ids(app) if any(root in op for root in roots))
+        assert not stray, f"{mode}: operation ids carry a mount root: {stray}"
 
 
 # Paths that may appear in published prose without being ours to move. The usage

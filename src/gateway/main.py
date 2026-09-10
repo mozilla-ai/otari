@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
@@ -133,6 +134,20 @@ _UNAUTHENTICATED_PATHS = frozenset(
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
 )
+
+
+def _operation_id(route: APIRoute) -> str:
+    """Name an operation by its tag and handler, so moving a path renames nothing.
+
+    The id is what a generated SDK calls the method, so it must survive a
+    change of mount root. A route with no tag is named by its handler alone.
+    Two routes that share a tag and a handler collide; the one at the second
+    path needs a ``name`` or an ``operation_id`` of its own.
+    """
+    tag = route.tags[0] if route.tags else None
+    return f"{tag}-{route.name}" if tag else route.name
+
+
 def _under(path: str, prefixes: tuple[str, ...]) -> bool:
     """Whether ``path`` is one of ``prefixes`` or sits inside one.
 
@@ -566,6 +581,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         redoc_url=f"{API_ROOT}/redoc" if config.enable_docs else None,
         openapi_url=f"{API_ROOT}/openapi.json" if config.enable_docs else None,
         swagger_ui_oauth2_redirect_url=f"{API_ROOT}/docs/oauth2-redirect",
+        generate_unique_id_function=_operation_id,
         lifespan=_create_lifespan(),
     )
 
