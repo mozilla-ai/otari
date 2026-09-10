@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 
 import type {
   User as ApiUser,
@@ -188,6 +188,11 @@ function AddMemberForm({
   // and behaves like one with nothing in it.
   const rows = workspaces.data
   const [seeded, setSeeded] = useState(false)
+  // Everything the operator can change, against what the form was seeded with.
+  // A list of fields drifts: this one read the address alone, so a role or a
+  // workspace change with no address typed closed unguarded.
+  const draft = JSON.stringify({ email, role, workspaceIds })
+  const seededDraft = useRef(draft)
   if (!seeded && rows && rows.length > 0) {
     setSeeded(true)
     // The workspace the shell is on, when it is one of this organization's.
@@ -196,7 +201,16 @@ function AddMemberForm({
     const preferred = rows.find(
       (workspace) => workspace.id === selected?.workspace_id,
     )
-    setWorkspaceIds([(preferred ?? rows[0]).id])
+    const defaults = [(preferred ?? rows[0]).id]
+    setWorkspaceIds(defaults)
+    // Part of the seed, not a change: this lands after mount, so a snapshot
+    // taken at first render would report the form dirty the moment the roster
+    // answers, and Escape would ask before closing an untouched form.
+    seededDraft.current = JSON.stringify({
+      email,
+      role,
+      workspaceIds: defaults,
+    })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -236,7 +250,7 @@ function AddMemberForm({
       onSubmit={submit}
       isPending={add.isPending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={trimmed !== ""}
+      isDirty={draft !== seededDraft.current}
       error={add.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -314,12 +328,24 @@ function InviteMemberForm({
 
   const rows = workspaces.data
   const [seeded, setSeeded] = useState(false)
+  // Same snapshot as the add form beside it, and the same reason.
+  const draft = JSON.stringify({ email, role, workspaceIds })
+  const seededDraft = useRef(draft)
   if (!seeded && rows && rows.length > 0) {
     setSeeded(true)
     const preferred = rows.find(
       (workspace) => workspace.id === selected?.workspace_id,
     )
-    setWorkspaceIds([(preferred ?? rows[0]).id])
+    const defaults = [(preferred ?? rows[0]).id]
+    setWorkspaceIds(defaults)
+    // Part of the seed, not a change: this lands after mount, so a snapshot
+    // taken at first render would report the form dirty the moment the roster
+    // answers, and Escape would ask before closing an untouched form.
+    seededDraft.current = JSON.stringify({
+      email,
+      role,
+      workspaceIds: defaults,
+    })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -393,11 +419,11 @@ function InviteMemberForm({
         if (!open) onClose()
       }}
       title="Invitation"
-      submitLabel="Send invitation"
+      submitLabel="Invite member"
       onSubmit={submit}
       isPending={invite.isPending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={trimmed !== ""}
+      isDirty={draft !== seededDraft.current}
       error={invite.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">

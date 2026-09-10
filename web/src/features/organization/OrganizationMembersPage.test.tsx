@@ -422,6 +422,57 @@ describe("OrganizationMembersPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("guards a role change on the add form, with no address typed", async () => {
+    // The guard reads one snapshot of the whole draft. It read the address
+    // alone, so changing the role, or unticking the seeded workspace the form
+    // itself warns about, was discarded with nothing asked.
+    mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    await pickOption(user, "Role", "Admin")
+
+    // Through Cancel: in jsdom focus lands on `<body>` after picking from a
+    // `Select`, so a keystroke reaches nothing.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+  })
+
+  it("guards an unticked workspace on the invite form, and reopens clean", async () => {
+    mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    // Seeded once the roster answers, which is after mount: unticking it is a
+    // change, and the seed it is compared against is the ticked default.
+    const production = await screen.findByLabelText("Production")
+    expect(production).toBeChecked()
+    await user.click(production)
+
+    await user.keyboard("{Escape}")
+    await user.click(await screen.findByRole("button", { name: "Discard" }))
+
+    // And the roster landing is not itself a change: the reopened form is
+    // clean, so Escape closes it rather than asking.
+    await user.click(screen.getByRole("button", { name: "Invite member" }))
+    await screen.findByLabelText("Production")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
   it("invites a member by email and shows the accept link when mail is not configured", async () => {
     const requests = mockApi({ members: [OWNER] })
     const user = userEvent.setup()
@@ -434,7 +485,13 @@ describe("OrganizationMembersPage", () => {
       screen.getByText(/Invitation email is unavailable/),
     ).toBeInTheDocument()
     await user.type(screen.getByLabelText("Email address"), "ada@example.com")
-    await user.click(screen.getByRole("button", { name: "Send invitation" }))
+    // Scoped: the trigger and the submit say the same thing, which is the label
+    // rule, so an unscoped press is ambiguous.
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
 
     const post = requests.find(
       (request) =>
