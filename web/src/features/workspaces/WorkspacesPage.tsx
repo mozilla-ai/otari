@@ -656,6 +656,16 @@ export function WorkspacesPage() {
   const remove = useDeleteWorkspace()
 
   const [creating, setCreating] = useState(false)
+  // Bumped on each open, and the create form is keyed on it, so the draft is
+  // fresh every time and untouched through the exit: the dialog keeps its
+  // content while it animates out, so clearing on the way out would blank the
+  // body in front of the operator. See feedback.md, "A draft is fresh on every
+  // open and untouched through the exit".
+  const [creatingCount, setCreatingCount] = useState(0)
+  const openCreate = () => {
+    setCreatingCount((n) => n + 1)
+    setCreating(true)
+  }
   const [editing, setEditing] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Workspace | null>(null)
 
@@ -797,7 +807,7 @@ export function WorkspacesPage() {
               variant="primary"
               onPress={() => {
                 setEditing(null)
-                setCreating(true)
+                openCreate()
               }}
             >
               Create workspace
@@ -824,6 +834,7 @@ export function WorkspacesPage() {
       )}
 
       <CreateWorkspaceForm
+        key={creatingCount}
         isOpen={creating}
         onClose={() => setCreating(false)}
       />
@@ -843,7 +854,7 @@ export function WorkspacesPage() {
           title="No workspaces yet"
           description="A workspace groups the work inside this organization and carries its own members and roles. Every organization is created with one, so an empty list usually means the default was deleted."
           actionLabel={manages ? "Create a workspace" : undefined}
-          onAction={manages ? () => setCreating(true) : undefined}
+          onAction={manages ? openCreate : undefined}
         />
       ) : (
         <TableScrollFrame className="otari-workspaces-table">

@@ -165,6 +165,27 @@ describe("BudgetsPage", () => {
     vi.restoreAllMocks()
   })
 
+  it("offers a fresh draft on each open of the create dialog", async () => {
+    // Reset on the way in, not on the way out: the dialog keeps its content
+    // while it animates out, so clearing on close blanks the body in front of
+    // the operator. The page keys the form on an open counter instead.
+    mockApi({})
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "half-typed")
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+    expect(screen.getByLabelText("Name (optional)")).toHaveValue("")
+  })
+
   it("keeps the page's create action visible while the dialog is open", async () => {
     mockApi({ budgets: [] })
     const user = userEvent.setup()

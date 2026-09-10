@@ -204,6 +204,32 @@ describe("the organization half of the scope switcher", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
+  it("offers a fresh draft on each open of the organization form", async () => {
+    // Reset on the way in, not on the way out: the dialog keeps its content
+    // while it animates out, so clearing on close blanks the body in front of
+    // the operator. The switcher keys the form on an open counter instead.
+    mockApi()
+    await renderSwitcher()
+
+    const { user, menu } = await openMenu()
+    await user.click(
+      within(menu).getByRole("button", { name: /Create organization/ }),
+    )
+    await user.type(await screen.findByLabelText(/Name/), "half-typed")
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    const reopened = await openMenu()
+    await reopened.user.click(
+      within(reopened.menu).getByRole("button", {
+        name: /Create organization/,
+      }),
+    )
+    expect(await screen.findByLabelText(/Name/)).toHaveValue("")
+  })
+
   it("creates an organization and moves into it", async () => {
     const requests = mockApi()
     await renderSwitcher()

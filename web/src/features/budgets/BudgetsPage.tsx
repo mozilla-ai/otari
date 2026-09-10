@@ -537,10 +537,20 @@ function DeploymentBudgetsPage() {
   // panel it sits in, so react-aria has nothing to restore to and focus falls
   // to body, which restarts Tab at the top of the document.
   const createButtonRef = useRef<HTMLButtonElement>(null)
-  // Bumped on every open and used as the create dialog's key. The draft is
-  // cleared on the way in rather than on the way out, which lets the dialog
-  // animate away with its fields intact.
+  // Bumped on each open, and the create dialog is keyed on it, so the draft is
+  // fresh every time and untouched through the exit: the dialog keeps its
+  // content while it animates out, so clearing on the way out would blank the
+  // body in front of the operator. See feedback.md, "A draft is fresh on every
+  // open and untouched through the exit".
+  //
+  // One function rather than the two statements at each opener: this page has
+  // two openers, and a counter is only a remount while every one of them bumps
+  // it.
   const [addOpenCount, setAddOpenCount] = useState(0)
+  const openCreate = () => {
+    setAddOpenCount((n) => n + 1)
+    setAddOpen(true)
+  }
   const [editing, setEditing] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Budget>()
@@ -801,8 +811,7 @@ function DeploymentBudgetsPage() {
               setEditing(null)
               setAssignmentError(null)
               setPendingAssignments(null)
-              setAddOpenCount((count) => count + 1)
-              setAddOpen(true)
+              openCreate()
             }}
           >
             Create budget
@@ -840,8 +849,7 @@ function DeploymentBudgetsPage() {
             setEditing(null)
             setAssignmentError(null)
             setPendingAssignments(null)
-            setAddOpenCount((count) => count + 1)
-            setAddOpen(true)
+            openCreate()
           }}
         />
       ) : null}

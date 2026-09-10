@@ -88,6 +88,16 @@ export function WorkspaceSwitcher({
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [creatingOrganization, setCreatingOrganization] = useState(false)
+  // Bumped on each open, and the create form is keyed on it, so the draft is
+  // fresh every time and untouched through the exit: the dialog keeps its
+  // content while it animates out, so clearing on the way out would blank the
+  // body in front of the operator. See feedback.md, "A draft is fresh on every
+  // open and untouched through the exit".
+  const [creatingOrganizationCount, setCreatingOrganizationCount] = useState(0)
+  const openCreateOrganization = () => {
+    setCreatingOrganizationCount((n) => n + 1)
+    setCreatingOrganization(true)
+  }
   // Owners and admins only, which is what the server says of
   // `POST /v1/workspaces` and what the Workspaces page gates its own create
   // control on. Without it a member or a viewer is handed the whole form from
@@ -337,7 +347,7 @@ export function WorkspaceSwitcher({
               className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
               onClick={() => {
                 setOpen(false)
-                setCreatingOrganization(true)
+                openCreateOrganization()
               }}
             >
               <PlusMark />
@@ -370,6 +380,7 @@ export function WorkspaceSwitcher({
         hold={createHold}
       />
       <CreateOrganizationForm
+        key={creatingOrganizationCount}
         isOpen={creatingOrganization}
         onClose={() => setCreatingOrganization(false)}
       />

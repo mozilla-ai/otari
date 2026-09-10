@@ -183,6 +183,29 @@ describe("WorkspacesPage", () => {
     ).toBeNull()
   })
 
+  it("offers a fresh draft on each open of the create dialog", async () => {
+    // Reset on the way in, not on the way out: the dialog keeps its content
+    // while it animates out, so clearing on close blanks the body in front of
+    // the operator. The page keys the form on an open counter instead.
+    mockApi({})
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.type(screen.getByLabelText("Name"), "half-typed")
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    expect(screen.getByLabelText("Name")).toHaveValue("")
+  })
+
   it("puts a refused create on the name that caused it, not in a banner", async () => {
     // A banner above the form resizes whatever frames it, and every way this
     // endpoint refuses is about the name: taken, empty, too long.
