@@ -308,7 +308,7 @@ function ArmedStrip({
   )
 }
 
-// ---------- create / edit forms (inline cards, matching ProvidersPage) ----------
+// ---------- create / edit forms (FormDialog) ----------
 
 // Shows the selected owner's model access so the operator sees the ceiling this
 // key narrows within (a key can inherit it or restrict to a subset, never exceed).
