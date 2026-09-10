@@ -340,6 +340,30 @@ def test_a_visitor_reads_the_catalog_only_while_it_is_public(
     assert refused.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
 
+@pytest.fixture
+def throttled_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True, public_catalog_rate_limit_per_minute=2))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_visitor_is_throttled_on_the_catalogs_own_budget(
+    throttled_public_client: TestClient, master_header: dict[str, str]
+) -> None:
+    # The budget is per client address and counts anonymous reads only.
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+        statuses = [throttled_public_client.get("/v1/catalog/models").status_code for _ in range(3)]
+        assert statuses == [status.HTTP_200_OK, status.HTTP_200_OK, status.HTTP_429_TOO_MANY_REQUESTS]
+        # The detail shares the budget: it is the same catalog being read.
+        detail = throttled_public_client.get("/v1/catalog/models/glm-5-3")
+        assert detail.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+        # A credentialed caller is not a visitor and is not counted against it.
+        signed_in = throttled_public_client.get("/v1/catalog/models", headers=master_header)
+        assert signed_in.status_code == status.HTTP_200_OK
+
+
 def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     priced: TestClient, master_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:

@@ -67,7 +67,8 @@ async def test_refresh_requires_confirmation_before_changing_active_prices(monke
     assert pending.snapshot == raw_snapshot
     preview_session.commit.assert_awaited_once()
 
-    result = SimpleNamespace(scalar_one_or_none=lambda: pending)
+    # The pending-row read, then the history window the prune reads.
+    result = SimpleNamespace(scalar_one_or_none=lambda: pending, scalars=lambda: iter(()))
     confirmation_session = AsyncMock(spec=AsyncSession)
     confirmation_session.execute.return_value = result
     confirmation_session.get.return_value = None
@@ -149,7 +150,7 @@ async def test_failed_snapshot_persistence_keeps_the_active_prices(monkeypatch: 
     await pricing_refresh_service.prepare_price_refresh(preview_session)
     pending = preview_session.add.call_args.args[0]
 
-    result = SimpleNamespace(scalar_one_or_none=lambda: pending)
+    result = SimpleNamespace(scalar_one_or_none=lambda: pending, scalars=lambda: iter(()))
     session = AsyncMock(spec=AsyncSession)
     session.execute.return_value = result
     session.get.return_value = None

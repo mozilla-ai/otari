@@ -77,6 +77,7 @@ the corresponding startup value after the database is available.
 | `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
 | `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
+| `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -192,7 +193,7 @@ snapshot on its own:
 
 Every accepted snapshot is recorded with who accepted it, `operator` or
 `schedule`, and how many models it priced; `GET /v1/pricing/snapshots` lists
-the history. `GET /v1/pricing/drift` puts every stored deployment rate beside
+the history, which keeps the newest thirty. `GET /v1/pricing/drift` puts every stored deployment rate beside
 the default it shadows, so a config-file price that has fallen behind the
 provider's list is visible before it costs anyone. Both are operator reads, and
 `pricing_refresh` can be changed at runtime through `PATCH /v1/settings`.
@@ -207,10 +208,15 @@ every restart is distinguishable from one set in the dashboard.
 Models page to a visitor with no credential, so a deployment can show what it
 serves before anyone signs up. A visitor sees the configured `providers:`
 instances only, priced at the deployment's rates, and never an organization's
-override, key-scoped allow-list, or usage; the read is rate-limited per client
-address. A caller who sends a credential is served as that caller, valid or
-not. The setting is off by default, off in hybrid mode, and can be changed at
-runtime.
+override, key-scoped allow-list, or usage. A caller who sends a credential is
+served as that caller, valid or not. The setting is off by default, off in
+hybrid mode, and can be changed at runtime.
+
+Anonymous reads are throttled per client address by
+`public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
+budget: `rate_limit_rpm` keys on an authenticated user and covers no anonymous
+path, and `dashboard_login_rate_limit_per_minute` is sized for password
+attempts, not for browsing. Set it to `null` to remove the limit.
 
 The instance names `otari` and `hosted` are reserved for a managed platform's
 own offerings and are refused in `providers:`.

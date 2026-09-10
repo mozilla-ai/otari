@@ -73,6 +73,9 @@ def test_the_policy_is_validated_at_load() -> None:
         GatewayConfig(master_key="k", pricing_refresh_interval_seconds=10)
     assert GatewayConfig(master_key="k").pricing_refresh == "manual"
     assert GatewayConfig(master_key="k").public_catalog is False
+    assert GatewayConfig(master_key="k").public_catalog_rate_limit_per_minute == 60
+    with pytest.raises(ValueError):
+        GatewayConfig(master_key="k", public_catalog_rate_limit_per_minute=0)
 
 
 @pytest.mark.parametrize("name", ["otari", "hosted"])

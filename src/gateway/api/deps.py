@@ -21,7 +21,6 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.rate_limit import check_rate_limit
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
@@ -490,17 +489,21 @@ async def verify_catalog_reader_or_public(
     The route is what narrows an anonymous read (the configured instances, the
     deployment price list, no tenant rows); this only decides who is asking.
 
-    Rate-limited by client address under the deployment's ordinary limiter, so
-    an open catalog cannot be scraped faster than a signed-in user could read it.
+    Throttled per client address on its own budget,
+    ``public_catalog_rate_limit_per_minute``, the way the public auth routes
+    are on theirs: ``rate_limit_rpm`` keys on an authenticated user and covers
+    no anonymous path, so it is not what stands between an open catalog and a
+    scraper.
     """
     if session_identity is not None:
         return None, True
     if _header_credentials_present(request) or not config.public_catalog:
         return await verify_api_key_or_master_key(request, db, config)
-    # The limiter raises its own 429; the key is the address, since a visitor
-    # has no other identity.
-    client = request.client.host if request.client is not None else "unknown"
-    check_rate_limit(request, f"public-catalog:{client}")
+    limiter = getattr(request.app.state, "public_catalog_rate_limiter", None)
+    if limiter is not None:
+        # The limiter raises its own 429; the key is the address, since a
+        # visitor has no other identity.
+        limiter.check(request.client.host if request.client is not None else "unknown")
     return None
 
 

@@ -10,7 +10,7 @@ import httpx
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot, set_custom_snapshot
 from genai_prices.types import Provider, _providers_from_raw
 from genai_prices.update_prices import DEFAULT_UPDATE_URL, UpdatePrices
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -212,6 +212,7 @@ async def confirm_price_refresh(session: AsyncSession, *, accepted_by: str = "op
             snapshot=raw_snapshot,
         )
     )
+    await _prune_history(session)
     await session.delete(pending_row)
     try:
         await session.commit()
@@ -253,6 +254,32 @@ class AcceptedSnapshot:
     accepted_at: datetime
     accepted_by: str
     model_count: int
+
+
+# How many accepted snapshots are kept, payload included. Each one is the whole
+# upstream dataset, a few hundred kilobytes, and under the auto policy one can
+# land every day, so the history is a window rather than a ledger: enough to
+# answer what a rate was a month ago, not enough to grow without bound.
+PRICING_SNAPSHOT_HISTORY_KEEP = 30
+
+
+async def _prune_history(session: AsyncSession) -> None:
+    """Drop the accepted snapshots older than the newest ``PRICING_SNAPSHOT_HISTORY_KEEP``."""
+    keep = (
+        select(PricingSnapshotHistory.id)
+        .where(PricingSnapshotHistory.source == GENAI_PRICES_SOURCE)
+        .order_by(PricingSnapshotHistory.accepted_at.desc())
+        .limit(PRICING_SNAPSHOT_HISTORY_KEEP)
+    )
+    kept = {row for row in (await session.execute(keep)).scalars()}
+    if len(kept) < PRICING_SNAPSHOT_HISTORY_KEEP:
+        return
+    await session.execute(
+        delete(PricingSnapshotHistory).where(
+            PricingSnapshotHistory.source == GENAI_PRICES_SOURCE,
+            PricingSnapshotHistory.id.not_in(kept),
+        )
+    )
 
 
 async def list_accepted_snapshots(session: AsyncSession, limit: int = 50) -> list[AcceptedSnapshot]:

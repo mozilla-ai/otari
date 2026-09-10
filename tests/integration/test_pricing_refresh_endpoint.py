@@ -130,6 +130,38 @@ def test_a_pending_update_is_previewed_without_fetching_and_accepting_it_is_reme
         reset_price_refresh_state()
 
 
+def test_the_history_keeps_only_the_newest_snapshots(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each accept is the whole dataset, so the history is a window."""
+    from gateway.models.entities import PricingSnapshot
+    from gateway.services import pricing_refresh_service as refresh
+
+    monkeypatch.setattr(refresh, "PRICING_SNAPSHOT_HISTORY_KEEP", 2)
+
+    def accept() -> None:
+        session = db_session_factory()
+        try:
+            session.add(PricingSnapshot(source=refresh.GENAI_PRICES_PENDING_SOURCE, snapshot=_RAW_SNAPSHOT))
+            session.commit()
+        finally:
+            session.close()
+        confirmed = client.post("/v1/pricing/refresh/confirm", headers=master_key_header)
+        assert confirmed.status_code == 200, confirmed.text
+
+    try:
+        for _ in range(3):
+            accept()
+        history = client.get("/v1/pricing/snapshots", headers=master_key_header).json()
+        assert len(history) == 2
+        assert history[0]["accepted_at"] >= history[1]["accepted_at"]
+    finally:
+        refresh.reset_price_refresh_state()
+
+
 def test_drift_puts_a_stored_rate_beside_todays_default(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

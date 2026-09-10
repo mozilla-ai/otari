@@ -221,6 +221,8 @@ class _Offering:
 
     wire: CatalogOffering
     metadata: ModelCatalogEntry | None
+    model_id: str
+    """The provider's own id, which a usage row carries beside the instance."""
 
 
 def _split_selector(obj: ModelObject) -> tuple[str, str]:
@@ -346,6 +348,8 @@ class _Grouped:
     """By selector."""
     catalog: dict[str, Any] | None
     configured_types: set[str]
+    organization_id: uuid.UUID | None
+    """Whose overrides priced the offerings; None for a visitor."""
 
 
 async def _group(
@@ -355,7 +359,6 @@ async def _group(
     *,
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
-    with_usage: bool = False,
 ) -> _Grouped:
     catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
     now = normalize_effective_at(None)
@@ -373,12 +376,6 @@ async def _group(
         if organization_id is not None
         else {}
     )
-    usage = (
-        await _usage_by_selector(db, organization_id, ((obj.id, *_split_selector(obj)) for obj in real))
-        if with_usage and organization_id is not None
-        else {}
-    )
-
     configured_types = {models_dev_provider_id(config.provider_instance_type(i)) for i in config.providers}
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
@@ -424,9 +421,9 @@ async def _group(
                 price_reference=reference,
                 metadata_input_price_per_million=metadata.cost_input if metadata else None,
                 metadata_output_price_per_million=metadata.cost_output if metadata else None,
-                usage_30d=usage.get(obj.id),
             ),
             metadata=metadata,
+            model_id=model_id,
         )
 
     return _Grouped(
@@ -434,7 +431,25 @@ async def _group(
         offerings=offerings,
         catalog=catalog,
         configured_types=configured_types,
+        organization_id=organization_id,
     )
+
+
+async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offering]) -> list[CatalogOffering]:
+    """One model's offerings with the viewer's 30-day usage of each.
+
+    Queried for these selectors alone rather than the whole catalog's: a usage
+    row is matched on two unindexed columns, and a detail read asks about one
+    model. A visitor has no organization and gets the offerings as they are.
+    """
+    if grouped.organization_id is None:
+        return [member.wire for member in members]
+    usage = await _usage_by_selector(
+        db,
+        grouped.organization_id,
+        ((member.wire.selector, member.wire.provider, member.model_id) for member in members),
+    )
+    return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
 
 
 def _credential(config: GatewayConfig, instance: str) -> Credential:
@@ -573,7 +588,7 @@ async def get_catalog_model(
     each over the last 30 days.
     """
     merged = await _merged_for(db, config, caller, session_identity)
-    grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity, with_usage=True)
+    grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     identity = next((identity for identity in grouped.identities.values() if identity.slug == model_id), None)
     if identity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
@@ -588,7 +603,7 @@ async def get_catalog_model(
     # The cheapest offering first, unpriced ones last, so the comparison the
     # page exists for is the order the rows arrive in.
     offerings = sorted(
-        (member.wire for member in members),
+        await _with_usage(db, grouped, members),
         key=lambda o: (o.pricing is None, o.pricing.input_price_per_million if o.pricing else 0.0, o.selector),
     )
     return CatalogModelDetail(

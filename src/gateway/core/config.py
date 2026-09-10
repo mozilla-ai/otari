@@ -502,6 +502,17 @@ class GatewayConfig(BaseSettings):
             "authenticated users and does not cover any of these pre-auth paths."
         ),
     )
+    public_catalog_rate_limit_per_minute: int | None = Field(
+        default=60,
+        ge=1,
+        description=(
+            "Maximum anonymous reads per client IP per minute of GET /v1/catalog/models and its "
+            "detail while public_catalog is on (None disables this limit). A signed-in caller "
+            "or an API key is never counted here. Its own budget rather than "
+            "dashboard_login_rate_limit_per_minute's, because a visitor browsing a catalog "
+            "reads it faster than anyone should be trying a password."
+        ),
+    )
     cors_allow_origins: list[str] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
     )
