@@ -1717,10 +1717,21 @@ describe("the catalog shows every prop", () => {
         names.add(token[1])
       }
     }
-    for (const match of bare.matchAll(
-      /(?:interface|type) \w*Props\w*\s*(?:=\s*)?\{([^}]*)\}/g,
-    )) {
-      for (const token of match[1].matchAll(/^\s*([a-zA-Z_]\w*)\??\s*:/gm)) {
+    // The Props declaration, read as a block rather than as a `{ ... }` right
+    // after the name. `Button`'s is `Omit<HeroButtonProps, …> & { … }`, so a
+    // pattern anchored on the brace missed `size`, which is declared there and
+    // forwarded through `...rest` without ever being destructured. Two props in
+    // the whole layer are only visible this way, and the canary above is what
+    // keeps that true.
+    //
+    // Line-anchored on purpose: a member of a nested object type is written
+    // inline here (`options: { value: string; label: string }[]`), so it cannot
+    // match and this stays free of the false positives a greedier read invites.
+    for (const match of bare.matchAll(/(?:interface|type)\s+\w*Props\w*\b/g)) {
+      const tail = bare.slice(match.index + match[0].length)
+      const stop = /\n(?:export|function|const|type|interface)\b/.exec(tail)
+      const block = stop ? tail.slice(0, stop.index) : tail
+      for (const token of block.matchAll(/^\s{2,}([a-zA-Z_]\w*)\??\s*:/gm)) {
         names.add(token[1])
       }
     }
@@ -1745,6 +1756,27 @@ describe("the catalog shows every prop", () => {
   it("covers the layer and its catalog", () => {
     expect(components.length).toBeGreaterThan(40)
     expect(stories.length).toBeGreaterThan(10_000)
+
+    // A guard on the extractor, not on the layer. The rule below asserts only
+    // that a list of missing props is empty, so a regex that stopped matching a
+    // component shape would report every prop as covered and pass. Five
+    // components legitimately yield nothing (their only props are `children` or
+    // `className`), so a per-component floor is wrong; the total is what says
+    // the extractor still works.
+    const extracted = components.reduce(
+      (total, name) =>
+        total + propsOf(readFileSync(join(DS, name), "utf8")).size,
+      0,
+    )
+    expect(extracted).toBeGreaterThan(200)
+
+    // And a canary with known props, so a shape this file reads today cannot
+    // silently stop being read. `Button` is `Omit<HeroButtonProps, …> & { … }`,
+    // which is the least regex-friendly declaration in the layer.
+    const button = propsOf(
+      readFileSync(join(DS, "actions", "Button.tsx"), "utf8"),
+    )
+    expect([...button].sort()).toEqual(["size", "variant"])
   })
 
   it.each(components)("shows every prop of %s", (name) => {
