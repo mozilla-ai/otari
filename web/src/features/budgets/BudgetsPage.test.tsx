@@ -481,6 +481,33 @@ describe("BudgetsPage", () => {
     expect(screen.queryByText(/A budget named beta already exists/)).toBeNull()
   })
 
+  it("returns focus to the heading trigger when the empty state has gone", async () => {
+    // The first budget created retires the panel the CTA sits in, so
+    // react-aria has nothing to restore focus to and it falls to body, which
+    // restarts Tab at the top of the document. `returnFocusRef` names the
+    // heading's own trigger, which outlives the create.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create your first budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "team-a")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create budget",
+      }),
+    )
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Create budget" }),
+      ).toHaveFocus(),
+    )
+  })
+
   it("keeps the onboarding panel mounted while its dialog is open", async () => {
     // react-aria returns focus to whatever opened the dialog. An empty-state
     // CTA that unmounts on open leaves it nothing to return to, so focus lands

@@ -3,7 +3,14 @@
 // took chips off everything it rebuilt, so this is an inconsistency rather than
 // a decision: see the note in the PR body.
 import { Button, Chip, Spinner } from "@heroui/react"
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type {
   Budget,
   BudgetResetLog,
@@ -21,6 +28,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -233,6 +241,7 @@ function BudgetForm({
   assignUsers,
   assignedUserIds,
   assignmentNote,
+  returnFocusRef,
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -259,6 +268,8 @@ function BudgetForm({
   // Why the multiselect is absent, where its absence is a rule rather than a
   // failed read. The failed-roster case is explained by the page's banner.
   assignmentNote?: string
+  /** Where focus goes when the opener has gone; see `FormDialog`. */
+  returnFocusRef?: RefObject<HTMLElement | null>
 }) {
   const [name, setName] = useState(initial.name ?? "")
   const [limit, setLimit] = useState(
@@ -277,21 +288,16 @@ function BudgetForm({
   // a reason to paint the button as refused.
   const blocked = !parsed.valid || periodInvalid
   const canSubmit = !isPending && !blocked
-  // One predicate naming every field the operator can change, so "is there
-  // anything to lose" is answered in a single place rather than by a snapshot
-  // string whose contents have to be kept in step by hand.
-  const seeded = useRef({
-    name: initial.name ?? "",
-    limit: initial.max_budget === null ? "" : String(initial.max_budget),
-    durationSec: initial.budget_duration_sec,
-    userIds: assignedUserIds ?? [],
+  // Everything the operator can change, in one snapshot. The people are sorted
+  // into it because the picker appends in click order, and a guard that read
+  // two orderings of one selection as a change would arm on the way back to
+  // where it started.
+  const { isDirty } = useDirtySnapshot({
+    name,
+    limit,
+    durationSec,
+    userIds: [...userIds].sort(),
   })
-  const isPristine =
-    name === seeded.current.name &&
-    limit === seeded.current.limit &&
-    durationSec === seeded.current.durationSec &&
-    userIds.length === seeded.current.userIds.length &&
-    userIds.every((id) => seeded.current.userIds.includes(id))
 
   const submit = () => {
     if (!canSubmit) return
@@ -319,7 +325,8 @@ function BudgetForm({
       onSubmit={submit}
       isPending={isPending}
       isSubmitDisabled={blocked}
-      isDirty={!isPristine}
+      isDirty={isDirty}
+      returnFocusRef={returnFocusRef}
       error={error}
     >
       <Field
@@ -525,6 +532,11 @@ function DeploymentBudgetsPage() {
   const updateUser = useUpdateUser()
 
   const [addOpen, setAddOpen] = useState(false)
+  // Where focus lands when a dialog closes and whatever opened it has gone.
+  // The empty state's CTA is the case: the first budget created retires the
+  // panel it sits in, so react-aria has nothing to restore to and focus falls
+  // to body, which restarts Tab at the top of the document.
+  const createButtonRef = useRef<HTMLButtonElement>(null)
   // Bumped on every open and used as the create dialog's key. The draft is
   // cleared on the way in rather than on the way out, which lets the dialog
   // animate away with its fields intact.
@@ -781,6 +793,7 @@ function DeploymentBudgetsPage() {
         title="Budgets"
         action={
           <Button
+            ref={createButtonRef}
             // Visible while the dialog is open, and beside the empty state's
             // own copy of it: the dialog is over the page.
             variant="primary"
@@ -844,6 +857,7 @@ function DeploymentBudgetsPage() {
         assignmentError={assignmentError}
         assigningUsers={assigningUsers}
         pendingAssignments={pendingAssignments}
+        returnFocusRef={createButtonRef}
         assignUsers={assignUsers}
         onAssignmentReset={() => setAssignmentError(null)}
         users={users.data ?? []}
@@ -1067,10 +1081,12 @@ function CreateBudgetDialog({
   assignmentError,
   assigningUsers,
   pendingAssignments,
+  returnFocusRef,
 }: {
   isOpen: boolean
   onClose: () => void
   users: User[]
+  returnFocusRef: RefObject<HTMLButtonElement | null>
   assignUsers: (
     budgetId: string,
     userIds: string[],
@@ -1134,6 +1150,7 @@ function CreateBudgetDialog({
       initial={{ name: null, max_budget: null, budget_duration_sec: null }}
       error={createBudget.error ?? assignmentError}
       isPending={createBudget.isPending || assigningUsers}
+      returnFocusRef={returnFocusRef}
       assignUsers={users}
       onSubmit={createAndAssign}
       onClose={onClose}
