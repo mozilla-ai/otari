@@ -138,22 +138,32 @@ test.describe("api keys", () => {
     await openPage(page, "API keys", "API keys")
 
     await page.getByRole("button", { name: "Create key" }).click()
-    await page.getByLabel("Name").fill(KEY_NAME)
+    // Scoped from here on, because "Create key" is now on screen twice: the
+    // heading's trigger stays visible while the dialog is open, and the labels
+    // rule makes the dialog's submit say the same words.
+    const dialog = page.getByRole("dialog")
+    await dialog.getByLabel("Name").fill(KEY_NAME)
     // Owner is required: this is what keeps the dashboard from minting the
     // anonymous virtual users an omitted id would.
-    const ownerBox = page.getByPlaceholder("Pick a user, or type a new id…")
+    const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
     await ownerBox.fill(PARITY.users.heavy)
-    await dismissComboBox(ownerBox)
-    await page.getByRole("button", { name: "Create key" }).click()
+    // A bare Escape rather than `dismissComboBox`: that helper waits for
+    // `aria-expanded` to clear on the box, and inside a dialog the key closes
+    // the popover without the box reporting it.
+    await page.keyboard.press("Escape")
+    await dialog.getByRole("button", { name: "Create key" }).click()
 
-    // The secret is shown exactly once, behind an explicit acknowledgement that
-    // Esc deliberately does not dismiss. A strip with `role="alert"` rather than
-    // a dialog: the modal's focus trap and swallowed Esc went with the redesign,
-    // and the acknowledgement is still the only thing that dismisses it.
+    // The secret is shown exactly once, behind an acknowledgement that is the
+    // only way out: the dialog is `isDismissable={false}`, so Escape and the
+    // close control are gone. The reveal keeps its own `role="alert"` inside
+    // the dialog body, which is what the first two assertions read.
     const reveal = page.getByRole("alert", { name: /API key created/ })
     await expect(reveal).toBeVisible()
     await expect(reveal).toContainText("shown only once")
-    await reveal.getByRole("button", { name: /saved this key/i }).click()
+    // Scoped to the dialog rather than to the reveal: the acknowledgement is
+    // the dialog's own submit, in the footer, so it sits outside the alert
+    // region the announcement covers.
+    await dialog.getByRole("button", { name: /saved this key/i }).click()
 
     const key = row(page, "API keys", KEY_NAME)
     await expect(key).toContainText("Active")
