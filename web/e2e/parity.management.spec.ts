@@ -8,7 +8,6 @@ import {
   openNested,
   openOrganization,
   pageHeading,
-  table,
   tableRows,
 } from "./helpers"
 import { PARITY } from "./parity-data"
@@ -117,14 +116,16 @@ test.describe("standalone provider setup", () => {
     )
     await page.getByRole("button", { name: "Cancel" }).click()
 
-    // Two presses on the same control: the first arms it, the second confirms
-    // (ConfirmButton, whose confirm label here is also "Delete").
-    const deleteProvider = row(page, "Providers", PROVIDER).getByRole(
-      "button",
-      { name: "Delete" },
-    )
-    await deleteProvider.click()
-    await deleteProvider.click()
+    // The confirmation is a modal, so it names the provider rather than relying
+    // on the row behind the backdrop to say which one this is about.
+    await row(page, "Providers", PROVIDER)
+      .getByRole("button", { name: "Delete" })
+      .click()
+    const confirmProvider = page.getByRole("alertdialog")
+    await expect(confirmProvider).toContainText(PROVIDER)
+    await confirmProvider
+      .getByRole("button", { name: "Delete provider" })
+      .click()
     await expect(row(page, "Providers", PROVIDER)).toHaveCount(0)
   })
 })
@@ -166,14 +167,11 @@ test.describe("api keys", () => {
     await expect(key.getByRole("button", { name: "Enable" })).toBeVisible()
 
     await key.getByRole("button", { name: "Delete" }).click()
-    // Scoped to the table rather than to `key`: arming a row now renders the
-    // confirmation as a strip in its own row beside it, not inside the cell, so
-    // a row-scoped locator cannot see the control it arms. `table` rather than
-    // `tableRows`, because that helper keeps only rows carrying a row header and
-    // the strip is a detail row with none.
-    await table(page, "API keys")
-      .getByRole("button", { name: "Delete permanently" })
-      .click()
+    // Scoped to the dialog rather than to `key`: the confirmation is a modal
+    // now, outside the table entirely.
+    const confirmKey = page.getByRole("alertdialog")
+    await expect(confirmKey).toContainText(KEY_NAME)
+    await confirmKey.getByRole("button", { name: "Delete permanently" }).click()
     await expect(row(page, "API keys", KEY_NAME)).toHaveCount(0)
   })
 })
@@ -225,12 +223,17 @@ test.describe("budgets", () => {
     await expect(page.getByText(`Reset history — ${BUDGET}`)).toBeVisible()
     await page.getByRole("button", { name: "Close" }).click()
 
-    // Deleting is armed first, and the confirmation names the budget it is about
-    // to drop rather than asking in the abstract.
-    const budgetRow = row(page, "Budgets", BUDGET)
-    await budgetRow.getByRole("button", { name: "Delete", exact: true }).click()
-    await expect(budgetRow).toContainText(`Delete ${BUDGET}?`)
-    await budgetRow.getByRole("button", { name: "Delete permanently" }).click()
+    // The confirmation names the budget it is about to drop rather than asking
+    // in the abstract, which is half of why it is a modal: the row it names is
+    // behind the backdrop.
+    await row(page, "Budgets", BUDGET)
+      .getByRole("button", { name: "Delete", exact: true })
+      .click()
+    const confirmBudget = page.getByRole("alertdialog")
+    await expect(confirmBudget).toContainText(BUDGET)
+    await confirmBudget
+      .getByRole("button", { name: "Delete permanently" })
+      .click()
     await expect(row(page, "Budgets", BUDGET)).toHaveCount(0)
   })
 })
@@ -288,7 +291,9 @@ test.describe("fallback routing", () => {
     await row(page, "Routing policies", POLICY)
       .getByRole("button", { name: "Delete" })
       .click()
-    await page.getByRole("button", { name: "Confirm" }).click()
+    const confirmPolicy = page.getByRole("alertdialog")
+    await expect(confirmPolicy).toContainText(POLICY)
+    await confirmPolicy.getByRole("button", { name: "Delete policy" }).click()
     await expect(row(page, "Routing policies", POLICY)).toHaveCount(0)
   })
 })
