@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -12,6 +12,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -288,9 +289,12 @@ export function CreateWorkspaceForm({
   onClose,
   onCreated,
   hold = defaultHold,
+  returnFocusRef,
 }: {
   isOpen: boolean
   onClose: () => void
+  /** Where focus goes when the opener has gone; see `FormDialog`. */
+  returnFocusRef?: RefObject<HTMLElement | null>
   /**
    * The acknowledged-press beat, as a gate rather than a duration. Defaults to
    * `ENTER_HOLD_MS` of wall clock; a test supplies one it opens itself, so the
@@ -348,8 +352,7 @@ export function CreateWorkspaceForm({
   // or the guard cannot see it. A predicate of empties had already forgotten
   // `budgetId`, so picking a default member budget and pressing Escape
   // discarded it with no guard.
-  const draft = JSON.stringify({ name, description, budgetId })
-  const seededDraft = useRef(draft)
+  const { isDirty } = useDirtySnapshot({ name, description, budgetId })
   // The submit promises the navigation only where it performs one, so the label
   // and the hold below are read off the same prop that does it. A form whose
   // button said "and open" while nothing opened would be the worse bug of the
@@ -431,7 +434,8 @@ export function CreateWorkspaceForm({
       onSubmit={submit}
       isPending={pending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
+      returnFocusRef={returnFocusRef}
       // A refusal about the name is carried by the name, not by a block above
       // the form. What reaches the banner is what no field state can honestly
       // say: a failure the operator cannot retype their way out of, and the
@@ -676,6 +680,9 @@ export function WorkspacesPage() {
   // body in front of the operator. See feedback.md, "A draft is fresh on every
   // open and untouched through the exit".
   const [creatingCount, setCreatingCount] = useState(0)
+  // Where focus lands when the empty state's CTA has gone, which is what the
+  // first workspace created does to it.
+  const createButtonRef = useRef<HTMLButtonElement>(null)
   const openCreate = () => {
     setCreatingCount((n) => n + 1)
     setCreating(true)
@@ -821,6 +828,7 @@ export function WorkspacesPage() {
         action={
           !manages ? null : (
             <Button
+              ref={createButtonRef}
               variant="primary"
               onPress={() => {
                 setEditing(null)
@@ -854,6 +862,7 @@ export function WorkspacesPage() {
         key={creatingCount}
         isOpen={creating}
         onClose={() => setCreating(false)}
+        returnFocusRef={createButtonRef}
       />
 
       {/* Keyed on the workspace so switching which one is edited remounts the
