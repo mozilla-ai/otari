@@ -98,3 +98,17 @@ export const InForm: Story = {
 export const AutoFocused: Story = {
   args: { autoFocus: true, description: "The caret starts here." },
 }
+
+/**
+ * `isDisabled` for a field the operator may read but not set: a value the
+ * deployment fixes, or one that belongs to a plan they are not on. It stays in
+ * the tab order's reading path but takes no input, which is why the value is
+ * left legible rather than dimmed to the point of being unreadable.
+ */
+export const Disabled: Story = {
+  args: {
+    isDisabled: true,
+    value: "gateway-managed",
+    description: "Set by the deployment, not per workspace.",
+  },
+}

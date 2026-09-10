@@ -278,3 +278,44 @@ export const AxisDensity: Story = {
     </div>
   ),
 }
+
+/**
+ * `height` on both, and it is the one dimension a chart takes as a number
+ * rather than from its parent. `ResponsiveContainer` measures the width and is
+ * told the height, so a chart in an unsized box collapses horizontally but
+ * never vertically.
+ *
+ * `TrendChart` defaults to 200, which is where the axis labels and the plot
+ * both have room. Below roughly 120 the y ticks start colliding, so a shorter
+ * strip wants `showYAxis={false}` with it. `Sparkline` defaults to 32: at that
+ * height there is nothing to label, which is why it takes bare numbers.
+ */
+export const Heights: Story = {
+  render: () => (
+    <div className="flex w-[40rem] flex-col gap-6">
+      {[120, 200, 320].map((height) => (
+        <div key={height} className="flex flex-col gap-1">
+          <span className="text-overline">TrendChart height {height}</span>
+          <TrendChart
+            data={SINGLE}
+            series={SINGLE_SERIES}
+            formatValue={count}
+            formatXTick={day}
+            ariaLabel={`Requests, ${height}px high`}
+            height={height}
+          />
+        </div>
+      ))}
+      {[16, 32, 64].map((height) => (
+        <div key={height} className="flex flex-col gap-1">
+          <span className="text-overline">Sparkline height {height}</span>
+          <Sparkline
+            values={[12, 18, 15, 24, 22, 31, 28, 36, 34, 41]}
+            ariaLabel={`Spend trend, ${height}px high`}
+            height={height}
+          />
+        </div>
+      ))}
+    </div>
+  ),
+}

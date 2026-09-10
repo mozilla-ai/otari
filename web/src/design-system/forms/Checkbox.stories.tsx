@@ -107,3 +107,39 @@ export const Visuals: Story = {
     </div>
   ),
 }
+
+/**
+ * `ariaLabel` when the visible label alone does not say which control it is.
+ *
+ * These three read "Allowed" on screen, which is all a column heading needs;
+ * spoken on its own it names nothing. The accessible name keeps the visible
+ * text inside it, so speech input still reaches the control by what is written
+ * on it.
+ */
+export const NamedForScreenReaders: Story = {
+  render: () => {
+    const [allowed, setAllowed] = useState<string[]>(["staging"])
+    return (
+      <div className="flex flex-col gap-3">
+        {["production", "staging", "sandbox"].map((workspace) => (
+          <span key={workspace} className="flex items-center gap-3">
+            <span className="w-24 text-caption">{workspace}</span>
+            <Checkbox
+              isSelected={allowed.includes(workspace)}
+              onChange={(on) =>
+                setAllowed((current) =>
+                  on
+                    ? [...current, workspace]
+                    : current.filter((name) => name !== workspace),
+                )
+              }
+              ariaLabel={`Allowed in ${workspace}`}
+            >
+              Allowed
+            </Checkbox>
+          </span>
+        ))}
+      </div>
+    )
+  },
+}

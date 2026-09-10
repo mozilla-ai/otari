@@ -84,3 +84,20 @@ export const UnknownValue: Story = {
 }
 
 export const Disabled: Story = { args: { isDisabled: true, className: "w-72" } }
+
+/**
+ * `isRequired` marks the field through HeroUI's own `[data-required]` rule, so
+ * nothing here spells the asterisk out; writing one renders two.
+ *
+ * `placeholder` is what the trigger says while nothing is selected, and it is
+ * an example rather than a restatement of the label. The default reads "Select
+ * an option", which is what an unset field with nothing better to say shows.
+ */
+export const Required: Story = {
+  args: {
+    value: "",
+    isRequired: true,
+    placeholder: "Pick how failures are routed",
+    className: "w-72",
+  },
+}

@@ -115,3 +115,11 @@ export const Invalid: Story = {
     className: "w-96",
   },
 }
+
+/**
+ * `isRequired` marks the group through HeroUI's own `[data-required]` rule, so
+ * the mark lands on the group's label rather than on any one option.
+ */
+export const Required: Story = {
+  args: { value: "", isRequired: true, className: "w-96" },
+}

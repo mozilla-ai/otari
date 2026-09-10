@@ -76,3 +76,16 @@ export const Disabled: Story = {
     className: "w-96",
   },
 }
+
+/**
+ * `isRequired` marks the field through HeroUI's own `[data-required]` rule.
+ * No manual asterisk: writing one renders two.
+ */
+export const Required: Story = {
+  args: {
+    value: "",
+    isRequired: true,
+    placeholder: "One host per line",
+    className: "w-96",
+  },
+}

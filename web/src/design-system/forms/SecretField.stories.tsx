@@ -53,3 +53,29 @@ export const WithValue: Story = {
     )
   },
 }
+
+/**
+ * `isInvalid` is what makes `errorMessage` render, on this field as on every
+ * other one here: the message is not shown by its presence alone, so a form
+ * holding a stale message cannot flash it while the value is being fixed.
+ *
+ * The message replaces the description rather than adding a row, and
+ * `reserveMessage` holds that line open so the form does not move when it
+ * appears.
+ */
+export const Invalid: Story = {
+  render: () => {
+    const [value, setValue] = useState("hunter2")
+    return (
+      <SecretField
+        label="OpenAI API key"
+        value={value}
+        onChange={setValue}
+        description="Stored encrypted. It is never shown again after saving."
+        isInvalid={!value.startsWith("sk-")}
+        errorMessage="An OpenAI key starts with sk-."
+        reserveMessage
+      />
+    )
+  },
+}

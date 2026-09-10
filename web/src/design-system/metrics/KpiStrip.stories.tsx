@@ -30,7 +30,7 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {
   render: () => (
-    <KpiStrip empty={false}>
+    <KpiStrip empty={false} columns={4}>
       <KpiCell label="Spend" value="$412.08" subline="This month" />
       <KpiCell label="Requests" value="1,284,901" subline="This month" />
       <KpiCell label="Tokens" value="94.2M" subline="This month" />
@@ -46,7 +46,7 @@ export const Default: Story = {
  */
 export const WithDeltaAndGraphic: Story = {
   render: () => (
-    <KpiStrip empty={false}>
+    <KpiStrip empty={false} columns={4}>
       <KpiCell
         label="Spend"
         value="$412.08"
@@ -81,7 +81,7 @@ export const WithDeltaAndGraphic: Story = {
  */
 export const WithSeverity: Story = {
   render: () => (
-    <KpiStrip empty={false}>
+    <KpiStrip empty={false} columns={4}>
       <KpiCell
         label="Budget"
         value="$1,041.20"
@@ -112,11 +112,29 @@ export const WithSeverity: Story = {
  */
 export const Empty: Story = {
   render: () => (
-    <KpiStrip empty>
+    <KpiStrip empty columns={4}>
       <KpiCell label="Spend" value="—" subline="No requests yet" />
       <KpiCell label="Requests" value="—" subline="No requests yet" />
       <KpiCell label="Tokens" value="—" subline="No requests yet" />
       <KpiCell label="Errors" value="—" subline="No requests yet" />
+    </KpiStrip>
+  ),
+}
+
+/**
+ * `columns` is the number of cells the caller passes, not a layout preference.
+ * The four stories above pass `columns={4}` for that reason: left at the
+ * default 5, a strip of four cells lays a fifth track and ends the row on a
+ * blank column. Five is the default because that is what Usage opens with.
+ */
+export const FiveColumns: Story = {
+  render: () => (
+    <KpiStrip empty={false} columns={5}>
+      <KpiCell label="Spend" value="$412.08" subline="This month" />
+      <KpiCell label="Requests" value="1,284,901" subline="This month" />
+      <KpiCell label="Tokens" value="94.2M" subline="This month" />
+      <KpiCell label="Errors" value="0.4%" subline="This month" />
+      <KpiCell label="Latency (p95)" value="812ms" subline="This month" />
     </KpiStrip>
   ),
 }

@@ -105,3 +105,32 @@ export const InFilterBar: Story = {
     )
   },
 }
+
+/**
+ * `id` when something outside the control has to point at it: a `<label
+ * htmlFor>` the filter bar owns rather than the control's own label, or a
+ * `aria-describedby` on a hint beside it.
+ *
+ * Passing `id` does not name the control on its own. The label below is
+ * associated through `htmlFor`, which is what makes the two one control to a
+ * screen reader; `ariaLabel` is the alternative when there is no visible text
+ * to associate.
+ */
+export const WithExternalLabel: Story = {
+  render: () => {
+    const [value, setValue] = useState("error")
+    return (
+      <div className="flex items-center gap-2">
+        <label htmlFor="activity-status" className="text-caption">
+          Status
+        </label>
+        <FilterSelect
+          id="activity-status"
+          value={value}
+          onChange={setValue}
+          options={STATUSES}
+        />
+      </div>
+    )
+  },
+}

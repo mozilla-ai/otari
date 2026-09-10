@@ -94,3 +94,32 @@ export const ControlFieldRig: Story = {
     </div>
   ),
 }
+
+/**
+ * `reserve={false}` for a field that will never speak: one in a table row or a
+ * toolbar. Holding a line open under each of those would put a band of empty
+ * space through every row.
+ *
+ * The two rows below carry the same message slot. Only the first pays for it.
+ */
+export const WithoutReserve: Story = {
+  render: () => (
+    <div className="flex w-96 flex-col gap-6">
+      {[true, false].map((reserve) => (
+        <div key={String(reserve)} className="flex flex-col gap-1">
+          <span className="text-overline">
+            reserve {reserve ? "on" : "off"}
+          </span>
+          <div className="divide-y divide-border border border-border">
+            {["staging", "sandbox"].map((row) => (
+              <div key={row} className="px-3 py-2">
+                <span className="text-body">{row}</span>
+                <FieldMessages reserve={reserve}>{null}</FieldMessages>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  ),
+}

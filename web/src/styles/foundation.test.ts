@@ -1741,10 +1741,41 @@ describe("the catalog shows every prop", () => {
     return names
   }
 
-  const stories = walk(DS)
+  // Comments stripped: a story's prose naming a prop would otherwise satisfy
+  // the shorthand pattern below.
+  const storyFiles = walk(DS)
     .filter((name) => name.endsWith(".stories.tsx"))
-    .map((name) => readFileSync(join(DS, name), "utf8"))
-    .join("\n")
+    .map((name) => withoutComments(readFileSync(join(DS, name), "utf8")))
+
+  const stories = storyFiles.join("\n")
+
+  /**
+   * The stories that could be showing this module's components: the ones that
+   * name any of its exports.
+   *
+   * A global search over the whole catalog was the first spelling and it was too
+   * loose by twelve props: `<Button isDisabled>` satisfied `isDisabled` for
+   * every other component that happens to declare it, so a prop with a common
+   * name passed without anyone having shown it. Narrowing to the files that
+   * mention the component keeps the cross-file coverage that matters, since
+   * `FieldMessages.stories.tsx` imports and renders `Field`, which is where
+   * `Field`'s message props are properly shown.
+   */
+  function corpusFor(source: string): string {
+    const exported = [
+      ...source.matchAll(/export (?:function|class) ([A-Z]\w*)/g),
+    ].map((match) => match[1])
+    // Every module in the layer declares at least one, `ErrorBoundary`'s being
+    // the only `class` among them. Falling back to the whole catalog would put
+    // one module back on the loose search this narrowing exists to replace, so
+    // a module the pattern cannot read reports no corpus and fails loudly.
+    expect(exported.length).toBeGreaterThan(0)
+    return storyFiles
+      .filter((text) =>
+        exported.some((name) => new RegExp(`\\b${name}\\b`).test(text)),
+      )
+      .join("\n")
+  }
 
   const components = walk(DS).filter(
     (name) =>
@@ -1782,6 +1813,7 @@ describe("the catalog shows every prop", () => {
   it.each(components)("shows every prop of %s", (name) => {
     const source = readFileSync(join(DS, name), "utf8")
     const module = name.replace(/\.tsx$/, "")
+    const corpus = corpusFor(source)
     const missing = [...propsOf(source)]
       .filter((prop) => CANNOT_BE_SHOWN[`${module}.${prop}`] === undefined)
       .filter((prop) => {
@@ -1789,7 +1821,7 @@ describe("the catalog shows every prop", () => {
         // shorthand, which is how the stories pass `bounded` and `nested`.
         const assigned = new RegExp(`\\b${prop}\\s*[=:]`)
         const shorthand = new RegExp(`\\b${prop}\\s*(?:/?>|\\n)`)
-        return !assigned.test(stories) && !shorthand.test(stories)
+        return !assigned.test(corpus) && !shorthand.test(corpus)
       })
       .sort()
 

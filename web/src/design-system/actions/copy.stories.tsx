@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useRef } from "react"
 
+import { Button as ActionButton } from "./Button"
 import { CopyButton } from "./CopyButton"
 import { CONCEALED_SECRET, CopyableValue, CopyField } from "./CopyField"
 
@@ -197,4 +198,29 @@ export const WithFieldRef: Story = {
       </div>
     )
   },
+}
+
+/**
+ * `action` puts a control beside the field, which moves the copy affordance
+ * inside the field and drops the button from the label row. It is the
+ * arrangement a value comes in when the operator has something to do with it
+ * once pasted: paste the record, then press Verify.
+ *
+ * Typed `ReactElement` rather than `ReactNode`, because the latter admits
+ * `false`: `action={enabled && <Button />}` compiled and then silently fell
+ * back to the default arrangement, which is the one this exists to replace.
+ * It is also excluded from `multiline` at the type level, since the right
+ * padding an in-field control needs indents every line of a textarea instead
+ * of making room on the first.
+ */
+export const FieldWithAction: Story = {
+  render: () => (
+    <div className="w-[48rem]">
+      <CopyField
+        label="Copy TXT record for example.com"
+        value="otari-verify=9f3c1a7b4e2d8065af13c9b27d4e5f60"
+        action={<ActionButton variant="primary">Verify</ActionButton>}
+      />
+    </div>
+  ),
 }
