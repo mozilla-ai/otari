@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import type { PolicySpec } from "@/client"
 import { API_ROOT } from "@/shared/api/client"
-import { PolicyForm } from "./RoutingPage"
+import { PolicyForm } from "./PolicyForm"
 
 /**
  * The routing form, in the dialog every create and edit in the dashboard opens
