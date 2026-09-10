@@ -131,6 +131,16 @@ async function drain() {
           (document.querySelector("#storybook-root")?.textContent ?? "").trim().length +
           (document.querySelector('[role="alertdialog"], [role="dialog"]')?.textContent ?? "").trim().length,
         svgs: document.querySelectorAll("#storybook-root svg").length,
+        // A full-bleed region reaches the width of its container query, so a
+        // story that clamps one inside a fixed-width wrapper pushes the band's
+        // left edge off the viewport, where it cannot be scrolled back into
+        // view. Seven stories shipped that way, cut about 114px in from the
+        // left. Negative and not "left of the canvas": a band bleeding out to
+        // the canvas edge is what it does on a page, and only what leaves the
+        // viewport is unreachable.
+        clipped: [...document.querySelectorAll(".otari-bleed")]
+          .map((el) => Math.round(el.getBoundingClientRect().left))
+          .filter((left) => left < 0),
       }))
       if (shown.errored) failures.push({ theme, id, why: "error display", errorText: shown.errorText })
       else if (shown.children === 0) failures.push({ theme, id, why: "empty root" })
@@ -139,6 +149,7 @@ async function drain() {
       else if (shown.text === 0 && shown.svgs === 0 && !(await page.evaluate(RENDERED)))
         failures.push({ theme, id, why: "no text, no svg, and nothing painted" })
       else if (errors.length) failures.push({ theme, id, why: "console errors", errors: [...new Set(errors)].slice(0, 3) })
+      else if (shown.clipped.length) failures.push({ theme, id, why: "a full-bleed region is cut off the left of the viewport", left: shown.clipped })
     } catch (e) {
       failures.push({ theme, id, why: "timeout", detail: String(e.message).split("\n")[0], errors: [...new Set(errors)].slice(0, 2) })
     }

@@ -32,7 +32,11 @@ export function AuthPageShell({ children }: { children: ReactNode }) {
         {/* The real mark, so the tab icon and the page agree. `alt=""` because
             nothing here is a destination and the heading below names the
             product. */}
-        <img src="/favicon.svg" alt="" className="h-6 w-[26px]" />
+        <img
+          src={`${import.meta.env.BASE_URL}favicon.svg`}
+          alt=""
+          className="h-6 w-[26px]"
+        />
       </header>
       <div className="flex min-h-0 flex-1">
         {/* `min-h-full` on the column is what runs the rule the height of the

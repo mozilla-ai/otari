@@ -139,7 +139,15 @@ jobs:
     - name: Install Chromium
       run: pnpm run e2e:install
 
+    # Built under the same base path `publish` uses, because that is the build
+    # this job exists to prove. Left at the root it renders a bundle nobody
+    # serves, and a URL written from the origin root instead of the base
+    # resolves in the sweep and 404s on the site. `<img src="/favicon.svg">`
+    # did exactly that on two pages: correct on a dashboard served at `/`,
+    # missing on a project site served under `/otari/`.
     - name: Build the catalog
+      env:
+        STORYBOOK_BASE_PATH: /${{ github.event.repository.name }}/
       run: pnpm run storybook:build
 
     # It serves the static build rather than the dev server, because the static
@@ -151,15 +159,23 @@ jobs:
     # `/iframe.html` are both real files on disk, and a rewrite-everything server
     # would actually be worse, turning a missing asset into a 200 that renders.
     #
+    # It is served one directory up, under the repository name, so the base path
+    # the bundle was built with is the path it is actually reached at. Serving
+    # the build at the root would put every asset one segment away from where
+    # the bundle asks for it, and nothing would load at all.
+    #
     # The exit status is the grep's, not the pipeline's: `smoke.mjs` reports its
     # failures on stdout and exits 0 either way, so without the grep this step
     # passes over a catalog where every story threw.
     - name: Render every story in both themes
       run: |
-        python3 -m http.server 6006 --directory storybook-static &
+        mkdir -p site
+        mv storybook-static "site/${{ github.event.repository.name }}"
+        python3 -m http.server 6006 --directory site &
         curl -s --retry 60 --retry-delay 2 --retry-connrefused \
-          -o /dev/null http://localhost:6006/index.json
-        pnpm exec node .storybook/smoke.mjs | tee smoke.log
+          -o /dev/null "http://localhost:6006/${{ github.event.repository.name }}/index.json"
+        SMOKE_ORIGIN="http://localhost:6006/${{ github.event.repository.name }}" \
+          pnpm exec node .storybook/smoke.mjs | tee smoke.log
         grep -q "ALL RENDERED CLEAN" smoke.log
 
   publish:

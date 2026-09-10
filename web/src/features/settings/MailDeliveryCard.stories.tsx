@@ -36,11 +36,6 @@ export const Ready: Story = {
       },
     },
   },
-  render: () => (
-    <div className="w-[40rem]">
-      <MailDeliveryCard />
-    </div>
-  ),
 }
 
 /**
@@ -62,11 +57,6 @@ export const MissingSettings: Story = {
       },
     },
   },
-  render: () => (
-    <div className="w-[40rem]">
-      <MailDeliveryCard />
-    </div>
-  ),
 }
 
 /**
@@ -88,11 +78,6 @@ export const NotConfigured: Story = {
       },
     },
   },
-  render: () => (
-    <div className="w-[40rem]">
-      <MailDeliveryCard />
-    </div>
-  ),
 }
 
 /**
@@ -108,9 +93,4 @@ export const GatewayError: Story = {
       },
     },
   },
-  render: () => (
-    <div className="w-[40rem]">
-      <MailDeliveryCard />
-    </div>
-  ),
 }

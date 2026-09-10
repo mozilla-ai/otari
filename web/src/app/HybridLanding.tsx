@@ -60,7 +60,11 @@ export function HybridLanding() {
         <Card.Content className="flex flex-col gap-6 p-7">
           <div className="flex flex-col items-center gap-3 text-center">
             {/* Decorative: the heading beside it already names the product. */}
-            <img src="/favicon.svg" alt="" className="h-12 w-12" />
+            <img
+              src={`${import.meta.env.BASE_URL}favicon.svg`}
+              alt=""
+              className="h-12 w-12"
+            />
             <div>
               <h1 className="text-display">Otari gateway</h1>
               <p className="mt-1 text-sm text-muted">

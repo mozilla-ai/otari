@@ -32,21 +32,11 @@ type Story = StoryObj<typeof meta>
  */
 export const Unclaimed: Story = {
   parameters: { deployment: { sign_in_methods: ["master_key"] } },
-  render: () => (
-    <div className="w-[40rem]">
-      <PasswordCard />
-    </div>
-  ),
 }
 
 /** Claimed: the same card is now a change-password form. */
 export const Claimed: Story = {
   parameters: { deployment: { sign_in_methods: ["password"] } },
-  render: () => (
-    <div className="w-[40rem]">
-      <PasswordCard />
-    </div>
-  ),
 }
 
 /**
@@ -56,9 +46,4 @@ export const Claimed: Story = {
  */
 export const BothMethods: Story = {
   parameters: { deployment: { sign_in_methods: ["master_key", "password"] } },
-  render: () => (
-    <div className="w-[40rem]">
-      <PasswordCard />
-    </div>
-  ),
 }
