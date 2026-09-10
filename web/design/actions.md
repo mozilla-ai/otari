@@ -107,7 +107,9 @@ says what the deletion costs does not fit on a row action.
 <ConfirmDialog
   isOpen={pendingDelete !== undefined}
   onOpenChange={(open) => {
-    if (!open) setPendingDelete(undefined)
+    if (open) return
+    setPendingDelete(undefined)
+    remove.reset()
   }}
   heading="Delete rate override"
   body={pendingDelete ? `${pendingDelete.model_key} returns to the catalog rate…` : null}
@@ -125,6 +127,12 @@ says what the deletion costs does not fit on a row action.
 the mutation's `onSuccess` clears it. The dialog owns `isPending` and `error`, so
 the page's own `ErrorBanner` drops the delete: a message behind the backdrop is a
 message the operator does not read. See [feedback.md](feedback.md).
+
+**Reset the mutation when the dialog closes.** A refusal stays on it until the next
+call, and the dialog reads it on open, so without this the next row's confirm opens
+already reporting a failure that was about the row before it. On close rather than
+on open, so the trigger in the row stays a bare `setPendingDelete` and a memoized
+column keeps its per-row cache.
 
 The dialog names the object and the consequence, and its confirm names the
 consequence rather than repeating the trigger's word: "Delete permanently", not
