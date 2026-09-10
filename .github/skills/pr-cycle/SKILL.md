@@ -113,7 +113,16 @@ PR with almost no CI, and neither of them reports anything:
   live with the inherited diff until its parent merges.
 - **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
   PR has none, so nothing runs until the conflict is resolved. The tell is
-  `mergeStateStatus: DIRTY` beside a check count that has stopped growing.
+  `mergeStateStatus: DIRTY` beside a check set that is not growing, and read that tell as "not
+  growing" rather than as "small": a PR that was mergeable when its checks ran and conflicted
+  afterwards keeps every one of those rows, so `DIRTY` beside a **complete** green set is the
+  same fault from the other end. Those runs are real and they are a verdict on a merge ref that
+  no longer exists, which is not the question anyone is asking when they look. Checks attach to
+  the head sha, so nothing about them changes when the mergeability underneath them does; four
+  PRs in one stack showed a full green set for the parent's pre-merge state within a minute of
+  that parent squashing. Neither half tells you anything alone. `DIRTY` plus finished means
+  re-verify after the rebase, and until then the set says only that the content merged with an
+  earlier `main`.
 
 A child PR hits the second case as soon as its parent is squash-merged, because its own
 unsquashed commits and the squash on `main` are the same content twice.
