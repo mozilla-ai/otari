@@ -229,12 +229,30 @@ its state, and a failed create's banner survives into a fresh form. `close()`
 only sets `isOpen` false; a `requestAnimationFrame` does not cover the exit,
 which is an animation rather than a frame.
 
-**`isDirty` is the negation of one `isPristine` predicate**, declared beside
-`resetForm`, that names every field the form owns. A field added to the form is
-added there or the guard lies: it will let Escape discard work it cannot see.
-Reading the two lists as one is what keeps them from drifting apart, which they
-have done in both directions, leaving a reopened dialog dirty on arrival and a
-half-filled one discarded without a word.
+**`isDirty` is `draft !== seed`**: one snapshot of every field the form owns,
+seeded once on mount beside the reset, and compared against the live one.
+
+```tsx
+// Correct: a snapshot, so dirty means "differs from what was seeded"
+const draft = JSON.stringify({ name, target, chain, conditions, guardrails })
+const seed = useRef(draft)
+…
+<FormDialog isDirty={draft !== seed.current} … />
+
+// Incorrect: a predicate of empties, which reports an edit form dirty on arrival
+const isPristine = name === "" && target === "" && chain.length === 0
+```
+
+Dirty means "differs from what was seeded", and a create form is the case where
+the seed happens to be all empties. So a hand-listed predicate of empties is the
+create-only degenerate form: it is right until the same component edits
+something, and it drifts, because a field added to the form has to be remembered
+in a second place. The snapshot cannot omit a field the reset does not, since
+both read one list.
+
+A guard that lies lets Escape discard work it cannot see. That has happened here
+in both directions: a reopened dialog dirty on arrival, and a half-filled one
+discarded without a word.
 
 The remount is also what keeps one row's draft out of the next row's dialog,
 which is the promise this component's own docstring makes; a page that holds the
