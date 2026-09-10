@@ -133,6 +133,19 @@ _UNAUTHENTICATED_PATHS = frozenset(
         f"{API_ROOT}/auth/oauth/{{provider}}/callback",
     }
 )
+def _under(path: str, prefixes: tuple[str, ...]) -> bool:
+    """Whether ``path`` is one of ``prefixes`` or sits inside one.
+
+    Compared on the segment boundary, not as a byte prefix, so a sibling that
+    merely begins with the same characters does not inherit the treatment:
+    ``/api/v1/health-internal`` is not under ``/api/v1/health``. The tuples
+    below that already end in a slash are safe either way; these do not, and
+    getting it wrong here fails open, shipping an authenticated response with
+    no ``no-store`` and no ``Vary: Authorization``.
+    """
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
+
+
 # Public, unauthenticated static assets that shared caches may keep. Paths here
 # set their own Cache-Control at the route (favicon.svg), so the middleware only
 # fills one in when it is missing.
@@ -163,7 +176,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         path = request.url.path
-        if path.startswith(_PUBLIC_PREFIXES):
+        if _under(path, _PUBLIC_PREFIXES):
             return response
         # A cacheable path's policy describes its content, so it applies only to a
         # response that carries any: an error under it is a fact about right now.
@@ -597,7 +610,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
-            if path in _UNAUTHENTICATED_PATHS or path.startswith(_PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
+            if path in _UNAUTHENTICATED_PATHS or _under(path, _PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
             requirement: list[dict[str, list[str]]] = (
                 [{"GatewayTokenAuth": []}]

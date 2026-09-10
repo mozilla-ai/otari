@@ -30,6 +30,9 @@ from gateway.main import (
     _UNAUTHENTICATED_PATHS,
     create_app,
 )
+from gateway.main import (
+    _under as _main_under,
+)
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
@@ -191,3 +194,20 @@ def test_no_published_description_names_a_moved_path(standalone: FastAPI) -> Non
     """
     stray = _described_paths(standalone.openapi()) - PROSE_EXEMPT_PATHS
     assert not stray, f"published prose still names paths that moved: {sorted(stray)}"
+
+
+def test_a_near_miss_of_a_public_prefix_is_not_treated_as_public() -> None:
+    """A sibling that merely starts the same way must not inherit the exemption.
+
+    The exemption skips ``Cache-Control: private, no-store`` and ``Vary:
+    Authorization``, so a byte-prefix comparison here fails open: a future
+    ``/api/v1/health-internal`` would be served to a shared cache without
+    either. The same comparison decides which operations the published document
+    leaves unstamped.
+    """
+    for prefix in _PUBLIC_PREFIXES:
+        assert _main_under(prefix, _PUBLIC_PREFIXES)
+        assert _main_under(f"{prefix}/readiness", _PUBLIC_PREFIXES)
+        assert not _main_under(f"{prefix}-internal", _PUBLIC_PREFIXES)
+        assert not _main_under(f"{prefix}z", _PUBLIC_PREFIXES)
+        assert not _main_under(f"{prefix}x/readiness", _PUBLIC_PREFIXES)
