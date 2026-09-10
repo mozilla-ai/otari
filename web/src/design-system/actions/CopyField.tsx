@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { FiEye, FiEyeOff } from "react-icons/fi"
 import { CopyButton } from "@/design-system/actions/CopyButton"
-import { copyToClipboard } from "@/shared/helpers/clipboard"
+import { copyToClipboard } from "@/design-system/helpers/clipboard"
 
 // An identifier the operator needs verbatim (a model id, an alias target, a
 // request id), rendered so it can be taken either way: highlighted with the mouse

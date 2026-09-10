@@ -18,6 +18,21 @@ import type {
   UpdateOwnKeyRequest,
   User,
 } from "@/client"
+import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { BulkActionBar } from "@/design-system/data/BulkActionBar"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   accessLabel,
   ModelScopeControl,
@@ -34,26 +49,6 @@ import {
 } from "@/shared/api/apiKeys"
 import { useUsers } from "@/shared/api/users"
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
-import {
-  CONCEALED_SECRET,
-  CopyField,
-} from "@/design-system/actions/CopyField"
-import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
-import { BulkActionBar } from "@/design-system/data/BulkActionBar"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/design-system/data/DataTable"
-import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
-import { EmptyState } from "@/design-system/feedback/EmptyState"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Checkbox } from "@/design-system/forms/Checkbox"
-import { Field } from "@/design-system/forms/Field"
-import { Dot } from "@/design-system/indicators/Dot"
-import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
-import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { formatDate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,
@@ -66,7 +61,6 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // ---------- helpers ----------

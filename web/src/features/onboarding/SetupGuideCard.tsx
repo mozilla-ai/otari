@@ -7,6 +7,9 @@ import type {
   ActivationAttempt,
   WorkspaceActivation,
 } from "@/client"
+import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
   useCreateActivationKey,
@@ -15,12 +18,6 @@ import {
 } from "@/shared/api/activation"
 import { useModels } from "@/shared/api/models"
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
-import {
-  CONCEALED_SECRET,
-  CopyField,
-} from "@/design-system/actions/CopyField"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,

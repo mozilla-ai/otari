@@ -1,28 +1,25 @@
 import { AlertDialog, Button, buttonVariants, Input } from "@heroui/react"
 import { useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
+import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { Toggle } from "@/design-system/forms/Toggle"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { Toolbar } from "@/design-system/layout/Toolbar"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
-import { Toggle } from "@/features/settings/Toggle"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useReencryptProviderCredentials,
   useStoredProviders,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
-import {
-  CONCEALED_SECRET,
-  CopyField,
-} from "@/design-system/actions/CopyField"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { PageLoading } from "@/design-system/feedback/PageLoading"
-import { Checkbox } from "@/design-system/forms/Checkbox"
-import { INPUT_CLASS } from "@/design-system/forms/inputClass"
-import { PageIntro } from "@/design-system/layout/PageIntro"
-import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { Toolbar } from "@/design-system/layout/Toolbar"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -216,10 +213,10 @@ function SettingControl({
   if (field.type === "bool") {
     return (
       <Toggle
-        checked={field.value === true}
+        isSelected={field.value === true}
         onChange={(next) => patch(settableUpdate(field.key, next))}
         label={field.key}
-        disabled={disabled}
+        isDisabled={disabled}
       />
     )
   }
