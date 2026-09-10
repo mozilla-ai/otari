@@ -19,6 +19,18 @@ describe("UserComboBox", () => {
     expect(field).toBeInTheDocument()
   })
 
+  it("says why the popover is empty rather than opening a silent box", async () => {
+    render(<UserComboBox value="" onChange={() => {}} users={[]} />)
+
+    await userEvent.click(screen.getByRole("combobox"))
+
+    // Neither sentence promises what typing an id will do: that differs per
+    // endpoint, and the caption line under the field is where it is answered.
+    expect(
+      await screen.findByText("No users to pick from yet."),
+    ).toBeInTheDocument()
+  })
+
   it("names a member by the roster instead of the UUID they were minted under", async () => {
     const uuid = "33333333-3333-3333-3333-333333333333"
     render(

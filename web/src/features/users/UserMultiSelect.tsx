@@ -2,6 +2,7 @@ import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
 
 import type { User } from "@/client"
+import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
@@ -120,7 +121,17 @@ export function UserMultiSelect({
             <ComboBox.Trigger />
           </ComboBox.InputGroup>
           <ComboBox.Popover>
-            <ListBox items={visible} className="max-h-72 overflow-auto">
+            <ListBox
+              items={visible}
+              className="max-h-72 overflow-auto"
+              renderEmptyState={() => (
+                <ComboBoxEmpty
+                  isSourceEmpty={options.every((o) => value.includes(o.id))}
+                  emptyMessage="Everybody here is already assigned."
+                  noMatchesMessage="Nobody matches what you typed."
+                />
+              )}
+            >
               {(option: Option) => (
                 <ListBoxItem id={option.id} textValue={option.label}>
                   {option.label}

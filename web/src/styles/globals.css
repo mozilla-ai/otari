@@ -1927,11 +1927,23 @@ main {
 }
 .select__trigger[data-open="true"],
 .select__trigger[aria-expanded="true"],
-.combo-box__trigger[data-open="true"],
 .dropdown__trigger[data-open="true"] {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+/* The combo box is deliberately not in that list, and it is the one family
+   where the trigger is not the control. HeroUI renders `.combo-box__trigger` as
+   an absolutely positioned chevron overlaying the field
+   (`absolute end-0 top-1/2 h-full -translate-y-1/2`, no border, no background),
+   so a ring at a 2px offset draws around the chevron and overhangs the field's
+   own edge on the trailing and block sides instead of following the control.
+
+   The control is the input group, and HeroUI already rings its
+   `[data-slot="input"]` on focus. That is the same moment: react-aria focuses
+   the input when the trigger is pressed and keeps the trigger out of the tab
+   order, so an open combo box always wears that ring and a keyboard user is
+   never left without one. The rule below is the other half, and the two agree:
+   the overlay chevron draws no ring of its own in either state. */
 /* 6px, not 8: the menu belongs to the control, and the gap was wide enough to
    read as two unrelated things. Measured rather than derived: the offset is
    HeroUI's and it moved when the trigger lost 2px of height in a table row, so
@@ -2189,16 +2201,14 @@ main {
   --border: var(--color-border-strong);
 }
 
-/* The one focus ring in the emitted stylesheet that does not follow its
-   element's corner. Every other ring here is a `box-shadow` or an `outline`,
-   both of which take the element's own `border-radius`, so zeroing `--radius`
-   squared them; HeroUI's combo-box trigger sets `border-radius: .25rem` inside
-   its own focus rule, which nothing about the token can reach. Found by reading
-   the compiled CSS rather than the page: the trigger renders on Keys and
-   Budgets, not on the screens this pass was checked against. */
+/* HeroUI rings the combo box's overlay chevron here too, at `ring-offset-2`,
+   which overhangs the field for the reason the open-state rule above gives. The
+   ring goes rather than being squared to the token: a square ring around the
+   chevron is still a ring around the wrong box, and the field's own focus ring
+   is what marks the control. */
 .combo-box__trigger:focus-visible:not(:focus),
 .combo-box__trigger[data-focus-visible="true"] {
-  border-radius: 0;
+  box-shadow: none;
 }
 
 .tooltip__content {

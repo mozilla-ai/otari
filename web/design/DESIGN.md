@@ -66,6 +66,8 @@ for a component, not for those.
 | `feedback/ErrorBanner` · `/InfoBanner` · `/EmptyState` · `/EmptyMessage` · `/PageLoading` · `/PageError` · `/ConfirmDialog` · `/Dialog` · `/ErrorBoundary` · `/Skeleton` · `/errorMessage` | one each |
 | `forms/Field` · `/SecretField` · `/TextArea` · `/SearchField` · `/FieldAction` | one component each |
 | `forms/Select` | `Select`, and the `SelectOption` type |
+| `forms/ComboBoxField` | `ComboBoxField`, and the `ComboBoxOption` type |
+| `forms/ComboBoxEmpty` | `ComboBoxEmpty`. The two sentences an empty popover picks between |
 | `forms/RadioGroup` | `RadioGroup`, and the `RadioOption` type |
 | `forms/Toggle` | `Toggle` |
 | `forms/FieldMessages` | `FieldMessages`, `ControlField` |

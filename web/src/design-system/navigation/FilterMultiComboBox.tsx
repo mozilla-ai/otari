@@ -2,6 +2,8 @@ import { ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react"
 import type { KeyboardEvent as ReactKeyboardEvent } from "react"
 import { useState } from "react"
 
+import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
+
 export function FilterMultiComboBox({
   label,
   values,
@@ -95,7 +97,23 @@ export function FilterMultiComboBox({
         <ComboBox.Trigger />
       </ComboBox.InputGroup>
       <ComboBox.Popover>
-        <ListBox items={visible} className="max-h-72 overflow-auto">
+        <ListBox
+          items={visible}
+          className="max-h-72 overflow-auto"
+          // A filter still owes the operator a reason for an empty menu, even
+          // though it never speaks a validation message.
+          renderEmptyState={() => (
+            <ComboBoxEmpty
+              isSourceEmpty={options.every((o) => values.includes(o.value))}
+              emptyMessage="Nothing left to filter by."
+              noMatchesMessage={
+                allowsCustom
+                  ? "No match. Press Enter to filter on what you typed."
+                  : "No match."
+              }
+            />
+          )}
+        >
           {(option: { value: string; label: string }) => (
             <ListBoxItem id={option.value} textValue={option.label}>
               {option.label}

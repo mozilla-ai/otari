@@ -27,6 +27,9 @@ Is it one of a short, closed set?
  ├── Do the options need explaining, or does seeing them all matter?
  │    └── Yes -> RadioGroup         (vertical; past ~5 options use Select)
  └── No -> Select
+Is it one of a set too long to scroll, or open-ended?
+ └── ComboBoxField                 (search as you type; `allowsCustomValue`
+                                    for a list that is a shortcut, not a whitelist)
 Is it many of a set?
  └── FilterMultiComboBox
 ```
@@ -53,6 +56,10 @@ Checkbox: { isSelected, onChange: (next: boolean) => void, isDisabled?, ariaLabe
   children }
 Select: { label, value, onChange, options: SelectOption[], description?, placeholder?,
   isRequired?, isDisabled?, isInvalid?, errorMessage?, reserveMessage?, className? }
+ComboBoxField: { label, value, onChange, options: ComboBoxOption[], description?,
+  placeholder?, isRequired?, isDisabled?, isInvalid?, errorMessage?, reserveMessage?,
+  className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus", shouldSelectOnFocus?,
+  isSourceEmpty?, emptyMessage?, noMatchesMessage? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
   className? }
@@ -105,6 +112,33 @@ Rules:
 - An error message **replaces** the description line rather than adding a row.
 - Inputs on public pages are 16px (`text-base`), which is what stops iOS from
   zooming on focus.
+
+## ComboBoxField
+
+`Select`'s vocabulary for everything the two share, plus what a combo box needs
+beyond it. See its docstring for the contract; three things are worth knowing at
+a call site.
+
+**It filters nothing.** `options` is what the popover holds, already matched and
+capped by the caller, because what counts as a match differs per field (an id as
+well as a name) and a ceiling wants a "showing 50 of 300" line under it.
+
+**An empty popover has to say which empty it is.** Every combo box here keeps
+its menu open on an empty collection, so that a query matching nothing does not
+read as a broken field. `noMatchesMessage` is about the query and `emptyMessage`
+about the source, `isSourceEmpty` picks between them, and only the caller knows
+what would fill an empty source: `ModelComboBox` names the provider credential
+that discovery needs. The two sentences are `ComboBoxEmpty`, which the comboboxes
+that are not form fields render through `ListBox`'s `renderEmptyState`.
+
+**An option's `hint` is a second, muted line inside the row**, for text that
+identifies the label rather than repeating it, such as the id a person is billed
+under. It joins the row's accessible name, since it is what tells two rows with
+one label apart.
+
+`FilterMultiComboBox` stays a separate component for the reason `FilterSelect`
+does: it is a filter, so its label is a caption beside the control and it never
+speaks a validation message.
 
 ## Field height is a property of the place, not of the field
 

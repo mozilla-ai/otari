@@ -1,20 +1,13 @@
-import {
-  ComboBox,
-  Description,
-  Input,
-  Label,
-  ListBox,
-  ListBoxItem,
-} from "@heroui/react"
 import type { ReactNode } from "react"
 import { useState } from "react"
 
 import type { User } from "@/client"
-import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import {
+  ComboBoxField,
+  type ComboBoxOption,
+} from "@/design-system/forms/ComboBoxField"
 
-interface Option {
-  id: string
-  name: string
+interface Option extends ComboBoxOption {
   isMember: boolean
 }
 
@@ -57,16 +50,16 @@ export function UserComboBox({
     .filter((u) => !u.user_id.startsWith("apikey-"))
     .map((u) => {
       const member = memberLabels?.get(u.user_id)
-      if (member) return { id: u.user_id, name: member, isMember: true }
+      if (member) return { value: u.user_id, label: member, isMember: true }
       return {
-        id: u.user_id,
-        name: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
+        value: u.user_id,
+        label: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
         isMember: false,
       }
     })
     .sort((a, b) => {
       if (a.isMember !== b.isMember) return a.isMember ? -1 : 1
-      return a.name.localeCompare(b.name)
+      return a.label.localeCompare(b.label)
     })
 
   const [text, setText] = useState(value)
@@ -75,8 +68,8 @@ export function UserComboBox({
     .filter(
       (o) =>
         !query ||
-        o.id.toLowerCase().includes(query) ||
-        o.name.toLowerCase().includes(query),
+        o.value.toLowerCase().includes(query) ||
+        o.label.toLowerCase().includes(query),
     )
     .slice(0, 50)
 
@@ -93,14 +86,14 @@ export function UserComboBox({
     // single scan matching either field would then bill the key to whichever of
     // the two came first. Only the typed path is affected (picking an option
     // carries the item's id), which is exactly the path that takes an id.
-    const byId = options.find((o) => o.id === trimmed)
-    if (byId) return byId.id
-    const byName = options.find((o) => o.name === trimmed)
-    return byName ? byName.id : trimmed
+    const byId = options.find((o) => o.value === trimmed)
+    if (byId) return byId.value
+    const byName = options.find((o) => o.label === trimmed)
+    return byName ? byName.value : trimmed
   }
 
   const selectedId = resolveId(text)
-  const known = options.some((o) => o.id === selectedId)
+  const known = options.some((o) => o.value === selectedId)
   const creatingHint =
     selectedId !== "" && !known
       ? (unknownHint ?? (
@@ -111,51 +104,29 @@ export function UserComboBox({
       : (description ?? "Spend and budgets track against this user.")
 
   return (
-    <ComboBox.Root
-      allowsCustomValue
-      allowsEmptyCollection
-      menuTrigger="focus"
-      inputValue={text}
-      onInputChange={(next) => {
+    <ComboBoxField
+      label={label}
+      value={text}
+      onChange={(next) => {
         setText(next)
         onChange(resolveId(next))
       }}
-      onSelectionChange={(key) => {
-        if (key != null) {
-          const id = String(key)
-          setText(id)
-          onChange(id)
-        }
-      }}
-      // Cap the width so the field and its dropdown trigger stay within easy
-      // reach instead of stretching across a wide form.
-      className="flex max-w-md flex-col gap-1"
-    >
-      <Label className="text-body">{label}</Label>
-      <ComboBox.InputGroup>
-        {/* Not a credential field: keep password managers out, and select on focus
-            so typing replaces the current value rather than appending. */}
-        <Input
-          placeholder={placeholder}
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          onFocus={(event) => event.currentTarget.select()}
-        />
-        <ComboBox.Trigger />
-      </ComboBox.InputGroup>
-      <ComboBox.Popover>
-        <ListBox items={visible} className="max-h-72 overflow-auto">
-          {(option: Option) => (
-            <ListBoxItem id={option.id} textValue={option.name}>
-              {option.name}
-            </ListBoxItem>
-          )}
-        </ListBox>
-      </ComboBox.Popover>
-      <FieldMessages>
-        <Description className="text-muted">{creatingHint}</Description>
-      </FieldMessages>
-    </ComboBox.Root>
+      options={visible}
+      description={creatingHint}
+      placeholder={placeholder}
+      allowsCustomValue
+      // The whole list on focus, filtered as you type, which is what a
+      // pick-from-a-list field wants; nothing here is autofocused.
+      menuTrigger="focus"
+      // Typing then replaces the shown owner rather than appending to it.
+      shouldSelectOnFocus
+      // Neither sentence says what typing an id will do, because that differs
+      // per caller: the description line below is where `unknownHint` answers
+      // it, and promising a creation here would be a 404 on an endpoint that
+      // only accepts existing owners.
+      isSourceEmpty={options.length === 0}
+      emptyMessage="No users to pick from yet."
+      noMatchesMessage="No user matches what you typed."
+    />
   )
 }

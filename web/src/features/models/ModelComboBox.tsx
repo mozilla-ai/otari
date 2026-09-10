@@ -1,14 +1,8 @@
-import {
-  ComboBox,
-  Description,
-  Input,
-  Label,
-  ListBox,
-  ListBoxItem,
-} from "@heroui/react"
 import { type ReactNode, useMemo } from "react"
-import type { DiscoverableModel } from "@/client"
-import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import {
+  ComboBoxField,
+  type ComboBoxOption,
+} from "@/design-system/forms/ComboBoxField"
 import { useDiscoverableModels } from "@/shared/api/models"
 
 // How many matches to render at once. A single provider can report a few hundred
@@ -38,6 +32,12 @@ const MAX_VISIBLE = 50
  * the commit, so picking an option silently fails to update the field.
  * Production builds are unaffected, but a picker that only works in prod is not
  * worth the headers, and the provider is legible on every row regardless.
+ *
+ * Nothing discovered is the ordinary state of a gateway with no provider
+ * credential, not an edge case, so the empty popover says which of the two it
+ * is and what fills it. The wording names the credential rather than the page
+ * that holds one: a hosted deployment keeps those under the organization
+ * instead of the process-wide providers page.
  */
 export function ModelComboBox({
   label,
@@ -58,21 +58,22 @@ export function ModelComboBox({
 }) {
   const discoverable = useDiscoverableModels()
 
-  const { visible, total, failed } = useMemo(() => {
+  const { visible, total, failed, isCatalogEmpty } = useMemo(() => {
     const query = value.trim().toLowerCase()
     const providers = discoverable.data?.providers ?? []
     // Provider order is preserved, so rows still cluster by provider even
     // without section headers.
-    const all: DiscoverableModel[] = providers.flatMap(
-      (provider) => provider.models,
+    const all: ComboBoxOption[] = providers.flatMap((provider) =>
+      provider.models.map((model) => ({ value: model.key, label: model.key })),
     )
     const hits = query
-      ? all.filter((model) => model.key.toLowerCase().includes(query))
+      ? all.filter((option) => option.value.toLowerCase().includes(query))
       : all
     return {
       visible: hits.slice(0, MAX_VISIBLE),
       total: hits.length,
       failed: providers.filter((provider) => !provider.ok),
+      isCatalogEmpty: all.length === 0,
     }
   }, [discoverable.data, value])
 
@@ -93,55 +94,29 @@ export function ModelComboBox({
   })()
 
   return (
-    <ComboBox.Root
+    <ComboBoxField
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={visible}
+      description={hint}
+      placeholder={placeholder}
+      autoFocus={autoFocus}
+      isRequired={isRequired}
       // Discovery is not authoritative, so anything typed stands on its own.
       allowsCustomValue
-      // Otherwise a query matching nothing closes the popover, which reads as
-      // "the field broke" rather than "no matches".
-      allowsEmptyCollection
-      // HeroUI defaults this to "focus", which with autoFocus drops the whole
-      // list open as soon as the form appears. React Aria marks everything
-      // outside an open popover aria-hidden, so the price fields and Save button
-      // would be unreachable to a screen reader before a single keystroke. Open
-      // on typing (or the trigger) instead.
+      // Not "focus", which with autoFocus drops the whole list open as soon as
+      // the form appears. React Aria marks everything outside an open popover
+      // aria-hidden, so the price fields and Save button would be unreachable
+      // to a screen reader before a single keystroke.
       menuTrigger="input"
-      inputValue={value}
-      onInputChange={onChange}
-      onSelectionChange={(key) => {
-        if (key != null) {
-          onChange(String(key))
-        }
-      }}
-      isRequired={isRequired}
-      // Cap the width so the field and its dropdown trigger stay within easy
-      // reach instead of stretching across a wide form.
-      className="flex max-w-md flex-col gap-1"
-    >
-      {/* HeroUI marks a required field's label through CSS; see Field. */}
-      <Label className="text-body">{label}</Label>
-      <ComboBox.InputGroup>
-        <Input placeholder={placeholder} autoFocus={autoFocus} />
-        <ComboBox.Trigger />
-      </ComboBox.InputGroup>
-      <ComboBox.Popover>
-        <ListBox items={visible} className="max-h-72 overflow-auto">
-          {(model: DiscoverableModel) => (
-            // id and textValue are the full selector, so picking a row puts what
-            // the API expects into the field.
-            <ListBoxItem id={model.key} textValue={model.key}>
-              {model.key}
-            </ListBoxItem>
-          )}
-        </ListBox>
-      </ComboBox.Popover>
-      {/* Reserved even when silent, so this control matches a `Field` beside it
-          in a row. The hint goes through HeroUI's `Description`, which is what
-          wires it to the input via aria-describedby; a bare node here leaves
-          the combo box reporting `aria-describedby: null`. Same reasoning as
-          `Field`. */}
-      <FieldMessages>
-        {hint ? <Description>{hint}</Description> : null}
-      </FieldMessages>
-    </ComboBox.Root>
+      isSourceEmpty={isCatalogEmpty}
+      emptyMessage={
+        discoverable.isLoading
+          ? "Looking for models…"
+          : "No models discovered yet. Add a provider credential and the models it serves appear here; until then, type the selector."
+      }
+      noMatchesMessage="No model matches. Type a provider:model selector to use it anyway."
+    />
   )
 }
