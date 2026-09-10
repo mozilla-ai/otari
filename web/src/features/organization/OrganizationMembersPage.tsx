@@ -25,6 +25,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
+import { Select } from "@/design-system/forms/Select"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
@@ -248,11 +249,12 @@ function AddMemberForm({
           autoFocus
           description="The handle this identity is claimed by. Nothing is emailed here; the membership is active straight away. Use Invite member instead to email an accept link."
         />
-        <FilterSelect
+        <Select
           label="Role"
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
           options={ROLE_OPTIONS}
+          reserveMessage={false}
         />
       </div>
       {workspaces.data && workspaces.data.length > 0 ? (
@@ -412,11 +414,12 @@ function InviteMemberForm({
               : "Invitation email is unavailable, so you will get a link to share with them yourself."
           }
         />
-        <FilterSelect
+        <Select
           label="Role"
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
           options={ROLE_OPTIONS}
+          reserveMessage={false}
         />
       </div>
       {workspaces.data && workspaces.data.length > 0 ? (
