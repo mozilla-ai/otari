@@ -1271,6 +1271,13 @@ describe("UsagePage gateway-run tools", () => {
             cost: 2.49,
           },
           {
+            tool: "web_fetch",
+            calls: 86,
+            errors: 7,
+            requests: 42,
+            cost: 0.43,
+          },
+          {
             tool: "code_execution",
             calls: 65,
             errors: 6,
@@ -1289,6 +1296,12 @@ describe("UsagePage gateway-run tools", () => {
     expect(within(row).getByText("13")).toBeInTheDocument()
     expect(within(row).getByText("105")).toBeInTheDocument()
     expect(within(row).getByText("$2.49")).toBeInTheDocument()
+
+    const fetchRow = screen.getByText("web fetch").closest("tr")!
+    expect(within(fetchRow).getByText("86")).toBeInTheDocument()
+    expect(within(fetchRow).getByText("7")).toBeInTheDocument()
+    expect(within(fetchRow).getByText("42")).toBeInTheDocument()
+    expect(within(fetchRow).getByText("$0.43")).toBeInTheDocument()
   })
 
   it("drills into the Activity log filtered on the clicked tool", async () => {

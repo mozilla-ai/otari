@@ -2011,6 +2011,22 @@ describe("ActivityPage filter serialization", () => {
       )
     }
   })
+
+  it("offers Web fetch as a named tool filter", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ rows: [entry()] })
+    renderPage(<ActivityPage />, "/activity?tool=web_search&range=24h")
+    await screen.findByText("gpt-4o")
+
+    await pickOption(user, "Tool", "Web fetch")
+
+    expect(selectTrigger("Tool")).toHaveTextContent("Web fetch")
+    await waitFor(() =>
+      expect(
+        listCalls(calls).some((url) => url.includes("tool=web_fetch")),
+      ).toBe(true),
+    )
+  })
 })
 
 describe("ActivityPage table-scan avoidance", () => {

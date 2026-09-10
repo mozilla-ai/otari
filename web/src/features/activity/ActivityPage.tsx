@@ -309,6 +309,7 @@ const TOOL_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
   { label: "Any tool", value: "any" },
   { label: "Web search", value: "web_search" },
+  { label: "Web fetch", value: "web_fetch" },
   { label: "Code execution", value: "code_execution" },
 ]
 
