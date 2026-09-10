@@ -16,7 +16,7 @@ const OPTIONS: ComboBoxOption[] = [
   },
 ]
 
-/** The field is controlled, so a test that types into it has to hold the text. */
+/** The field is controlled, so a test that picks or types has to hold the value. */
 function Harness({
   options = OPTIONS,
   onValue,
@@ -41,7 +41,7 @@ function Harness({
 }
 
 describe("ComboBoxField", () => {
-  it("reports a picked option once, as its value rather than its label", async () => {
+  it("reports a picked row once, as its id, and displays its label", async () => {
     const seen: string[] = []
     render(
       <Harness
@@ -50,16 +50,44 @@ describe("ComboBoxField", () => {
       />,
     )
 
-    await userEvent.click(screen.getByRole("combobox", { name: "Serves" }))
+    const field = screen.getByRole("combobox", { name: "Serves" })
+    await userEvent.click(field)
     await userEvent.click(
       await screen.findByRole("option", { name: "Ada Lovelace" }),
     )
 
-    // One report, not two. react-aria writes the row's display text into the
-    // input after reporting the selection; forwarding that echo would hand the
-    // caller a label after a key, and a label does not identify a row (two rows
-    // may share one, and one row's label may be another row's value).
+    // One report, and it is the id: a label identifies no row, since two rows
+    // may share one and one row's label may be another row's id. The label is
+    // what the box shows, which is the whole division of labor here.
     expect(seen).toEqual(["018f-0001"])
+    expect(field).toHaveValue("Ada Lovelace")
+  })
+
+  it("displays a label the caller resolves after mount", () => {
+    const { rerender } = render(
+      <ComboBoxField
+        label="Owner"
+        value="018f-0001"
+        onChange={() => {}}
+        options={[]}
+      />,
+    )
+
+    // A roster or a catalog read lands after the field paints, so the id it
+    // arrives with has to give way to the name it resolves to.
+    const field = screen.getByRole("combobox", { name: "Owner" })
+    expect(field).toHaveValue("018f-0001")
+
+    rerender(
+      <ComboBoxField
+        label="Owner"
+        value="018f-0001"
+        onChange={() => {}}
+        options={[{ value: "018f-0001", label: "Ada Lovelace" }]}
+      />,
+    )
+
+    expect(field).toHaveValue("Ada Lovelace")
   })
 
   it("still reports text the operator edits after picking a row", async () => {
@@ -79,10 +107,34 @@ describe("ComboBoxField", () => {
     )
     await userEvent.type(field, "!")
 
-    // Only the one echo is swallowed. Anything typed afterwards is the
-    // operator's, so a field that went quiet after a pick would be a worse bug
-    // than the one the swallowing fixes.
-    expect(seen.at(-1)).toBe("018f-0001!")
+    // Editing the box is not holding a selection: what is in it is text, and a
+    // field that went quiet after a pick would be the worse bug.
+    expect(seen.at(-1)).toBe("Ada Lovelace!")
+  })
+
+  it("publishes the input's text for a caller that filters", async () => {
+    const queries: string[] = []
+    render(
+      <Harness
+        allowsCustomValue
+        options={[{ value: "018f-0001", label: "Ada Lovelace" }]}
+        onQueryChange={(query) => queries.push(query)}
+      />,
+    )
+
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "Serves" }),
+      "ada",
+    )
+    expect(queries.at(-1)).toBe("ada")
+
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Ada Lovelace" }),
+    )
+
+    // Empty once a row is picked: the field shows a choice rather than a
+    // search, so the caller offers its whole list again, not the one row.
+    expect(queries.at(-1)).toBe("")
   })
 
   it("reports free text when the caller allows it", async () => {

@@ -7,15 +7,16 @@ import {
   ListBox,
   ListBoxItem,
 } from "@heroui/react"
-import { type ReactNode, useRef } from "react"
+import { type ReactNode, useState } from "react"
 
 import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 
 /** One choice in a `ComboBoxField`. `isDisabled` shows a choice that exists but cannot be taken. */
 export interface ComboBoxOption {
-  /** What the field reports, and the key react-aria carries. Never empty: react-aria reads an empty key as "nothing selected". */
+  /** The option's id: what the field reports and the key react-aria carries. Never empty: react-aria reads an empty key as "nothing selected". */
   value: string
+  /** What the row and the input display. Never what the field reports. */
   label: string
   /** A second, muted line inside the row, for text that identifies the label rather than repeating it. */
   hint?: string
@@ -32,6 +33,12 @@ export interface ComboBoxOption {
 export const comboBoxOptionText = (
   option: Pick<ComboBoxOption, "label" | "hint">,
 ) => (option.hint ? `${option.label} (${option.hint})` : option.label)
+
+// `options` is the whole popover, so react-aria must not filter it again: its
+// own filter reads a row's `textValue`, which is the label, and would drop a
+// row the caller matched on its hint. Hoisted so the collection it feeds is not
+// rebuilt on every render.
+const KEEP_EVERY_OPTION = () => true
 
 /**
  * One of a set, searchable, in a form the operator submits.
@@ -51,22 +58,26 @@ export const comboBoxOptionText = (
  * `ComboBoxEmpty` is the sentence that tells those apart, and there is no way
  * to render this control without one.
  *
- * `value` is the input's text rather than a chosen key, which is what lets a
- * caller with `allowsCustomValue` submit something the list never offered.
- * Picking a row reports that option's `value`, and reports it once: react-aria
- * echoes the row's display text into the input afterwards, and that echo is
- * swallowed here rather than forwarded. So `onChange` carries a key when a row
- * was picked and text when text was typed, and never a label. See the handlers
- * for why the caller cannot be the one to sort those out.
+ * `value` is an option's `value`, as in `forms/Select`, and never a label. An
+ * id and a name point at the same thing, so identity travels as the id,
+ * through react-aria's `selectedKey`, and the label is only displayed: this
+ * field owns the input's text and shows the matched option's label. Picking a
+ * row reports its id, once. With `allowsCustomValue` the text an operator
+ * types is reported as the value too, because a list that is a shortcut rather
+ * than a whitelist has to let something it never offered stand; that text is
+ * then itself rather than a lookup, since a label maps back to no single id
+ * (two rows may share one, and one row's label may be another row's id).
  *
- * No filtering of its own: `options` is what the popover holds. The caller
- * matches and caps, because what counts as a match differs per field (an id as
- * well as a name, a ceiling with a "showing N of M" line under it).
+ * No filtering of its own: `options` is what the popover holds, and
+ * `onQueryChange` is what the caller matches on. The caller matches and caps,
+ * because what counts as a match differs per field (an id as well as a name, a
+ * ceiling with a "showing N of M" line under it).
  */
 export function ComboBoxField({
   label,
   value,
   onChange,
+  onQueryChange,
   options,
   description,
   placeholder,
@@ -85,10 +96,16 @@ export function ComboBoxField({
   noMatchesMessage,
 }: {
   label: ReactNode
-  /** The input's text. Not a key: a field allowing custom values holds text no option carries. */
+  /** The selected option's `value`, or, where custom values are allowed, text no option carries. */
   value: string
   /** Takes the value, never an event, which is the convention every control here follows. */
   onChange: (value: string) => void
+  /**
+   * The input's text, for a caller that filters `options` by it. Empty once a
+   * row is picked, because the field is then showing a choice rather than a
+   * search. Only this field can report it: it owns the input's text.
+   */
+  onQueryChange?: (query: string) => void
   /** Already filtered and capped by the caller, whose match rules and ceiling are its own. */
   options: readonly ComboBoxOption[]
   description?: ReactNode
@@ -120,9 +137,21 @@ export function ComboBoxField({
   /** What it says when the source has options and the query matched none. */
   noMatchesMessage?: ReactNode
 }) {
-  // Not state: nothing renders from it, and a re-render between the pick and
-  // its echo would drop it.
-  const echoRef = useRef<string | undefined>(undefined)
+  const selected = options.find((option) => option.value === value)
+  // What the value reads as: the matched row's label, or the value itself,
+  // which is then text no row carries.
+  const shown = selected?.label ?? value
+
+  // What is being typed, which stands in for the value's own text until a row
+  // is picked or the field is committed. Undefined the rest of the time, so a
+  // label the caller resolves after mount reaches the input rather than leaving
+  // an id in the box.
+  const [typed, setTyped] = useState<string>()
+
+  const setQuery = (next: string | undefined) => {
+    setTyped(next)
+    onQueryChange?.(next ?? "")
+  }
 
   return (
     <ComboBox.Root
@@ -132,26 +161,29 @@ export function ComboBoxField({
       // empty message below reachable at all.
       allowsEmptyCollection
       menuTrigger={menuTrigger}
-      inputValue={value}
-      // The echo, and why it is caught here. react-aria reports a pick through
-      // `onSelectionChange` and then writes that row's display text into the
-      // input, firing `onInputChange` with a label where the previous call
-      // carried a key. A caller that forwarded both would have to turn the
-      // label back into a key, and two rows may share a label, or one row's
-      // label may be another row's value, so that mapping can land on the wrong
-      // row. Here the picked option is in hand, so the echo is recognized by
-      // identity and dropped. Anything else the operator types passes through.
+      defaultFilter={KEEP_EVERY_OPTION}
+      // Both halves controlled, which is what keeps a pick reported once:
+      // react-aria writes the picked row's text back into the input only while
+      // one of the two is uncontrolled, and leaves the text here otherwise.
+      inputValue={typed ?? shown}
+      // The row an open list marks as selected. Nothing is selected while text
+      // is being typed, because text that happens to match a row's id is still
+      // text, and treating it as a pick would close the list mid-search.
+      selectedKey={selected && typed === undefined ? selected.value : null}
       onInputChange={(next) => {
-        const echoed = echoRef.current
-        echoRef.current = undefined
-        if (echoed !== undefined && next === echoed) return
-        onChange(next)
+        setQuery(next)
+        // Only a field offering the list as suggestions can report what was
+        // typed. Elsewhere the value stays whichever row is selected, and
+        // react-aria reports the selection back on commit.
+        if (allowsCustomValue) onChange(next)
       }}
       onSelectionChange={(key) => {
-        if (key == null) return
-        const picked = options.find((option) => option.value === String(key))
-        echoRef.current = picked ? comboBoxOptionText(picked) : undefined
-        onChange(String(key))
+        // The input goes back to showing the value, which after a pick is that
+        // row's label. `key` is null when the field was committed on text no
+        // row matches, which needs no report: with custom values that text is
+        // already the value, and without them the value never left the row.
+        setQuery(undefined)
+        if (key != null) onChange(String(key))
       }}
       isRequired={isRequired}
       isDisabled={isDisabled}
@@ -195,7 +227,10 @@ export function ComboBoxField({
           {(option: ComboBoxOption) => (
             <ListBoxItem
               id={option.value}
-              textValue={comboBoxOptionText(option)}
+              // The label alone, because this is also the text react-aria reads
+              // the selection as, and it has to agree with what the input shows
+              // or re-picking the selected row rewrites the input.
+              textValue={option.label}
               // Spelled out, because the row has two text nodes and the name
               // computed from them runs the hint onto the end of the label with
               // no separator. The hint belongs in the name rather than being

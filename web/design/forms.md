@@ -56,10 +56,10 @@ Checkbox: { isSelected, onChange: (next: boolean) => void, isDisabled?, ariaLabe
   children }
 Select: { label, value, onChange, options: SelectOption[], description?, placeholder?,
   isRequired?, isDisabled?, isInvalid?, errorMessage?, reserveMessage?, className? }
-ComboBoxField: { label, value, onChange, options: ComboBoxOption[], description?,
-  placeholder?, isRequired?, isDisabled?, isInvalid?, errorMessage?, reserveMessage?,
-  className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus", shouldSelectOnFocus?,
-  isSourceEmpty?, emptyMessage?, noMatchesMessage? }
+ComboBoxField: { label, value, onChange, onQueryChange?, options: ComboBoxOption[],
+  description?, placeholder?, isRequired?, isDisabled?, isInvalid?, errorMessage?,
+  reserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
+  shouldSelectOnFocus?, isSourceEmpty?, emptyMessage?, noMatchesMessage? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
   className? }
@@ -116,12 +116,25 @@ Rules:
 ## ComboBoxField
 
 `Select`'s vocabulary for everything the two share, plus what a combo box needs
-beyond it. See its docstring for the contract; three things are worth knowing at
+beyond it. See its docstring for the contract; four things are worth knowing at
 a call site.
+
+**`value` is the option's `value`, exactly as in `Select`**, and the input shows
+that option's `label`. An id and a name point at the same thing, so identity
+travels as the id and the label is only displayed; the field never reports a
+label, because a label maps back to no single id (two rows may share one, and
+one row's label may be another row's id). `allowsCustomValue` is the one
+addition: text matching no row is reported as the value too, as itself rather
+than as a lookup. So typing somebody's name names a new id rather than
+resolving to theirs, and `description` is where a field says what typing will
+do (`UserComboBox`'s `unknownHint`).
 
 **It filters nothing.** `options` is what the popover holds, already matched and
 capped by the caller, because what counts as a match differs per field (an id as
 well as a name) and a ceiling wants a "showing 50 of 300" line under it.
+`onQueryChange` is what the caller matches on: the field owns the input's text,
+so it is the only thing that can publish it. It reports empty once a row is
+picked, since the field is then showing a choice rather than a search.
 
 **An empty popover has to say which empty it is.** Every combo box here keeps
 its menu open on an empty collection, so that a query matching nothing does not
