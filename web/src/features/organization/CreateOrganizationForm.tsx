@@ -71,7 +71,9 @@ export function CreateOrganizationForm({
         // gone rather than disabled, and so is its description, which describes
         // a create that has already happened.
         <p className="text-body">
-          {created.name} was created. Switching into it failed.
+          {switchTo.isPending
+            ? `${created.name} was created. Switching into it…`
+            : `${created.name} was created. Switching into it failed.`}
         </p>
       ) : (
         <Field

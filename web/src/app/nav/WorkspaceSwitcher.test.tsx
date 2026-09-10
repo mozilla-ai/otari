@@ -53,6 +53,9 @@ function mockApi(
     memberships?: CallerOrganizationMembership[]
     context?: Parameters<typeof organizationContext>[0]
     switchFails?: boolean
+    // Holds the switch in flight, so the created step's pending line can be
+    // read before the refusal lands.
+    switchGate?: Promise<unknown>
     pendingInvitations?: PendingOrganizationInvitation[]
     pendingInvitationsFail?: boolean
   } = {},
@@ -104,13 +107,23 @@ function mockApi(
       return { data: memberships, count: memberships.length } as never
     }
     if (url === "/organizations/me/switch") {
+      if (options.switchGate) await options.switchGate
       if (options.switchFails) {
         throw new apiClient.ApiError(404, "Organization not found")
       }
       return organizationContext() as never
     }
     if (url === "/organizations") {
-      return organization({ id: SECOND_ORGANIZATION_ID }) as never
+      // Echoes the posted name, as the server does: the created step names the
+      // organization back to the operator, so a fixture name would let that
+      // copy pass while showing the wrong one.
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as { name?: string })
+        : {}
+      return organization({
+        id: SECOND_ORGANIZATION_ID,
+        ...(body.name ? { name: body.name } : {}),
+      }) as never
     }
     return organizationContext(options.context) as never
   })
@@ -255,6 +268,49 @@ describe("the organization half of the scope switcher", () => {
     expect(posts[1]?.body).toEqual({
       organization_id: SECOND_ORGANIZATION_ID,
     })
+  })
+
+  it("says the switch is running before it says the switch failed", async () => {
+    // Two states, one step: the organization exists the moment the create
+    // lands, so the body has to say what is happening rather than announcing a
+    // failure that has not happened yet.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({ switchFails: true, switchGate: gate })
+    await renderSwitcher()
+
+    const { user, menu } = await openMenu()
+    await user.click(
+      within(menu).getByRole("button", { name: /Create organization/ }),
+    )
+    await user.type(await screen.findByLabelText(/Name/), "Research")
+    const form = await screen.findByRole("dialog")
+    await user.click(
+      within(form).getByRole("button", { name: "Create organization" }),
+    )
+
+    // In flight: the create is done and the switch is not.
+    expect(
+      await within(form).findByText("Research was created. Switching into it…"),
+    ).toBeVisible()
+    expect(
+      await within(form).findByRole("heading", {
+        name: "Organization created",
+      }),
+    ).toBeVisible()
+
+    release()
+
+    expect(
+      await within(form).findByText(
+        "Research was created. Switching into it failed.",
+      ),
+    ).toBeVisible()
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      "Organization not found",
+    )
   })
 
   it("retries only the switch when the switch after a create was refused", async () => {
