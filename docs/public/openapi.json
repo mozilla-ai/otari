@@ -1461,37 +1461,7 @@
         "title": "BlobResourceContents",
         "type": "object"
       },
-      "Body_create_file_api_v1_files_post": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "purpose": {
-            "default": "user_data",
-            "title": "Purpose",
-            "type": "string"
-          },
-          "user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_create_file_api_v1_files_post",
-        "type": "object"
-      },
-      "Body_create_transcription_api_v1_audio_transcriptions_post": {
+      "Body_audio-create_transcription": {
         "properties": {
           "file": {
             "contentMediaType": "application/octet-stream",
@@ -1562,7 +1532,37 @@
           "file",
           "model"
         ],
-        "title": "Body_create_transcription_api_v1_audio_transcriptions_post",
+        "title": "Body_audio-create_transcription",
+        "type": "object"
+      },
+      "Body_files-create_file": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "purpose": {
+            "default": "user_data",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_files-create_file",
         "type": "object"
       },
       "BudgetResetLogResponse": {
@@ -15285,7 +15285,7 @@
     "/api/v1/admin/access": {
       "get": {
         "description": "Report whether the caller may use the deployment administration surface.\n\nThe one endpoint here that answers 200 for everybody. The rest refuse a\nnon-operator with 404 so they do not confirm they exist, which leaves a\ndashboard nothing to gate its navigation on but a failed request; this says\nthe same thing without one. It publishes only the caller's own standing,\nwhich they could establish by trying an endpoint anyway.",
-        "operationId": "get_administration_access_api_v1_admin_access_get",
+        "operationId": "admin-get_administration_access",
         "responses": {
           "200": {
             "content": {
@@ -15315,7 +15315,7 @@
     "/api/v1/admin/users": {
       "get": {
         "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /api/v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
-        "operationId": "list_deployment_users_api_v1_admin_users_get",
+        "operationId": "admin-list_deployment_users",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -15384,7 +15384,7 @@
     "/api/v1/admin/users/{user_id}": {
       "patch": {
         "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
-        "operationId": "update_deployment_user_api_v1_admin_users__user_id__patch",
+        "operationId": "admin-update_deployment_user",
         "parameters": [
           {
             "in": "path",
@@ -15446,7 +15446,7 @@
     "/api/v1/agent-telemetry": {
       "delete": {
         "description": "Delete agent_telemetry rows by explicit ids or by filter (standalone).\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
-        "operationId": "delete_agent_telemetry_rows_api_v1_agent_telemetry_delete",
+        "operationId": "agent-telemetry-delete_agent_telemetry_rows",
         "requestBody": {
           "content": {
             "application/json": {
@@ -15496,7 +15496,7 @@
     "/api/v1/agent-telemetry/count": {
       "get": {
         "description": "Total agent_telemetry rows matching the given filters (standalone).\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
-        "operationId": "count_agent_telemetry_api_v1_agent_telemetry_count_get",
+        "operationId": "agent-telemetry-count_agent_telemetry",
         "parameters": [
           {
             "description": "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -15638,7 +15638,7 @@
     "/api/v1/agent-telemetry/series": {
       "get": {
         "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
-        "operationId": "agent_telemetry_series_api_v1_agent_telemetry_series_get",
+        "operationId": "agent-telemetry-agent_telemetry_series",
         "parameters": [
           {
             "description": "Dimension to split the series by",
@@ -15811,7 +15811,7 @@
     "/api/v1/agent-telemetry/summary": {
       "get": {
         "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nThe spend side is every usage row in scope, not only the agent's: unfiltered,\nthat includes traffic from clients that never reported telemetry, so a\nper-outcome measure read over a whole deployment answers \"what did this\ndeployment spend per commit\", not \"what did the agent spend per commit\".\nFilter by user, API key, or session to divide only the matching spend.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
-        "operationId": "agent_telemetry_summary_api_v1_agent_telemetry_summary_get",
+        "operationId": "agent-telemetry-agent_telemetry_summary",
         "parameters": [
           {
             "description": "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -15969,7 +15969,7 @@
     "/api/v1/aliases": {
       "get": {
         "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
-        "operationId": "list_aliases_api_v1_aliases_get",
+        "operationId": "aliases-list_aliases",
         "parameters": [
           {
             "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
@@ -15999,7 +15999,7 @@
                   "items": {
                     "$ref": "#/components/schemas/AliasResponse"
                   },
-                  "title": "Response List Aliases Api V1 Aliases Get",
+                  "title": "Response Aliases-List Aliases",
                   "type": "array"
                 }
               }
@@ -16032,7 +16032,7 @@
       },
       "post": {
         "description": "Create or update a stored alias in one workspace, optionally for one user.",
-        "operationId": "set_alias_api_v1_aliases_post",
+        "operationId": "aliases-set_alias",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16082,7 +16082,7 @@
     "/api/v1/aliases/{name}": {
       "delete": {
         "description": "Delete a stored alias in one scope.",
-        "operationId": "delete_alias_api_v1_aliases__name__delete",
+        "operationId": "aliases-delete_alias",
         "parameters": [
           {
             "in": "path",
@@ -16163,7 +16163,7 @@
     "/api/v1/audio/speech": {
       "post": {
         "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_speech_api_v1_audio_speech_post",
+        "operationId": "audio-create_speech",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16247,12 +16247,12 @@
     "/api/v1/audio/transcriptions": {
       "post": {
         "description": "OpenAI-compatible audio transcription endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_transcription_api_v1_audio_transcriptions_post",
+        "operationId": "audio-create_transcription",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_create_transcription_api_v1_audio_transcriptions_post"
+                "$ref": "#/components/schemas/Body_audio-create_transcription"
               }
             }
           },
@@ -16295,7 +16295,7 @@
     "/api/v1/auth/oauth/{provider}/authorize": {
       "get": {
         "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET that writes, which is the one thing to know about it. It records the\nauthorization it is about to start (the state's hash, the PKCE verifier the\nexchange will need, and the digest of a flow secret it sets as an HttpOnly\ncookie) so the callback has something to check against, and that record is\nthe whole reason the callback can refuse a code this deployment never asked\nfor, or one presented from a browser other than the one that asked.\n\nStill safe to repeat: each call mints its own state, and only the one the\nbrowser kept is the one it sends back. The rows the others leave expire on\ntheir own and are swept by the next call. The cookie is reused when the\nbrowser already holds one, so a second tab does not break the first.",
-        "operationId": "authorize_api_v1_auth_oauth__provider__authorize_get",
+        "operationId": "auth-authorize",
         "parameters": [
           {
             "description": "Which OAuth provider to sign in with.",
@@ -16341,7 +16341,7 @@
     "/api/v1/auth/oauth/{provider}/callback": {
       "post": {
         "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.",
-        "operationId": "callback_api_v1_auth_oauth__provider__callback_post",
+        "operationId": "auth-callback",
         "parameters": [
           {
             "description": "Which OAuth provider to sign in with.",
@@ -16397,7 +16397,7 @@
     "/api/v1/auth/password": {
       "put": {
         "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. The operator setting a password\nfor the first time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
-        "operationId": "set_dashboard_password_api_v1_auth_password_put",
+        "operationId": "auth-set_dashboard_password",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16447,7 +16447,7 @@
     "/api/v1/auth/password/reset": {
       "post": {
         "description": "Mail a password-reset link, or do nothing: the response never says which.",
-        "operationId": "request_reset_api_v1_auth_password_reset_post",
+        "operationId": "auth-request_reset",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16489,7 +16489,7 @@
     "/api/v1/auth/password/reset/confirm": {
       "post": {
         "description": "Complete a password reset. Single-use: the token stops working after this.",
-        "operationId": "confirm_reset_api_v1_auth_password_reset_confirm_post",
+        "operationId": "auth-confirm_reset",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16524,7 +16524,7 @@
     "/api/v1/auth/resend-verification": {
       "post": {
         "description": "Mail a fresh verification link, or do nothing: the response never says which.",
-        "operationId": "resend_verification_api_v1_auth_resend_verification_post",
+        "operationId": "auth-resend_verification",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16566,7 +16566,7 @@
     "/api/v1/auth/session": {
       "delete": {
         "description": "Sign out: revoke the cookie's session server-side and expire the cookie.\n\nDeliberately unauthenticated and idempotent: it only ever revokes the\nsession named by the caller's own cookie, and the dashboard calls it on the\n401-bounce path where no valid credential exists anymore. Unlike the read\npath in ``deps.py`` it applies no Sec-Fetch-Site check: ``SameSite=Strict``\nalready keeps cross-site requests from carrying the cookie, and the worst a\nforged call could do is sign the operator out.",
-        "operationId": "delete_session_api_v1_auth_session_delete",
+        "operationId": "auth-delete_session",
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -16579,7 +16579,7 @@
       },
       "post": {
         "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.\n\nThe maintenance-mode check runs before either credential is verified, and\nrefuses both. Before, because a frozen deployment should not spend a bcrypt\nverification per attempt and the refusal is not about the credential\nanyway; both, because the way back out is the master key against\n``PATCH /api/v1/settings/maintenance-mode`` through the header, which never\npasses through this door. That is what keeps the way back out off the frozen\npath, and it is why no identity needs an exemption here; an operator who no\nlonger holds the master key recovers by setting ``OTARI_MASTER_KEY`` and\nrestarting, which is a restart rather than a click. It leaks nothing\neither: ``GET /api/v1/bootstrap`` already publishes the same flag\nunauthenticated, so the sign-in screen can render the right page.",
-        "operationId": "create_session_api_v1_auth_session_post",
+        "operationId": "auth-create_session",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16621,7 +16621,7 @@
     "/api/v1/auth/signup": {
       "post": {
         "description": "Claim a roster identity, or do nothing: the response never says which.\n\nNo session is minted. A newly claimed identity is hard-blocked from\nsigning in until it verifies, so there is nothing yet to sign it into.",
-        "operationId": "signup_api_v1_auth_signup_post",
+        "operationId": "auth-signup",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16663,7 +16663,7 @@
     "/api/v1/auth/verify-email": {
       "post": {
         "description": "Confirm an address from its verification link, lifting the sign-in gate.",
-        "operationId": "verify_email_route_api_v1_auth_verify_email_post",
+        "operationId": "auth-verify_email_route",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16705,7 +16705,7 @@
     "/api/v1/auth/webauthn/authenticate": {
       "post": {
         "description": "Verify an assertion and set the HttpOnly session cookie.\n\nThe session is bound to the identity whose passkey signed, exactly as a\npassword sign-in binds one to the identity that authenticated, so every\nrequest it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and answered as a 401 by the tenancy error\nhandler. Unlike the password path there is no separate post-failure\nthrottle: this route is throttled unconditionally on the way in, because\nunlike a password there is no legitimate caller here whose correct\ncredential must never be blocked (a passkey ceremony is one round trip a\nbrowser drives, not something a person retries by hand).\n\n**Maintenance mode freezes this the way it freezes the password sign-in.**\nThe freeze is on starting a session, not on a credential, so a passkey has\nto answer to it or the switch is bypassable by anybody holding one, which is\nthe whole population it exists to hold off during a redeploy. Refused before\nthe assertion is verified, so a frozen deployment does no crypto and counts\nno auth failure: nobody failed to authenticate, the gateway declined to try.",
-        "operationId": "authenticate_passkey_api_v1_auth_webauthn_authenticate_post",
+        "operationId": "auth-authenticate_passkey",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16747,7 +16747,7 @@
     "/api/v1/auth/webauthn/authenticate/options": {
       "post": {
         "description": "Start a passkey sign-in. Public, throttled, and names no credentials.\n\nThe options carry no ``allowCredentials``, so this publishes nothing about\nwho holds a passkey here; see ``webauthn_service.begin_authentication``.",
-        "operationId": "authentication_options_api_v1_auth_webauthn_authenticate_options_post",
+        "operationId": "auth-authentication_options",
         "responses": {
           "200": {
             "content": {
@@ -16769,7 +16769,7 @@
     "/api/v1/auth/webauthn/credentials": {
       "get": {
         "description": "The caller's own passkeys. Never anybody else's, and never key material.\n\nDeliberately *not* behind ``require_passkey_support``, and not filtered to\nthe current relying-party ID. A deployment that has changed or lost that ID\nstill holds the rows registered under the old one, and refusing to list them\nwould leave somebody looking at an empty page with no way to clean up and no\nhint as to why. Each row carries ``is_usable`` instead, so an orphan is\nvisible, explained, and deletable.",
-        "operationId": "list_passkeys_api_v1_auth_webauthn_credentials_get",
+        "operationId": "auth-list_passkeys",
         "responses": {
           "200": {
             "content": {
@@ -16799,7 +16799,7 @@
     "/api/v1/auth/webauthn/credentials/{credential_id}": {
       "delete": {
         "description": "Remove one of the caller's passkeys.\n\nRemoving the last one is allowed: an email and password is still this\ndeployment's login, so this is not a lockout, and refusing would strand\nwhoever lost the authenticator.",
-        "operationId": "delete_passkey_api_v1_auth_webauthn_credentials__credential_id__delete",
+        "operationId": "auth-delete_passkey",
         "parameters": [
           {
             "in": "path",
@@ -16842,7 +16842,7 @@
       },
       "patch": {
         "description": "Relabel one of the caller's passkeys, which is all that is editable.\n\nUngated like the list, and for the same reason: naming an orphan before\ndeleting it is not something a lost relying-party ID should prevent.",
-        "operationId": "rename_passkey_api_v1_auth_webauthn_credentials__credential_id__patch",
+        "operationId": "auth-rename_passkey",
         "parameters": [
           {
             "in": "path",
@@ -16904,7 +16904,7 @@
     "/api/v1/auth/webauthn/register": {
       "post": {
         "description": "Verify a registration ceremony and store the passkey it produced.",
-        "operationId": "register_passkey_api_v1_auth_webauthn_register_post",
+        "operationId": "auth-register_passkey",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16954,7 +16954,7 @@
     "/api/v1/auth/webauthn/register/options": {
       "post": {
         "description": "Start registering a passkey for the signed-in identity.\n\nA POST rather than a GET even though it reads like one: it issues a\nserver-side challenge and writes it, so it is not safe to repeat, cache, or\nprefetch.",
-        "operationId": "registration_options_api_v1_auth_webauthn_register_options_post",
+        "operationId": "auth-registration_options",
         "responses": {
           "200": {
             "content": {
@@ -16984,7 +16984,7 @@
     "/api/v1/batches": {
       "get": {
         "description": "List batches for a provider.\n\nNon-master keys only see batches they own in their own workspace (plus\nlegacy batches without an ownership marker, or without a recorded\nworkspace); the page is filtered after the provider call, so a page may\ncontain fewer than ``limit`` items.",
-        "operationId": "list_batches_api_v1_batches_get",
+        "operationId": "batches-list_batches",
         "parameters": [
           {
             "in": "query",
@@ -17063,7 +17063,7 @@
       },
       "post": {
         "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_batch_api_v1_batches_post",
+        "operationId": "batches-create_batch",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17111,7 +17111,7 @@
     "/api/v1/batches/{batch_id}": {
       "get": {
         "description": "Retrieve the status of a batch.",
-        "operationId": "retrieve_batch_api_v1_batches__batch_id__get",
+        "operationId": "batches-retrieve_batch",
         "parameters": [
           {
             "in": "path",
@@ -17169,7 +17169,7 @@
     "/api/v1/batches/{batch_id}/cancel": {
       "post": {
         "description": "Cancel a batch.",
-        "operationId": "cancel_batch_api_v1_batches__batch_id__cancel_post",
+        "operationId": "batches-cancel_batch",
         "parameters": [
           {
             "in": "path",
@@ -17227,7 +17227,7 @@
     "/api/v1/batches/{batch_id}/results": {
       "get": {
         "description": "Retrieve the results of a completed batch.",
-        "operationId": "retrieve_batch_results_api_v1_batches__batch_id__results_get",
+        "operationId": "batches-retrieve_batch_results",
         "parameters": [
           {
             "in": "path",
@@ -17291,7 +17291,7 @@
     "/api/v1/bootstrap": {
       "get": {
         "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
-        "operationId": "get_bootstrap_api_v1_bootstrap_get",
+        "operationId": "bootstrap-get_bootstrap",
         "responses": {
           "200": {
             "content": {
@@ -17313,7 +17313,7 @@
     "/api/v1/budgets": {
       "get": {
         "description": "List all budgets with pagination.",
-        "operationId": "list_budgets_api_v1_budgets_get",
+        "operationId": "budgets-list_budgets",
         "parameters": [
           {
             "in": "query",
@@ -17347,7 +17347,7 @@
                   "items": {
                     "$ref": "#/components/schemas/BudgetResponse"
                   },
-                  "title": "Response List Budgets Api V1 Budgets Get",
+                  "title": "Response Budgets-List Budgets",
                   "type": "array"
                 }
               }
@@ -17380,7 +17380,7 @@
       },
       "post": {
         "description": "Create a new budget.",
-        "operationId": "create_budget_api_v1_budgets_post",
+        "operationId": "budgets-create_budget",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17430,7 +17430,7 @@
     "/api/v1/budgets/{budget_id}": {
       "delete": {
         "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
-        "operationId": "delete_budget_api_v1_budgets__budget_id__delete",
+        "operationId": "budgets-delete_budget",
         "parameters": [
           {
             "in": "path",
@@ -17472,7 +17472,7 @@
       },
       "get": {
         "description": "Get details of a specific budget.",
-        "operationId": "get_budget_api_v1_budgets__budget_id__get",
+        "operationId": "budgets-get_budget",
         "parameters": [
           {
             "in": "path",
@@ -17521,7 +17521,7 @@
       },
       "patch": {
         "description": "Update a budget.",
-        "operationId": "update_budget_api_v1_budgets__budget_id__patch",
+        "operationId": "budgets-update_budget",
         "parameters": [
           {
             "in": "path",
@@ -17582,7 +17582,7 @@
     "/api/v1/budgets/{budget_id}/reset-logs": {
       "get": {
         "description": "List per-user reset events for a budget, newest first.",
-        "operationId": "list_budget_reset_logs_api_v1_budgets__budget_id__reset_logs_get",
+        "operationId": "budgets-list_budget_reset_logs",
         "parameters": [
           {
             "in": "path",
@@ -17625,7 +17625,7 @@
                   "items": {
                     "$ref": "#/components/schemas/BudgetResetLogResponse"
                   },
-                  "title": "Response List Budget Reset Logs Api V1 Budgets  Budget Id  Reset Logs Get",
+                  "title": "Response Budgets-List Budget Reset Logs",
                   "type": "array"
                 }
               }
@@ -17660,7 +17660,7 @@
     "/api/v1/chat/completions": {
       "post": {
         "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "chat_completions_api_v1_chat_completions_post",
+        "operationId": "chat-chat_completions",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17708,7 +17708,7 @@
     "/api/v1/embeddings": {
       "post": {
         "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_embedding_api_v1_embeddings_post",
+        "operationId": "embeddings-create_embedding",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17756,7 +17756,7 @@
     "/api/v1/files": {
       "get": {
         "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
-        "operationId": "list_files_api_v1_files_get",
+        "operationId": "files-list_files",
         "parameters": [
           {
             "in": "query",
@@ -17814,7 +17814,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response List Files Api V1 Files Get",
+                  "title": "Response Files-List Files",
                   "type": "object"
                 }
               }
@@ -17847,12 +17847,12 @@
       },
       "post": {
         "description": "OpenAI-compatible file upload endpoint.",
-        "operationId": "create_file_api_v1_files_post",
+        "operationId": "files-create_file",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_create_file_api_v1_files_post"
+                "$ref": "#/components/schemas/Body_files-create_file"
               }
             }
           },
@@ -17864,7 +17864,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Create File Api V1 Files Post",
+                  "title": "Response Files-Create File",
                   "type": "object"
                 }
               }
@@ -17899,7 +17899,7 @@
     "/api/v1/files/{file_id}": {
       "delete": {
         "description": "Soft-delete a file's metadata and remove its bytes from the backend.",
-        "operationId": "delete_file_api_v1_files__file_id__delete",
+        "operationId": "files-delete_file",
         "parameters": [
           {
             "in": "path",
@@ -17933,7 +17933,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Delete File Api V1 Files  File Id  Delete",
+                  "title": "Response Files-Delete File",
                   "type": "object"
                 }
               }
@@ -17966,7 +17966,7 @@
       },
       "get": {
         "description": "Retrieve metadata for a single file.",
-        "operationId": "get_file_api_v1_files__file_id__get",
+        "operationId": "files-get_file",
         "parameters": [
           {
             "in": "path",
@@ -18000,7 +18000,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get File Api V1 Files  File Id  Get",
+                  "title": "Response Files-Get File",
                   "type": "object"
                 }
               }
@@ -18035,7 +18035,7 @@
     "/api/v1/files/{file_id}/content": {
       "get": {
         "description": "Download the raw bytes of a file, streamed rather than buffered whole.",
-        "operationId": "get_file_content_api_v1_files__file_id__content_get",
+        "operationId": "files-get_file_content",
         "parameters": [
           {
             "in": "path",
@@ -18117,7 +18117,7 @@
     "/api/v1/health": {
       "get": {
         "description": "General health check endpoint.\n\nReturns basic health status. For infrastructure monitoring,\nuse /health/readiness or /health/liveness instead.",
-        "operationId": "health_check_api_v1_health_get",
+        "operationId": "health-health_check",
         "responses": {
           "200": {
             "content": {
@@ -18126,7 +18126,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Health Check Api V1 Health Get",
+                  "title": "Response Health-Health Check",
                   "type": "object"
                 }
               }
@@ -18143,13 +18143,13 @@
     "/api/v1/health/liveness": {
       "get": {
         "description": "Liveness probe endpoint.\n\nSimple check to verify the process is alive and responding.\nUsed by Kubernetes/container orchestrators for liveness probes.\n\nReturns:\n    Plain text \"I'm alive!\" message",
-        "operationId": "health_liveness_api_v1_health_liveness_get",
+        "operationId": "health-health_liveness",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Health Liveness Api V1 Health Liveness Get",
+                  "title": "Response Health-Health Liveness",
                   "type": "string"
                 }
               }
@@ -18166,14 +18166,14 @@
     "/api/v1/health/readiness": {
       "get": {
         "description": "Readiness probe endpoint.\n\nChecks if the gateway is ready to serve requests by validating:\n- Database connectivity\n- Service availability\n\nUsed by Kubernetes/container orchestrators for readiness probes.\nReturns HTTP 503 if any dependency is unavailable.\n\nReturns:\n    dict: Status object with health details\n\nRaises:\n    HTTPException: 503 if service is not ready",
-        "operationId": "health_readiness_api_v1_health_readiness_get",
+        "operationId": "health-health_readiness",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Health Readiness Api V1 Health Readiness Get",
+                  "title": "Response Health-Health Readiness",
                   "type": "object"
                 }
               }
@@ -18190,7 +18190,7 @@
     "/api/v1/images/generations": {
       "post": {
         "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_image_api_v1_images_generations_post",
+        "operationId": "images-create_image",
         "requestBody": {
           "content": {
             "application/json": {
@@ -18238,7 +18238,7 @@
     "/api/v1/invitations/accept": {
       "post": {
         "description": "Accept a pending invitation, resolving it to an active membership.",
-        "operationId": "accept_invitation_api_v1_invitations_accept_post",
+        "operationId": "invitations-accept_invitation",
         "requestBody": {
           "content": {
             "application/json": {
@@ -18280,7 +18280,7 @@
     "/api/v1/invitations/validate": {
       "post": {
         "description": "Look up a pending invitation by its token, for the accept page to render before committing.\n\nA ``POST`` with the token in the body, not a ``GET`` with it in the URL:\nthe token is a bearer credential, and a URL path is what an access log or\nan intermediate proxy routinely retains.",
-        "operationId": "validate_invitation_api_v1_invitations_validate_post",
+        "operationId": "invitations-validate_invitation",
         "requestBody": {
           "content": {
             "application/json": {
@@ -18322,7 +18322,7 @@
     "/api/v1/keys": {
       "get": {
         "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.",
-        "operationId": "list_keys_api_v1_keys_get",
+        "operationId": "keys-list_keys",
         "parameters": [
           {
             "in": "query",
@@ -18375,7 +18375,7 @@
                   "items": {
                     "$ref": "#/components/schemas/KeyInfo"
                   },
-                  "title": "Response List Keys Api V1 Keys Get",
+                  "title": "Response Keys-List Keys",
                   "type": "array"
                 }
               }
@@ -18408,7 +18408,7 @@
       },
       "post": {
         "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
-        "operationId": "create_key_api_v1_keys_post",
+        "operationId": "keys-create_key",
         "requestBody": {
           "content": {
             "application/json": {
@@ -18458,7 +18458,7 @@
     "/api/v1/keys/{key_id}": {
       "delete": {
         "description": "Delete (revoke) an API key in the caller's organization.\n\nRequires master key authentication.",
-        "operationId": "delete_key_api_v1_keys__key_id__delete",
+        "operationId": "keys-delete_key",
         "parameters": [
           {
             "in": "path",
@@ -18500,7 +18500,7 @@
       },
       "get": {
         "description": "Get details of a specific API key in the caller's organization.\n\nRequires master key authentication.",
-        "operationId": "get_key_api_v1_keys__key_id__get",
+        "operationId": "keys-get_key",
         "parameters": [
           {
             "in": "path",
@@ -18549,7 +18549,7 @@
       },
       "patch": {
         "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
-        "operationId": "update_key_api_v1_keys__key_id__patch",
+        "operationId": "keys-update_key",
         "parameters": [
           {
             "in": "path",
@@ -18610,7 +18610,7 @@
     "/api/v1/keys/{key_id}/rotate": {
       "post": {
         "description": "Rotate an API key's secret in place, within the caller's organization.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
-        "operationId": "rotate_key_api_v1_keys__key_id__rotate_post",
+        "operationId": "keys-rotate_key",
         "parameters": [
           {
             "in": "path",
@@ -18661,7 +18661,7 @@
     "/api/v1/mcp/execute": {
       "post": {
         "description": "Execute one caller-authorized tool call against a stored MCP server.\n\nThe calling application owns any user approval, argument editing,\ncancellation and action history; Otari executes exactly the tool name and\narguments it is given, once, and returns the remote server's native result.\nA result with ``isError: true`` is a definitive outcome and comes back as an\nHTTP 200.\n\n**This request must never be retried automatically.** ``client_execution_id``\nis correlation, not idempotency: once the call has been dispatched Otari\ncannot know whether the tool ran, and an ``outcome_unknown`` response means\nexactly that. Proxies, service meshes and SDKs on this path have to disable\nretries for it, including on connection resets and 5xx responses.",
-        "operationId": "execute_mcp_tool_api_v1_mcp_execute_post",
+        "operationId": "mcp-execute_mcp_tool",
         "requestBody": {
           "content": {
             "application/json": {
@@ -18821,7 +18821,7 @@
     "/api/v1/mcp/servers/{mcp_server_id}/tools": {
       "get": {
         "description": "List the tools a stored MCP server exposes to the authenticated workspace.\n\nCall this once per server when preparing a model or workflow run, and reuse\nthe answer for every tool from that server for the length of the run: there\nis no cross-run cache in this version, so a later run rediscovers and\nstaleness stays bounded without any invalidation state to keep.\n\nThe response is the whole authorized catalog or an error. It is never\npartial, because a caller would read a short catalog as the complete input\nto its own authorization and risk policy. The single exception is\n``warnings``, which names a tool whose descriptor Otari could not carry.\n\nA tool the server removes after discovery may still be proposed from the\nrun's snapshot; execution then returns the remote server's own typed error.",
-        "operationId": "list_mcp_tools_api_v1_mcp_servers__mcp_server_id__tools_get",
+        "operationId": "mcp-list_mcp_tools",
         "parameters": [
           {
             "in": "path",
@@ -18963,7 +18963,7 @@
     "/api/v1/messages": {
       "post": {
         "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
-        "operationId": "create_message_api_v1_messages_post",
+        "operationId": "messages-create_message",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19011,7 +19011,7 @@
     "/api/v1/messages/count_tokens": {
       "post": {
         "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 hybrid mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
-        "operationId": "count_message_tokens_api_v1_messages_count_tokens_post",
+        "operationId": "messages-count_message_tokens",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19061,7 +19061,7 @@
     "/api/v1/models": {
       "get": {
         "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available. Models that only\nexist in the pricing table are also included for backward compatibility.",
-        "operationId": "list_models_api_v1_models_get",
+        "operationId": "models-list_models",
         "parameters": [
           {
             "description": "Filter models by provider name",
@@ -19121,7 +19121,7 @@
     "/api/v1/models/discoverable": {
       "get": {
         "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /api/v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
-        "operationId": "list_discoverable_models_api_v1_models_discoverable_get",
+        "operationId": "models-list_discoverable_models",
         "parameters": [
           {
             "description": "Re-dial every provider instead of answering from the discovery cache.",
@@ -19175,7 +19175,7 @@
     "/api/v1/models/metadata": {
       "get": {
         "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
-        "operationId": "list_model_metadata_api_v1_models_metadata_get",
+        "operationId": "models-list_model_metadata",
         "responses": {
           "200": {
             "content": {
@@ -19205,7 +19205,7 @@
     "/api/v1/models/{model_id}": {
       "get": {
         "description": "Get details for a specific model.",
-        "operationId": "get_model_api_v1_models__model_id__get",
+        "operationId": "models-get_model",
         "parameters": [
           {
             "in": "path",
@@ -19256,7 +19256,7 @@
     "/api/v1/moderations": {
       "post": {
         "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_moderation_api_v1_moderations_post",
+        "operationId": "moderations-create_moderation",
         "parameters": [
           {
             "in": "query",
@@ -19318,7 +19318,7 @@
     "/api/v1/organizations": {
       "post": {
         "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.",
-        "operationId": "create_organization_api_v1_organizations_post",
+        "operationId": "organizations-create_organization",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19368,7 +19368,7 @@
     "/api/v1/organizations/me": {
       "get": {
         "description": "Get the caller's active organization and their standing in it.",
-        "operationId": "get_active_organization_context_api_v1_organizations_me_get",
+        "operationId": "organizations-get_active_organization_context",
         "responses": {
           "200": {
             "content": {
@@ -19396,7 +19396,7 @@
       },
       "patch": {
         "description": "Rename the caller's active organization.",
-        "operationId": "update_active_organization_api_v1_organizations_me_patch",
+        "operationId": "organizations-update_active_organization",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19446,7 +19446,7 @@
     "/api/v1/organizations/me/aliases": {
       "get": {
         "description": "List the aliases in force in the workspaces this caller may see.\n\nThe policies list's sibling, over ``model_aliases``, and scoped the same way:\nstored rows from the caller's visible workspaces, plus the config-file\naliases, which are deployment-wide.",
-        "operationId": "list_visible_aliases_api_v1_organizations_me_aliases_get",
+        "operationId": "aliases-list_visible_aliases",
         "parameters": [
           {
             "description": "Maximum entries to return, stored and config-file together.",
@@ -19471,7 +19471,7 @@
                   "items": {
                     "$ref": "#/components/schemas/AliasResponse"
                   },
-                  "title": "Response List Visible Aliases Api V1 Organizations Me Aliases Get",
+                  "title": "Response Aliases-List Visible Aliases",
                   "type": "array"
                 }
               }
@@ -19504,7 +19504,7 @@
       },
       "post": {
         "description": "Create or update a stored alias in one of the organization's workspaces.\n\nOrganization owners and admins only, with the same two scope rules the policy\nwrite has: ``workspace_id`` is required and resolved inside the caller's\norganization, and ``user_id`` is not accepted.",
-        "operationId": "set_organization_alias_api_v1_organizations_me_aliases_post",
+        "operationId": "aliases-set_organization_alias",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19554,7 +19554,7 @@
     "/api/v1/organizations/me/aliases/{name}": {
       "delete": {
         "description": "Delete a stored alias from one of the organization's workspaces. Owners and admins only.",
-        "operationId": "delete_organization_alias_api_v1_organizations_me_aliases__name__delete",
+        "operationId": "aliases-delete_organization_alias",
         "parameters": [
           {
             "in": "path",
@@ -19617,7 +19617,7 @@
     "/api/v1/organizations/me/budgets": {
       "get": {
         "description": "List the budgets this organization has defined. Owners and admins only.",
-        "operationId": "list_organization_budgets_api_v1_organizations_me_budgets_get",
+        "operationId": "organization-budgets-list_organization_budgets",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -19684,7 +19684,7 @@
       },
       "post": {
         "description": "Define a budget owned by this organization. Owners and admins only.",
-        "operationId": "create_organization_budget_api_v1_organizations_me_budgets_post",
+        "operationId": "organization-budgets-create_organization_budget",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19734,7 +19734,7 @@
     "/api/v1/organizations/me/budgets/{budget_id}": {
       "delete": {
         "description": "Delete a budget, refused with 409 while a ceiling or workspace default names it.",
-        "operationId": "delete_organization_budget_api_v1_organizations_me_budgets__budget_id__delete",
+        "operationId": "organization-budgets-delete_organization_budget",
         "parameters": [
           {
             "in": "path",
@@ -19783,7 +19783,7 @@
       },
       "patch": {
         "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
-        "operationId": "update_organization_budget_api_v1_organizations_me_budgets__budget_id__patch",
+        "operationId": "organization-budgets-update_organization_budget",
         "parameters": [
           {
             "in": "path",
@@ -19844,7 +19844,7 @@
     "/api/v1/organizations/me/domains": {
       "get": {
         "description": "List the caller's organization's email-domain claims. Owners and admins only.",
-        "operationId": "list_active_organization_domains_api_v1_organizations_me_domains_get",
+        "operationId": "organizations-list_active_organization_domains",
         "responses": {
           "200": {
             "content": {
@@ -19872,7 +19872,7 @@
       },
       "post": {
         "description": "Claim an email domain for the caller's organization. Owners and admins only.\n\nThe claim lands unverified and does nothing until ``POST\n/me/domains/{id}/verify`` finds the record in ``verification_record``\npublished at the domain's apex. A public email provider is refused outright,\nand a domain another organization already claims answers 409 without saying\nwho holds it.",
-        "operationId": "create_active_organization_domain_api_v1_organizations_me_domains_post",
+        "operationId": "organizations-create_active_organization_domain",
         "requestBody": {
           "content": {
             "application/json": {
@@ -19922,7 +19922,7 @@
     "/api/v1/organizations/me/domains/{organization_domain_id}": {
       "delete": {
         "description": "Drop an email-domain claim. Owners and admins only.\n\nMembers who already joined through it keep their membership: they are\ncolleagues by then, not an artifact of the claim.",
-        "operationId": "delete_active_organization_domain_api_v1_organizations_me_domains__organization_domain_id__delete",
+        "operationId": "organizations-delete_active_organization_domain",
         "parameters": [
           {
             "in": "path",
@@ -19972,7 +19972,7 @@
       },
       "patch": {
         "description": "Change a claim's auto-join role or enabled flag. Owners and admins only.\n\nThe domain itself and its verification state are not editable: a different\ndomain is a different claim and needs its own proof.",
-        "operationId": "update_active_organization_domain_api_v1_organizations_me_domains__organization_domain_id__patch",
+        "operationId": "organizations-update_active_organization_domain",
         "parameters": [
           {
             "in": "path",
@@ -20034,7 +20034,7 @@
     "/api/v1/organizations/me/domains/{organization_domain_id}/verify": {
       "post": {
         "description": "Prove control of a claimed domain via its DNS TXT record. Owners and admins only.\n\nIdempotent, and answers 400 while the record is not visible yet, which is\nthe expected answer straight after publishing one.",
-        "operationId": "verify_active_organization_domain_api_v1_organizations_me_domains__organization_domain_id__verify_post",
+        "operationId": "organizations-verify_active_organization_domain",
         "parameters": [
           {
             "in": "path",
@@ -20086,7 +20086,7 @@
     "/api/v1/organizations/me/guardrails": {
       "get": {
         "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",
-        "operationId": "list_organization_guardrails_api_v1_organizations_me_guardrails_get",
+        "operationId": "organization-guardrails-list_organization_guardrails",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -20153,7 +20153,7 @@
       },
       "post": {
         "description": "Mandate a guardrail across the organization. Organization owners and admins only.\n\nThe guardrail runs on every request from the workspaces it is scoped to, in\naddition to whatever the caller asked for, with the stricter of the two\nsettings applying to a profile both name. Set\n``applies_to_all_workspaces`` for it to cover workspaces created later;\notherwise a new workspace inherits nothing and the entry runs only in the\nworkspaces ``workspace_ids`` lists.",
-        "operationId": "create_organization_guardrail_api_v1_organizations_me_guardrails_post",
+        "operationId": "organization-guardrails-create_organization_guardrail",
         "requestBody": {
           "content": {
             "application/json": {
@@ -20203,7 +20203,7 @@
     "/api/v1/organizations/me/guardrails/{guardrail_id}": {
       "delete": {
         "description": "Stop mandating a guardrail, discarding its credential and scope.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nit everywhere while keeping both.",
-        "operationId": "delete_organization_guardrail_api_v1_organizations_me_guardrails__guardrail_id__delete",
+        "operationId": "organization-guardrails-delete_organization_guardrail",
         "parameters": [
           {
             "in": "path",
@@ -20253,7 +20253,7 @@
       },
       "patch": {
         "description": "Change a guardrail's profile, endpoint, credential, modes, or scope.\n\nOrganization owners and admins only. Omitted fields are left as they are;\n``workspace_ids`` replaces the scope whole when sent, and ``url`` and\n``credential`` are cleared by sending an empty string rather than null.",
-        "operationId": "update_organization_guardrail_api_v1_organizations_me_guardrails__guardrail_id__patch",
+        "operationId": "organization-guardrails-update_organization_guardrail",
         "parameters": [
           {
             "in": "path",
@@ -20315,7 +20315,7 @@
     "/api/v1/organizations/me/keys": {
       "get": {
         "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
-        "operationId": "list_own_keys_api_v1_organizations_me_keys_get",
+        "operationId": "organization-keys-list_own_keys",
         "parameters": [
           {
             "in": "query",
@@ -20368,7 +20368,7 @@
                   "items": {
                     "$ref": "#/components/schemas/KeyInfo"
                   },
-                  "title": "Response List Own Keys Api V1 Organizations Me Keys Get",
+                  "title": "Response Organization-Keys-List Own Keys",
                   "type": "array"
                 }
               }
@@ -20401,7 +20401,7 @@
       },
       "post": {
         "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin/superuser, who see every workspace). The secret is returned once.",
-        "operationId": "create_own_key_api_v1_organizations_me_keys_post",
+        "operationId": "organization-keys-create_own_key",
         "requestBody": {
           "content": {
             "application/json": {
@@ -20451,7 +20451,7 @@
     "/api/v1/organizations/me/keys/{key_id}": {
       "delete": {
         "description": "Delete (revoke) one of the caller's own API keys.",
-        "operationId": "delete_own_key_api_v1_organizations_me_keys__key_id__delete",
+        "operationId": "organization-keys-delete_own_key",
         "parameters": [
           {
             "in": "path",
@@ -20493,7 +20493,7 @@
       },
       "patch": {
         "description": "Update one of the caller's own API keys.",
-        "operationId": "update_own_key_api_v1_organizations_me_keys__key_id__patch",
+        "operationId": "organization-keys-update_own_key",
         "parameters": [
           {
             "in": "path",
@@ -20554,7 +20554,7 @@
     "/api/v1/organizations/me/keys/{key_id}/rotate": {
       "post": {
         "description": "Rotate the secret of one of the caller's own API keys, in place.\n\nSame contract as the operator's rotate: the row keeps its identity, the new\nraw key is returned once, and the previous secret stops authenticating\nimmediately with no grace window.",
-        "operationId": "rotate_own_key_api_v1_organizations_me_keys__key_id__rotate_post",
+        "operationId": "organization-keys-rotate_own_key",
         "parameters": [
           {
             "in": "path",
@@ -20605,7 +20605,7 @@
     "/api/v1/organizations/me/member-invitations": {
       "post": {
         "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /api/v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
-        "operationId": "invite_active_organization_member_api_v1_organizations_me_member_invitations_post",
+        "operationId": "organizations-invite_active_organization_member",
         "requestBody": {
           "content": {
             "application/json": {
@@ -20655,7 +20655,7 @@
     "/api/v1/organizations/me/member-invitations/{invitation_id}": {
       "delete": {
         "description": "Revoke an unaccepted invitation. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
-        "operationId": "revoke_active_organization_member_invitation_api_v1_organizations_me_member_invitations__invitation_id__delete",
+        "operationId": "organizations-revoke_active_organization_member_invitation",
         "parameters": [
           {
             "in": "path",
@@ -20707,7 +20707,7 @@
     "/api/v1/organizations/me/members": {
       "get": {
         "description": "List the members of the caller's active organization.",
-        "operationId": "list_active_organization_members_api_v1_organizations_me_members_get",
+        "operationId": "organizations-list_active_organization_members",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -20774,7 +20774,7 @@
       },
       "post": {
         "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.",
-        "operationId": "create_active_organization_member_api_v1_organizations_me_members_post",
+        "operationId": "organizations-create_active_organization_member",
         "requestBody": {
           "content": {
             "application/json": {
@@ -20824,7 +20824,7 @@
     "/api/v1/organizations/me/members/{organization_member_id}": {
       "delete": {
         "description": "Remove a member by suspending their membership, keeping their history resolvable.",
-        "operationId": "remove_active_organization_member_api_v1_organizations_me_members__organization_member_id__delete",
+        "operationId": "organizations-remove_active_organization_member",
         "parameters": [
           {
             "in": "path",
@@ -20874,7 +20874,7 @@
       },
       "patch": {
         "description": "Change a member's role or status. Organization owners and admins only.",
-        "operationId": "update_active_organization_member_api_v1_organizations_me_members__organization_member_id__patch",
+        "operationId": "organizations-update_active_organization_member",
         "parameters": [
           {
             "in": "path",
@@ -20936,7 +20936,7 @@
     "/api/v1/organizations/me/memberships": {
       "get": {
         "description": "List the organizations the caller belongs to, and their role in each.\n\nThe caller's own active memberships, not a directory of the deployment's\norganizations: this is what an organization switcher renders, and one row\ncarries ``is_active_organization`` so it can mark the current one. Not to be\nconfused with ``GET /me/members``, which is the active organization's\nroster.",
-        "operationId": "list_caller_organization_memberships_api_v1_organizations_me_memberships_get",
+        "operationId": "organizations-list_caller_organization_memberships",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -21005,7 +21005,7 @@
     "/api/v1/organizations/me/pending-memberships": {
       "get": {
         "description": "List the organization invitations still awaiting the caller.\n\nThe invitee's side of the invitation flow, where ``/me/member-invitations``\nis the admin's. Not to be confused with ``GET /me/memberships``, which\nlists the organizations the caller is already an active member of and\ndeliberately omits an ``invited`` one.\n\nTakes no token, unlike ``/api/v1/invitations/*``: those are public because the\nrecipient of an emailed link holds nothing else to prove anything with,\nwhile this caller is authenticated as the addressee and the membership's\nown ``user_id`` is what scopes the answer. An invitation whose deadline has\npassed is omitted rather than listed as unactionable.",
-        "operationId": "list_caller_pending_memberships_api_v1_organizations_me_pending_memberships_get",
+        "operationId": "organizations-list_caller_pending_memberships",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -21074,7 +21074,7 @@
     "/api/v1/organizations/me/pending-memberships/{organization_member_id}/accept": {
       "post": {
         "description": "Accept an invitation addressed to the caller, resolving it to an active membership.\n\nDoes the same work as ``POST /api/v1/invitations/accept``, including the\nworkspace assignments parked at invite time, and answers the same shape.\nAddressed by membership id rather than by token: the caller is already the\naddressee, so a token would add nothing their session does not carry.\n\nIdempotent for any membership the caller already holds ``active``, which is\nwhat two clicks before the list refreshes produces: it answers that\nmembership's organization and role rather than a 404 for an action that\nworked. Deliberately not narrowed to memberships that got there by\naccepting, which would cost a lookup to tell the two apart and answer a\ncaller nothing they cannot already read from ``GET /me/memberships``.\n\nAnswers 404 for a membership that is not the caller's own, whether or not\nit exists, and for one of theirs that is neither ``active`` nor holding an\ninvitation. An invitation that has lapsed answers 400.",
-        "operationId": "accept_caller_pending_membership_api_v1_organizations_me_pending_memberships__organization_member_id__accept_post",
+        "operationId": "organizations-accept_caller_pending_membership",
         "parameters": [
           {
             "in": "path",
@@ -21126,7 +21126,7 @@
     "/api/v1/organizations/me/pending-memberships/{organization_member_id}/decline": {
       "post": {
         "description": "Decline an invitation addressed to the caller.\n\nLands the pair where a revoke does: the invitation cancelled and the\nmembership suspended rather than deleted, which is what stops the emailed\nlink from later reviving a declined invitation. A future invite to the same\naddress revives the membership.",
-        "operationId": "decline_caller_pending_membership_api_v1_organizations_me_pending_memberships__organization_member_id__decline_post",
+        "operationId": "organizations-decline_caller_pending_membership",
         "parameters": [
           {
             "in": "path",
@@ -21178,7 +21178,7 @@
     "/api/v1/organizations/me/pricing": {
       "get": {
         "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
-        "operationId": "list_organization_pricing_api_v1_organizations_me_pricing_get",
+        "operationId": "organization-pricing-list_organization_pricing",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -21245,7 +21245,7 @@
       },
       "post": {
         "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
-        "operationId": "create_organization_pricing_api_v1_organizations_me_pricing_post",
+        "operationId": "organization-pricing-create_organization_pricing",
         "requestBody": {
           "content": {
             "application/json": {
@@ -21295,7 +21295,7 @@
     "/api/v1/organizations/me/pricing/{pricing_id}": {
       "delete": {
         "description": "Remove an override, returning the model to the deployment price list.",
-        "operationId": "delete_organization_pricing_api_v1_organizations_me_pricing__pricing_id__delete",
+        "operationId": "organization-pricing-delete_organization_pricing",
         "parameters": [
           {
             "in": "path",
@@ -21338,7 +21338,7 @@
       },
       "put": {
         "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.",
-        "operationId": "replace_organization_pricing_api_v1_organizations_me_pricing__pricing_id__put",
+        "operationId": "organization-pricing-replace_organization_pricing",
         "parameters": [
           {
             "in": "path",
@@ -21400,7 +21400,7 @@
     "/api/v1/organizations/me/provider-keys": {
       "get": {
         "description": "List the caller's organization's provider keys. Organization owners and admins only.",
-        "operationId": "list_org_provider_keys_api_v1_organizations_me_provider_keys_get",
+        "operationId": "provider-keys-list_org_provider_keys",
         "parameters": [
           {
             "description": "Include archived keys.",
@@ -21479,7 +21479,7 @@
       },
       "post": {
         "description": "Create a provider key in the caller's organization. Organization owners and admins only.",
-        "operationId": "create_org_provider_key_api_v1_organizations_me_provider_keys_post",
+        "operationId": "provider-keys-create_org_provider_key",
         "requestBody": {
           "content": {
             "application/json": {
@@ -21529,7 +21529,7 @@
     "/api/v1/organizations/me/provider-keys/{key_id}": {
       "delete": {
         "description": "Permanently delete an archived key. Organization owners and admins only.",
-        "operationId": "delete_org_provider_key_api_v1_organizations_me_provider_keys__key_id__delete",
+        "operationId": "provider-keys-delete_org_provider_key",
         "parameters": [
           {
             "in": "path",
@@ -21579,7 +21579,7 @@
       },
       "patch": {
         "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.",
-        "operationId": "update_org_provider_key_api_v1_organizations_me_provider_keys__key_id__patch",
+        "operationId": "provider-keys-update_org_provider_key",
         "parameters": [
           {
             "in": "path",
@@ -21641,7 +21641,7 @@
     "/api/v1/organizations/me/provider-keys/{key_id}/archive": {
       "post": {
         "description": "Archive a key. Organization owners and admins only.",
-        "operationId": "archive_org_provider_key_api_v1_organizations_me_provider_keys__key_id__archive_post",
+        "operationId": "provider-keys-archive_org_provider_key",
         "parameters": [
           {
             "in": "path",
@@ -21693,7 +21693,7 @@
     "/api/v1/organizations/me/provider-keys/{key_id}/default": {
       "post": {
         "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
-        "operationId": "set_org_provider_key_default_api_v1_organizations_me_provider_keys__key_id__default_post",
+        "operationId": "provider-keys-set_org_provider_key_default",
         "parameters": [
           {
             "in": "path",
@@ -21745,7 +21745,7 @@
     "/api/v1/organizations/me/provider-keys/{key_id}/restore": {
       "post": {
         "description": "Restore an archived key. Organization owners and admins only.",
-        "operationId": "restore_org_provider_key_api_v1_organizations_me_provider_keys__key_id__restore_post",
+        "operationId": "provider-keys-restore_org_provider_key",
         "parameters": [
           {
             "in": "path",
@@ -21797,7 +21797,7 @@
     "/api/v1/organizations/me/routing-policies": {
       "get": {
         "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the\ncaller's own organization.",
-        "operationId": "list_visible_routing_policies_api_v1_organizations_me_routing_policies_get",
+        "operationId": "routing-list_visible_routing_policies",
         "parameters": [
           {
             "description": "Maximum entries to return, stored and config-file together.",
@@ -21822,7 +21822,7 @@
                   "items": {
                     "$ref": "#/components/schemas/PolicyResponse"
                   },
-                  "title": "Response List Visible Routing Policies Api V1 Organizations Me Routing Policies Get",
+                  "title": "Response Routing-List Visible Routing Policies",
                   "type": "array"
                 }
               }
@@ -21855,7 +21855,7 @@
       },
       "post": {
         "description": "Create or update a stored policy in one of the organization's workspaces.\n\nOrganization owners and admins only. ``workspace_id`` is required and must\nname a workspace of the caller's own organization; ``user_id`` is not\naccepted here.",
-        "operationId": "set_organization_routing_policy_api_v1_organizations_me_routing_policies_post",
+        "operationId": "routing-set_organization_routing_policy",
         "requestBody": {
           "content": {
             "application/json": {
@@ -21905,7 +21905,7 @@
     "/api/v1/organizations/me/routing-policies/{name}": {
       "delete": {
         "description": "Delete a stored policy from one of the organization's workspaces. Owners and admins only.",
-        "operationId": "delete_organization_routing_policy_api_v1_organizations_me_routing_policies__name__delete",
+        "operationId": "routing-delete_organization_routing_policy",
         "parameters": [
           {
             "in": "path",
@@ -21968,7 +21968,7 @@
     "/api/v1/organizations/me/spend-ceilings": {
       "get": {
         "description": "List the ceilings capping identities inside this organization. Owners and admins only.\n\nA ceiling whose budget this organization does not own is listed with\n``manageable`` false rather than omitted: it is enforcing against this\norganization's spend, so leaving it out would let the page read as uncapped.",
-        "operationId": "list_organization_spend_ceilings_api_v1_organizations_me_spend_ceilings_get",
+        "operationId": "organization-budgets-list_organization_spend_ceilings",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -22035,7 +22035,7 @@
       },
       "post": {
         "description": "Cap one identity in this organization at one of its budgets.\n\nAnswers 404 when the scope names nothing in this organization, rather than\ncreating a ceiling that can never bind, and 404 when the budget is not this\norganization's.",
-        "operationId": "create_organization_spend_ceiling_api_v1_organizations_me_spend_ceilings_post",
+        "operationId": "organization-budgets-create_organization_spend_ceiling",
         "requestBody": {
           "content": {
             "application/json": {
@@ -22085,7 +22085,7 @@
     "/api/v1/organizations/me/spend-ceilings/{ceiling_id}": {
       "delete": {
         "description": "Remove a ceiling inside this organization.",
-        "operationId": "delete_organization_spend_ceiling_api_v1_organizations_me_spend_ceilings__ceiling_id__delete",
+        "operationId": "organization-budgets-delete_organization_spend_ceiling",
         "parameters": [
           {
             "in": "path",
@@ -22134,7 +22134,7 @@
       },
       "patch": {
         "description": "Relabel a ceiling, or point it at a different budget of this organization's.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is a\ndelete and a create.",
-        "operationId": "update_organization_spend_ceiling_api_v1_organizations_me_spend_ceilings__ceiling_id__patch",
+        "operationId": "organization-budgets-update_organization_spend_ceiling",
         "parameters": [
           {
             "in": "path",
@@ -22195,7 +22195,7 @@
     "/api/v1/organizations/me/switch": {
       "post": {
         "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
-        "operationId": "switch_active_organization_api_v1_organizations_me_switch_post",
+        "operationId": "organizations-switch_active_organization",
         "requestBody": {
           "content": {
             "application/json": {
@@ -22245,7 +22245,7 @@
     "/api/v1/organizations/me/usage": {
       "get": {
         "description": "List the caller's organization's usage logs, most recent first.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage``: same filters, same bare\nJSON array, same separate ``/count`` for a paginator's total, confined to\nwhat the caller's membership lets them see. Scope is never a parameter here.",
-        "operationId": "list_organization_usage_api_v1_organizations_me_usage_get",
+        "operationId": "organization-usage-list_organization_usage",
         "parameters": [
           {
             "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -22591,7 +22591,7 @@
                   "items": {
                     "$ref": "#/components/schemas/UsageEntry"
                   },
-                  "title": "Response List Organization Usage Api V1 Organizations Me Usage Get",
+                  "title": "Response Organization-Usage-List Organization Usage",
                   "type": "array"
                 }
               }
@@ -22626,7 +22626,7 @@
     "/api/v1/organizations/me/usage/count": {
       "get": {
         "description": "Total rows matching these filters, within the caller's scope.\n\nServes the paginator's \"N of M\" beside the list above, and is scoped the\nsame way, so the total can never describe more rows than the list will show.\n\nUnlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``\nis not narrowed to imported rows here: that narrowing sizes the bulk mutations, and\nthis surface has none. So this total keeps matching the list beside it.",
-        "operationId": "count_organization_usage_api_v1_organizations_me_usage_count_get",
+        "operationId": "organization-usage-count_organization_usage",
         "parameters": [
           {
             "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -22980,7 +22980,7 @@
     "/api/v1/organizations/me/usage/series": {
       "get": {
         "description": "Time series split by one dimension, for the caller's organization.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage/series``, and kept in\nlockstep with the summary above for the reason that endpoint gives: the\ndashboard serializes one filter object for both, so a filter one of them\nignored would make the stacked chart disagree with the tiles beside it.",
-        "operationId": "organization_usage_series_api_v1_organizations_me_usage_series_get",
+        "operationId": "organization-usage-organization_usage_series",
         "parameters": [
           {
             "description": "Dimension to split the series by",
@@ -23345,7 +23345,7 @@
     "/api/v1/organizations/me/usage/summary": {
       "get": {
         "description": "Aggregate spend, tokens and request volume for the caller's organization.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage/summary``, running the same\naggregation over a narrower row set: the same bounded window, the same\nbreakdowns, the same ``dimensions`` selector for paying only for the passes a\ncaller reads. The breakdown by user names the people inside the caller's own\nscope, which is the roster they can already read.",
-        "operationId": "organization_usage_summary_api_v1_organizations_me_usage_summary_get",
+        "operationId": "organization-usage-organization_usage_summary",
         "parameters": [
           {
             "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -23726,7 +23726,7 @@
     "/api/v1/pricing": {
       "get": {
         "description": "List all model pricing.",
-        "operationId": "list_pricing_api_v1_pricing_get",
+        "operationId": "pricing-list_pricing",
         "parameters": [
           {
             "in": "query",
@@ -23760,7 +23760,7 @@
                   "items": {
                     "$ref": "#/components/schemas/PricingResponse"
                   },
-                  "title": "Response List Pricing Api V1 Pricing Get",
+                  "title": "Response Pricing-List Pricing",
                   "type": "array"
                 }
               }
@@ -23793,7 +23793,7 @@
       },
       "post": {
         "description": "Set or update pricing for a model.\n\nRejects an alias or a routing policy: pricing, budgets, and usage all key on\nthe model a request resolves to, so a row stored under either name would\nnever be read.",
-        "operationId": "set_pricing_api_v1_pricing_post",
+        "operationId": "pricing-set_pricing",
         "requestBody": {
           "content": {
             "application/json": {
@@ -23843,7 +23843,7 @@
     "/api/v1/pricing/refresh": {
       "post": {
         "description": "Fetch the latest defaults and hold them for operator review.",
-        "operationId": "preview_pricing_refresh_api_v1_pricing_refresh_post",
+        "operationId": "pricing-preview_pricing_refresh",
         "responses": {
           "200": {
             "content": {
@@ -23873,7 +23873,7 @@
     "/api/v1/pricing/refresh/confirm": {
       "post": {
         "description": "Activate the latest reviewed default-price snapshot.",
-        "operationId": "confirm_pricing_refresh_api_v1_pricing_refresh_confirm_post",
+        "operationId": "pricing-confirm_pricing_refresh",
         "responses": {
           "200": {
             "content": {
@@ -23903,7 +23903,7 @@
     "/api/v1/pricing/refresh/reject": {
       "post": {
         "description": "Discard a reviewed default-price snapshot without applying it.",
-        "operationId": "reject_pricing_refresh_api_v1_pricing_refresh_reject_post",
+        "operationId": "pricing-reject_pricing_refresh",
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -23926,7 +23926,7 @@
     "/api/v1/pricing/{model_key}": {
       "delete": {
         "description": "Delete pricing entries for a model.",
-        "operationId": "delete_pricing_api_v1_pricing__model_key__delete",
+        "operationId": "pricing-delete_pricing",
         "parameters": [
           {
             "in": "path",
@@ -23987,7 +23987,7 @@
       },
       "get": {
         "description": "Get pricing for a specific model as of a timestamp.",
-        "operationId": "get_pricing_api_v1_pricing__model_key__get",
+        "operationId": "pricing-get_pricing",
         "parameters": [
           {
             "in": "path",
@@ -24057,7 +24057,7 @@
     "/api/v1/pricing/{model_key}/history": {
       "get": {
         "description": "Return the full pricing history for a model.",
-        "operationId": "get_pricing_history_api_v1_pricing__model_key__history_get",
+        "operationId": "pricing-get_pricing_history",
         "parameters": [
           {
             "in": "path",
@@ -24077,7 +24077,7 @@
                   "items": {
                     "$ref": "#/components/schemas/PricingResponse"
                   },
-                  "title": "Response Get Pricing History Api V1 Pricing  Model Key  History Get",
+                  "title": "Response Pricing-Get Pricing History",
                   "type": "array"
                 }
               }
@@ -24112,7 +24112,7 @@
     "/api/v1/provider-credentials": {
       "get": {
         "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
-        "operationId": "list_stored_providers_api_v1_provider_credentials_get",
+        "operationId": "providers-list_stored_providers",
         "responses": {
           "200": {
             "content": {
@@ -24121,7 +24121,7 @@
                   "items": {
                     "$ref": "#/components/schemas/StoredProviderResponse"
                   },
-                  "title": "Response List Stored Providers Api V1 Provider Credentials Get",
+                  "title": "Response Providers-List Stored Providers",
                   "type": "array"
                 }
               }
@@ -24144,7 +24144,7 @@
       },
       "post": {
         "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
-        "operationId": "create_stored_provider_api_v1_provider_credentials_post",
+        "operationId": "providers-create_stored_provider",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24194,7 +24194,7 @@
     "/api/v1/provider-credentials/reencrypt": {
       "post": {
         "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
-        "operationId": "reencrypt_stored_provider_keys_api_v1_provider_credentials_reencrypt_post",
+        "operationId": "providers-reencrypt_stored_provider_keys",
         "responses": {
           "200": {
             "content": {
@@ -24224,7 +24224,7 @@
     "/api/v1/provider-credentials/test": {
       "post": {
         "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
-        "operationId": "test_provider_connection_api_v1_provider_credentials_test_post",
+        "operationId": "providers-test_provider_connection",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24274,7 +24274,7 @@
     "/api/v1/provider-credentials/{instance}": {
       "delete": {
         "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
-        "operationId": "delete_stored_provider_api_v1_provider_credentials__instance__delete",
+        "operationId": "providers-delete_stored_provider",
         "parameters": [
           {
             "in": "path",
@@ -24316,7 +24316,7 @@
       },
       "patch": {
         "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
-        "operationId": "update_stored_provider_api_v1_provider_credentials__instance__patch",
+        "operationId": "providers-update_stored_provider",
         "parameters": [
           {
             "in": "path",
@@ -24377,7 +24377,7 @@
     "/api/v1/provider-credentials/{instance}/test": {
       "post": {
         "description": "Verify a stored provider's key by listing its models, without exposing the key.",
-        "operationId": "test_stored_provider_api_v1_provider_credentials__instance__test_post",
+        "operationId": "providers-test_stored_provider",
         "parameters": [
           {
             "in": "path",
@@ -24428,7 +24428,7 @@
     "/api/v1/providers": {
       "get": {
         "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.",
-        "operationId": "list_providers_api_v1_providers_get",
+        "operationId": "providers-list_providers",
         "responses": {
           "200": {
             "content": {
@@ -24458,7 +24458,7 @@
     "/api/v1/providers/catalog": {
       "get": {
         "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
-        "operationId": "provider_catalog_api_v1_providers_catalog_get",
+        "operationId": "providers-provider_catalog",
         "responses": {
           "200": {
             "content": {
@@ -24467,7 +24467,7 @@
                   "items": {
                     "$ref": "#/components/schemas/KnownProviderSummarySchema"
                   },
-                  "title": "Response Provider Catalog Api V1 Providers Catalog Get",
+                  "title": "Response Providers-Provider Catalog",
                   "type": "array"
                 }
               }
@@ -24492,7 +24492,7 @@
     "/api/v1/providers/catalog/{provider_id}": {
       "get": {
         "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
-        "operationId": "provider_catalog_detail_api_v1_providers_catalog__provider_id__get",
+        "operationId": "providers-provider_catalog_detail",
         "parameters": [
           {
             "in": "path",
@@ -24543,7 +24543,7 @@
     "/api/v1/providers/health": {
       "get": {
         "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
-        "operationId": "provider_health_api_v1_providers_health_get",
+        "operationId": "providers-provider_health",
         "parameters": [
           {
             "in": "query",
@@ -24595,7 +24595,7 @@
     "/api/v1/rerank": {
       "post": {
         "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
-        "operationId": "create_rerank_api_v1_rerank_post",
+        "operationId": "rerank-create_rerank",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24643,7 +24643,7 @@
     "/api/v1/responses": {
       "post": {
         "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
-        "operationId": "create_response_api_v1_responses_post",
+        "operationId": "responses-create_response",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24691,7 +24691,7 @@
     "/api/v1/routing/policies": {
       "get": {
         "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
-        "operationId": "list_policies_api_v1_routing_policies_get",
+        "operationId": "routing-list_policies",
         "parameters": [
           {
             "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
@@ -24721,7 +24721,7 @@
                   "items": {
                     "$ref": "#/components/schemas/PolicyResponse"
                   },
-                  "title": "Response List Policies Api V1 Routing Policies Get",
+                  "title": "Response Routing-List Policies",
                   "type": "array"
                 }
               }
@@ -24754,7 +24754,7 @@
       },
       "post": {
         "description": "Create or update a stored policy in one workspace, optionally for one user.\n\nOmitting ``workspace_id`` means the deployment's default workspace, which is\nwhere an operator acting deployment-wide writes.",
-        "operationId": "set_policy_api_v1_routing_policies_post",
+        "operationId": "routing-set_policy",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24804,7 +24804,7 @@
     "/api/v1/routing/policies/explain": {
       "post": {
         "description": "Compile a policy and return the plan, without dispatching anything.\n\nOperator-gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
-        "operationId": "explain_policy_api_v1_routing_policies_explain_post",
+        "operationId": "routing-explain_policy",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24854,7 +24854,7 @@
     "/api/v1/routing/policies/{name}": {
       "delete": {
         "description": "Delete a stored policy in one scope.",
-        "operationId": "delete_policy_api_v1_routing_policies__name__delete",
+        "operationId": "routing-delete_policy",
         "parameters": [
           {
             "in": "path",
@@ -24935,7 +24935,7 @@
     "/api/v1/routing/preferences/rank": {
       "post": {
         "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
-        "operationId": "rank_candidates_api_v1_routing_preferences_rank_post",
+        "operationId": "routing-rank_candidates",
         "requestBody": {
           "content": {
             "application/json": {
@@ -24985,7 +24985,7 @@
     "/api/v1/routing/status": {
       "get": {
         "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
-        "operationId": "routing_memory_status_api_v1_routing_status_get",
+        "operationId": "routing-routing_memory_status",
         "parameters": [
           {
             "description": "Whose routing memory to report on.",
@@ -25057,7 +25057,7 @@
     "/api/v1/scoped-budgets": {
       "get": {
         "description": "List scoped budgets, optionally filtered to one scope.",
-        "operationId": "list_scoped_budgets_api_v1_scoped_budgets_get",
+        "operationId": "scoped-budgets-list_scoped_budgets",
         "parameters": [
           {
             "in": "query",
@@ -25131,7 +25131,7 @@
                   "items": {
                     "$ref": "#/components/schemas/ScopedBudgetResponse"
                   },
-                  "title": "Response List Scoped Budgets Api V1 Scoped Budgets Get",
+                  "title": "Response Scoped-Budgets-List Scoped Budgets",
                   "type": "array"
                 }
               }
@@ -25164,7 +25164,7 @@
       },
       "post": {
         "description": "Create a scoped budget.\n\nAnswers 404 when the scope names nothing, rather than creating a ceiling\nthat can never bind.",
-        "operationId": "create_scoped_budget_api_v1_scoped_budgets_post",
+        "operationId": "scoped-budgets-create_scoped_budget",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25214,7 +25214,7 @@
     "/api/v1/scoped-budgets/{budget_id}": {
       "delete": {
         "description": "Delete a scoped budget.\n\nA request holding a reservation against it settles into nothing afterwards,\nwhich is the right outcome: the ceiling no longer exists to be credited.",
-        "operationId": "delete_scoped_budget_api_v1_scoped_budgets__budget_id__delete",
+        "operationId": "scoped-budgets-delete_scoped_budget",
         "parameters": [
           {
             "in": "path",
@@ -25256,7 +25256,7 @@
       },
       "get": {
         "description": "Get one scoped budget.",
-        "operationId": "get_scoped_budget_api_v1_scoped_budgets__budget_id__get",
+        "operationId": "scoped-budgets-get_scoped_budget",
         "parameters": [
           {
             "in": "path",
@@ -25305,7 +25305,7 @@
       },
       "patch": {
         "description": "Relabel a ceiling, or point it at a different budget.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.\n\nThere is no limit or period to set here any more. Both are properties of the\nbudget, so changing what a ceiling allows is either editing that budget,\nwhich moves every ceiling naming it, or naming a different one.",
-        "operationId": "update_scoped_budget_api_v1_scoped_budgets__budget_id__patch",
+        "operationId": "scoped-budgets-update_scoped_budget",
         "parameters": [
           {
             "in": "path",
@@ -25366,7 +25366,7 @@
     "/api/v1/search": {
       "post": {
         "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
-        "operationId": "create_search_api_v1_search_post",
+        "operationId": "search-create_search",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25416,7 +25416,7 @@
     "/api/v1/search-tools": {
       "get": {
         "description": "List every search tool ``POST /api/v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
-        "operationId": "list_all_search_tools_api_v1_search_tools_get",
+        "operationId": "search-tools-list_all_search_tools",
         "responses": {
           "200": {
             "content": {
@@ -25444,7 +25444,7 @@
       },
       "post": {
         "description": "Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.",
-        "operationId": "create_search_tool_api_v1_search_tools_post",
+        "operationId": "search-tools-create_search_tool",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25494,7 +25494,7 @@
     "/api/v1/search-tools/providers": {
       "get": {
         "description": "List the search providers this build can dispatch to, for the add-tool form.\n\nReports per provider whether an API key is required and what endpoint a tool\ninherits when it declares none, so the form can ask for exactly what the\nchosen provider needs instead of taking a free-text provider name.",
-        "operationId": "list_search_providers_api_v1_search_tools_providers_get",
+        "operationId": "search-tools-list_search_providers",
         "responses": {
           "200": {
             "content": {
@@ -25503,7 +25503,7 @@
                   "items": {
                     "$ref": "#/components/schemas/SearchProviderSchema"
                   },
-                  "title": "Response List Search Providers Api V1 Search Tools Providers Get",
+                  "title": "Response Search-Tools-List Search Providers",
                   "type": "array"
                 }
               }
@@ -25528,7 +25528,7 @@
     "/api/v1/search-tools/reencrypt": {
       "post": {
         "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /api/v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
-        "operationId": "reencrypt_stored_search_tool_keys_api_v1_search_tools_reencrypt_post",
+        "operationId": "search-tools-reencrypt_stored_search_tool_keys",
         "responses": {
           "200": {
             "content": {
@@ -25558,7 +25558,7 @@
     "/api/v1/search-tools/{name}": {
       "delete": {
         "description": "Delete a stored search tool. A config-file search tool cannot be deleted here.",
-        "operationId": "delete_stored_search_tool_api_v1_search_tools__name__delete",
+        "operationId": "search-tools-delete_stored_search_tool",
         "parameters": [
           {
             "in": "path",
@@ -25600,7 +25600,7 @@
       },
       "patch": {
         "description": "Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored.",
-        "operationId": "update_search_tool_api_v1_search_tools__name__patch",
+        "operationId": "search-tools-update_search_tool",
         "parameters": [
           {
             "in": "path",
@@ -25661,7 +25661,7 @@
     "/api/v1/search/{search_tool_name}": {
       "post": {
         "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
-        "operationId": "create_search_for_tool_api_v1_search__search_tool_name__post",
+        "operationId": "search-create_search_for_tool",
         "parameters": [
           {
             "description": "Configured search tool to run against",
@@ -25724,7 +25724,7 @@
     "/api/v1/settings": {
       "get": {
         "description": "Return non-secret runtime settings for the admin dashboard.",
-        "operationId": "get_settings_api_v1_settings_get",
+        "operationId": "settings-get_settings",
         "responses": {
           "200": {
             "content": {
@@ -25752,7 +25752,7 @@
       },
       "patch": {
         "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Operator-gated: these change\nhow the gateway meters and lists models.",
-        "operationId": "update_settings_api_v1_settings_patch",
+        "operationId": "settings-update_settings",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25802,7 +25802,7 @@
     "/api/v1/settings/mail": {
       "get": {
         "description": "Report the effective outgoing-mail configuration.",
-        "operationId": "get_mail_settings_api_v1_settings_mail_get",
+        "operationId": "settings-get_mail_settings",
         "responses": {
           "200": {
             "content": {
@@ -25832,7 +25832,7 @@
     "/api/v1/settings/mail/test": {
       "post": {
         "description": "Send one templated test message to prove the configuration works.\n\nRefuses with 503 when the deployment cannot send a linked message, naming\nthe missing settings; the dashboard disables the control in that state, so\nreaching this is a direct API call or a race with a configuration change.\n\nThe recipient is the only caller-supplied value: the body is a fixed\ntemplate, so this cannot be used to put chosen text in someone's inbox from\nthe deployment's own address, and the message says outright that no account\nwas created for whoever receives it.",
-        "operationId": "send_test_mail_api_v1_settings_mail_test_post",
+        "operationId": "settings-send_test_mail",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25882,7 +25882,7 @@
     "/api/v1/settings/maintenance-mode": {
       "get": {
         "description": "Report whether new dashboard sign-ins are frozen.",
-        "operationId": "get_maintenance_mode_api_v1_settings_maintenance_mode_get",
+        "operationId": "settings-get_maintenance_mode",
         "responses": {
           "200": {
             "content": {
@@ -25910,7 +25910,7 @@
       },
       "patch": {
         "description": "Freeze or unfreeze dashboard sign-ins, for this and every other replica.\n\nThe new state is persisted and nothing is applied to the running worker,\nbecause every reader goes back to the stored row. That is what makes one\ncall enough for a deployment running more than one of them.",
-        "operationId": "update_maintenance_mode_api_v1_settings_maintenance_mode_patch",
+        "operationId": "settings-update_maintenance_mode",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25960,7 +25960,7 @@
     "/api/v1/settings/master-key/rotate": {
       "post": {
         "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key, for the same identity it named, so the tab that performed the\nrotation stays signed in as who it was. A caller that authenticated with a\nheader key has no session identity to re-mint for, so it is not handed one:\nit was not signed in to the dashboard to begin with.",
-        "operationId": "rotate_master_key_api_v1_settings_master_key_rotate_post",
+        "operationId": "settings-rotate_master_key",
         "responses": {
           "200": {
             "content": {
@@ -25990,7 +25990,7 @@
     "/api/v1/tool-settings": {
       "get": {
         "description": "Return the effective tool/guardrail settings for the dashboard.\n\nAuthentication only on the router: the role decides *how much* rather than\nwhether, so this is not the deployment-wide gate ``require_deployment_operator``\nnames. A header master key is the deployment credential and reads everything;\na session reads everything only while it operates the deployment, and\notherwise gets the fields without the service endpoints in them.",
-        "operationId": "get_tool_settings_api_v1_tool_settings_get",
+        "operationId": "tool-settings-get_tool_settings",
         "responses": {
           "200": {
             "content": {
@@ -26018,7 +26018,7 @@
       },
       "patch": {
         "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated and standalone-only.",
-        "operationId": "update_tool_settings_api_v1_tool_settings_patch",
+        "operationId": "tool-settings-update_tool_settings",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26068,7 +26068,7 @@
     "/api/v1/tool-settings/{service}/test": {
       "post": {
         "description": "Structurally validate a URL and probe it for reachability.\n\nTests the URL in the request body (typically unsaved), so an operator can\nverify before saving. The probe is a plain HTTP GET with a short timeout: any\nHTTP response means the host is reachable; a connection/timeout/DNS error means\nit is not. The operator is trusted (master key), so no SSRF deny-list applies;\nonly the structural check (http/https + host) runs first.",
-        "operationId": "test_service_api_v1_tool_settings__service__test_post",
+        "operationId": "tool-settings-test_service",
         "parameters": [
           {
             "in": "path",
@@ -26129,7 +26129,7 @@
     "/api/v1/tools": {
       "get": {
         "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
-        "operationId": "list_tools_api_v1_tools_get",
+        "operationId": "tools-list_tools",
         "responses": {
           "200": {
             "content": {
@@ -26159,7 +26159,7 @@
     "/api/v1/usage": {
       "delete": {
         "description": "Delete imported usage rows by explicit ids or by filter (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
-        "operationId": "delete_usage_rows_api_v1_usage_delete",
+        "operationId": "usage-delete_usage_rows",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26207,7 +26207,7 @@
       },
       "get": {
         "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /api/v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
-        "operationId": "list_usage_api_v1_usage_get",
+        "operationId": "usage-list_usage",
         "parameters": [
           {
             "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -26553,7 +26553,7 @@
                   "items": {
                     "$ref": "#/components/schemas/UsageEntry"
                   },
-                  "title": "Response List Usage Api V1 Usage Get",
+                  "title": "Response Usage-List Usage",
                   "type": "array"
                 }
               }
@@ -26588,7 +26588,7 @@
     "/api/v1/usage/count": {
       "get": {
         "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /api/v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.\n\nThat value is the one place this count is narrower than ``GET /api/v1/usage``: it\nalso excludes rows this deployment served itself, so the number an operator\nconfirms is the number the mutation can reach. The list still pages the\nbudget-exempt gateway rows it omits.",
-        "operationId": "count_usage_api_v1_usage_count_get",
+        "operationId": "usage-count_usage",
         "parameters": [
           {
             "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -26942,7 +26942,7 @@
     "/api/v1/usage/external-events": {
       "post": {
         "description": "Ingest a batch of externally-observed usage events (standalone).\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
-        "operationId": "ingest_external_usage_api_v1_usage_external_events_post",
+        "operationId": "usage-ingest_external_usage",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26992,7 +26992,7 @@
     "/api/v1/usage/in-flight": {
       "get": {
         "description": "Requests the gateway is currently serving, longest-running first.\n\nA usage row is written when a request settles, so the log alone cannot answer\n\"is anything happening right now\": on a slow backend, a 30-second local model\ncall is invisible until it finishes. This reports what is in progress.\n\nRead from an in-memory registry, so it describes the process that answers this\ncall and not the deployment: behind a load balancer, consecutive polls reach\ndifferent otari processes, and there is no deployment-wide total to ask for.\n``total`` is the true in-flight count for the answering process even when\n``requests`` is capped.",
-        "operationId": "list_in_flight_api_v1_usage_in_flight_get",
+        "operationId": "usage-list_in_flight",
         "responses": {
           "200": {
             "content": {
@@ -27022,7 +27022,7 @@
     "/api/v1/usage/series": {
       "get": {
         "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary`` (kept in lockstep: the\ndashboard serializes one filter object for both, and a filter this endpoint\nsilently ignored would make the stacked chart disagree with the tiles beside\nit). The window's top groups by spend are returned as their own series;\neverything past the top eight folds into a single ``other`` series per\nbucket, so the stack always reconciles with the summary totals. Points are\nsparse (populated cells only); the bucket grid is bounded like ``/summary``'s\nseries, so an hourly bucket over a too-wide window is rejected rather than\nballooning the payload.",
-        "operationId": "usage_series_api_v1_usage_series_get",
+        "operationId": "usage-usage_series",
         "parameters": [
           {
             "description": "Dimension to split the series by",
@@ -27387,7 +27387,7 @@
     "/api/v1/usage/set-price": {
       "post": {
         "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
-        "operationId": "set_usage_price_rows_api_v1_usage_set_price_post",
+        "operationId": "usage-set_usage_price_rows",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27437,7 +27437,7 @@
     "/api/v1/usage/summary": {
       "get": {
         "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/api/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.\n\n``model``, ``user_id``, and ``api_key_id`` are repeatable: several values match\nany of them, so one chart can compare a handful of models, users, or keys.",
-        "operationId": "usage_summary_api_v1_usage_summary_get",
+        "operationId": "usage-usage_summary",
         "parameters": [
           {
             "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -27818,7 +27818,7 @@
     "/api/v1/users": {
       "get": {
         "description": "List all users with pagination.",
-        "operationId": "list_users_api_v1_users_get",
+        "operationId": "users-list_users",
         "parameters": [
           {
             "in": "query",
@@ -27852,7 +27852,7 @@
                   "items": {
                     "$ref": "#/components/schemas/UserResponse"
                   },
-                  "title": "Response List Users Api V1 Users Get",
+                  "title": "Response Users-List Users",
                   "type": "array"
                 }
               }
@@ -27885,7 +27885,7 @@
       },
       "post": {
         "description": "Create a new user.",
-        "operationId": "create_user_api_v1_users_post",
+        "operationId": "users-create_user",
         "requestBody": {
           "content": {
             "application/json": {
@@ -27935,7 +27935,7 @@
     "/api/v1/users/{user_id}": {
       "delete": {
         "description": "Delete a user, and erase the telemetry captured under their name.",
-        "operationId": "delete_user_api_v1_users__user_id__delete",
+        "operationId": "users-delete_user",
         "parameters": [
           {
             "in": "path",
@@ -27977,7 +27977,7 @@
       },
       "get": {
         "description": "Get details of a specific user.",
-        "operationId": "get_user_api_v1_users__user_id__get",
+        "operationId": "users-get_user",
         "parameters": [
           {
             "in": "path",
@@ -28026,7 +28026,7 @@
       },
       "patch": {
         "description": "Update a user.",
-        "operationId": "update_user_api_v1_users__user_id__patch",
+        "operationId": "users-update_user",
         "parameters": [
           {
             "in": "path",
@@ -28087,7 +28087,7 @@
     "/api/v1/users/{user_id}/usage": {
       "get": {
         "description": "Get usage history for a specific user.",
-        "operationId": "get_user_usage_api_v1_users__user_id__usage_get",
+        "operationId": "users-get_user_usage",
         "parameters": [
           {
             "in": "path",
@@ -28130,7 +28130,7 @@
                   "items": {
                     "$ref": "#/components/schemas/UsageLogResponse"
                   },
-                  "title": "Response Get User Usage Api V1 Users  User Id  Usage Get",
+                  "title": "Response Users-Get User Usage",
                   "type": "array"
                 }
               }
@@ -28165,7 +28165,7 @@
     "/api/v1/web-search/search": {
       "get": {
         "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
-        "operationId": "web_search_api_v1_web_search_search_get",
+        "operationId": "web-search-web_search",
         "parameters": [
           {
             "description": "The search query.",
@@ -28317,7 +28317,7 @@
     "/api/v1/workspaces": {
       "get": {
         "description": "List the workspaces the caller can see in their organization.",
-        "operationId": "list_workspaces_api_v1_workspaces_get",
+        "operationId": "workspaces-list_workspaces",
         "parameters": [
           {
             "description": "Number of records to skip",
@@ -28384,7 +28384,7 @@
       },
       "post": {
         "description": "Create a workspace in the caller's organization. Owners and admins only.",
-        "operationId": "create_workspace_api_v1_workspaces_post",
+        "operationId": "workspaces-create_workspace",
         "requestBody": {
           "content": {
             "application/json": {
@@ -28434,7 +28434,7 @@
     "/api/v1/workspaces/{workspace_id}": {
       "delete": {
         "description": "Delete a workspace and its memberships. Organization owners and admins only.",
-        "operationId": "delete_workspace_api_v1_workspaces__workspace_id__delete",
+        "operationId": "workspaces-delete_workspace",
         "parameters": [
           {
             "in": "path",
@@ -28484,7 +28484,7 @@
       },
       "get": {
         "description": "Get one workspace.",
-        "operationId": "get_workspace_api_v1_workspaces__workspace_id__get",
+        "operationId": "workspaces-get_workspace",
         "parameters": [
           {
             "in": "path",
@@ -28534,7 +28534,7 @@
       },
       "patch": {
         "description": "Rename a workspace or change its description.",
-        "operationId": "update_workspace_api_v1_workspaces__workspace_id__patch",
+        "operationId": "workspaces-update_workspace",
         "parameters": [
           {
             "in": "path",
@@ -28596,7 +28596,7 @@
     "/api/v1/workspaces/{workspace_id}/activation": {
       "get": {
         "description": "Where a workspace stands on its first successful request.\n\nReadable by any member who can see the workspace. Whether the guide should\nactually be offered to this caller is ``experience_eligible``, which also\nanswers false when the deployment has the flow turned off\n(``activation_guide``), so a dashboard left open stops offering it without\nneeding to be reloaded.",
-        "operationId": "get_workspace_activation_api_v1_workspaces__workspace_id__activation_get",
+        "operationId": "workspace-activation-get_workspace_activation",
         "parameters": [
           {
             "in": "path",
@@ -28648,7 +28648,7 @@
     "/api/v1/workspaces/{workspace_id}/activation/dismiss": {
       "post": {
         "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
-        "operationId": "dismiss_workspace_activation_api_v1_workspaces__workspace_id__activation_dismiss_post",
+        "operationId": "workspace-activation-dismiss_workspace_activation",
         "parameters": [
           {
             "in": "path",
@@ -28700,7 +28700,7 @@
     "/api/v1/workspaces/{workspace_id}/activation/key": {
       "post": {
         "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
-        "operationId": "create_workspace_activation_key_api_v1_workspaces__workspace_id__activation_key_post",
+        "operationId": "workspace-activation-create_workspace_activation_key",
         "parameters": [
           {
             "in": "path",
@@ -28752,7 +28752,7 @@
     "/api/v1/workspaces/{workspace_id}/code-execution-policy": {
       "delete": {
         "description": "Drop a workspace's policy, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no policy is already in the state this\nasks for, so it answers with the unconfigured policy rather than a 404.",
-        "operationId": "clear_workspace_code_execution_policy_api_v1_workspaces__workspace_id__code_execution_policy_delete",
+        "operationId": "workspace-code-execution-policy-clear_workspace_code_execution_policy",
         "parameters": [
           {
             "in": "path",
@@ -28802,7 +28802,7 @@
       },
       "get": {
         "description": "Read a workspace's code-execution policy.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the policy describes the\nworkspace's security and billing posture rather than one member's\nallowance. A workspace with no policy answers with the unconfigured one\n(``configured: false``), which is the deployment's own behavior described\nin the same shape rather than a 404.",
-        "operationId": "get_workspace_code_execution_policy_api_v1_workspaces__workspace_id__code_execution_policy_get",
+        "operationId": "workspace-code-execution-policy-get_workspace_code_execution_policy",
         "parameters": [
           {
             "in": "path",
@@ -28852,7 +28852,7 @@
       },
       "put": {
         "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, lowering the loop and execution\nceilings, and removing tool kinds from what the sandbox backend serves. It\nnever turns a sandbox the deployment has not configured on, and ``image``\nmay only name one the operator curated (``allowed_images`` on the response\nreports the set); anything else is refused with 400.",
-        "operationId": "set_workspace_code_execution_policy_api_v1_workspaces__workspace_id__code_execution_policy_put",
+        "operationId": "workspace-code-execution-policy-set_workspace_code_execution_policy",
         "parameters": [
           {
             "in": "path",
@@ -28914,7 +28914,7 @@
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
       "get": {
         "description": "List the MCP servers configured for a workspace.\n\nReadable by any member who can see the workspace: these servers act on\nevery request a member sends through it, so what they are is a member's\nto view (otari-ai#1942). Changing them stays with organization\nowners/admins or this workspace's owners/admins. Authorization tokens are\nnever included; each server reports only whether it has one.",
-        "operationId": "list_workspace_mcp_servers_api_v1_workspaces__workspace_id__mcp_servers_get",
+        "operationId": "mcp-servers-list_workspace_mcp_servers",
         "parameters": [
           {
             "in": "path",
@@ -28991,7 +28991,7 @@
       },
       "post": {
         "description": "Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.\n\nThe authorization token is encrypted at rest and never returned. The URL\nis checked for SSRF safety here as well as on the request path, and must\nuse https when a token is set. A name already used in this workspace is\nrefused with a 409.",
-        "operationId": "create_workspace_mcp_server_api_v1_workspaces__workspace_id__mcp_servers_post",
+        "operationId": "mcp-servers-create_workspace_mcp_server",
         "parameters": [
           {
             "in": "path",
@@ -29053,7 +29053,7 @@
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}": {
       "delete": {
         "description": "Delete a server and the token stored with it. Organization owners/admins or this workspace's owners/admins.",
-        "operationId": "delete_workspace_mcp_server_api_v1_workspaces__workspace_id__mcp_servers__server_id__delete",
+        "operationId": "mcp-servers-delete_workspace_mcp_server",
         "parameters": [
           {
             "in": "path",
@@ -29113,7 +29113,7 @@
       },
       "patch": {
         "description": "Update a server. Organization owners/admins or this workspace's owners/admins.\n\nOnly the fields sent are applied. Omit `authorization_token` to leave the\nstored token alone, send an empty string to clear it, or send a value to\nrotate it.",
-        "operationId": "update_workspace_mcp_server_api_v1_workspaces__workspace_id__mcp_servers__server_id__patch",
+        "operationId": "mcp-servers-update_workspace_mcp_server",
         "parameters": [
           {
             "in": "path",
@@ -29185,7 +29185,7 @@
     "/api/v1/workspaces/{workspace_id}/member-budget-policies": {
       "get": {
         "description": "List the budget defaults attached to a workspace. Any member may read it.",
-        "operationId": "list_workspace_budget_defaults_api_v1_workspaces__workspace_id__member_budget_policies_get",
+        "operationId": "workspace-member-budget-policies-list_workspace_budget_defaults",
         "parameters": [
           {
             "in": "path",
@@ -29262,7 +29262,7 @@
       },
       "post": {
         "description": "Create a budget default.\n\nMaterializes it into a per-member ``scoped_budgets`` row for every\nexisting active member of the workspace; a member who joins afterwards is\nmaterialized when they join.",
-        "operationId": "create_workspace_budget_default_api_v1_workspaces__workspace_id__member_budget_policies_post",
+        "operationId": "workspace-member-budget-policies-create_workspace_budget_default",
         "parameters": [
           {
             "in": "path",
@@ -29324,7 +29324,7 @@
     "/api/v1/workspaces/{workspace_id}/member-budget-policies/{default_id}": {
       "delete": {
         "description": "Delete a budget default.\n\nThe per-member ``scoped_budgets`` rows it already materialized are kept;\na member joining afterwards no longer gets one from it.",
-        "operationId": "delete_workspace_budget_default_api_v1_workspaces__workspace_id__member_budget_policies__default_id__delete",
+        "operationId": "workspace-member-budget-policies-delete_workspace_budget_default",
         "parameters": [
           {
             "in": "path",
@@ -29383,7 +29383,7 @@
       },
       "patch": {
         "description": "Update a budget default's label or limit.\n\nNot retroactive: members already materialized from this default keep\ntheir existing ceiling; only a member materialized afterwards sees the\nnew one.",
-        "operationId": "update_workspace_budget_default_api_v1_workspaces__workspace_id__member_budget_policies__default_id__patch",
+        "operationId": "workspace-member-budget-policies-update_workspace_budget_default",
         "parameters": [
           {
             "in": "path",
@@ -29454,7 +29454,7 @@
     "/api/v1/workspaces/{workspace_id}/members": {
       "get": {
         "description": "List a workspace's members.",
-        "operationId": "list_workspace_members_api_v1_workspaces__workspace_id__members_get",
+        "operationId": "workspaces-list_workspace_members",
         "parameters": [
           {
             "in": "path",
@@ -29533,7 +29533,7 @@
     "/api/v1/workspaces/{workspace_id}/members/{user_id}": {
       "delete": {
         "description": "Remove a member from a workspace. Idempotent.",
-        "operationId": "remove_workspace_member_api_v1_workspaces__workspace_id__members__user_id__delete",
+        "operationId": "workspaces-remove_workspace_member",
         "parameters": [
           {
             "in": "path",
@@ -29593,7 +29593,7 @@
       },
       "patch": {
         "description": "Change a workspace member's role.",
-        "operationId": "update_workspace_member_role_api_v1_workspaces__workspace_id__members__user_id__patch",
+        "operationId": "workspaces-update_workspace_member_role",
         "parameters": [
           {
             "in": "path",
@@ -29670,7 +29670,7 @@
       },
       "post": {
         "description": "Add an existing organization member to a workspace.",
-        "operationId": "add_workspace_member_api_v1_workspaces__workspace_id__members__user_id__post",
+        "operationId": "workspaces-add_workspace_member",
         "parameters": [
           {
             "in": "path",
@@ -29750,7 +29750,7 @@
     "/api/v1/workspaces/{workspace_id}/provider-keys": {
       "get": {
         "description": "The effective view of every key visible to this workspace. Any member of the workspace may read it.",
-        "operationId": "list_workspace_provider_keys_api_v1_workspaces__workspace_id__provider_keys_get",
+        "operationId": "provider-keys-list_workspace_provider_keys",
         "parameters": [
           {
             "in": "path",
@@ -29802,7 +29802,7 @@
     "/api/v1/workspaces/{workspace_id}/provider-keys/{key_id}": {
       "delete": {
         "description": "Remove this workspace's override, reverting to full inheritance. Idempotent.",
-        "operationId": "reset_workspace_provider_key_override_api_v1_workspaces__workspace_id__provider_keys__key_id__delete",
+        "operationId": "provider-keys-reset_workspace_provider_key_override",
         "parameters": [
           {
             "in": "path",
@@ -29862,7 +29862,7 @@
       },
       "patch": {
         "description": "Pin or disable a key for this workspace. Organization owners/admins or this workspace's owners/admins.",
-        "operationId": "set_workspace_provider_key_override_api_v1_workspaces__workspace_id__provider_keys__key_id__patch",
+        "operationId": "provider-keys-set_workspace_provider_key_override",
         "parameters": [
           {
             "in": "path",
@@ -29934,7 +29934,7 @@
     "/api/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models": {
       "get": {
         "description": "List this workspace's model allow-list for a key. Empty means every model is allowed.",
-        "operationId": "list_workspace_provider_key_model_restrictions_api_v1_workspaces__workspace_id__provider_keys__key_id__models_get",
+        "operationId": "provider-keys-list_workspace_provider_key_model_restrictions",
         "parameters": [
           {
             "in": "path",
@@ -29994,7 +29994,7 @@
       },
       "post": {
         "description": "Narrow this workspace's allow-list for a key to include one more model. Idempotent.",
-        "operationId": "add_workspace_provider_key_model_restriction_api_v1_workspaces__workspace_id__provider_keys__key_id__models_post",
+        "operationId": "provider-keys-add_workspace_provider_key_model_restriction",
         "parameters": [
           {
             "in": "path",
@@ -30066,7 +30066,7 @@
     "/api/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models/{model}": {
       "delete": {
         "description": "Remove one model from this workspace's allow-list for a key. Idempotent.",
-        "operationId": "remove_workspace_provider_key_model_restriction_api_v1_workspaces__workspace_id__provider_keys__key_id__models__model__delete",
+        "operationId": "provider-keys-remove_workspace_provider_key_model_restriction",
         "parameters": [
           {
             "in": "path",
@@ -30137,7 +30137,7 @@
     "/api/v1/workspaces/{workspace_id}/web-search": {
       "delete": {
         "description": "Drop a workspace's configuration, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no configuration is already in the state\nthis asks for, so it answers with the unconfigured shape rather than a 404.",
-        "operationId": "clear_workspace_web_search_config_api_v1_workspaces__workspace_id__web_search_delete",
+        "operationId": "workspace-web-search-clear_workspace_web_search_config",
         "parameters": [
           {
             "in": "path",
@@ -30187,7 +30187,7 @@
       },
       "get": {
         "description": "Read a workspace's web-search configuration.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the row describes the workspace's\nposture rather than one member's allowance. A workspace with no row answers\nwith the unconfigured shape (``configured: false``), which is the\ndeployment's own behavior described in the same shape rather than a 404.",
-        "operationId": "get_workspace_web_search_config_api_v1_workspaces__workspace_id__web_search_get",
+        "operationId": "workspace-web-search-get_workspace_web_search_config",
         "parameters": [
           {
             "in": "path",
@@ -30237,7 +30237,7 @@
       },
       "put": {
         "description": "Set a workspace's web-search configuration, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. The configuration can only narrow what the deployment permits: turning\nweb search off for the workspace, lowering the result ceiling, and adding to\nthe domains a search may not reach. It never turns on a backend the\ndeployment has not configured, and it carries no credential.",
-        "operationId": "set_workspace_web_search_config_api_v1_workspaces__workspace_id__web_search_put",
+        "operationId": "workspace-web-search-set_workspace_web_search_config",
         "parameters": [
           {
             "in": "path",
@@ -30299,7 +30299,7 @@
     "/otlp/v1/logs": {
       "post": {
         "description": "Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs).",
-        "operationId": "receive_logs_otlp_v1_logs_post",
+        "operationId": "otel-receive_logs",
         "responses": {
           "200": {
             "content": {
@@ -30327,7 +30327,7 @@
     "/otlp/v1/metrics": {
       "post": {
         "description": "Ingest content-free coding-agent outcome metrics from OTLP metric points.\n\nRecords the outcome counters a coding agent reports on the metrics signal and\nthat Otari has no other source for: lines of code changed, commits, pull\nrequests, and active time. Points are stored exactly as reported, with their\nOTLP series identity, so a cumulative counter is turned into an increment at\nread time rather than re-counted on every export. Metrics that duplicate an\nalready-recorded signal (token/cost usage, already billed; edit decisions,\nalready captured as behavioral events) are skipped, as is any metric name this\ngateway does not know, so a newer agent version never breaks reception.\n\nOutcome metrics are never billable: they touch no budget and no spend. Capture\nanswers to the same ``capture_agent_telemetry`` toggle as behavioral events;\nwith it off, the export still succeeds and simply stores nothing.",
-        "operationId": "receive_metrics_otlp_v1_metrics_post",
+        "operationId": "otel-receive_metrics",
         "responses": {
           "200": {
             "content": {
@@ -30355,7 +30355,7 @@
     "/otlp/v1/traces": {
       "post": {
         "description": "Ingest LLM usage from OTLP spans (GenAI semantic conventions).",
-        "operationId": "receive_traces_otlp_v1_traces_post",
+        "operationId": "otel-receive_traces",
         "responses": {
           "200": {
             "content": {
