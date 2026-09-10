@@ -307,8 +307,8 @@ usage-report timeout and retries, and first-chunk fallback timeout. See
 
 `bootstrap` or `OTARI_BOOTSTRAP` names a trusted `module:callable` loaded
 inside the gateway process. The callable can rebind extension ports,
-contribute capability-gated routers, and contribute background tasks. Most
-deployments should leave it unset.
+contribute routers, contribute background tasks, and contribute an Alembic
+migration chain for tables of its own. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
@@ -338,3 +338,73 @@ def register(container: Container) -> None:
 
 Names are unique per container; a second task registered under a taken name
 fails startup.
+
+### Contributing a migration chain
+
+A module that owns tables records its own Alembic script directory and its own
+version table on the container:
+
+```python
+from gateway.container import Container, MigrationContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(
+            name="alerts",
+            script_location="/opt/alerts/alembic",
+            version_table="alerts_alembic_version",
+        )
+    )
+```
+
+When `auto_migrate` is on (the default), startup upgrades Otari's own chain to
+`head` first and then each contributed chain, on the same database URL. Each
+chain stamps only the version table it named, so the histories never share a
+row. `alembic_version` is Otari's and is refused, as is a version table or a
+name another contribution already claimed; the refusal happens while the
+container is built, before anything touches the database.
+
+Otari hands the contributed `env.py` two things on the Alembic config. The
+database URL travels on two channels, `sqlalchemy.url` and
+`config.attributes["database_url"]`, and a contributed chain should prefer the
+attribute: `sqlalchemy.url` is read back through configparser, whose
+interpolation treats a percent sign as a token, so a password containing one
+breaks it. The declared version table travels as
+`config.attributes["version_table"]`.
+
+```python
+from alembic import context
+
+config = context.config
+database_url = config.attributes["database_url"]
+version_table = config.attributes.get("version_table", "alerts_alembic_version")
+
+# ... build the engine from database_url ...
+context.configure(connection=connection, target_metadata=metadata, version_table=version_table)
+```
+
+Reading `version_table` from the attributes is offered, not required: a chain
+may equally hardcode a constant of its own. What Otari requires is that the
+`version_table` declared on the `MigrationContribution` is the table the chain
+actually stamps. Otari uses the declared value for one thing only, refusing a
+collision with core's `alembic_version` and with another contribution, so a
+chain that declares one table and stamps another defeats that check.
+
+Two cautions. A contributed chain must not reference a core table by foreign
+key in a way that would block a core migration: the core chain runs first and
+knows nothing about contributed tables, so a core revision that rebuilds a
+table (SQLite has no `ALTER` for constraints) fails on a constraint it did not
+create. Prefer plain indexed id columns over enforced foreign keys into core
+tables. And `otari migrate` runs the core chain only; a deployment that
+migrates with the CLI instead of on startup has to run each contributed chain
+itself for now. Hybrid mode skips database initialization entirely, contributed
+chains included, since it has no local database.
+
+Contributed chains run under Otari's existing `auto_migrate` gate and get no
+knob of their own. Setting `auto_migrate` to true is already a deployment's
+explicit acceptance of boot-time DDL, and registering a bootstrap that
+contributes a chain is a second explicit choice, so a third switch would only
+add a way for a deployment to be half configured. A deployment that does not
+want DDL at boot turns `auto_migrate` off and migrates out of band, which holds
+for contributed chains exactly as it does for Otari's own.

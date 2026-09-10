@@ -165,6 +165,17 @@ Entitlement is not authentication either, and the mount point adds none. A capab
 
 A contributed background task is the additive seam for a periodic worker (an alert evaluator, a sync job, a purge), which would otherwise need a line in the lifespan's hand-kept refresher list. `start` is a coroutine function that receives the `GatewayConfig`; the lifespan schedules it after Otari's own refreshers, in every mode, and stops it under the same shared cancellation bound, so a task that ignores cancellation is abandoned rather than allowed to hang shutdown, and one that dies is logged under its `name` and never takes the process down. Names are unique per container, and the startup summary lists them beside the contributed routers.
 
+A contributed **migration chain** is the other additive half, for a module that owns tables of its own. Its revisions cannot join Otari's chain without editing the repo, and a second `alembic upgrade` on the default `alembic_version` table would fight Otari's over one row, so a bootstrap records an Alembic script directory of its own together with a version table of its own:
+
+```python
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(name="alerts", script_location=str(ALERTS_ALEMBIC_DIR), version_table="alerts_alembic_version")
+    )
+```
+
+At startup, with `auto_migrate` on, `init_db` upgrades Otari's own chain to `head` and then each contribution's, on the same database URL, each stamping only the version table it named, so the two histories never interleave. `alembic_version` itself is refused at contribution time, as is a version table or a name another contribution already holds. Hybrid mode skips `init_db`, and therefore contributed chains too: there is no local database. `otari migrate` runs the core chain only; whether it should also run contributed chains is an open question. The `env.py` contract and the foreign-key caution are in [docs/configuration.md](docs/configuration.md#extending-otari-with-a-bootstrap-module).
+
 > **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps.py`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
 
 Not every service goes through a port. Most code has a single implementation and stays plain (see [when a capability earns a port](#cardinal-rules-for-contributors)); only capabilities with a real second implementation are resolved through the container.

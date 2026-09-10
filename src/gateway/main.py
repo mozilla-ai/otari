@@ -353,7 +353,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
-            init_db(config)
+            # Contributed chains run after Otari's own, so a bootstrap's tables
+            # exist before the first request reaches its routers. create_app
+            # always attaches a container; an app assembled by hand (as some
+            # tests do) may not have one, and then only the core chain runs.
+            container: Container | None = getattr(app.state, "container", None)
+            init_db(config, migration_contributions=container.migration_contributions() if container else ())
             async with create_session() as session:
                 # Persisted dashboard overrides win over config/env; apply them
                 # before pricing init so default-pricing behavior is consistent.

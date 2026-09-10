@@ -27,6 +27,8 @@ from gateway.container import (
     Container,
     ContainerError,
     DuplicateBackgroundTaskError,
+    MigrationContribution,
+    MigrationContributionError,
     PortNotBoundError,
     RouterContribution,
     build_container,
@@ -100,6 +102,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
 
     assert container.router_contributions() == ()
     assert container.background_task_contributions() == ()
+    assert container.migration_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
     for port in (
         BillingPort,
@@ -334,6 +337,48 @@ def test_a_duplicate_background_task_name_is_refused_and_the_first_stands() -> N
     assert container.background_task_contributions() == (first,)
 
 
+def _chain(name: str, version_table: str) -> MigrationContribution:
+    return MigrationContribution(name=name, script_location=f"/plugins/{name}/alembic", version_table=version_table)
+
+
+def test_migration_contributions_are_recorded_in_order() -> None:
+    container = Container()
+    first = _chain("one", "one_alembic_version")
+    second = _chain("two", "two_alembic_version")
+
+    container.contribute_migrations(first)
+    container.contribute_migrations(second)
+
+    assert container.migration_contributions() == (first, second)
+
+
+def test_a_migration_contribution_may_not_claim_the_core_version_table() -> None:
+    container = Container()
+
+    with pytest.raises(MigrationContributionError, match="Otari's own version table"):
+        container.contribute_migrations(_chain("greedy", "alembic_version"))
+
+    assert container.migration_contributions() == ()
+
+
+def test_two_migration_contributions_may_not_share_a_version_table() -> None:
+    container = Container()
+    container.contribute_migrations(_chain("one", "shared_alembic_version"))
+
+    with pytest.raises(MigrationContributionError, match="already held by 'one'"):
+        container.contribute_migrations(_chain("two", "shared_alembic_version"))
+
+    assert [contribution.name for contribution in container.migration_contributions()] == ["one"]
+
+
+def test_two_migration_contributions_may_not_share_a_name() -> None:
+    container = Container()
+    container.contribute_migrations(_chain("one", "one_alembic_version"))
+
+    with pytest.raises(MigrationContributionError, match="'one' is already recorded"):
+        container.contribute_migrations(_chain("one", "other_alembic_version"))
+
+
 def test_bootstrap_summary_names_the_contributed_background_tasks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -372,3 +417,29 @@ def register(container: Container) -> None:
         "tasks_bootstrap:register rebound no ports, contributed routers for alerts, "
         "contributed background tasks budget alerts, purge"
     )
+
+
+def test_bootstrap_contributes_a_migration_chain_and_the_summary_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "chain_bootstrap",
+        """
+from gateway.container import Container, MigrationContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(
+            name="alerts", script_location="/plugins/alerts/alembic", version_table="alerts_alembic_version"
+        )
+    )
+""",
+    )
+
+    container = build_container("chain_bootstrap:register")
+
+    assert [contribution.name for contribution in container.migration_contributions()] == ["alerts"]
+    assert container.summary == "chain_bootstrap:register rebound no ports, contributed migration chains alerts"
