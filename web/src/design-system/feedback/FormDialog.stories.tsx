@@ -53,7 +53,6 @@ function KeyFields() {
           { value: "workspace", label: "This workspace" },
           { value: "organization", label: "Whole organization" },
         ]}
-        reserveMessage
       />
     </>
   )
@@ -251,7 +250,9 @@ function ManyFields() {
               prev.map((item, at) => (at === index ? next : item)),
             )
           }
-          reserveMessage
+          // No description, so no reserved line: the line exists for an error to
+          // replace a description in, and eight of them reserved against nothing
+          // added 8 empty rungs to a body that already scrolls.
         />
       ))}
     </>

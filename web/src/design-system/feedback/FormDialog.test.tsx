@@ -142,16 +142,39 @@ describe("FormDialog", () => {
         </FormDialog>,
       )
       // The spinner replaces the label in place rather than beside it: the
-      // label element is still laid out, only invisible. A spinner appended
+      // label element is still laid out, only transparent. A spinner appended
       // next to a removed label is the shape this asserts against, and it
       // would change the button's resting width mid-submit.
+      //
+      // `opacity-0` and not `invisible` for a second reason this cannot see:
+      // `visibility: hidden` takes the label out of the accessibility tree,
+      // which would leave the button nameless mid-submit. jsdom loads no
+      // stylesheet, so `getByRole` here would find it either way.
       const submit = screen.getByRole("button", { name: /Create key/ })
       const label = within(submit).getByText("Create key")
-      expect(label).toHaveClass("invisible")
-      expect(submit).toHaveAttribute("data-pending", "true")
+      expect(label).toHaveClass("opacity-0")
     })
 
-    it("disables Cancel and the close control for the same duration", () => {
+    it("says the submit is busy rather than refused, and blocks its own press", () => {
+      render(
+        <FormDialog {...base} isOpen isPending>
+          {withField}
+        </FormDialog>,
+      )
+      // Disabled is one treatment in this product, at 0.4 opacity, and it has
+      // to read as denied. A submit in flight is working, so it keeps its fill
+      // and stops the press itself.
+      const submit = screen.getByRole("button", { name: /Create key/ })
+      expect(submit).not.toBeDisabled()
+      expect(submit).not.toHaveAttribute("data-disabled")
+      expect(submit).not.toHaveAttribute("aria-disabled", "true")
+      expect(submit).toHaveClass("pointer-events-none")
+      // On the form, not the button: react-aria filters unrecognized ARIA off
+      // a Button, so an `aria-busy` there reaches no DOM node.
+      expect(submit.closest("form")).toHaveAttribute("aria-busy", "true")
+    })
+
+    it("disables Cancel and the close control, which genuinely are refused", () => {
       render(
         <FormDialog {...base} isOpen isPending>
           {withField}

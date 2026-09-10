@@ -2154,6 +2154,17 @@ main {
   max-height: calc(var(--visual-viewport-height, 100dvh) - 15rem);
 }
 
+/* A field fills this dialog. `Field` and `SecretField` cap themselves at
+ * `max-w-md`, which is right on a page (a 448px measure under a 620px column
+ * keeps a name field from reading as a paragraph) and wrong here: it left a
+ * 448px input in the 638px body of an `lg` dialog, with 190px of nothing beside
+ * it. The dialog is a named place the way a toolbar is, so the override belongs
+ * to the place rather than to every call site inside it, and it is keyed on
+ * HeroUI's own `data-slot` because that is the element carrying the cap. */
+.otari-form-dialog [data-slot="textfield"] {
+  max-width: none;
+}
+
 /* Below 640px every size is a full-screen sheet: a centered box with a phone's
  * margins around it wastes the only axis a form needs, and the keyboard takes
  * half of what is left. The footer clears the home indicator. */

@@ -145,7 +145,13 @@ one question; a form is a place to work.
   error={create.error}
   isDirty={name !== ""}
 >
-  <Field label="Key name" value={name} onChange={setName} reserveMessage />
+  <Field
+    label="Key name"
+    value={name}
+    onChange={setName}
+    description="Lowercase, hyphens, no spaces."
+    reserveMessage
+  />
 </FormDialog>
 
 // Incorrect: the title restates the button, and nothing says what was made
@@ -159,15 +165,21 @@ sheet. Those widths cannot be spelled as a class: `globals.css` pins
 floor under it, so the component sets `--form-dialog-width` inline and the
 geometry is settled beside the rule it has to beat.
 
-**Fields go in with `reserveMessage` on**, so a validation message opens a line
-that was already there instead of moving the footer. The first field takes
-`autoFocus`.
+**A field reserves its message line only where it has a description**, which is
+[forms.md](forms.md)'s rule and not a dialog rule: the reserved line exists so an
+error can replace a description rather than push the footer down, so a field with
+nothing to say under it holds nothing. The first field takes `autoFocus`.
 
-**The footer's height never changes.** `isPending` keeps the primary at its
-resting width, because the spinner replaces the label in place rather than
-sitting beside it; Cancel and the close control are disabled for the same
-duration. HeroUI's own `isPending` draws no spinner, so this one is the
-component's, not the library's.
+**Fields fill the dialog.** `Field` and `SecretField` cap themselves at 448px,
+which is right on a page and wrong in a 640px dialog; `globals.css` lifts the cap
+for this place, so no call site sets a width.
+
+**The footer's height never changes, and the primary keeps its width.** The
+spinner replaces the label in place rather than sitting beside it. The primary
+is **not** disabled while it runs: disabled is one treatment at 0.4 opacity and
+it has to read as denied, and a submit in flight is working rather than refused,
+so it keeps its fill and blocks its own press. Cancel and the close control *are*
+disabled, because they genuinely are refused until it lands.
 
 **`isDirty` arms a guard in the footer, not a second dialog.** Escape and a
 click outside swap the actions for "Unsaved changes · Keep editing · Discard".

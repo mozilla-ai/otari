@@ -59,8 +59,17 @@ band, the secondary one becomes a ghost.
 <Button variant="outline" onPress={exportCsv}>Export CSV</Button>
 ```
 
-`Button` takes `isPending` while a mutation is in flight; it disables itself and
-shows its own spinner. Do not pair it with `isDisabled` for the same condition.
+`Button` takes `isPending` while a mutation is in flight. **It draws no spinner**,
+whatever this file used to say: HeroUI puts `data-pending` on the element and the
+stylesheet answers that with `pointer-events: none` and nothing else, so the
+spinner is the call site's to render. What `isPending` does supply is the press
+block, `aria-disabled`, and react-aria's announcement, and it paints the button
+at the disabled 0.4. Do not pair it with `isDisabled` for the same condition.
+
+Which means `isPending` is the wrong prop wherever the button should read as
+*working* rather than *refused*, since 0.4 is the denied treatment
+([motion-and-access.md](motion-and-access.md)). `FormDialog`'s submit is the
+worked example: it keeps its fill, blocks its own press, and says `aria-busy`.
 
 ## Where a create action lives, and what it says
 

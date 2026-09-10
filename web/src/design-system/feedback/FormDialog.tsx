@@ -50,7 +50,11 @@ export interface FormDialogProps {
   footerStart?: ReactNode
   /** A `TabRow` under the header. `lg` only, where a form has two shapes. */
   tabs?: ReactNode
-  /** `Field`, `SecretField`, `Select`, `Checkbox`. Each with `reserveMessage`. */
+  /**
+   * `Field`, `SecretField`, `Select`, `Checkbox`. A field with a description
+   * takes `reserveMessage`, so an error replaces that line instead of moving
+   * the footer; one with nothing to say under it reserves nothing.
+   */
   children: ReactNode
 }
 
@@ -153,12 +157,18 @@ export function FormDialog({
                   <p className="text-body text-muted">{description}</p>
                 ) : null}
               </div>
-              {/* 32px glyph box lifted 4px so it centers on the title's own
-                  line rather than on the header block, with the 44px target
-                  bled outward so raising it moves no layout. */}
+              {/* `isIconOnly` at `sm` is what makes this a 32px square with no
+                  edge: the rule that drops a ghost's border is keyed on the
+                  control being icon-only, so a `border-0` here would be a call
+                  site trying to remember something the system already knows.
+                  Lifted 4px to center on the title's own line rather than on
+                  the header block, with the 44px target bled outward so
+                  raising it moves no layout. */}
               <Button
                 aria-label="Close"
-                className="relative -top-1 size-8 min-h-0 min-w-0 shrink-0 justify-center border-0 p-0 before:absolute before:-inset-1.5 before:content-['']"
+                isIconOnly
+                size="sm"
+                className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
                 isDisabled={isPending}
                 onPress={requestClose}
               >
@@ -185,6 +195,7 @@ export function FormDialog({
                 event.preventDefault()
                 if (!isPending) onSubmit()
               }}
+              aria-busy={isPending}
               className="flex min-h-0 flex-col"
             >
               {/* `min-h-0` above and here is what lets this scroll rather than
@@ -225,24 +236,45 @@ export function FormDialog({
                       <Button isDisabled={isPending} onPress={requestClose}>
                         Cancel
                       </Button>
-                      {/* The spinner replaces the label in place rather than
+                      {/* Not `isPending`, and not `isDisabled`. Both land on
+                          the product's one disabled treatment, which is 0.4
+                          opacity and has to read as *denied*; a submit in
+                          flight is working, not refused, and the design keeps
+                          its fill. So the press is blocked by hand
+                          (`pointer-events`, plus the guard in `onSubmit` for
+                          the keyboard) and `aria-busy` says what is happening.
+
+                          The spinner replaces the label in place rather than
                           sitting beside it, so the button keeps its resting
-                          width and the footer keeps its height. HeroUI's
-                          `isPending` draws no spinner of its own: it sets
-                          `data-pending`, which the stylesheet answers with
-                          `pointer-events: none` and nothing else. */}
+                          width and the footer keeps its height. `opacity-0`
+                          rather than `invisible`: `visibility: hidden` would
+                          take the label out of the accessibility tree and
+                          leave the button with no name mid-submit.
+
+                          The busy state is announced from the form's
+                          `aria-busy` rather than the button's: react-aria
+                          filters unrecognized ARIA off a Button, so an
+                          `aria-busy` here reaches no DOM node at all. */}
                       <Button
                         type="submit"
                         variant="primary"
-                        isPending={isPending}
-                        className="relative"
+                        className={`relative ${isPending ? "pointer-events-none" : ""}`}
                       >
-                        <span className={isPending ? "invisible" : undefined}>
+                        <span className={isPending ? "opacity-0" : undefined}>
                           {submitLabel}
                         </span>
                         {isPending ? (
                           <span className="absolute inset-0 flex items-center justify-center">
-                            <Spinner size="sm" aria-hidden="true" />
+                            {/* `current`, not the default `accent`: the accent
+                                is this button's own fill, so the default paints
+                                teal on teal. `current` inherits the button's
+                                ink, which is what makes it white here and would
+                                make it right on any other ground. */}
+                            <Spinner
+                              size="sm"
+                              color="current"
+                              aria-hidden="true"
+                            />
                           </span>
                         ) : null}
                       </Button>
