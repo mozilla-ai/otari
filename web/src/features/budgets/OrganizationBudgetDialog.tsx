@@ -3,7 +3,7 @@ import { useState } from "react"
 import type { OrganizationBudget } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 
 import {
   PERIOD_OPTIONS,
@@ -135,7 +135,7 @@ export function OrganizationBudgetDialog({
         // behavior this field no longer decides alone.
         description="Leave blank for no dollar limit."
       />
-      <FilterSelect
+      <Select
         label="Resets"
         value={period}
         onChange={setPeriod}
@@ -143,6 +143,7 @@ export function OrganizationBudgetDialog({
           value: option.value,
           label: option.label,
         }))}
+        reserveMessage={false}
       />
       {editing && editing.ceiling_count > 0 ? (
         <p className="text-sm text-muted">

@@ -345,7 +345,7 @@ describe("OrganizationBudgetsPage", () => {
   })
 
   it("will not save a ceiling still holding a budget the organization does not own", async () => {
-    // `FilterSelect` carries an unmatched value as its own option rather than
+    // `Select` carries an unmatched value as its own option rather than
     // dropping it, so the deployment budget stays selected and Save looked
     // enabled while submitting an id the endpoint answers 404 for.
     mockApi({

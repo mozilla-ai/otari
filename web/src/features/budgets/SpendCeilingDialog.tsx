@@ -7,7 +7,7 @@ import type {
 } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 
 import { budgetLabel, limitLabel, scopeLabel } from "./organizationBudget"
 
@@ -81,7 +81,7 @@ export function SpendCeilingDialog({
     label: `${budgetLabel(budget)} — ${limitLabel(budget)}`,
   }))
   // A ceiling holding a budget set at the deployment level opens on an id no
-  // option carries, and `FilterSelect` renders such a value as itself: a raw
+  // option carries, and `Select` renders such a value as itself: a raw
   // uuid where the budget's name belongs. Carried as its own labelled option
   // instead, so the current selection reads as what it is and choosing one of
   // the organization's own is still the way out.
@@ -167,11 +167,12 @@ export function SpendCeilingDialog({
         </div>
       ) : (
         <>
-          <FilterSelect
+          <Select
             label="Capping"
             value={target}
             onChange={setTarget}
             options={targetOptions}
+            reserveMessage={false}
           />
           <Field
             label="Provider instance"
@@ -182,12 +183,13 @@ export function SpendCeilingDialog({
           />
         </>
       )}
-      <FilterSelect
+      <Select
         label="Budget"
         value={budgetId}
         onChange={setBudgetId}
         options={budgetOptions}
-        disabled={noBudgets}
+        isDisabled={noBudgets}
+        reserveMessage={false}
       />
       <Field
         label="Name"
