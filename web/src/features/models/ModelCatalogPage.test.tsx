@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -276,24 +276,6 @@ describe("ModelCatalogPage", () => {
     const list = screen.getByRole("list", { name: "Models" })
     expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
     expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
-  })
-
-  it("re-reads the list at a comparison size", async () => {
-    const fetchMock = mockApi()
-    renderPage(<ModelCatalogPage />)
-    const user = userEvent.setup()
-
-    await screen.findByRole("list", { name: "Models" })
-    await user.click(screen.getByRole("button", { name: /Compare prices at/ }))
-    await user.click(screen.getByRole("radio", { name: "Compare at 200K" }))
-
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([url]) =>
-          String(url).includes("/v1/catalog/models?at_context=200000"),
-        ),
-      ).toBe(true),
-    )
   })
 
   it("offers the same rows as a table", async () => {

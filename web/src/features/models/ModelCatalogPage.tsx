@@ -11,7 +11,6 @@ import {
   CAPABILITY_FILTERS,
   type CatalogFilters,
   type CatalogSortColumn,
-  COMPARE_AT_OPTIONS,
   CONTEXT_OPTIONS,
   compareModels,
   EMPTY_FILTERS,
@@ -173,14 +172,10 @@ function FilterRail({
   models,
   filters,
   onChange,
-  compareAt,
-  onCompareAt,
 }: {
   models: CatalogModelSummary[]
   filters: CatalogFilters
   onChange: (next: CatalogFilters) => void
-  compareAt: string
-  onCompareAt: (value: string) => void
 }) {
   const set = <K extends keyof CatalogFilters>(
     key: K,
@@ -312,14 +307,6 @@ function FilterRail({
           options={RELEASE_OPTIONS}
         />
       </FilterGroup>
-      <FilterGroup label="Compare prices at" count={compareAt !== "0" ? 1 : 0}>
-        <RadioList
-          name="Compare prices at"
-          value={compareAt}
-          onChange={onCompareAt}
-          options={COMPARE_AT_OPTIONS}
-        />
-      </FilterGroup>
     </div>
   )
 }
@@ -410,10 +397,7 @@ function ModelCard({
   )
 }
 
-function tableColumns(
-  atContext: number,
-): DataTableColumn<CatalogModelSummary>[] {
-  const at = atContext ? ` at ${formatContext(atContext)}` : ""
+function tableColumns(): DataTableColumn<CatalogModelSummary>[] {
   return [
     {
       id: "name",
@@ -456,7 +440,7 @@ function tableColumns(
     },
     {
       id: "input",
-      header: `Input / 1M${at}`,
+      header: "Input / 1M",
       align: "end",
       allowsSorting: true,
       cell: (row) => (
@@ -467,7 +451,7 @@ function tableColumns(
     },
     {
       id: "output",
-      header: `Output / 1M${at}`,
+      header: "Output / 1M",
       align: "end",
       allowsSorting: true,
       cell: (row) => (
@@ -499,9 +483,7 @@ export function ModelCatalogView({
   /** A provider instance to start filtered on. */
   initialProvider?: string
 }) {
-  const [compareAt, setCompareAt] = useState("0")
-  const atContext = Number(compareAt) || 0
-  const catalog = useCatalog(atContext || null)
+  const catalog = useCatalog()
 
   const [filters, setFilters] = useState<CatalogFilters>({
     ...EMPTY_FILTERS,
@@ -600,11 +582,6 @@ export function ModelCatalogView({
             models={models}
             filters={filters}
             onChange={updateFilters}
-            compareAt={compareAt}
-            onCompareAt={(value) => {
-              setCompareAt(value)
-              setPage(0)
-            }}
           />
         </aside>
 
@@ -657,7 +634,7 @@ export function ModelCatalogView({
             <TableScrollFrame className="otari-models-table">
               <DataTable
                 ariaLabel="Models"
-                columns={tableColumns(atContext)}
+                columns={tableColumns()}
                 rows={pageRows}
                 getRowKey={(row) => row.id}
                 sortDescriptor={sortDescriptor}

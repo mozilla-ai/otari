@@ -106,18 +106,6 @@ export const RELEASE_OPTIONS = [
   { value: "1095", label: "Past 3 years" },
 ]
 
-// The request size a price is compared at. Not a filter on the rows but on
-// the numbers: a tiered offering is cheap at 8K and not at 500K, and the list
-// is re-read from the gateway at the chosen size.
-export const COMPARE_AT_OPTIONS = [
-  { value: "0", label: "Base prices" },
-  { value: "8000", label: "Compare at 8K" },
-  { value: "128000", label: "Compare at 128K" },
-  { value: "200000", label: "Compare at 200K" },
-  { value: "500000", label: "Compare at 500K" },
-  { value: "1000000", label: "Compare at 1M" },
-]
-
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface CatalogFilters {
