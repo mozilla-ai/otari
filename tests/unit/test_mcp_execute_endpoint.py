@@ -1,4 +1,4 @@
-"""``POST /v1/mcp/execute``: the caller-orchestrated execution contract.
+"""``POST /api/v1/mcp/execute``: the caller-orchestrated execution contract.
 
 Otari executes one exact call an application has already authorized. It proves
 no approval and claims none (R-AUTH-4); what it enforces is authentication,

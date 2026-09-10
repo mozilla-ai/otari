@@ -1,4 +1,4 @@
-"""Integration tests for model auto-discovery in the GET /v1/models endpoint."""
+"""Integration tests for model auto-discovery in the GET /api/v1/models endpoint."""
 
 from collections.abc import Generator
 from typing import Any
@@ -76,7 +76,7 @@ def test_list_models_with_discovery(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """Discovered models appear in GET /v1/models."""
+    """Discovered models appear in GET /api/v1/models."""
     from any_llm.types.model import Model
 
     fake_models = [
@@ -165,7 +165,7 @@ def test_list_models_includes_keyless_local_provider(
     Regression for mozilla-ai/otari#389. Ollama, llama.cpp, and llamafile take no
     credential, so ``ollama:`` with no body under ``providers`` is the whole
     config. That entry used to fail to load (YAML gives ``None``), leaving a
-    running local server callable but permanently absent from GET /v1/models.
+    running local server callable but permanently absent from GET /api/v1/models.
     """
     from any_llm.types.model import Model
 
@@ -420,7 +420,7 @@ def test_get_model_tolerates_a_provider_without_created(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """The same missing ``created`` must not fail GET /v1/models/{id}."""
+    """The same missing ``created`` must not fail GET /api/v1/models/{id}."""
     from any_llm.types.model import Model
 
     get_model_cache().set(
@@ -437,7 +437,7 @@ def test_get_model_from_discovery_cache(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """GET /v1/models/{id} finds a model that exists only in the discovery cache."""
+    """GET /api/v1/models/{id} finds a model that exists only in the discovery cache."""
     from any_llm.types.model import Model
 
     fake_models = [Model(**_make_openai_model("gpt-4o"))]
@@ -457,7 +457,7 @@ def test_get_model_not_found_with_discovery(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """GET /v1/models/{id} returns 404 when not in cache or pricing table."""
+    """GET /api/v1/models/{id} returns 404 when not in cache or pricing table."""
     resp = discovery_client.get(
         f"{API_ROOT}/models/openai:nonexistent-model",
         headers=discovery_master_header,
@@ -497,7 +497,7 @@ def test_list_models_sorted(
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/models/discoverable
+# GET /api/v1/models/discoverable
 # ---------------------------------------------------------------------------
 
 
@@ -575,7 +575,7 @@ def test_discoverable_queries_providers_when_discovery_disabled(
     two_provider_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """model_discovery is a listing policy for /v1/models, not a query switch.
+    """model_discovery is a listing policy for /api/v1/models, not a query switch.
 
     The fixture config sets model_discovery=False; the operator still gets the
     models their credentials can reach.
@@ -596,7 +596,7 @@ def test_discoverable_queries_providers_when_discovery_disabled(
 
     openai_models = next(p for p in discoverable.json()["providers"] if p["provider"] == "openai")
     assert [m["id"] for m in openai_models["models"]] == ["gpt-4o", "gpt-4o-mini"]
-    # Same config, same call: /v1/models still publishes nothing, as configured.
+    # Same config, same call: /api/v1/models still publishes nothing, as configured.
     assert listed.json()["data"] == []
 
 
@@ -692,7 +692,7 @@ def test_discoverable_is_not_shadowed_by_get_model(
     two_provider_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """The path must not be captured by GET /v1/models/{model_id:path}.
+    """The path must not be captured by GET /api/v1/models/{model_id:path}.
 
     Registration order decides this, so a reordering would silently turn the
     response into a 404 ModelObject lookup for a model named "discoverable".
@@ -710,7 +710,7 @@ def test_discoverable_is_not_shadowed_by_get_model(
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/providers/health (provider health monitor)
+# GET /api/v1/providers/health (provider health monitor)
 # ---------------------------------------------------------------------------
 
 
@@ -956,7 +956,7 @@ def test_models_read_serves_an_expired_cache_without_dialing(
     cached_discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """The fix: an expired entry is served, not re-dialed, on GET /v1/models.
+    """The fix: an expired entry is served, not re-dialed, on GET /api/v1/models.
 
     Before the background refresher, whichever request arrived after the TTL
     lapsed paid ``model_discovery_timeout_seconds`` per unreachable provider and
@@ -1095,7 +1095,7 @@ def test_model_detail_agrees_with_the_listing_on_a_stale_entry(
     cached_discovery_client: TestClient,
     discovery_master_header: dict[str, str],
 ) -> None:
-    """GET /v1/models/{id} must not 404 a model GET /v1/models is listing.
+    """GET /api/v1/models/{id} must not 404 a model GET /api/v1/models is listing.
 
     Nothing on the request path renews ``cached_at`` any more, and the refresher
     sleeps its interval *after* each round, so an entry is expired from the moment

@@ -142,7 +142,7 @@ def test_readiness_never_depends_on_a_validator_having_run() -> None:
 def test_config_and_transport_never_disagree_about_whether_mail_exists() -> None:
     """The two readers of "is mail configured" must not be able to drift apart.
 
-    ``/v1/bootstrap`` reads the config property and the invitation path asks the
+    ``/api/v1/bootstrap`` reads the config property and the invitation path asks the
     mailer; if those could differ, the dashboard would offer an affordance the
     request path refuses. Exhaustive over the settings that decide it, because
     the states that broke this before were the ones nobody thinks to write a
@@ -161,7 +161,7 @@ def test_config_and_transport_never_disagree_about_whether_mail_exists() -> None
                     state = (transport, host, sender, url)
                     assert config.mail_enabled == (select_transport(config) is not None), state
                     assert config.mail_ready == Mailer(config).can_send_links, state
-                    # "Empty exactly when ready" is the contract GET /v1/settings/mail
+                    # "Empty exactly when ready" is the contract GET /api/v1/settings/mail
                     # publishes, so it holds for every state and not just the tidy ones.
                     assert (config.missing_mail_settings == ()) == config.mail_ready, state
 

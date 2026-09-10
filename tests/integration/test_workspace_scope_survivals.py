@@ -166,7 +166,7 @@ def test_deleting_an_alias_in_the_wrong_workspace_is_a_404(
 def test_an_alias_cannot_be_written_into_a_workspace_that_does_not_exist(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """Checked rather than left to the foreign key, matching POST /v1/keys.
+    """Checked rather than left to the foreign key, matching POST /api/v1/keys.
 
     The id comes from the caller, so an unknown one is a bad request; reaching
     the constraint would answer 500 "Database error" for a value they can fix.
@@ -325,7 +325,7 @@ def test_the_master_key_still_sees_every_workspaces_files(
     """The operator acting deployment-wide, which is what keeps their tooling working.
 
     Narrowable with ``workspace_id`` rather than narrowed by default, matching
-    ``GET /v1/keys``.
+    ``GET /api/v1/keys``.
     """
     platform = _make_workspace(client, master_key_header, "Platform team")
     there = _key_header(client, master_key_header, api_key_header, workspace_id=platform, user_id="ada")

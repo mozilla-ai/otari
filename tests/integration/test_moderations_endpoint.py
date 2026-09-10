@@ -1,4 +1,4 @@
-"""Tests for the POST /v1/moderations endpoint."""
+"""Tests for the POST /api/v1/moderations endpoint."""
 
 import logging
 from datetime import UTC, datetime
@@ -33,7 +33,7 @@ def _mock_moderation_response() -> ModerationResponse:
 
 
 def test_moderations_requires_auth(client: TestClient) -> None:
-    """POST /v1/moderations requires authentication."""
+    """POST /api/v1/moderations requires authentication."""
     resp = client.post(
         f"{API_ROOT}/moderations",
         json={"model": "openai:omni-moderation-latest", "input": "hello"},
@@ -45,7 +45,7 @@ def test_moderations_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations works with API key authentication."""
+    """POST /api/v1/moderations works with API key authentication."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -68,7 +68,7 @@ def test_moderations_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations with master key requires 'user' field."""
+    """POST /api/v1/moderations with master key requires 'user' field."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -89,7 +89,7 @@ def test_moderations_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations with master key + user field succeeds."""
+    """POST /api/v1/moderations with master key + user field succeeds."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -112,7 +112,7 @@ def test_moderations_list_input(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations accepts a list of strings as input."""
+    """POST /api/v1/moderations accepts a list of strings as input."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -134,7 +134,7 @@ def test_moderations_multimodal_input(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations accepts multimodal content-part dicts."""
+    """POST /api/v1/moderations accepts multimodal content-part dicts."""
     mock_resp = _mock_moderation_response()
     multimodal_input = [
         {"type": "text", "text": "describe this"},
@@ -161,7 +161,7 @@ def test_moderations_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations returns 502 when the provider fails."""
+    """POST /api/v1/moderations returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
@@ -221,7 +221,7 @@ def test_moderations_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations creates a usage log entry on success."""
+    """POST /api/v1/moderations creates a usage log entry on success."""
     mock_resp = _mock_moderation_response()
     user_id = api_key_obj["user_id"]
 
@@ -258,7 +258,7 @@ def test_moderations_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations logs an error entry when the provider fails."""
+    """POST /api/v1/moderations logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -285,7 +285,7 @@ def test_moderations_include_raw_opts_in(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations forwards the include_raw query param to amoderation."""
+    """POST /api/v1/moderations forwards the include_raw query param to amoderation."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -320,7 +320,7 @@ def test_moderations_cost_tracked_with_pricing(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations records a non-zero cost when pricing exists."""
+    """POST /api/v1/moderations records a non-zero cost when pricing exists."""
     client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -362,7 +362,7 @@ def test_moderations_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations records auditable charge lines alongside cost."""
+    """POST /api/v1/moderations records auditable charge lines alongside cost."""
     client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -431,7 +431,7 @@ def test_moderations_no_warning_when_pricing_missing(
     api_key_header: dict[str, str],
     caplog: Any,
 ) -> None:
-    """POST /v1/moderations does not emit the 'No pricing configured' warning."""
+    """POST /api/v1/moderations does not emit the 'No pricing configured' warning."""
     mock_resp = _mock_moderation_response()
     with caplog.at_level(logging.WARNING, logger="gateway"):
         with patch(

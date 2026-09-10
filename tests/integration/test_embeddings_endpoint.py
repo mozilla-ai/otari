@@ -1,4 +1,4 @@
-"""Tests for the POST /v1/embeddings endpoint."""
+"""Tests for the POST /api/v1/embeddings endpoint."""
 
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -21,7 +21,7 @@ def _mock_embedding_response(prompt_tokens: int = 10) -> CreateEmbeddingResponse
 
 
 def test_embeddings_requires_auth(client: TestClient) -> None:
-    """POST /v1/embeddings requires authentication."""
+    """POST /api/v1/embeddings requires authentication."""
     resp = client.post(f"{API_ROOT}/embeddings", json={"model": "openai:text-embedding-3-small", "input": "hello"})
     assert resp.status_code == 401
 
@@ -30,7 +30,7 @@ def test_embeddings_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/embeddings works with API key authentication."""
+    """POST /api/v1/embeddings works with API key authentication."""
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -48,7 +48,7 @@ def test_embeddings_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/embeddings with master key requires 'user' field."""
+    """POST /api/v1/embeddings with master key requires 'user' field."""
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -65,7 +65,7 @@ def test_embeddings_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/embeddings with master key + user field succeeds."""
+    """POST /api/v1/embeddings with master key + user field succeeds."""
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -84,7 +84,7 @@ def test_embeddings_list_input(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/embeddings accepts a list of strings as input."""
+    """POST /api/v1/embeddings accepts a list of strings as input."""
     mock_resp = _mock_embedding_response()
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -99,7 +99,7 @@ def test_embeddings_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/embeddings returns 502 when the provider fails."""
+    """POST /api/v1/embeddings returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.embeddings.aembedding",
         new_callable=AsyncMock,
@@ -120,7 +120,7 @@ def test_embeddings_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/embeddings creates a usage log entry."""
+    """POST /api/v1/embeddings creates a usage log entry."""
     mock_resp = _mock_embedding_response()
     user_id = api_key_obj["user_id"]
 
@@ -148,7 +148,7 @@ def test_embeddings_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/embeddings logs an error entry when the provider fails."""
+    """POST /api/v1/embeddings logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -177,7 +177,7 @@ def test_embeddings_optional_fields(
     api_key_header: dict[str, str],
     extra_field: str,
 ) -> None:
-    """POST /v1/embeddings forwards optional OpenAI fields."""
+    """POST /api/v1/embeddings forwards optional OpenAI fields."""
     mock_resp = _mock_embedding_response()
     values = {"encoding_format": "float", "dimensions": 256}
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp) as mock:
@@ -202,7 +202,7 @@ def test_embeddings_cost_tracked_with_pricing(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/embeddings calculates cost when model pricing exists.
+    """POST /api/v1/embeddings calculates cost when model pricing exists.
 
     A realistic prompt, because settlement is to the micro-dollar: ten tokens at
     $0.02 per million is two ten-millionths of a dollar, which the cost column
@@ -280,7 +280,7 @@ def test_embeddings_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/embeddings records auditable charge lines alongside cost."""
+    """POST /api/v1/embeddings records auditable charge lines alongside cost."""
     client.post(
         f"{API_ROOT}/pricing",
         json={

@@ -53,7 +53,7 @@ def test_the_only_cap_surface_is_the_one_that_is_bounded(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """A scoped ceiling names a budget rather than carrying its own limit, so
-    the bound on ``/v1/budgets`` is the whole of the guard. Asserted rather than
+    the bound on ``/api/v1/budgets`` is the whole of the guard. Asserted rather than
     assumed: a future surface that reintroduced a cap field would need bounding
     too, and this is what would notice.
     """

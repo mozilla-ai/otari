@@ -1,4 +1,4 @@
-"""Deployment-wide account administration (`/v1/admin`), end to end and at the service.
+"""Deployment-wide account administration (`/api/v1/admin`), end to end and at the service.
 
 Split the way `test_tenancy_authorization.py` explains: a master-key request is
 always the one bootstrap operator, who is a superuser, so a header-authenticated

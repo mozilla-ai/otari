@@ -334,7 +334,7 @@ def test_a_ceiling_on_an_unknown_scope_is_refused(
     """Refused rather than created, because a scope naming nothing never binds.
 
     A ceiling on a typo is created, listed, and silently unenforced, with nothing
-    anywhere to surface it. Same rule ``POST /v1/scoped-budgets`` states.
+    anywhere to surface it. Same rule ``POST /api/v1/scoped-budgets`` states.
     """
     budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
 
@@ -447,7 +447,7 @@ def test_the_deployment_budget_list_is_not_this_one(
     """A budget defined here is the organization's, and one defined there is not.
 
     The two surfaces share the table, so this pins the filter rather than
-    assuming it: ``/v1/budgets`` sees everything, and this list sees only rows
+    assuming it: ``/api/v1/budgets`` sees everything, and this list sees only rows
     carrying the caller's organization.
     """
     deployment = client.post(f"{API_ROOT}/budgets", json={"name": "Deployment wide"}, headers=master_key_header)
@@ -463,7 +463,7 @@ def test_the_deployment_budget_list_is_not_this_one(
         tenant["budget_id"],
     }
     # And each row says which it is, so the operator's assignment control can
-    # withhold the one `POST /v1/users` would refuse.
+    # withhold the one `POST /api/v1/users` would refuse.
     owners = {row["budget_id"]: row["organization_id"] for row in everything}
     assert owners[deployment.json()["budget_id"]] is None
     assert owners[tenant["budget_id"]] == tenant["organization_id"]
@@ -1054,7 +1054,7 @@ async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: Asyn
 async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_db: AsyncSession) -> None:
     """The hold the assignment sites no longer create, and still have to refuse.
 
-    Since otari#881 neither `/v1/users` site will point a gateway user at a
+    Since otari#881 neither `/api/v1/users` site will point a gateway user at a
     tenant's budget, so a row in this shape was assigned before that. Seeded
     directly for the same reason. `Budget.users` is a plain relationship, so an
     unchecked delete does not fail on it: the ORM nulls the column out, and an

@@ -2,7 +2,7 @@
 
 The management surface is covered in ``test_organization_guardrails.py``; this is
 the other half of otari#654's Definition of Done, the request path enforcing what
-the configuration says. Every case goes through ``/v1/messages`` with the
+the configuration says. Every case goes through ``/api/v1/messages`` with the
 provider call patched out and the guardrails service stubbed with an
 ``httpx.MockTransport``, so what is asserted is admission: whether a check ran at
 all, what it was sent, and what the verdict did to the request.

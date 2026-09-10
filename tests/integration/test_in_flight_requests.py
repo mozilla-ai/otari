@@ -1,4 +1,4 @@
-"""GET /v1/usage/in-flight reports what the gateway is serving right now.
+"""GET /api/v1/usage/in-flight reports what the gateway is serving right now.
 
 The usage log only records requests that have settled, so a slow backend (a local
 model taking 30 seconds) is invisible while it runs. These tests pin the two

@@ -1,4 +1,4 @@
-"""Tests for the /v1/batches batch API endpoints."""
+"""Tests for the /api/v1/batches batch API endpoints."""
 
 import os
 from collections.abc import Generator
@@ -54,12 +54,12 @@ def _create_batch_body(**overrides: Any) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# POST /v1/batches — Create batch
+# POST /api/v1/batches: Create batch
 # ---------------------------------------------------------------------------
 
 
 def test_create_batch_auth_required(client: TestClient) -> None:
-    """POST /v1/batches requires authentication."""
+    """POST /api/v1/batches requires authentication."""
     resp = client.post(f"{API_ROOT}/batches", json=_create_batch_body())
     assert resp.status_code == 401
 
@@ -68,7 +68,7 @@ def test_create_batch_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches works with API key and returns provider field."""
+    """POST /api/v1/batches works with API key and returns provider field."""
     mock_batch = _mock_batch()
 
     class _SupportsBatch:
@@ -98,7 +98,7 @@ def test_create_batch_with_master_key(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches works with master key naming an existing user."""
+    """POST /api/v1/batches works with master key naming an existing user."""
     mock_batch = _mock_batch()
 
     class _SupportsBatch:
@@ -129,7 +129,7 @@ def test_create_batch_unsupported_provider(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches returns 422 for unsupported provider."""
+    """POST /api/v1/batches returns 422 for unsupported provider."""
 
     class _NoBatch:
         SUPPORTS_BATCH = False
@@ -145,7 +145,7 @@ def test_create_batch_empty_requests(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches returns 422 for empty requests array."""
+    """POST /api/v1/batches returns 422 for empty requests array."""
     resp = client.post(
         f"{API_ROOT}/batches",
         json=_create_batch_body(requests=[]),
@@ -158,7 +158,7 @@ def test_create_batch_invalid_model_format(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches returns 400 when model has no provider prefix."""
+    """POST /api/v1/batches returns 400 when model has no provider prefix."""
     with patch(
         "gateway.api.routes.batches.AnyLLM.split_model_provider",
         side_effect=ValueError("Model must be in 'provider:model' format"),
@@ -176,7 +176,7 @@ def test_create_batch_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches returns 502 when provider fails."""
+    """POST /api/v1/batches returns 502 when provider fails."""
 
     class _SupportsBatch:
         SUPPORTS_BATCH = True
@@ -201,7 +201,7 @@ def test_create_batch_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/batches creates a usage log entry."""
+    """POST /api/v1/batches creates a usage log entry."""
     mock_batch = _mock_batch()
     user_id = api_key_obj["user_id"]
 
@@ -228,7 +228,7 @@ def test_create_batch_temp_file_cleanup(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches cleans up temp file even on error."""
+    """POST /api/v1/batches cleans up temp file even on error."""
     created_files: list[str] = []
 
     class _SupportsBatch:
@@ -258,7 +258,7 @@ def test_create_batch_temp_file_cleanup(
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/batches/{batch_id} — Retrieve batch
+# GET /api/v1/batches/{batch_id}: Retrieve batch
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ def test_retrieve_batch(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id} retrieves batch status."""
+    """GET /api/v1/batches/{batch_id} retrieves batch status."""
     mock_batch = _mock_batch(status="in_progress")
 
     with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=mock_batch):
@@ -283,13 +283,13 @@ def test_retrieve_batch_missing_provider(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id} without provider returns 422."""
+    """GET /api/v1/batches/{batch_id} without provider returns 422."""
     resp = client.get(f"{API_ROOT}/batches/batch_abc123", headers=api_key_header)
     assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
-# POST /v1/batches/{batch_id}/cancel — Cancel batch
+# POST /api/v1/batches/{batch_id}/cancel: Cancel batch
 # ---------------------------------------------------------------------------
 
 
@@ -297,7 +297,7 @@ def test_cancel_batch(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches/{batch_id}/cancel cancels a batch."""
+    """POST /api/v1/batches/{batch_id}/cancel cancels a batch."""
     mock_batch = _mock_batch(status="cancelling")
 
     with (
@@ -318,7 +318,7 @@ def test_cancel_batch(
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/batches — List batches
+# GET /api/v1/batches: List batches
 # ---------------------------------------------------------------------------
 
 
@@ -326,7 +326,7 @@ def test_list_batches(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches lists batches for a provider."""
+    """GET /api/v1/batches lists batches for a provider."""
     mock_batches = [_mock_batch(id="batch_1"), _mock_batch(id="batch_2")]
 
     with patch(
@@ -349,7 +349,7 @@ def test_list_batches(
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/batches/{batch_id}/results — Retrieve batch results
+# GET /api/v1/batches/{batch_id}/results: Retrieve batch results
 # ---------------------------------------------------------------------------
 
 
@@ -357,7 +357,7 @@ def test_retrieve_batch_results(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id}/results returns per-request results."""
+    """GET /api/v1/batches/{batch_id}/results returns per-request results."""
     mock_completion = MagicMock()
     mock_completion.model = "gpt-4o-mini"
     mock_completion.usage = None
@@ -399,7 +399,7 @@ def test_retrieve_batch_results_not_complete(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id}/results returns 409 when batch is not complete."""
+    """GET /api/v1/batches/{batch_id}/results returns 409 when batch is not complete."""
     with (
         patch(
             "gateway.api.routes.batches.aretrieve_batch",
@@ -427,7 +427,7 @@ def test_retrieve_batch_results_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """GET /v1/batches/{batch_id}/results creates a usage log entry."""
+    """GET /api/v1/batches/{batch_id}/results creates a usage log entry."""
     mock_result = BatchResult(results=[])
     user_id = api_key_obj["user_id"]
 
@@ -472,7 +472,7 @@ def test_create_batch_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches with master key and no user field is rejected with 400."""
+    """POST /api/v1/batches with master key and no user field is rejected with 400."""
     create_patch, supports_patch = _batch_enforcement_patches()
     with create_patch as mock_call, supports_patch:
         resp = client.post(f"{API_ROOT}/batches", json=_create_batch_body(), headers=master_key_header)
@@ -486,7 +486,7 @@ def test_create_batch_master_key_unknown_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches with master key naming a nonexistent user returns 404."""
+    """POST /api/v1/batches with master key naming a nonexistent user returns 404."""
     create_patch, supports_patch = _batch_enforcement_patches()
     with create_patch as mock_call, supports_patch:
         resp = client.post(
@@ -504,7 +504,7 @@ def test_create_batch_blocked_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches for a blocked user is rejected before the provider call."""
+    """POST /api/v1/batches for a blocked user is rejected before the provider call."""
     resp = client.post(
         f"{API_ROOT}/users",
         json={"user_id": "batch-blocked-user", "blocked": True},
@@ -529,7 +529,7 @@ def test_create_batch_over_budget_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches for a user over budget is rejected before the provider call."""
+    """POST /api/v1/batches for a user over budget is rejected before the provider call."""
     budget_resp = client.post(
         f"{API_ROOT}/budgets",
         json={"max_budget": 0.0},
@@ -610,7 +610,7 @@ def batch_rate_limit_client(postgres_url: str) -> Generator[TestClient]:
 
 
 def test_create_batch_rate_limited(batch_rate_limit_client: TestClient) -> None:
-    """POST /v1/batches enforces the per-user rate limit."""
+    """POST /api/v1/batches enforces the per-user rate limit."""
     header = {API_KEY_HEADER: "Bearer test-master-key"}
     resp = batch_rate_limit_client.post(
         f"{API_ROOT}/users",
@@ -648,7 +648,7 @@ def test_retrieve_batch_owned_by_other_user_is_404(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id} hides batches owned by another user."""
+    """GET /api/v1/batches/{batch_id} hides batches owned by another user."""
     foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
 
     with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=foreign):
@@ -663,7 +663,7 @@ def test_retrieve_batch_owned_by_self(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """GET /v1/batches/{batch_id} returns batches owned by the key's user."""
+    """GET /api/v1/batches/{batch_id} returns batches owned by the key's user."""
     own = _mock_batch(metadata={"otari_user_id": api_key_obj["user_id"]})
 
     with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=own):
@@ -690,7 +690,7 @@ def test_cancel_batch_owned_by_other_user_is_404(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches/{batch_id}/cancel refuses batches owned by another user."""
+    """POST /api/v1/batches/{batch_id}/cancel refuses batches owned by another user."""
     foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
 
     with (
@@ -707,7 +707,7 @@ def test_retrieve_batch_results_owned_by_other_user_is_404(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id}/results refuses batches owned by another user."""
+    """GET /api/v1/batches/{batch_id}/results refuses batches owned by another user."""
     foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
 
     with (
@@ -725,7 +725,7 @@ def test_list_batches_filters_foreign_batches(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """GET /v1/batches hides other users' batches but keeps own and legacy ones."""
+    """GET /api/v1/batches hides other users' batches but keeps own and legacy ones."""
     own = _mock_batch(id="batch_own", metadata={"otari_user_id": api_key_obj["user_id"]})
     foreign = _mock_batch(id="batch_foreign", metadata={"otari_user_id": "someone-else"})
     legacy = _mock_batch(id="batch_legacy")
@@ -780,7 +780,7 @@ def test_retrieve_batch_results_records_tokens_and_cost(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """GET /v1/batches/{batch_id}/results records summed tokens and cost."""
+    """GET /api/v1/batches/{batch_id}/results records summed tokens and cost."""
     pricing_resp = client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -1007,7 +1007,7 @@ def test_batch_lines_keep_their_cached_token_discount(
     # 1000 fresh at 2.5/M + 9000 cached at 0.25/M + 500 output at 10/M.
     assert row["cost"] == pytest.approx(0.0025 + 0.00225 + 0.005)
     # The row shows the cached count its cost already reflects. Read through
-    # /v1/usage rather than the per-user view, which does not carry the column.
+    # /api/v1/usage rather than the per-user view, which does not carry the column.
     entries = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/batches/results"}, headers=master_key_header
     ).json()

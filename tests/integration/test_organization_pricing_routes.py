@@ -288,7 +288,7 @@ def test_repeated_tier_thresholds_are_refused(
     """Two rates for one threshold is a question with no answer.
 
     The cost core resolves a tie by taking the first applicable entry, so which
-    rate applied would depend on JSON array order. ``POST /v1/pricing`` and
+    rate applied would depend on JSON array order. ``POST /api/v1/pricing`` and
     ``GatewayConfig`` already refuse it; this surface has to as well.
     """
     response = client.post(

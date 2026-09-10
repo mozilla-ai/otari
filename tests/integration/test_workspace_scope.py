@@ -281,8 +281,8 @@ def test_a_members_workspace_ceiling_goes_with_the_workspace(
 #
 # A workspace belongs to exactly one organization, so scoping the request plane
 # to a workspace only holds up if the management plane cannot reach across one.
-# Before otari-ai#1880 it could: `POST /v1/keys` validated `workspace_id` for
-# existence and every `/v1/keys/{id}` route loaded by id alone, so a key minted
+# Before otari-ai#1880 it could: `POST /api/v1/keys` validated `workspace_id` for
+# existence and every `/api/v1/keys/{id}` route loaded by id alone, so a key minted
 # into another organization's workspace resolved that organization's BYO
 # provider credential and billed it.
 
@@ -343,7 +343,7 @@ def test_a_key_cannot_be_minted_into_another_organizations_workspace(
 
     Deliberately not a 403: a distinct status would confirm that the id names a
     real workspace somewhere on the deployment, which is the enumeration
-    ``GET /v1/keys`` used to hand over outright.
+    ``GET /api/v1/keys`` used to hand over outright.
     """
     home = _default_workspace(client, master_key_header)
     other = _second_organization(client, master_key_header)
@@ -372,7 +372,7 @@ def test_another_organizations_key_is_neither_listed_nor_reachable_by_id(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Every `/v1/keys/{id}` route, including the rotate that returned a live secret.
+    """Every `/api/v1/keys/{id}` route, including the rotate that returned a live secret.
 
     Rotation is the sharpest of the four: it answered with the new plaintext key,
     so an unscoped load by id was direct theft of any credential on the

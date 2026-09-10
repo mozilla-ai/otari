@@ -1,4 +1,4 @@
-"""Unit tests for the ``/v1/files`` route's streaming helpers.
+"""Unit tests for the ``/api/v1/files`` route's streaming helpers.
 
 Covers ``_prime`` in isolation (no FastAPI app/DB needed): it has no
 dependency on request/db/config, so it's tested directly rather than through

@@ -134,7 +134,7 @@ async def test_stale_read_retries_a_failed_fetch_on_the_negative_ttl() -> None:
 
     The refresh cadence is the *success* cadence (``models_dev_cache_ttl_seconds``,
     a day by default). Serving a failure at any age would leave the dashboard
-    without enrichment until the next tick, and ``/v1/models/metadata`` has no
+    without enrichment until the next tick, and ``/api/v1/models/metadata`` has no
     ``refresh`` flag to escape it. The 60s negative TTL still governs a failure.
     """
     mcs.clear_catalog_cache()

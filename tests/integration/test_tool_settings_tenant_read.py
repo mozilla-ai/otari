@@ -1,4 +1,4 @@
-"""``GET /v1/tool-settings`` answers a tenant, without the service endpoints in it.
+"""``GET /api/v1/tool-settings`` answers a tenant, without the service endpoints in it.
 
 The roles matrix has the Tools pages at View for a member, and mozilla-ai/otari#867
 deferred this one read because the fields are deployment infrastructure rather

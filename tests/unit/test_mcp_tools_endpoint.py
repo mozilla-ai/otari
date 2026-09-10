@@ -1,4 +1,4 @@
-"""``GET /v1/mcp/servers/{id}/tools``: the stored-server discovery contract.
+"""``GET /api/v1/mcp/servers/{id}/tools``: the stored-server discovery contract.
 
 An application calls this once per server when it prepares a model or workflow
 run, and every proposed call from that server reuses the answer. The response is

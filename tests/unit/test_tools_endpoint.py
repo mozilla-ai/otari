@@ -1,4 +1,4 @@
-"""Endpoint tests for GET /v1/tools (gateway-run tool discovery)."""
+"""Endpoint tests for GET /api/v1/tools (gateway-run tool discovery)."""
 
 from collections.abc import Iterator
 from pathlib import Path

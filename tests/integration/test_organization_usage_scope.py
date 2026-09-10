@@ -1,6 +1,6 @@
 """The organization-scoped usage reads see the caller's own organization and no more.
 
-``/v1/usage`` is deployment-wide and operator-only since #821. These routes are
+``/api/v1/usage`` is deployment-wide and operator-only since #821. These routes are
 the tenant's half of it (otari#837), and the whole of their correctness is that
 the row set is decided by the caller's membership rather than by anything the
 request carries. So the suite is written against a world holding *two*
@@ -358,7 +358,7 @@ def test_a_suspended_workspace_membership_stops_granting_the_workspace(
 
 
 def test_a_superuser_reads_their_active_organization_and_not_every_tenant(client: TestClient, world: _World) -> None:
-    """This router is scoped even for an operator; ``/v1/usage`` is where they read across tenants."""
+    """This router is scoped even for an operator; ``/api/v1/usage`` is where they read across tenants."""
     listed = _models_listed(client, world, "superuser")
     assert listed == set(_BETA_MODELS)
     assert listed.isdisjoint(_ALPHA_ONE_MODELS)
@@ -488,7 +488,7 @@ def test_an_unauthenticated_request_is_refused(client: TestClient, world: _World
 
 
 def test_the_context_reports_whether_the_caller_operates_the_deployment(client: TestClient, world: _World) -> None:
-    """`deployment_operator` is the answer `GET /v1/admin/access` gives, on a read the shell already makes.
+    """`deployment_operator` is the answer `GET /api/v1/admin/access` gives, on a read the shell already makes.
 
     Carried here so the sidebar has no window in which it shows a row it is about
     to retract (otari#836), and so the roster can say which authority its role

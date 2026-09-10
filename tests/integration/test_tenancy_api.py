@@ -78,7 +78,7 @@ def _add_identity(
 def _other_tenant(session_factory: Callable[[], Session]) -> tuple[uuid.UUID, uuid.UUID]:
     """Insert a second organization with a workspace, and return both ids.
 
-    Written directly rather than through ``POST /v1/organizations``, which makes
+    Written directly rather than through ``POST /api/v1/organizations``, which makes
     the caller its owner: these rows exist to be the organization the operator
     is *not* in, which is what every cross-tenant assertion here points at.
     """
@@ -123,9 +123,9 @@ def test_context_reports_whether_provider_keys_can_be_encrypted(
     monkeypatch: pytest.MonkeyPatch,
     configured: bool,
 ) -> None:
-    """The context carries the fact, so a tenant never has to read /v1/settings for it.
+    """The context carries the fact, so a tenant never has to read /api/v1/settings for it.
 
-    ``GET /v1/settings`` reports the same thing as ``secret_key_configured`` and
+    ``GET /api/v1/settings`` reports the same thing as ``secret_key_configured`` and
     is operator-only, so the provider-key pages inferred it from a query that
     403s for every organization owner (#839).
     """

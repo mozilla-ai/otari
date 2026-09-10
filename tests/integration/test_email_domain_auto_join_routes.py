@@ -45,7 +45,7 @@ _TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
 
 @pytest.fixture
 def mail_configured(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    """What ``POST /v1/auth/signup`` needs before it will send anything.
+    """What ``POST /api/v1/auth/signup`` needs before it will send anything.
 
     Both settings, because the route refuses on either alone: the transport
     decides whether mail can go out and ``public_base_url`` is what the verify
@@ -67,7 +67,7 @@ def claiming_organization(
 
     The operator is switched back to the organization the deployment booted
     before this returns, and that is load-bearing rather than tidiness.
-    ``POST /v1/organizations/me/members`` adds to whichever organization the
+    ``POST /api/v1/organizations/me/members`` adds to whichever organization the
     caller is pointed at, so leaving the operator in Beta would put Ada straight
     into the claiming organization and every assertion below would hold with
     auto-join deleted.

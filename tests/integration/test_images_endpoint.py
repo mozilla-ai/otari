@@ -1,4 +1,4 @@
-"""Tests for the POST /v1/images/generations endpoint."""
+"""Tests for the POST /api/v1/images/generations endpoint."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -31,7 +31,7 @@ def _mock_images_response(n: int = 1) -> ImagesResponse:
 
 
 def test_images_requires_auth(client: TestClient) -> None:
-    """POST /v1/images/generations requires authentication."""
+    """POST /api/v1/images/generations requires authentication."""
     resp = client.post(
         f"{API_ROOT}/images/generations",
         json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
@@ -43,7 +43,7 @@ def test_images_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations works with API key authentication."""
+    """POST /api/v1/images/generations works with API key authentication."""
     mock_resp = _mock_images_response()
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -61,7 +61,7 @@ def test_images_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations with master key requires 'user' field."""
+    """POST /api/v1/images/generations with master key requires 'user' field."""
     mock_resp = _mock_images_response()
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -78,7 +78,7 @@ def test_images_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations with master key + user field succeeds."""
+    """POST /api/v1/images/generations with master key + user field succeeds."""
     mock_resp = _mock_images_response()
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -97,7 +97,7 @@ def test_images_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations returns 502 when the provider fails."""
+    """POST /api/v1/images/generations returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.images.aimage_generation",
         new_callable=AsyncMock,
@@ -118,7 +118,7 @@ def test_images_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations creates a usage log entry."""
+    """POST /api/v1/images/generations creates a usage log entry."""
     mock_resp = _mock_images_response()
     user_id = api_key_obj["user_id"]
 
@@ -146,7 +146,7 @@ def test_images_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations logs an error entry when the provider fails."""
+    """POST /api/v1/images/generations logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -175,7 +175,7 @@ def test_images_optional_fields(
     api_key_header: dict[str, str],
     extra_field: str,
 ) -> None:
-    """POST /v1/images/generations forwards optional fields."""
+    """POST /api/v1/images/generations forwards optional fields."""
     mock_resp = _mock_images_response()
     values = {"n": 2, "size": "1792x1024", "quality": "hd", "style": "natural"}
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp) as mock:
@@ -200,7 +200,7 @@ def test_images_cost_tracked_with_pricing(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations calculates cost when model pricing exists."""
+    """POST /api/v1/images/generations calculates cost when model pricing exists."""
     # Set up pricing: input_price_per_million is repurposed as price-per-image
     client.post(
         f"{API_ROOT}/pricing",
@@ -238,7 +238,7 @@ def test_images_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations records auditable charge lines alongside cost."""
+    """POST /api/v1/images/generations records auditable charge lines alongside cost."""
     client.post(
         f"{API_ROOT}/pricing",
         json={

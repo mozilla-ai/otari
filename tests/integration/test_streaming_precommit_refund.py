@@ -2,10 +2,10 @@
 
 A streaming request whose upstream provider call fails *before the first chunk*
 ("pre-commit") must release the budget pre-debit hold, the same as the
-non-streaming handlers do. Previously ``/v1/messages`` and ``/v1/responses``
+non-streaming handlers do. Previously ``/api/v1/messages`` and ``/api/v1/responses``
 logged the error but left ``users.reserved`` inflated (a leak that was never
 released, since a budget-period reset zeroes ``spend`` but not ``reserved``).
-``/v1/chat/completions`` already refunded here; it is covered too as a parity
+``/api/v1/chat/completions`` already refunded here; it is covered too as a parity
 guard so all three endpoints stay consistent.
 """
 

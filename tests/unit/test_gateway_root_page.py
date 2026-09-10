@@ -240,7 +240,7 @@ def test_hybrid_mode_serves_the_dashboard_at_root(tmp_path: Path, monkeypatch: p
     """Hybrid boots to the landing page, which is the same bundle standalone serves.
 
     Which surfaces exist is the browser's question to ask once, of
-    ``/v1/bootstrap``, rather than something this process answers by withholding
+    ``/api/v1/bootstrap``, rather than something this process answers by withholding
     files: the page renders the data-plane landing page from that answer. Serving
     the tutorial here instead would leave a hybrid operator with no status page at
     all.
@@ -291,7 +291,7 @@ def test_hybrid_mode_serves_no_install_manifest(tmp_path: Path, monkeypatch: pyt
 def test_hybrid_root_carries_no_platform_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The two things a hybrid gateway hands an unauthenticated browser.
 
-    The landing page reads its deployment from ``/v1/bootstrap`` and its status
+    The landing page reads its deployment from ``/api/v1/bootstrap`` and its status
     from ``/health``, and neither may carry the credential this gateway calls the
     platform with. The page itself is checked alongside them because it is served
     to the same anonymous browser and is now served in this mode at all.

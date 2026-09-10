@@ -89,7 +89,7 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
     with TestClient(app) as client:
         for path in (
             f"{API_ROOT}/settings",
-            # Covered by the /v1/settings/{path} stub: a hybrid gateway sends no
+            # Covered by the /api/v1/settings/{path} stub: a hybrid gateway sends no
             # mail of its own, and the mail surface must 404 with the same hint
             # rather than reporting an unconfigured transport as if it were one
             # this deployment could configure.
@@ -101,14 +101,14 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
             f"{API_ROOT}/workspaces",
             # A workspace's MCP servers are stored with a bearer token, and in
             # hybrid mode they live on the platform. Listed explicitly rather
-            # than left to the `/v1/workspaces` entry above: this is a distinct
+            # than left to the `/api/v1/workspaces` entry above: this is a distinct
             # router, so re-mounting it would not show up in that check.
             f"{API_ROOT}/workspaces/11111111-1111-1111-1111-111111111111/mcp-servers",
             # A workspace's web-search configuration lives on the platform in
             # hybrid mode, where `prepare_gateway_tools` resolves it from
             # otari.ai rather than from a local row. Listed for the same reason
             # as the servers above: its own router, so re-mounting it would not
-            # show up in the `/v1/workspaces` check.
+            # show up in the `/api/v1/workspaces` check.
             f"{API_ROOT}/workspaces/11111111-1111-1111-1111-111111111111/web-search",
         ):
             response = client.get(path)

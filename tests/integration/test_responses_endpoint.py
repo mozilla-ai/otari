@@ -1,4 +1,4 @@
-"""Tests for the /v1/responses gateway endpoint."""
+"""Tests for the /api/v1/responses gateway endpoint."""
 
 import json
 from typing import Any, AsyncIterator

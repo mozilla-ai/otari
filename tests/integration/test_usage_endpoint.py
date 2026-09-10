@@ -501,10 +501,10 @@ def test_list_usage_still_returns_bare_list(
     master_key_header: dict[str, str],
     db_session: Session,
 ) -> None:
-    """Contract guard: /v1/usage must stay a bare JSON array, not an envelope.
+    """Contract guard: /api/v1/usage must stay a bare JSON array, not an envelope.
 
     External billing/analytics consumers depend on the top-level array; the
-    paginated UI's total count is served by /v1/usage/count instead.
+    paginated UI's total count is served by /api/v1/usage/count instead.
     """
     _make_log(db_session, user_id="contract", timestamp=datetime(2025, 9, 5, 12, 0, tzinfo=UTC))
     db_session.commit()

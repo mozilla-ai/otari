@@ -1,8 +1,8 @@
 """The member-scoped key surface touches the caller's own keys and no more.
 
-``/v1/keys`` is deployment-wide and operator-only (otari-ai#1880), which left a
+``/api/v1/keys`` is deployment-wide and operator-only (otari-ai#1880), which left a
 hosted organization member with no way to mint a key (mozilla-ai/otari-ai#1941).
-``/v1/organizations/me/keys`` is the tenant's half of it, and the whole of its
+``/api/v1/organizations/me/keys`` is the tenant's half of it, and the whole of its
 correctness is that ownership and workspace scope are decided by the caller's
 identity and memberships rather than by anything the request carries. So the
 suite is written against a world holding two organizations, two members sharing
@@ -276,7 +276,7 @@ def test_an_omitted_workspace_refuses_a_caller_outside_the_default_one(client: T
 def test_a_revoked_spend_identity_cannot_mint_its_way_back(
     client: TestClient, world: _World, master_key_header: dict[str, str]
 ) -> None:
-    """``DELETE /v1/users`` is the operator's revocation, and this surface must not undo it.
+    """``DELETE /api/v1/users`` is the operator's revocation, and this surface must not undo it.
 
     That route soft-deletes the spend identity and deactivates every key it
     holds, and the data plane refuses a request whose owner is deleted.
@@ -393,7 +393,7 @@ def test_a_key_the_member_owns_but_did_not_mint_is_theirs_to_manage(
     """Ownership is the billing row, however the key got there.
 
     The handed-over case the docstrings promise, which no request can set up:
-    ``POST /v1/keys`` names an owner but mints into the *operator's* organization,
+    ``POST /api/v1/keys`` names an owner but mints into the *operator's* organization,
     so the row is written directly into alpha instead. What is asserted is the
     owner predicate on its own, and that it carries the whole lifecycle rather
     than the list alone.

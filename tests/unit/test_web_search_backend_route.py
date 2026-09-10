@@ -1,4 +1,4 @@
-"""Endpoint tests for GET /v1/web-search/search.
+"""Endpoint tests for GET /api/v1/web-search/search.
 
 The search backend a data-plane gateway calls when the deployment holding the
 search credential is a different process. Covers what is mounted, who may call

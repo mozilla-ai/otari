@@ -6,7 +6,7 @@ are places a real credential legitimately lives: standalone Bedrock keeps its
 never forwards ``api_key`` into the boto3 client it builds. ``OrgProviderKey``
 has masked its own since it shipped; otari-ai#1880 is the other two, where
 ``ProviderCredential.client_args`` returned a live AWS secret to anyone who
-could reach ``GET /v1/provider-credentials``.
+could reach ``GET /api/v1/provider-credentials``.
 
 Masking on read creates the other half of the problem, so it is asserted here
 too: an editor that loads a row and saves it back would otherwise store the mask

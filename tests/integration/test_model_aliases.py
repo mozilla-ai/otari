@@ -3,7 +3,7 @@
 An alias is a display name (e.g. ``myopusmodel``) that maps to a real selector
 (``provider:model`` or a named ``instance:model``). A request naming the alias
 routes to the target with the target's credentials, billing keys on the target,
-and the alias is what appears in GET /v1/models and in the response ``model``.
+and the alias is what appears in GET /api/v1/models and in the response ``model``.
 """
 
 from collections.abc import AsyncIterator, Generator

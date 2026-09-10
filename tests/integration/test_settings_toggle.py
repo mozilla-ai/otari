@@ -1,4 +1,4 @@
-"""Tests for the writable runtime settings endpoint (PATCH /v1/settings)."""
+"""Tests for the writable runtime settings endpoint (PATCH /api/v1/settings)."""
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator

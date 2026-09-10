@@ -2,9 +2,9 @@
 
 The management surface is covered in ``test_workspace_web_search.py``; this is
 the other half of #656's Definition of Done, the request path honoring what the
-row says. The in-loop cases go through ``/v1/messages`` with the search backend
+row says. The in-loop cases go through ``/api/v1/messages`` with the search backend
 and the tool loop patched out, so what is asserted is admission and the values
-handed to the backend, not any search. The last few cover ``POST /v1/search``,
+handed to the backend, not any search. The last few cover ``POST /api/v1/search``,
 the other door into the same capability.
 """
 
@@ -609,7 +609,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """`POST /v1/search` is the other door into web search, and it must not stay open.
+    """`POST /api/v1/search` is the other door into web search, and it must not stay open.
 
     A workspace that has turned search off has turned it off; leaving this
     endpoint unguarded would make the switch bypassable by any key in that

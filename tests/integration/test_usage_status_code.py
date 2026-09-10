@@ -181,7 +181,7 @@ def test_status_code_filters_the_list_and_the_count(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """``status_code`` narrows both /v1/usage and /v1/usage/count, so a paginated
+    """``status_code`` narrows both /api/v1/usage and /api/v1/usage/count, so a paginated
     "show me the 429s" view agrees with its own total."""
     for upstream in (429, 429, 500):
         with _upstream_fails(_StatusError(upstream)):
@@ -341,7 +341,7 @@ def test_batch_create_failure_records_the_upstream_status(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """``POST /v1/batches`` classifies its provider failure on its own error row.
+    """``POST /api/v1/batches`` classifies its provider failure on its own error row.
 
     Batches write usage through ``log_batch_usage`` instead of the chat pipeline's
     writer, so this is the second independent stamp that a refactor could drop

@@ -1,4 +1,4 @@
-"""Route-level tests for the /v1/responses endpoint wiring.
+"""Route-level tests for the /api/v1/responses endpoint wiring.
 
 Mirror of :mod:`tests.integration.test_messages_route_dispatch` for the OpenAI
 Responses API surface: tool extraction, mutual-exclusivity validation,

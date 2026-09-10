@@ -1,4 +1,4 @@
-"""Endpoint tests for /v1/tool-settings (sqlite-backed TestClient)."""
+"""Endpoint tests for /api/v1/tool-settings (sqlite-backed TestClient)."""
 
 from collections.abc import Callable, Iterator
 from pathlib import Path

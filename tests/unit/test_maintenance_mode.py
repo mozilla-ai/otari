@@ -6,13 +6,13 @@ name does not do this (it swaps a view in the browser *after* login and its
 `login.tsx` checks nothing), so what is asserted here is the behavior the issue
 describes rather than a ported one:
 
-* while it is on, ``POST /v1/auth/session`` refuses both credentials with 503;
+* while it is on, ``POST /api/v1/auth/session`` refuses both credentials with 503;
 * a session already minted keeps working, so the operator who flipped the switch
   is not locked out of the dashboard by it;
 * the master key through the header is never frozen, which is what guarantees a
   way back out even from a fresh browser;
 * the data plane and the rest of the management API are untouched;
-* ``GET /v1/bootstrap`` publishes it, so the sign-in screen can say what is
+* ``GET /api/v1/bootstrap`` publishes it, so the sign-in screen can say what is
   happening rather than presenting a form that can only be refused.
 
 Unit rather than integration: all of it is route and service behavior that runs

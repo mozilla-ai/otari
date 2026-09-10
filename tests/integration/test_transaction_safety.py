@@ -211,6 +211,6 @@ def test_auth_commit_failure_does_not_break_verification(
             headers={API_KEY_HEADER: f"Bearer {api_key}"},
         )
         # Auth should not crash with 500 from the commit failure.
-        # The /v1/users endpoint requires master key, so we may get 401
+        # The /api/v1/users endpoint requires master key, so we may get 401
         # (API key not accepted as master key), but crucially not 500.
         assert resp.status_code != 500

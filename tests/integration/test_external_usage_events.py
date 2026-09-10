@@ -1,4 +1,4 @@
-"""Integration tests for POST /v1/usage/external-events.
+"""Integration tests for POST /api/v1/usage/external-events.
 
 Covers auth, content-free validation, idempotency, historical + cache pricing,
 organization-scoped rates, budget isolation, and the read-surface (source filter,
@@ -55,7 +55,7 @@ def _seed_pricing(
     assert resp.status_code == 200, resp.text
 
 
-# An hour ago, not a fixed date. `GET /v1/usage/summary` bounds itself to the
+# An hour ago, not a fixed date. `GET /api/v1/usage/summary` bounds itself to the
 # last 30 days when the caller names no window (`_DEFAULT_SUMMARY_LOOKBACK`), so
 # a literal timestamp puts every summary assertion in this file on a fuse: it
 # passes until the day the clock is 30 days past it, then fails everywhere at

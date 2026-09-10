@@ -133,7 +133,7 @@ def test_soft_deleted_user_not_in_list(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Soft-deleted users should not appear in GET /v1/users."""
+    """Soft-deleted users should not appear in GET /api/v1/users."""
     client.post(f"{API_ROOT}/users", json={"user_id": "list-del-user"}, headers=master_key_header)
     client.delete(f"{API_ROOT}/users/list-del-user", headers=master_key_header)
 
@@ -166,7 +166,7 @@ def test_recreate_soft_deleted_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/users with a previously soft-deleted user_id should restore the user with spend=0."""
+    """POST /api/v1/users with a previously soft-deleted user_id should restore the user with spend=0."""
     client.post(
         f"{API_ROOT}/users",
         json={"user_id": "revive-user", "alias": "Original"},
@@ -215,7 +215,7 @@ def test_get_user_usage_after_soft_delete(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/users/{user_id}/usage should still return logs after the user is soft-deleted."""
+    """GET /api/v1/users/{user_id}/usage should still return logs after the user is soft-deleted."""
     client.post(f"{API_ROOT}/users", json={"user_id": "usage-del-user"}, headers=master_key_header)
     key_resp = client.post(
         f"{API_ROOT}/keys",

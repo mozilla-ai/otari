@@ -3,7 +3,7 @@
 `api/deps.verify_master_key` answers *authenticated*, not *authorized*: a
 dashboard session clears it for any active identity. Two families of router
 declare it, and only one of them re-checks the caller afterwards. The
-tenant-scoped family (organizations, workspaces, org provider keys, `/v1/admin`)
+tenant-scoped family (organizations, workspaces, org provider keys, `/api/v1/admin`)
 resolves `CurrentIdentity` and asks a service whether that identity may act on
 the organization, workspace or deployment named; the deployment-wide family does
 not, so clearing the credential check *was* the whole authorization there.
@@ -105,7 +105,7 @@ _CATALOG_PROBES: list[tuple[str, str]] = [
 # joined them in otari-ai#1944), and their own 403 is indistinguishable here
 # from the one this file is about.
 #
-# ``GET /v1/tool-settings`` sits here because it *narrows* rather than refuses,
+# ``GET /api/v1/tool-settings`` sits here because it *narrows* rather than refuses,
 # withholding the three service-endpoint fields from a non-operator
 # (otari-ai#1969). It rides its own ``reader_router`` for that, since a
 # router-level gate always runs and a route cannot opt out of one in place, which
@@ -194,7 +194,7 @@ def test_a_plain_member_session_is_refused_by_every_deployment_wide_route(
 ) -> None:
     """otari-ai#1880: this is the whole of the cross-organization breach.
 
-    403 rather than 404: unlike `/v1/admin`, these routes are no secret, and the
+    403 rather than 404: unlike `/api/v1/admin`, these routes are no secret, and the
     dashboard has to tell "you may not" apart from "there is nothing here" to
     decide whether to keep the caller signed in.
     """
@@ -334,7 +334,7 @@ def test_the_admin_router_keeps_its_own_404_rather_than_the_gate_403(
     db_session_factory: Callable[[], Session],
     test_config: GatewayConfig,
 ) -> None:
-    """`/v1/admin` hides itself from a non-operator on purpose, and still does.
+    """`/api/v1/admin` hides itself from a non-operator on purpose, and still does.
 
     Its refusal is a 404 so the surface does not confirm it exists, and
     `GET /access` answers 200 either way so the dashboard has something to gate

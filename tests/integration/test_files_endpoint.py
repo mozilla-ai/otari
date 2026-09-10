@@ -1,4 +1,4 @@
-"""Integration tests for the /v1/files API and end-to-end file understanding.
+"""Integration tests for the /api/v1/files API and end-to-end file understanding.
 
 The headline test exercises the full path: upload a file, send a chat request
 that references it by ``file_id``, and assert the gateway extracted the file to

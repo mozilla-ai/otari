@@ -3,7 +3,7 @@
 The management surface is covered in
 ``test_workspace_code_execution_policy.py``; this is the other half of #657's
 Definition of Done, the request path honoring what the policy says. Every case
-goes through ``/v1/messages`` with the sandbox backend and the tool loop
+goes through ``/api/v1/messages`` with the sandbox backend and the tool loop
 patched out, so what is asserted is admission and the values handed to the
 loop, not any execution.
 """

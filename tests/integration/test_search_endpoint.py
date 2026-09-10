@@ -1,4 +1,4 @@
-"""Integration tests for the POST /v1/search endpoint.
+"""Integration tests for the POST /api/v1/search endpoint.
 
 The provider adapter is stubbed at ``run_search`` so these exercise the route's
 own job: auth, tool selection, budget reservation and settlement, and the usage
@@ -53,7 +53,7 @@ def test_config(postgres_url: str) -> GatewayConfig:
 def _search_rows(client: TestClient, headers: dict[str, str], user_id: str) -> list[dict[str, Any]]:
     """The user's search usage rows, from the admin view that exposes every column.
 
-    ``/v1/users/{id}/usage`` omits ``counts_toward_budget``, which the refusal
+    ``/api/v1/users/{id}/usage`` omits ``counts_toward_budget``, which the refusal
     rows below have to assert on.
     """
     resp = client.get(
@@ -75,13 +75,13 @@ def _mock_search(outcome: SearchOutcome | None = None, *, side_effect: Exception
 
 
 def test_search_requires_auth(client: TestClient) -> None:
-    """POST /v1/search requires authentication."""
+    """POST /api/v1/search requires authentication."""
     resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "exa-search"})
     assert resp.status_code == 401
 
 
 def test_search_with_api_key(client: TestClient, api_key_header: dict[str, str]) -> None:
-    """POST /v1/search returns normalized results for an authenticated key."""
+    """POST /api/v1/search returns normalized results for an authenticated key."""
     with _mock_search():
         resp = client.post(
             f"{API_ROOT}/search",
@@ -103,7 +103,7 @@ def test_search_with_api_key(client: TestClient, api_key_header: dict[str, str])
 
 
 def test_search_by_path_selects_the_tool(client: TestClient, api_key_header: dict[str, str]) -> None:
-    """POST /v1/search/{tool} runs against the tool named in the path."""
+    """POST /api/v1/search/{tool} runs against the tool named in the path."""
     mock = AsyncMock(return_value=SearchOutcome(results=_HITS))
     with patch("gateway.api.routes.search.run_search", mock):
         resp = client.post(f"{API_ROOT}/search/exa-fast", json=SEARCH_PAYLOAD, headers=api_key_header)
@@ -164,7 +164,7 @@ def test_search_unknown_tool_is_400(client: TestClient, api_key_header: dict[str
 
 
 def test_search_master_key_requires_user(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """POST /v1/search with the master key requires a 'user' field."""
+    """POST /api/v1/search with the master key requires a 'user' field."""
     with _mock_search():
         resp = client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=master_key_header)
     assert resp.status_code == 400
@@ -176,7 +176,7 @@ def test_search_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/search with the master key plus a user field succeeds."""
+    """POST /api/v1/search with the master key plus a user field succeeds."""
     payload = {**SEARCH_PAYLOAD, "user": test_user["user_id"]}
     with _mock_search():
         resp = client.post(f"{API_ROOT}/search/exa-search", json=payload, headers=master_key_header)

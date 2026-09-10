@@ -1,4 +1,4 @@
-"""Hybrid-mode integration tests for /v1/messages.
+"""Hybrid-mode integration tests for /api/v1/messages.
 
 Mirrors :mod:`tests.integration.test_hybrid_mode_chat`: exercises the
 multi-attempt platform resolve / fallback / usage-reporting flow against the
@@ -129,7 +129,7 @@ def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) 
     )
 
     assert response.status_code == 401
-    # /v1/messages errors, including auth, are delivered in the Anthropic envelope.
+    # /api/v1/messages errors, including auth, are delivered in the Anthropic envelope.
     assert response.json() == {
         "detail": {
             "type": "error",
@@ -681,7 +681,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     its successful completion.
 
     Verifies the ``[:1]`` collapse is gone for tool-loop requests on
-    ``/v1/messages`` now that ``on_first_response`` lock-in is wired into
+    ``/api/v1/messages`` now that ``on_first_response`` lock-in is wired into
     ``anthropic_tool_loop``.
     """
     usage_reports: list[dict[str, Any]] = []
@@ -1148,7 +1148,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Streaming MCP request on /v1/messages: the first attempt errors before
+    """Streaming MCP request on /api/v1/messages: the first attempt errors before
     yielding any event, so the gateway falls through to the second attempt and
     streams its response (same pre-lock-in semantics as chat, which this
     format previously collapsed to a single attempt)."""

@@ -4,7 +4,7 @@ Keys, budgets, and usage hang off the gateway's string-keyed ``users`` table;
 members are UUID-keyed ``user`` rows. Nothing joins them, so before this a member
 could be added to the roster and then not be given a key. These cover the bridge:
 that adding a member mints the owner row, that the id the roster reports is one
-``POST /v1/keys`` actually accepts, and that re-adding someone reuses their row
+``POST /api/v1/keys`` actually accepts, and that re-adding someone reuses their row
 rather than minting a second or resurrecting a clean one.
 """
 

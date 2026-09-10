@@ -1,4 +1,4 @@
-"""Tests for GET /v1/models/metadata (models.dev enrichment, mocked fetch)."""
+"""Tests for GET /api/v1/models/metadata (models.dev enrichment, mocked fetch)."""
 
 from collections.abc import Generator
 from typing import Any

@@ -2549,7 +2549,7 @@ def test_platform_mode_sandbox_unreachable_returns_502(
     """Hybrid non-streaming chat with the sandbox backend down surfaces the
     backend-specific 502, not a generic provider error or a 500. Regression
     for the drift where only messages/responses translated this failure: the
-    translation now lives in run_platform_non_stream, so /v1/chat/completions
+    translation now lives in run_platform_non_stream, so /api/v1/chat/completions
     inherits it."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
 

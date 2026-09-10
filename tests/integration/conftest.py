@@ -440,7 +440,7 @@ def test_user(client: TestClient, master_key_header: dict[str, str]) -> dict[str
 
 @pytest.fixture
 def responses_request_body(test_user: dict[str, Any]) -> dict[str, Any]:
-    """A minimal /v1/responses request body. Shared so endpoint and
+    """A minimal /api/v1/responses request body. Shared so endpoint and
     provider-error-classification tests can both use it."""
     return {
         "model": "openai:gpt-4o-mini",
@@ -451,7 +451,7 @@ def responses_request_body(test_user: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.fixture
 def messages_request_body() -> dict[str, Any]:
-    """A minimal /v1/messages request body. Shared so endpoint and
+    """A minimal /api/v1/messages request body. Shared so endpoint and
     provider-error-classification tests can both use it."""
     return {
         "model": "anthropic:claude-3-5-sonnet",

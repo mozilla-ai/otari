@@ -1,6 +1,6 @@
-"""End-to-end web-search interception over /v1/chat/completions.
+"""End-to-end web-search interception over /api/v1/chat/completions.
 
-The `/v1/messages` side (including the native server-tool blocks, which only
+The `/api/v1/messages` side (including the native server-tool blocks, which only
 Anthropic has a vocabulary for) is covered in
 ``test_messages_route_dispatch.py``. This file covers the other half of the
 contract: a provider-named declaration on the OpenAI-shaped endpoint reaches the

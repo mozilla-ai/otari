@@ -1,4 +1,4 @@
-"""Route-level tests for the /v1/messages endpoint wiring.
+"""Route-level tests for the /api/v1/messages endpoint wiring.
 
 These complement :mod:`tests.unit.test_mcp_loop_messages` (which tests the
 Anthropic tool loop in isolation) by exercising the FastAPI route handler:

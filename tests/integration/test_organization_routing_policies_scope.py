@@ -1,9 +1,9 @@
 """The organization-scoped routing-policy read sees the caller's own workspaces and no more.
 
-``/v1/routing/policies`` is deployment-wide and operator-only, and stays that
+``/api/v1/routing/policies`` is deployment-wide and operator-only, and stays that
 way: its ``workspace_id`` parameter is a filter the client supplies, so nothing
 but the operator gate stands between a signed-in member and another
-organization's routing. ``/v1/organizations/me/routing-policies`` is the
+organization's routing. ``/api/v1/organizations/me/routing-policies`` is the
 tenant's View half of it (otari-ai#1942), shaped like the usage scope
 (otari#837), and this suite is that file's shape over the ``routing_policies``
 table: two organizations with policies in both, and every assertion names the
@@ -229,7 +229,7 @@ def test_a_member_of_no_workspace_reads_no_stored_rows_rather_than_a_refusal(
 
 
 def test_a_superuser_reads_their_active_organization_and_not_every_tenant(client: TestClient, world: _World) -> None:
-    """This route is scoped even for an operator; ``/v1/routing/policies`` is where they read across tenants."""
+    """This route is scoped even for an operator; ``/api/v1/routing/policies`` is where they read across tenants."""
     listed = _stored_names(client, world, "superuser")
     assert listed == set(_BETA_POLICIES)
     assert listed.isdisjoint(_ALPHA_ONE_POLICIES)

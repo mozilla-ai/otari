@@ -1,7 +1,7 @@
-"""Integration tests for the /v1/search-tools CRUD endpoints.
+"""Integration tests for the /api/v1/search-tools CRUD endpoints.
 
 A search tool used to be declarable only in a config file, so a deployment
-configured through the dashboard could not use POST /v1/search at all (issue
+configured through the dashboard could not use POST /api/v1/search at all (issue
 #601). These cover the route in: keys are write-only, the same rules startup
 validation applies are applied here, config-file tools stay honored and
 read-only, and a tool added at runtime is immediately dispatchable.
@@ -230,7 +230,7 @@ def test_provider_catalog_reports_what_each_provider_needs(
 def test_stored_tool_is_immediately_dispatchable(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
 ) -> None:
-    """The whole point of issue #601: a dashboard-added tool serves /v1/search."""
+    """The whole point of issue #601: a dashboard-added tool serves /api/v1/search."""
     assert _create(client, master_key_header).status_code == 201
     outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="Example")])
     mock = AsyncMock(return_value=outcome)

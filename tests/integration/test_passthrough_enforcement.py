@@ -5,7 +5,7 @@ audio transcription, audio speech) resolves a billed user and reserves budget
 *before* the provider call. These tests lock that in: a blocked user and an
 over-budget user must be rejected with 403 on every one of those routes, before
 any provider is reached. This is the guard that would have caught the
-``/v1/batches`` enforcement bypass (nothing asserted a given route actually runs
+``/api/v1/batches`` enforcement bypass (nothing asserted a given route actually runs
 the budget gate).
 
 The provider entrypoint for each route is patched to raise if it is ever
@@ -172,7 +172,7 @@ def test_batches_rejects_blocked_user(
     master_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """``/v1/batches`` rejects a blocked user with 403 before the provider.
+    """``/api/v1/batches`` rejects a blocked user with 403 before the provider.
 
     Batches bills the API key's owner when no ``user`` body field is sent. A key
     created without a user_id owns the shared "default" user, so we block that and

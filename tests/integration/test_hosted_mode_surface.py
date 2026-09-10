@@ -140,8 +140,8 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.
         f"{API_ROOT}/models",
-        # The catalog POST /v1/search dispatches against. Management, and the
-        # one prefix a careless /v1/search stub could shadow.
+        # The catalog POST /api/v1/search dispatches against. Management, and the
+        # one prefix a careless /api/v1/search stub could shadow.
         f"{API_ROOT}/search-tools",
     ):
         response = hosted_client.get(path)
@@ -215,7 +215,7 @@ def test_the_refusal_names_the_data_plane_when_the_deployment_knows_it(
 
     "Send it to your Otari gateway" is what they already believed they were
     doing. Where ``data_plane_url`` is set, which is the same value
-    ``GET /v1/bootstrap`` hands the dashboard, the refusal names the host.
+    ``GET /api/v1/bootstrap`` hands the dashboard, the refusal names the host.
     """
     response = hosted_client_knowing_its_data_plane.post(f"{API_ROOT}/chat/completions", json={})
 

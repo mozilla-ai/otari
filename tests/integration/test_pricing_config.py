@@ -251,7 +251,7 @@ def test_set_pricing_persists_cache_rates(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Cache rates round-trip through /v1/pricing and are stored on the row."""
+    """Cache rates round-trip through /api/v1/pricing and are stored on the row."""
     resp = client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -389,7 +389,7 @@ def test_pricing_history_endpoint_returns_entries(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/pricing/{model_key}/history returns versions in descending order."""
+    """GET /api/v1/pricing/{model_key}/history returns versions in descending order."""
 
     model_key = "openai:gpt-4"
     first_effective = datetime(2025, 1, 1, tzinfo=UTC)
@@ -421,7 +421,7 @@ def test_get_pricing_respects_as_of(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/pricing/{model_key} returns the effective price at a timestamp."""
+    """GET /api/v1/pricing/{model_key} returns the effective price at a timestamp."""
 
     model_key = "anthropic:claude-3"
     early = datetime(2025, 3, 1, tzinfo=UTC)

@@ -1,4 +1,4 @@
-"""Unit tests for the ``POST /v1/search`` backend.
+"""Unit tests for the ``POST /api/v1/search`` backend.
 
 Covers tool resolution against ``config.search_tools`` and the Exa and SearXNG
 adapters: request translation from the LiteLLM-shaped request to each

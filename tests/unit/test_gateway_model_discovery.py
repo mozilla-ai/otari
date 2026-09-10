@@ -598,7 +598,7 @@ class TestDiscoveryStallGuards:
     async def test_concurrent_callers_share_one_upstream_call(self) -> None:
         """Concurrent discoveries of the same provider dial it once (single-flight).
 
-        This is what stops /v1/models and /v1/models/discoverable from each firing
+        This is what stops /api/v1/models and /api/v1/models/discoverable from each firing
         a full fanout when the Models page mounts both at once.
         """
         config = self._config({"openai": {"api_key": "sk-test"}})
@@ -682,7 +682,7 @@ class TestDiscoveryStallGuards:
     async def test_one_provider_raising_does_not_sink_the_listing(self) -> None:
         """A provider whose discovery raises is dropped/surfaced, never propagated.
 
-        discover_models_with_status feeds the operator's /v1/models/discoverable,
+        discover_models_with_status feeds the operator's /api/v1/models/discoverable,
         which awaits it with no guard, so an escaped exception must not 500 it.
         """
         config = self._config({"good": {"api_key": "x"}, "bad": {"api_key": "y"}})

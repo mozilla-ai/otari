@@ -1,4 +1,4 @@
-"""Integration tests for the /v1/provider-credentials CRUD + test endpoints.
+"""Integration tests for the /api/v1/provider-credentials CRUD + test endpoints.
 
 Covers the security-critical behavior: keys are write-only and never echoed,
 storing a key requires OTARI_SECRET_KEY, updates are optimistic, and every route

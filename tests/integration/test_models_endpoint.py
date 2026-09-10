@@ -1,4 +1,4 @@
-"""Tests for the GET /v1/models endpoint."""
+"""Tests for the GET /api/v1/models endpoint."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -12,7 +12,7 @@ def test_list_models_empty(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/models returns empty list when no pricing is configured."""
+    """GET /api/v1/models returns empty list when no pricing is configured."""
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     data = resp.json()
@@ -25,7 +25,7 @@ def test_list_models_returns_configured_models(
     master_key_header: dict[str, str],
     model_pricing: dict[str, Any],
 ) -> None:
-    """GET /v1/models returns models from the pricing table."""
+    """GET /api/v1/models returns models from the pricing table."""
     resp = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert resp.status_code == 200
     data = resp.json()
@@ -95,7 +95,7 @@ def test_list_models_exposes_cache_pricing(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Cache read/write rates set via /v1/pricing surface on the model catalog."""
+    """Cache read/write rates set via /api/v1/pricing surface on the model catalog."""
     client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -131,7 +131,7 @@ def test_get_model_found(
     master_key_header: dict[str, str],
     model_pricing: dict[str, Any],
 ) -> None:
-    """GET /v1/models/{model_id} returns the model when it exists."""
+    """GET /api/v1/models/{model_id} returns the model when it exists."""
     model_key = model_pricing["model_key"]
     resp = client.get(f"{API_ROOT}/models/{model_key}", headers=master_key_header)
     assert resp.status_code == 200
@@ -146,19 +146,19 @@ def test_get_model_not_found(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/models/{model_id} returns 404 for unknown models."""
+    """GET /api/v1/models/{model_id} returns 404 for unknown models."""
     resp = client.get(f"{API_ROOT}/models/nonexistent:model", headers=master_key_header)
     assert resp.status_code == 404
 
 
 def test_list_models_requires_auth(client: TestClient) -> None:
-    """GET /v1/models requires authentication."""
+    """GET /api/v1/models requires authentication."""
     resp = client.get(f"{API_ROOT}/models")
     assert resp.status_code == 401
 
 
 def test_get_model_requires_auth(client: TestClient) -> None:
-    """GET /v1/models/{model_id} requires authentication."""
+    """GET /api/v1/models/{model_id} requires authentication."""
     resp = client.get(f"{API_ROOT}/models/openai:gpt-4o")
     assert resp.status_code == 401
 
@@ -167,7 +167,7 @@ def test_list_models_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/models works with API key authentication (not just master key)."""
+    """GET /api/v1/models works with API key authentication (not just master key)."""
     resp = client.get(f"{API_ROOT}/models", headers=api_key_header)
     assert resp.status_code == 200
     assert resp.json()["object"] == "list"
@@ -177,7 +177,7 @@ def test_list_models_sorted_by_key(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/models returns models sorted by model_key."""
+    """GET /api/v1/models returns models sorted by model_key."""
     for model_key in ["openai:gpt-4o", "anthropic:claude-3-haiku"]:
         client.post(
             f"{API_ROOT}/pricing",

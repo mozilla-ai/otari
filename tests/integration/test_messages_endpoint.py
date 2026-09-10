@@ -1,4 +1,4 @@
-"""Tests for the /v1/messages gateway endpoint."""
+"""Tests for the /api/v1/messages gateway endpoint."""
 
 from typing import Any
 from unittest.mock import AsyncMock, patch

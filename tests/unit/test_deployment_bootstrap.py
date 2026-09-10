@@ -148,7 +148,7 @@ def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
 
     with TestClient(app) as client:
         anonymous = client.get(f"{API_ROOT}/bootstrap")
-        # Named to contrast with /v1/settings, which the same client cannot read.
+        # Named to contrast with /api/v1/settings, which the same client cannot read.
         settings = client.get(f"{API_ROOT}/settings")
 
     assert anonymous.status_code == 200
@@ -214,9 +214,9 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
         assert client.get(f"{API_ROOT}/bootstrap").json()["mail_ready"] is True
 
 
-# A surface names its router's ``/v1/`` prefix, so the prefix is derived from the
+# A surface names its router's ``/api/v1/`` prefix, so the prefix is derived from the
 # name. One is nested rather than top-level and cannot be: the organization's own
-# provider keys hang off ``/v1/organizations``, and naming them ``organizations``
+# provider keys hang off ``/api/v1/organizations``, and naming them ``organizations``
 # would collapse them into the roster surface, which is a different page with
 # different access. Listed here rather than in the surface tuple itself so the
 # tuple stays the plain list of names the dashboard gates on.
@@ -250,7 +250,7 @@ def test_every_surface_names_a_route_the_gateway_mounts(
 
     for surface in surfaces:
         prefix = SURFACE_ROUTE_PREFIXES.get(surface, f"{API_ROOT}/{surface}")
-        assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /v1/ route"
+        assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /api/v1/ route"
 
 
 
@@ -553,7 +553,7 @@ def test_a_blank_legal_url_is_an_unset_one(field: str) -> None:
 def test_a_link_url_carrying_a_credential_is_refused_at_load(field: str, configured: str) -> None:
     """The refusal ``data_plane_url`` already made, for the same reason.
 
-    ``GET /v1/bootstrap`` is unauthenticated, so a credential written into any
+    ``GET /api/v1/bootstrap`` is unauthenticated, so a credential written into any
     of these link fields would reach every browser that asked for it, which no
     redaction in the operator-gated config viewer would cover. ``docs_url`` is
     covered too: it rides the same validator and the same response.
@@ -619,7 +619,7 @@ def test_standalone_never_publishes_a_data_plane_url(tmp_path: Path) -> None:
     """A standalone gateway is its own data plane, so the browser's origin is right.
 
     Configured or not, it answers null: the address that reached this page is an
-    address that reaches ``/v1/chat/completions``, which is more reliable than
+    address that reaches ``/api/v1/chat/completions``, which is more reliable than
     anything this process could report about itself from behind a proxy.
     """
     config = _standalone(tmp_path)
@@ -670,7 +670,7 @@ def test_a_data_plane_url_that_is_not_an_http_link_is_refused_at_load(configured
 def test_a_data_plane_url_carrying_a_query_or_fragment_is_refused_at_load(configured: str) -> None:
     """The one bad value an http(s) check alone would let through.
 
-    This is a base URL a client appends ``/v1/chat/completions`` to, so a query
+    This is a base URL a client appends ``/api/v1/chat/completions`` to, so a query
     string would swallow that path into a parameter value and a fragment would
     drop it after the hash. Both parse as absolute http(s) URLs and neither is
     recoverable downstream, unlike ``docs_url``, which is a link a person
@@ -687,7 +687,7 @@ def test_a_data_plane_url_carrying_a_query_or_fragment_is_refused_at_load(config
 def test_a_data_plane_url_carrying_a_credential_is_refused(configured: str) -> None:
     """Refused at load, because this value is published to anyone who asks.
 
-    ``GET /v1/bootstrap`` is unauthenticated, so a credential here would reach
+    ``GET /api/v1/bootstrap`` is unauthenticated, so a credential here would reach
     any browser that requested it, which no redaction in the operator-gated
     config viewer would cover. The snippet built from it would also put the
     whole address into a curl command somebody pastes into a shell history.
@@ -771,7 +771,7 @@ def test_a_path_that_does_not_name_v1_is_left_alone(configured: str) -> None:
 
 
 def test_a_trailing_slash_is_trimmed_from_the_data_plane_url() -> None:
-    """The dashboard suffixes this with ``/v1``, and ``//v1`` is a different path.
+    """The dashboard suffixes this with ``/api/v1``, and ``//api/v1`` is a different path.
 
     Normalized once here rather than at each consumer, since the value travels to
     a browser that builds a URL from it.

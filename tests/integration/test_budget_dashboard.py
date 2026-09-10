@@ -227,7 +227,7 @@ def test_a_calendar_aligned_budget_gives_a_user_a_boundary_reset(
 ) -> None:
     """The user plane reads both cadences, not just the duration.
 
-    ``/v1/budgets`` accepts ``reset_alignment``, and the assignment path used to
+    ``/api/v1/budgets`` accepts ``reset_alignment``, and the assignment path used to
     read only ``budget_duration_sec``, so a user on a calendar-aligned budget got
     a null next reset. A null next reset never fires, so their spend never
     refilled and they were eventually refused permanently.

@@ -769,7 +769,7 @@ def test_a_malformed_stored_address_is_not_reported_as_the_caller_s_mistake(tmp_
 def _add_a_password(tmp_path: Path, email: str, password: str) -> None:
     """Give an existing identity a usable password, the way signup does.
 
-    Written straight to the row rather than through ``POST /v1/auth/signup``,
+    Written straight to the row rather than through ``POST /api/v1/auth/signup``,
     which needs a configured mailer: what these tests are about is the column,
     not the flow that fills it. ``email_verified_at`` is stamped alongside so
     the identity can actually sign in, which is the state signup leaves it in
@@ -845,7 +845,7 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
 
     Platform identities carry ``hashed_password`` already, so a backfilled
     deployment would otherwise read as claimed before anyone had claimed it:
-    ``/v1/bootstrap`` would publish ``["password"]`` and the sign-in screen
+    ``/api/v1/bootstrap`` would publish ``["password"]`` and the sign-in screen
     would ask the operator holding the master key for credentials that are not
     theirs.
     """

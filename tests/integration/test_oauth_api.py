@@ -309,7 +309,7 @@ def test_a_deactivated_identity_cannot_sign_in_with_a_provider_either(
 ) -> None:
     # Deactivating somebody has to close every road in, or OAuth becomes the
     # door left open behind them. Flipped in the database because this edition
-    # exposes no route that deactivates a tenancy identity; `/v1/users` is the
+    # exposes no route that deactivates a tenancy identity; `/api/v1/users` is the
     # request-plane spend identity, which is a different table.
     add_member(client, master_key_header, email="ada@example.com")
     identity = _identity(db_session, "ada@example.com")

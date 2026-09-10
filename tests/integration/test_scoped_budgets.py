@@ -701,7 +701,7 @@ def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
     A null ``max_budget`` is a budget that meters and admits everything; a null
     ``budget_duration_sec`` is one that never resets. Both are creatable, so
     testing the value rather than whether the field was sent would make a cadence
-    addable and never removable. On ``/v1/budgets`` now, with the cadence.
+    addable and never removable. On ``/api/v1/budgets`` now, with the cadence.
 
     ``max_budget`` is the exception and stays value-tested, which is pre-existing
     behavior this change does not touch: clearing a limit is still done by
@@ -757,7 +757,7 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
     Resolution matches a ceiling by id, so one naming a workspace that does not
     exist is created, listed, and never applied, with nothing anywhere to say
     so. That is what a mis-mapped id in a bulk import produces, and it fails in
-    the permissive direction. ``POST /v1/keys`` already refuses an unknown
+    the permissive direction. ``POST /api/v1/keys`` already refuses an unknown
     workspace; this matches it.
     """
     missing = client.post(
@@ -864,7 +864,7 @@ def test_a_budget_cannot_be_created_with_both_kinds_of_period(
     """The state the table's CHECK refuses is answered as a request error, not a
     database error.
 
-    On ``/v1/budgets`` now, because that is where a period lives.
+    On ``/api/v1/budgets`` now, because that is where a period lives.
     """
     response = client.post(
         f"{API_ROOT}/budgets",

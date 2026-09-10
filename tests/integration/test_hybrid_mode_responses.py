@@ -1,4 +1,4 @@
-"""Hybrid-mode integration tests for /v1/responses.
+"""Hybrid-mode integration tests for /api/v1/responses.
 
 Mirror of :mod:`tests.integration.test_hybrid_mode_messages` for the OpenAI
 Responses endpoint. Tool-loop platform requests are tested only in the
@@ -552,7 +552,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Non-streaming MCP request on /v1/responses: first attempt errors before
+    """Non-streaming MCP request on /api/v1/responses: first attempt errors before
     any tool round completes → fallback to the second attempt.
     """
     usage_reports: list[dict[str, Any]] = []
@@ -837,7 +837,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Streaming MCP request on /v1/responses: the first attempt errors before
+    """Streaming MCP request on /api/v1/responses: the first attempt errors before
     yielding any event, so the gateway falls through to the second attempt and
     streams its response (same pre-lock-in semantics as chat, which this
     format previously collapsed to a single attempt)."""

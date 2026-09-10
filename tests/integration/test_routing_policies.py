@@ -62,7 +62,7 @@ def _completion(model: str) -> ChatCompletion:
 
 
 def _message_response() -> Any:
-    """A minimal valid Anthropic Message, for the /v1/messages dispatch path."""
+    """A minimal valid Anthropic Message, for the /api/v1/messages dispatch path."""
     from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 
     return MessageResponse(
@@ -1426,7 +1426,7 @@ def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
                 "max_tokens": 16,
                 "stream": stream,
                 "messages": [{"role": "user", "content": "hi"}],
-                # /v1/messages takes the billed user in metadata, not a top-level field.
+                # /api/v1/messages takes the billed user in metadata, not a top-level field.
                 "metadata": {"user_id": "test-user"},
             },
             headers=HEADERS,

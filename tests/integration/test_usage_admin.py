@@ -403,7 +403,7 @@ def test_set_price_by_filter_prices_the_named_models_only(
 def test_by_filter_rejects_more_values_than_the_read_endpoints_accept(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """The destructive body stops where /v1/usage/count stops.
+    """The destructive body stops where /api/v1/usage/count stops.
 
     The count an operator confirms comes from the read endpoints, which 422 past
     MAX_FILTER_VALUES. A body that accepted more would delete over a filter set no

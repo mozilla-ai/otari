@@ -34,7 +34,6 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
-from gateway.core.config import API_ROOT
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
 
@@ -43,7 +42,7 @@ _RAW = "raw provider detail SECRET token=abc123"
 # The exact upstream OpenAI message for the tools + reasoning_effort rejection.
 _REASONING_TOOLS_MSG = (
     "Function tools with reasoning_effort are not supported for gpt-5.6-sol in "
-    f"{API_ROOT}/chat/completions. To use function tools, use /v1/responses or set "
+    "/v1/chat/completions. To use function tools, use /v1/responses or set "
     "reasoning_effort to 'none'."
 )
 

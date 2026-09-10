@@ -219,7 +219,7 @@ def test_signup_without_mail_configured_is_refused_and_writes_nothing(tmp_path: 
         response = _signup(client, email="ada@example.com")
         assert response.status_code == 503
         # Not the central tenancy handler's generic 5xx body: this refusal has
-        # to name what is missing, the same as GET /v1/settings/mail's own.
+        # to name what is missing, the same as GET /api/v1/settings/mail's own.
         assert "mail_transport" in response.json()["detail"]
 
     engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")

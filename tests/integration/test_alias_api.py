@@ -1,6 +1,6 @@
 """End-to-end behavior for runtime (stored) model aliases.
 
-A stored alias is a row in ``model_aliases``, created through /v1/aliases. It
+A stored alias is a row in ``model_aliases``, created through /api/v1/aliases. It
 means the same thing to a request as a ``config.yml`` alias, but it can appear
 without a restart, so the interesting cases are the ones where the two kinds
 have to agree: routing, listing, pricing, and validation.

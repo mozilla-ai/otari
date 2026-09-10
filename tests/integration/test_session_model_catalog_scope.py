@@ -1,4 +1,4 @@
-"""``GET /v1/models`` shows a tenant only the providers their organization reaches.
+"""``GET /api/v1/models`` shows a tenant only the providers their organization reaches.
 
 The roles matrix wants a member's model list narrowed to the providers they have
 access to (otari-ai#1969). The narrowing reuses the allow-list machinery an API

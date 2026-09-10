@@ -1,4 +1,4 @@
-"""Tests for the POST /v1/audio/transcriptions and POST /v1/audio/speech endpoints."""
+"""Tests for the POST /api/v1/audio/transcriptions and POST /api/v1/audio/speech endpoints."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -28,7 +28,7 @@ FAKE_AUDIO_BYTES = b"fake-audio-content-mp3"
 
 
 def test_transcription_requires_auth(client: TestClient) -> None:
-    """POST /v1/audio/transcriptions requires authentication."""
+    """POST /api/v1/audio/transcriptions requires authentication."""
     resp = client.post(
         f"{API_ROOT}/audio/transcriptions",
         files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
@@ -41,7 +41,7 @@ def test_transcription_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/transcriptions works with API key authentication."""
+    """POST /api/v1/audio/transcriptions works with API key authentication."""
     mock_resp = _mock_transcription_response()
     with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -59,7 +59,7 @@ def test_transcription_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/transcriptions with master key requires 'user' field."""
+    """POST /api/v1/audio/transcriptions with master key requires 'user' field."""
     mock_resp = _mock_transcription_response()
     with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -77,7 +77,7 @@ def test_transcription_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/audio/transcriptions with master key + user field succeeds."""
+    """POST /api/v1/audio/transcriptions with master key + user field succeeds."""
     mock_resp = _mock_transcription_response()
     with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
@@ -93,7 +93,7 @@ def test_transcription_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/transcriptions returns 502 when the provider fails."""
+    """POST /api/v1/audio/transcriptions returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.audio.atranscription",
         new_callable=AsyncMock,
@@ -115,7 +115,7 @@ def test_transcription_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/audio/transcriptions creates a usage log entry."""
+    """POST /api/v1/audio/transcriptions creates a usage log entry."""
     mock_resp = _mock_transcription_response()
     user_id = api_key_obj["user_id"]
 
@@ -143,7 +143,7 @@ def test_transcription_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/audio/transcriptions logs an error entry when the provider fails."""
+    """POST /api/v1/audio/transcriptions logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -173,7 +173,7 @@ def test_transcription_optional_fields(
     api_key_header: dict[str, str],
     extra_field: str,
 ) -> None:
-    """POST /v1/audio/transcriptions forwards optional fields."""
+    """POST /api/v1/audio/transcriptions forwards optional fields."""
     mock_resp = _mock_transcription_response()
     values = {"language": "en", "prompt": "Previous context", "response_format": "verbose_json", "temperature": "0.2"}
     with patch("gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=mock_resp) as mock:
@@ -192,7 +192,7 @@ def test_transcription_optional_fields(
 
 
 def test_speech_requires_auth(client: TestClient) -> None:
-    """POST /v1/audio/speech requires authentication."""
+    """POST /api/v1/audio/speech requires authentication."""
     resp = client.post(
         f"{API_ROOT}/audio/speech",
         json={"model": "openai:tts-1", "input": "Hello", "voice": "alloy"},
@@ -204,7 +204,7 @@ def test_speech_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/speech works with API key authentication."""
+    """POST /api/v1/audio/speech works with API key authentication."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",
@@ -220,7 +220,7 @@ def test_speech_content_type_matches_format(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/speech returns correct Content-Type for each format."""
+    """POST /api/v1/audio/speech returns correct Content-Type for each format."""
     format_types = {
         "opus": "audio/opus",
         "aac": "audio/aac",
@@ -242,7 +242,7 @@ def test_speech_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/speech with master key requires 'user' field."""
+    """POST /api/v1/audio/speech with master key requires 'user' field."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",
@@ -258,7 +258,7 @@ def test_speech_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/audio/speech with master key + user field succeeds."""
+    """POST /api/v1/audio/speech with master key + user field succeeds."""
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
         resp = client.post(
             f"{API_ROOT}/audio/speech",
@@ -277,7 +277,7 @@ def test_speech_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/speech returns 502 when the provider fails."""
+    """POST /api/v1/audio/speech returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.audio.aspeech",
         new_callable=AsyncMock,
@@ -298,7 +298,7 @@ def test_speech_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/audio/speech creates a usage log entry."""
+    """POST /api/v1/audio/speech creates a usage log entry."""
     user_id = api_key_obj["user_id"]
 
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES):
@@ -324,7 +324,7 @@ def test_speech_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/audio/speech logs an error entry when the provider fails."""
+    """POST /api/v1/audio/speech logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -353,7 +353,7 @@ def test_speech_optional_fields(
     api_key_header: dict[str, str],
     extra_field: str,
 ) -> None:
-    """POST /v1/audio/speech forwards optional fields."""
+    """POST /api/v1/audio/speech forwards optional fields."""
     values = {"response_format": "opus", "speed": 1.5, "instructions": "Speak slowly"}
     with patch("gateway.api.routes.audio.aspeech", new_callable=AsyncMock, return_value=FAKE_AUDIO_BYTES) as mock:
         resp = client.post(
@@ -377,7 +377,7 @@ def test_transcription_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/transcriptions records auditable charge lines alongside cost.
+    """POST /api/v1/audio/transcriptions records auditable charge lines alongside cost.
 
     Audio bills per request like moderations (input_price_per_million holds the
     per-million-request rate), so a priced model yields one request meter and one
@@ -453,7 +453,7 @@ def test_speech_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/speech records auditable charge lines alongside cost."""
+    """POST /api/v1/audio/speech records auditable charge lines alongside cost."""
     client.post(
         f"{API_ROOT}/pricing",
         json={

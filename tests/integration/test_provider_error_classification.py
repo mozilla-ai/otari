@@ -26,7 +26,7 @@ _RAW = "raw upstream message SECRET-9f3a"
 # The upstream OpenAI rejection for function tools + a non-'none' reasoning_effort.
 _REASONING_TOOLS_MSG = (
     "Function tools with reasoning_effort are not supported for gpt-5.6-sol in "
-    f"{API_ROOT}/chat/completions. To use function tools, use /v1/responses or set "
+    "/v1/chat/completions. To use function tools, use /v1/responses or set "
     "reasoning_effort to 'none'."
 )
 

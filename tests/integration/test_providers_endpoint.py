@@ -1,4 +1,4 @@
-"""Tests for the GET /v1/providers endpoint."""
+"""Tests for the GET /api/v1/providers endpoint."""
 
 from collections.abc import Generator
 from typing import Any
