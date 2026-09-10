@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import type { Decorator } from "@storybook/react-vite"
 
+import { type ApiMocks, pathOf, route } from "./apiRouting"
+
 /**
  * A stub gateway for the stories whose component fetches its own data.
  *
@@ -26,7 +28,7 @@ import type { Decorator } from "@storybook/react-vite"
  *   parameters: {
  *     api: {
  *       "/v1/settings/mail": { configured: true, from_address: "otari@example.com" },
- *       "/v1/organization/context": organizationContext(),
+ *       "/v1/organizations/me": organizationContext(),
  *     },
  *   }
  *
@@ -47,17 +49,6 @@ import type { Decorator } from "@storybook/react-vite"
  * helper it needs no import -- which matters, because a story lives under `src/`
  * and importing out of this directory would pull it into the app's tsconfig.
  */
-export interface MockFailure {
-  $status: number
-  $body?: unknown
-}
-
-export type ApiMocks = Record<string, unknown>
-
-function isMockFailure(value: unknown): value is MockFailure {
-  return typeof value === "object" && value !== null && "$status" in value
-}
-
 /**
  * The mock tables of every story currently on screen.
  *
@@ -73,19 +64,6 @@ const mounted = new Set<ApiMocks>()
 // later would read the stub.
 const realFetch: typeof fetch = globalThis.fetch.bind(globalThis)
 
-/** Match the whole path first, then its pathname. */
-function lookup(mocks: ApiMocks, path: string): unknown {
-  if (path in mocks) return mocks[path]
-  const pathname = path.split("?")[0]
-  return pathname in mocks ? mocks[pathname] : undefined
-}
-
-function pathOf(input: RequestInfo | URL): string {
-  if (typeof input === "string") return input
-  if (input instanceof URL) return input.pathname + input.search
-  return input.url
-}
-
 function jsonResponse(status: number, body: unknown): Response {
   if (status === 204) return new Response(null, { status })
   return new Response(JSON.stringify(body ?? null), {
@@ -97,28 +75,13 @@ function jsonResponse(status: number, body: unknown): Response {
 // Installed once at module scope, not per story. Patching inside the decorator
 // would reassign on every render, and the second pass would capture the stub as
 // the "real" fetch and never be able to restore it.
+//
+// The decision itself is in `apiRouting.ts`, which has no side effects and is
+// unit-tested; this is only the part that has to touch `globalThis`.
 globalThis.fetch = async (input, init) => {
-  const path = pathOf(input)
-  for (const mocks of mounted) {
-    const match = lookup(mocks, path)
-    if (match === undefined) continue
-    const [status, body] = isMockFailure(match)
-      ? [match.$status, match.$body]
-      : [200, match]
-    return jsonResponse(status, body)
-  }
-
-  // Nothing declared this path. Stories with no `api` parameter register an empty
-  // table, so they land here too and reach the real network -- which is what a
-  // story of a prop-driven component wants, and what lets Storybook's own
-  // requests through.
-  if (mounted.size === 0) return realFetch(input, init)
-
-  // 501, not 404: a 404 is a real gateway answer that some components handle
-  // gracefully, which would hide the fact that a story forgot a path.
-  return jsonResponse(501, {
-    detail: `No story mock for ${path}. Add it to parameters.api.`,
-  })
+  const routed = route(pathOf(input), mounted)
+  if (routed.kind === "network") return realFetch(input, init)
+  return jsonResponse(routed.status, routed.body)
 }
 
 export const withApiMocks: Decorator = (Story, context) => {

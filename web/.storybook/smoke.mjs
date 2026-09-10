@@ -88,7 +88,14 @@ async function drain() {
     const onConsole = (m) => {
       if (m.type() !== "error") return
       const text = m.text().split("\n")[0]
-      if (/Failed to load resource/.test(text)) return
+      // Aborted requests only, not every failed one. This used to drop the
+      // whole "Failed to load resource" family, which is why it reported the
+      // catalog clean while every story 404d on `/v1/organizations/me`: the
+      // decorators mount a provider that queries the organization, and nothing
+      // answered it. Now that `apiMock` owns every `/v1/` path, a load failure
+      // is a real finding. The abort is still this probe's own fault, since it
+      // reuses one page across hundreds of rapid navigations.
+      if (/net::ERR_ABORTED/.test(text)) return
       if (text.trim() === "%o") return
       errors.push(text)
     }
