@@ -180,6 +180,22 @@ models from the catalog.
 `GET /v1/catalog/models` reads the same merged catalog as `GET /v1/models` and
 folds it by model, so `nebius:zai-org/GLM-5.3` and
 `fireworks:accounts/fireworks/models/glm-5p3` are two offerings of one entry.
+### Short selectors
+
+A provider's own id can be long, so the gateway also accepts two spellings the
+catalog shows. `instance:<cleaned id>` (`fireworks:gpt-oss-120b`) resolves to
+the provider's full id on that instance, where only one offering on the
+instance cleans to it. The model's slug alone (`gpt-oss-120b`) resolves to the
+model's cheapest offering by the deployment's own rates. Both are relabeled
+like an alias, so a response's `model` is what was sent, and pricing, budgets
+and usage key on the offering reached. A key whose allow-list names some
+instances only should send one of those instances or an alias, since a bare
+slug resolves before the allow-list is consulted. The index behind this is
+rebuilt every minute from the deployment's catalog view and on
+`POST /v1/catalog/selectors/refresh`, an operator call, and each offering's
+`short_selector` and each model's `selector` in the catalog say what is in
+force.
+
 `?at_context=<tokens>` on the list takes each model's minimum from the pricing
 tier a request of that size would settle at, so tiered offerings compare at
 the size that matters rather than at their base rate.

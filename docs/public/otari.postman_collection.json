@@ -1610,6 +1610,26 @@
               ]
             }
           }
+        },
+        {
+          "name": "Refresh Selector Index",
+          "request": {
+            "description": "Re-index the short spellings now, rather than on the refresher's next tick.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "catalog",
+                "selectors",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/v1/catalog/selectors/refresh"
+            }
+          }
         }
       ],
       "name": "catalog"

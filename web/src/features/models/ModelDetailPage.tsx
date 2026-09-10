@@ -366,22 +366,31 @@ function OfferingDetail({
   const modelId = offering.selector.startsWith(`${offering.provider}:`)
     ? offering.selector.slice(offering.provider.length + 1)
     : offering.selector
+  // The short spelling where the gateway has one: it is what the catalog
+  // shows, and the full selector is still accepted.
+  const sendAs = offering.short_selector ?? offering.selector
   const input = {
     baseUrl: baseUrl ?? "",
     apiKey: "$OTARI_API_KEY",
-    model: offering.selector,
+    model: sendAs,
   }
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
           <dt className="text-caption">Selector</dt>
-          <dd>
-            <CopyableValue value={offering.selector} label="selector">
-              <code className="text-mono-caption break-all">
-                {offering.selector}
-              </code>
+          <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <CopyableValue value={sendAs} label="selector">
+              <code className="text-mono-caption break-all">{sendAs}</code>
             </CopyableValue>
+            {offering.short_selector ? (
+              <span className="text-caption">
+                also{" "}
+                <code className="text-mono-caption break-all">
+                  {offering.selector}
+                </code>
+              </span>
+            ) : null}
           </dd>
           <dt className="text-caption">Provider's id</dt>
           <dd>
@@ -690,6 +699,21 @@ export function ModelDetailView({
               <CopyableValue value={model.id} label="model id">
                 <code className="text-mono-caption">{model.id}</code>
               </CopyableValue>
+              {model.selector ? (
+                <span className="text-caption">
+                  send it as <code className="text-mono-caption">model</code>
+                  {model.resolves_to ? (
+                    <>
+                      {" "}
+                      and{" "}
+                      <code className="text-mono-caption">
+                        {model.resolves_to}
+                      </code>{" "}
+                      answers
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
               {model.open_weights ? (
                 <Badge tone="muted">Open weights</Badge>
               ) : null}
@@ -963,22 +987,24 @@ export function ModelDetailView({
               <h2 id="use-title" className="text-heading">
                 Quick start
               </h2>
-              {first && model.offerings.length > 1 && !publicView ? (
+              {first ? (
                 <span className="text-caption">
-                  Through{" "}
-                  <code className="text-mono-caption">{first.selector}</code>,
-                  or{" "}
-                  <Link
-                    to="/routing"
-                    className="text-link hover:text-link-hover"
-                  >
-                    route across the offerings
-                  </Link>
-                </span>
-              ) : first ? (
-                <span className="text-caption">
-                  Through{" "}
-                  <code className="text-mono-caption">{first.selector}</code>
+                  Send{" "}
+                  <code className="text-mono-caption">
+                    {model.selector ?? first.short_selector ?? first.selector}
+                  </code>
+                  {model.selector ? " for the cheapest offering" : ""}
+                  {model.offerings.length > 1 && !publicView ? (
+                    <>
+                      , or{" "}
+                      <Link
+                        to="/routing"
+                        className="text-link hover:text-link-hover"
+                      >
+                        route across the offerings
+                      </Link>
+                    </>
+                  ) : null}
                 </span>
               ) : null}
             </div>
@@ -999,7 +1025,7 @@ export function ModelDetailView({
 
       {first ? (
         <QuickStart
-          selector={first.selector}
+          selector={model.selector ?? first.short_selector ?? first.selector}
           isOpen={quickStart}
           onOpenChange={setQuickStart}
           publicView={publicView}

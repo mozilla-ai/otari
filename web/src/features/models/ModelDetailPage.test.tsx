@@ -42,6 +42,8 @@ const GLM: CatalogModelSummary = {
   offering_count: 2,
   provider_count: 2,
   providers: ["fireworks", "nebius"],
+  selector: "glm-5-3",
+  resolves_to: "nebius:zai-org/GLM-5.3",
   selectors: [
     "fireworks:accounts/fireworks/models/glm-5p3",
     "nebius:zai-org/GLM-5.3",
@@ -66,6 +68,8 @@ const KIMI: CatalogModelSummary = {
   offering_count: 1,
   provider_count: 1,
   providers: ["nebius"],
+  selector: null,
+  resolves_to: null,
   selectors: ["nebius:moonshotai/Kimi-K2.6"],
   price_sources: ["defaults"],
   unpriced_count: 0,
@@ -77,6 +81,7 @@ const KIMI: CatalogModelSummary = {
 function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
   return {
     selector: "nebius:zai-org/GLM-5.3",
+    short_selector: "nebius:glm-5.3",
     provider: "nebius",
     provider_type: "nebius",
     credential: "deployment",
@@ -105,6 +110,7 @@ const GLM_DETAIL: CatalogModelDetail = {
     offering({}),
     offering({
       selector: "fireworks:accounts/fireworks/models/glm-5p3",
+      short_selector: "fireworks:glm-5p3",
       provider: "fireworks",
       provider_type: "fireworks",
       context_window: 131_072,
@@ -232,12 +238,13 @@ describe("ModelDetailPage", () => {
     })
     await user.click(within(grid).getByText("nebius"))
 
-    expect(
-      await within(grid).findByText("nebius:zai-org/GLM-5.3"),
-    ).toBeInTheDocument()
+    // The short spelling leads, the full selector is still named, and the
+    // request sends the short one.
+    expect(await within(grid).findByText("nebius:glm-5.3")).toBeInTheDocument()
+    expect(within(grid).getByText("nebius:zai-org/GLM-5.3")).toBeInTheDocument()
     expect(within(grid).getByText("zai-org/GLM-5.3")).toBeInTheDocument()
     const curl = within(grid).getByLabelText("cURL") as HTMLTextAreaElement
-    expect(curl.value).toContain("nebius:zai-org/GLM-5.3")
+    expect(curl.value).toContain('"model": "nebius:glm-5.3"')
 
     await user.click(within(grid).getByRole("button", { name: "Close" }))
     expect(within(grid).queryByText("nebius:zai-org/GLM-5.3")).toBeNull()
@@ -254,7 +261,8 @@ describe("ModelDetailPage", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Use this model" })
     const curl = within(dialog).getByLabelText("cURL") as HTMLTextAreaElement
-    expect(curl.value).toContain("nebius:zai-org/GLM-5.3")
+    // The slug itself, since the gateway resolves it to the cheapest offering.
+    expect(curl.value).toContain('"model": "glm-5-3"')
     expect(
       within(dialog).getByRole("link", { name: "API keys" }),
     ).toHaveAttribute("href", "/keys")

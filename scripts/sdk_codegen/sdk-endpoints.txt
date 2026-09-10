@@ -180,6 +180,7 @@ GET /v1/pricing/drift                           # not yet wrapped
 # Model catalog, grouped by model
 GET /v1/catalog/models                          # not yet wrapped
 GET /v1/catalog/models/{model_id}               # not yet wrapped
+POST /v1/catalog/selectors/refresh              # not yet wrapped
 # Providers
 GET /v1/providers/catalog/{provider_id}         # not yet wrapped
 GET /v1/providers/health                        # not yet wrapped

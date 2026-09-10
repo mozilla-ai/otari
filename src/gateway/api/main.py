@@ -169,6 +169,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     # The same merged catalog, folded by model for a chooser rather than listed
     # flat for an SDK. Same reader gate as /v1/models.
     api.include_router(catalog.router)
+    api.include_router(catalog.operator_router)
     api.include_router(providers.router)
     api.include_router(keys.router)
     api.include_router(users.router)

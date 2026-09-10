@@ -2024,6 +2024,30 @@
             ],
             "title": "Release Date"
           },
+          "resolves_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The offering `selector` resolves to.",
+            "title": "Resolves To"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.",
+            "title": "Selector"
+          },
           "selectors": {
             "description": "Every offering's selector, so the list can be searched by one.",
             "items": {
@@ -2235,6 +2259,30 @@
             ],
             "title": "Release Date"
           },
+          "resolves_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The offering `selector` resolves to.",
+            "title": "Resolves To"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.",
+            "title": "Selector"
+          },
           "selectors": {
             "description": "Every offering's selector, so the list can be searched by one.",
             "items": {
@@ -2406,6 +2454,18 @@
             "description": "What to send as `model`, in `instance:model` form.",
             "title": "Selector",
             "type": "string"
+          },
+          "short_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A shorter spelling the gateway also accepts: the instance with the model's cleaned id (`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or until the gateway has indexed the catalog.",
+            "title": "Short Selector"
           },
           "usage_30d": {
             "anyOf": [
@@ -10727,6 +10787,33 @@
         "title": "SearchToolsResponse",
         "type": "object"
       },
+      "SelectorIndexResponse": {
+        "description": "What the rebuilt index knows.",
+        "properties": {
+          "models": {
+            "description": "Slugs that resolve to an offering.",
+            "title": "Models",
+            "type": "integer"
+          },
+          "offerings": {
+            "description": "Selectors the deployment serves.",
+            "title": "Offerings",
+            "type": "integer"
+          },
+          "short_selectors": {
+            "description": "Offerings with an unambiguous short spelling.",
+            "title": "Short Selectors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offerings",
+          "short_selectors",
+          "models"
+        ],
+        "title": "SelectorIndexResponse",
+        "type": "object"
+      },
       "SendTestMailRequest": {
         "description": "Where to send the test message.",
         "properties": {
@@ -18090,6 +18177,36 @@
           }
         ],
         "summary": "Get Catalog Model",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/v1/catalog/selectors/refresh": {
+      "post": {
+        "description": "Re-index the short spellings now, rather than on the refresher's next tick.",
+        "operationId": "refresh_selector_index_v1_catalog_selectors_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectorIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Selector Index",
         "tags": [
           "catalog"
         ]

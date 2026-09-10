@@ -23,6 +23,7 @@ public description and capabilities describe the model, and a member choosing
 one needs them as much as an operator does.
 """
 
+import asyncio
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -35,7 +36,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import get_config, get_db, get_session_identity, verify_catalog_reader_or_public
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_session_identity,
+    require_deployment_operator,
+    verify_catalog_reader_or_public,
+)
 from gateway.api.routes.models import (
     ALIAS_OWNED_BY,
     MergedCatalog,
@@ -45,12 +52,22 @@ from gateway.api.routes.models import (
     build_merged_catalog,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.database import create_session
+from gateway.log_config import logger
 from gateway.models.entities import APIKey, PricingSnapshot, UsageLog
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.services.catalog_selectors import (
+    build_selector_index,
+    current_selector_index,
+    model_selector_for_slug,
+    set_selector_index,
+    short_selector_for,
+)
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     background_catalog_enabled,
+    cached_models_dev_catalog,
     load_models_dev_catalog,
     models_dev_provider_id,
     parse_entry,
@@ -80,6 +97,10 @@ router = APIRouter(
     tags=["catalog"],
     dependencies=[Depends(verify_catalog_reader_or_public)],
 )
+# The one write on the catalog: an operator asking for the short spellings to
+# be re-indexed now rather than on the next tick, after pricing or providers
+# changed.
+operator_router = APIRouter(prefix="/v1/catalog", tags=["catalog"], dependencies=[Depends(require_deployment_operator)])
 
 # The anonymous caller, as the dependency hands it over; the routes below read
 # it as "nobody" rather than as a key that failed to verify.
@@ -129,6 +150,14 @@ class CatalogOffering(BaseModel):
     """One way this deployment can call a model: a selector on a provider."""
 
     selector: str = Field(description="What to send as `model`, in `instance:model` form.")
+    short_selector: str | None = Field(
+        default=None,
+        description=(
+            "A shorter spelling the gateway also accepts: the instance with the model's cleaned id "
+            "(`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or "
+            "until the gateway has indexed the catalog."
+        ),
+    )
     provider: str = Field(description="The provider instance the selector names.")
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
     credential: Credential = Field(
@@ -168,6 +197,14 @@ class CatalogModelSummary(BaseModel):
     """One model, as the list shows it."""
 
     id: str = Field(description="URL-safe id, derived from the display name.")
+    selector: str | None = Field(
+        default=None,
+        description=(
+            "The id as a selector: send it as `model` and the model's cheapest offering answers. "
+            "Null until the gateway has indexed the catalog."
+        ),
+    )
+    resolves_to: str | None = Field(default=None, description="The offering `selector` resolves to.")
     name: str
     vendor: str | None
     description: str | None = Field(default=None, description="models.dev's, from the offering that named the model.")
@@ -361,6 +398,108 @@ class _Grouped:
     """Whose overrides priced the offerings; None for a visitor."""
 
 
+def _real_offerings(merged: MergedCatalog) -> list[ModelObject]:
+    """The selectors themselves, sorted so grouping is order-stable.
+
+    Aliases and policies are names over selectors and live on Routing.
+    """
+    return sorted(
+        (obj for obj in merged.models.values() if obj.owned_by != ALIAS_OWNED_BY and obj.pricing_source != "dynamic"),
+        key=lambda obj: obj.id,
+    )
+
+
+def _seed(
+    config: GatewayConfig, catalog: dict[str, Any] | None, obj: ModelObject
+) -> tuple[OfferingSeed, ModelCatalogEntry | None, str, str, str]:
+    """One offering's identity seed, with the facts the seed was read from."""
+    instance, model_id = _split_selector(obj)
+    provider_type = config.provider_instance_type(instance)
+    metadata = _metadata_entry(catalog, provider_type, model_id)
+    seed = OfferingSeed(
+        selector=obj.id,
+        provider_type=provider_type,
+        model_id=model_id,
+        name=metadata.name if metadata else None,
+    )
+    return seed, metadata, instance, model_id, provider_type
+
+
+async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fetch: bool = False) -> None:
+    """Index the short spellings from the deployment's own catalog view.
+
+    The master key's view, which is every configured instance priced from the
+    deployment's list and the defaults: what a bare slug resolves to must not
+    depend on who asks, since the same request from two keys should reach the
+    same offering.
+
+    ``fetch`` lets a request-time rebuild pull models.dev the way a page load
+    does. The scheduled rebuild reads the cache as it stands instead: fetching
+    from a background task would bind the catalog's fetch lock to that task's
+    loop, and the cache is warm within a tick of any page load anyway.
+    """
+    merged = await build_merged_catalog(db, config, auth=(None, True), session_identity=None)
+    catalog = (
+        await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
+        if fetch
+        else cached_models_dev_catalog(config)
+    )
+    rows: list[tuple[str, str, str, float | None]] = []
+    seeds: list[OfferingSeed] = []
+    for obj in _real_offerings(merged):
+        seed, _metadata, instance, model_id, _provider_type = _seed(config, catalog, obj)
+        seeds.append(seed)
+        rate = obj.pricing.input_price_per_million if obj.pricing is not None else None
+        rows.append((obj.id, instance, clean_model_id(model_id).model, rate))
+    identities = {
+        identity.slug: (identity.key, identity.selectors) for identity in group_offerings(seeds).values()
+    }
+    set_selector_index(build_selector_index(rows, identities))
+
+
+SELECTOR_INDEX_INTERVAL_SECONDS = 60.0
+
+
+class SelectorIndexResponse(BaseModel):
+    """What the rebuilt index knows."""
+
+    offerings: int = Field(description="Selectors the deployment serves.")
+    short_selectors: int = Field(description="Offerings with an unambiguous short spelling.")
+    models: int = Field(description="Slugs that resolve to an offering.")
+
+
+@operator_router.post("/selectors/refresh", response_model=SelectorIndexResponse)
+async def refresh_selector_index(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> SelectorIndexResponse:
+    """Re-index the short spellings now, rather than on the refresher's next tick."""
+    await rebuild_selector_index(db, config, fetch=True)
+    index = current_selector_index()
+    return SelectorIndexResponse(
+        offerings=len(index.full), short_selectors=len(index.short), models=len(index.models)
+    )
+
+
+async def run_selector_index_refresher(config: GatewayConfig, interval: float | None = None) -> None:
+    """Keep the selector index current with discovery, pricing and providers.
+
+    Rebuilt on a short fixed interval rather than hooked into every writer that
+    could change it (a price set, a provider added, a discovery tick): the
+    build is one catalog read, and a spelling that lags a minute behind a
+    change is a far smaller hazard than one hook missed.
+    """
+    while True:
+        try:
+            async with create_session() as session:
+                await rebuild_selector_index(session, config)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("catalog selector index rebuild failed; retrying on the next tick", exc_info=True)
+        await asyncio.sleep(interval if interval is not None else SELECTOR_INDEX_INTERVAL_SECONDS)
+
+
 async def _group(
     db: AsyncSession,
     config: GatewayConfig,
@@ -371,13 +510,7 @@ async def _group(
 ) -> _Grouped:
     catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
     now = normalize_effective_at(None)
-
-    # Aliases and policies are names over selectors and live on Routing; the
-    # catalog is the selectors themselves. Sorted so grouping is order-stable.
-    real = sorted(
-        (obj for obj in merged.models.values() if obj.owned_by != ALIAS_OWNED_BY and obj.pricing_source != "dynamic"),
-        key=lambda obj: obj.id,
-    )
+    real = _real_offerings(merged)
 
     organization_id = await _viewer_organization(db, caller, session_identity)
     overrides = (
@@ -389,17 +522,8 @@ async def _group(
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
     for obj in real:
-        instance, model_id = _split_selector(obj)
-        provider_type = config.provider_instance_type(instance)
-        metadata = _metadata_entry(catalog, provider_type, model_id)
-        seeds.append(
-            OfferingSeed(
-                selector=obj.id,
-                provider_type=provider_type,
-                model_id=model_id,
-                name=metadata.name if metadata else None,
-            )
-        )
+        seed, metadata, instance, model_id, provider_type = _seed(config, catalog, obj)
+        seeds.append(seed)
 
         override = resolve_organization_override(overrides, [obj.id], now)
         pricing: ModelPricingInfo | None
@@ -418,6 +542,7 @@ async def _group(
         offerings[obj.id] = _Offering(
             wire=CatalogOffering(
                 selector=obj.id,
+                short_selector=short_selector_for(obj.id),
                 provider=instance,
                 provider_type=provider_type,
                 credential=_credential(config, instance),
@@ -519,8 +644,11 @@ def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int 
     winners = [entry for entry in described if entry.name and entry.name.rsplit("/", 1)[-1] == identity.name]
     contexts = [member.wire.context_window for member in members if member.wire.context_window is not None]
     outputs = [member.wire.max_output_tokens for member in members if member.wire.max_output_tokens is not None]
+    resolves_to = model_selector_for_slug(identity.slug)
     return CatalogModelSummary(
         id=identity.slug,
+        selector=identity.slug if resolves_to is not None else None,
+        resolves_to=resolves_to,
         name=identity.name,
         vendor=identity.vendor,
         description=_first(entry.description for entry in [*winners, *described]),

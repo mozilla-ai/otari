@@ -80,6 +80,19 @@ _lock = asyncio.Lock()
 _MISS = object()
 
 
+def cached_models_dev_catalog(config: GatewayConfig) -> dict[str, Any] | None:
+    """The catalog as last fetched, at any age, without fetching or locking.
+
+    For a reader that runs off the request path and must not bind the fetch
+    lock to its own loop, such as the selector index refresher: it answers
+    from whatever a page load or the catalog refresher last put here, and
+    ``None`` until something has.
+    """
+    if not config.models_dev_metadata or not _cache.ok:
+        return None
+    return _cache.data
+
+
 def clear_catalog_cache() -> None:
     """Reset the cache (tests, and after a config change)."""
     _cache.data = None

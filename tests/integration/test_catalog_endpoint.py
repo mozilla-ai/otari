@@ -354,6 +354,39 @@ def test_prices_compare_at_the_tier_a_request_size_settles_at(
     assert priced.get("/v1/catalog/models?at_context=0", headers=master_header).status_code == 422
 
 
+def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    """After the index is built, a row says its short selector and the model says its slug resolves."""
+    from typing import cast
+
+    from fastapi import FastAPI
+
+    from gateway.services import catalog_selectors as selectors
+    from gateway.services.provider_kwargs import resolve_provider_selector
+
+    config = cast(FastAPI, priced.app).state.config
+    try:
+        with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+            rebuilt = priced.post("/v1/catalog/selectors/refresh", headers=master_header)
+        assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
+        assert rebuilt.json()["models"] >= 1
+        detail = _get(priced, "/v1/catalog/models/glm-5-3", headers=master_header)
+        by_selector = {offering["selector"]: offering for offering in detail["offerings"]}
+        assert by_selector[_NEBIUS_GLM]["short_selector"] == "nebius:glm-5.3"
+        assert by_selector[_FIREWORKS_GLM]["short_selector"] == "fireworks:glm-5p3"
+        # Nebius is the cheaper of the two, so the slug lands there.
+        assert detail["selector"] == "glm-5-3"
+        assert detail["resolves_to"] == _NEBIUS_GLM
+
+        resolved = resolve_provider_selector(config, "glm-5-3")
+        assert (resolved.instance, resolved.model, resolved.alias) == ("nebius", "zai-org/GLM-5.3", "glm-5-3")
+        short = resolve_provider_selector(config, "fireworks:glm-5p3")
+        assert short.model == "accounts/fireworks/models/glm-5p3"
+    finally:
+        selectors.reset_selector_index()
+
+
 def test_a_visitor_reads_the_catalog_only_while_it_is_public(
     catalog_client: TestClient, public_client: TestClient, master_header: dict[str, str]
 ) -> None:

@@ -42,6 +42,8 @@ const GLM: CatalogModelSummary = {
   offering_count: 2,
   provider_count: 2,
   providers: ["fireworks", "nebius"],
+  selector: "glm-5-3",
+  resolves_to: "nebius:zai-org/GLM-5.3",
   selectors: [
     "fireworks:accounts/fireworks/models/glm-5p3",
     "nebius:zai-org/GLM-5.3",
@@ -66,6 +68,8 @@ const KIMI: CatalogModelSummary = {
   offering_count: 1,
   provider_count: 1,
   providers: ["nebius"],
+  selector: null,
+  resolves_to: null,
   selectors: ["nebius:moonshotai/Kimi-K2.6"],
   price_sources: ["defaults"],
   unpriced_count: 0,
@@ -77,6 +81,7 @@ const KIMI: CatalogModelSummary = {
 function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
   return {
     selector: "nebius:zai-org/GLM-5.3",
+    short_selector: "nebius:glm-5.3",
     provider: "nebius",
     provider_type: "nebius",
     credential: "deployment",
@@ -105,6 +110,7 @@ const GLM_DETAIL: CatalogModelDetail = {
     offering({}),
     offering({
       selector: "fireworks:accounts/fireworks/models/glm-5p3",
+      short_selector: "fireworks:glm-5p3",
       provider: "fireworks",
       provider_type: "fireworks",
       context_window: 131_072,

@@ -1063,6 +1063,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/catalog/selectors/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Selector Index
+         * @description Re-index the short spellings now, rather than on the refresher's next tick.
+         */
+        post: operations["refresh_selector_index_v1_catalog_selectors_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chat/completions": {
         parameters: {
             query?: never;
@@ -5500,6 +5520,16 @@ export interface components {
             /** Release Date */
             release_date?: string | null;
             /**
+             * Resolves To
+             * @description The offering `selector` resolves to.
+             */
+            resolves_to?: string | null;
+            /**
+             * Selector
+             * @description The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.
+             */
+            selector?: string | null;
+            /**
              * Selectors
              * @description Every offering's selector, so the list can be searched by one.
              */
@@ -5588,6 +5618,16 @@ export interface components {
             /** Release Date */
             release_date?: string | null;
             /**
+             * Resolves To
+             * @description The offering `selector` resolves to.
+             */
+            resolves_to?: string | null;
+            /**
+             * Selector
+             * @description The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.
+             */
+            selector?: string | null;
+            /**
              * Selectors
              * @description Every offering's selector, so the list can be searched by one.
              */
@@ -5658,6 +5698,11 @@ export interface components {
              * @description What to send as `model`, in `instance:model` form.
              */
             selector: string;
+            /**
+             * Short Selector
+             * @description A shorter spelling the gateway also accepts: the instance with the model's cleaned id (`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or until the gateway has indexed the catalog.
+             */
+            short_selector?: string | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
         };
         /**
@@ -9396,6 +9441,27 @@ export interface components {
             stored: components["schemas"]["StoredSearchToolSchema"][];
         };
         /**
+         * SelectorIndexResponse
+         * @description What the rebuilt index knows.
+         */
+        SelectorIndexResponse: {
+            /**
+             * Models
+             * @description Slugs that resolve to an offering.
+             */
+            models: number;
+            /**
+             * Offerings
+             * @description Selectors the deployment serves.
+             */
+            offerings: number;
+            /**
+             * Short Selectors
+             * @description Offerings with an unambiguous short spelling.
+             */
+            short_selectors: number;
+        };
+        /**
          * SendTestMailRequest
          * @description Where to send the test message.
          */
@@ -12708,6 +12774,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_selector_index_v1_catalog_selectors_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectorIndexResponse"];
                 };
             };
         };
