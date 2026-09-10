@@ -27,9 +27,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed
+from gateway.api.deps import EntitlementPortDep, get_config, get_db_if_needed
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
+from gateway.ports.entitlement_port import EntitlementPort
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password
 from gateway.services.tenancy.webauthn_service import has_any_credential
@@ -159,6 +160,18 @@ class DeploymentBootstrap(BaseModel):
             "Empty for a hybrid gateway."
         )
     )
+    capabilities: list[str] = Field(
+        description=(
+            "Capabilities this deployment resolves as entitled, sorted. The licensing "
+            "(installed) axis, as distinct from surfaces, the topology axis: a surface says this "
+            "process hosts a management API group, a capability says this deployment may use a "
+            "gated feature, and a nav item is shown only where both agree. In the base build this "
+            "is the set a bootstrap installed by contributing routers, so it is empty with no "
+            "bootstrap; an overlay with a real entitlement resolver answers with whatever that "
+            "resolver grants. Names are open-ended domain strings, not a closed enum, because an "
+            "overlay ships capabilities the base cannot enumerate."
+        )
+    )
     management_url: str | None = Field(
         description=(
             "Where the authoritative control plane lives when it is not this deployment. "
@@ -269,6 +282,7 @@ class DeploymentBootstrap(BaseModel):
 async def get_bootstrap(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    entitlements: EntitlementPortDep,
 ) -> DeploymentBootstrap:
     """Return the deployment context the dashboard shell renders from.
 
@@ -281,12 +295,16 @@ async def get_bootstrap(
     marker, and the identity it names, to answer whether *that* identity holds a
     password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
     and ``get_db_if_needed`` hands it no session to read one from.
+    ``EntitlementPort`` is resolved in both modes on the same (possibly absent)
+    session, and the base adapter never reads it.
     """
+    capabilities = await _capabilities(entitlements)
     if config.is_hybrid_mode:
         return DeploymentBootstrap(
             deployment_type="hybrid",
             session_type="none",
             surfaces=[],
+            capabilities=capabilities,
             sign_in_methods=[],
             management_url=config.platform_management_url,
             # This gateway *is* the data plane, so the address that reached this
@@ -312,6 +330,7 @@ async def get_bootstrap(
         deployment_type="hosted" if hosted else "standalone",
         session_type="local_operator",
         surfaces=sorted(HOSTED_SURFACES if hosted else STANDALONE_SURFACES),
+        capabilities=capabilities,
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         # Standalone is its own data plane and answers null; a hosted control
@@ -362,6 +381,22 @@ async def _sign_in_methods(db: AsyncSession, config: GatewayConfig) -> list[Sign
     if passkeys:
         methods.append("passkey")
     return sorted(methods)
+
+
+async def _capabilities(entitlements: EntitlementPort) -> list[str]:
+    """The capabilities this deployment is entitled to, sorted.
+
+    A database failure answers "none", as ``_sign_in_methods`` does and for the
+    same reason: the base adapter reads nothing, but an overlay's resolver may,
+    and this payload must render a page rather than propagate a 500. The
+    server-side gate (``require_capability``) keeps refusing for itself either
+    way, so an empty answer here hides a link and grants nothing.
+    """
+    try:
+        return sorted(await entitlements.entitlements())
+    except SQLAlchemyError:
+        logger.warning("Could not resolve which capabilities this deployment is entitled to", exc_info=True)
+        return []
 
 
 async def _maintenance_mode(db: AsyncSession) -> bool:

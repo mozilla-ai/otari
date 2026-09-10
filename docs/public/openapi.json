@@ -3448,6 +3448,14 @@
       "DeploymentBootstrap": {
         "description": "What the dashboard shell needs before it can render anything.",
         "properties": {
+          "capabilities": {
+            "description": "Capabilities this deployment resolves as entitled, sorted. The licensing (installed) axis, as distinct from surfaces, the topology axis: a surface says this process hosts a management API group, a capability says this deployment may use a gated feature, and a nav item is shown only where both agree. In the base build this is the set a bootstrap installed by contributing routers, so it is empty with no bootstrap; an overlay with a real entitlement resolver answers with whatever that resolver grants. Names are open-ended domain strings, not a closed enum, because an overlay ships capabilities the base cannot enumerate.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "data_plane_url": {
             "anyOf": [
               {
@@ -3577,6 +3585,7 @@
           "deployment_type",
           "session_type",
           "surfaces",
+          "capabilities",
           "management_url",
           "data_plane_url",
           "docs_url",
@@ -17290,7 +17299,7 @@
     },
     "/api/v1/bootstrap": {
       "get": {
-        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
+        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.\n``EntitlementPort`` is resolved in both modes on the same (possibly absent)\nsession, and the base adapter never reads it.",
         "operationId": "bootstrap-get_bootstrap",
         "responses": {
           "200": {

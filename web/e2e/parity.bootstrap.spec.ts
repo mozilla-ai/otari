@@ -32,6 +32,11 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "users",
       "workspaces",
     ],
+    // The entitlement axis, distinct from the surfaces above: what this
+    // deployment is licensed for, rather than what it hosts. Empty because no
+    // bootstrap contributes a router in this environment and the base ships
+    // no gated capability of its own; see ARCHITECTURE.md.
+    capabilities: [],
     // The master key, because nothing in this environment has claimed the
     // deployment by setting an operator password. Once something does, the
     // gateway answers ["password"] instead and the master key stops being a

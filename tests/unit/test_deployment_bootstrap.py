@@ -8,6 +8,7 @@ on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
 import logging
+import sys
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +18,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
 from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES
@@ -100,6 +102,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "deployment_type": "standalone",
         "session_type": "local_operator",
         "surfaces": sorted(STANDALONE_SURFACES),
+        "capabilities": [],
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
@@ -155,6 +158,55 @@ def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
     # Unauthenticated but not cacheable: the answer describes this gateway's
     # configuration, and a shared cache must not serve one gateway's to another.
     assert anonymous.headers["Cache-Control"] == "private, no-store, no-cache"
+
+
+def test_capabilities_publishes_what_a_bootstrap_contributed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The entitlement axis, answered by the server rather than a browser constant.
+
+    A bootstrap that contributes routers and rebinds nothing is the plugin case:
+    the base adapter grants what it installed, and the shell can learn the plugin
+    is present from the same payload it already reads first.
+    """
+    (tmp_path / "contributing_bootstrap.py").write_text(
+        "from fastapi import APIRouter\n\n"
+        "from gateway.container import Container, RouterContribution\n\n\n"
+        "def register(container: Container) -> None:\n"
+        "    for capability in ('zeta', 'alpha'):\n"
+        "        container.contribute_router(RouterContribution(capability=capability, router=APIRouter()))\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("contributing_bootstrap", None)
+    config = _standalone(tmp_path)
+    config.bootstrap = "contributing_bootstrap:register"
+    app = create_app(config)
+
+    try:
+        with TestClient(app) as client:
+            answered = client.get(f"{API_ROOT}/bootstrap").json()
+    finally:
+        sys.modules.pop("contributing_bootstrap", None)
+
+    # Sorted, like every other list here, so the payload is stable to diff.
+    assert answered["capabilities"] == ["alpha", "zeta"]
+    assert answered["surfaces"] == sorted(STANDALONE_SURFACES)
+
+
+def test_a_failing_entitlement_resolver_answers_no_capabilities_rather_than_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same degradation as the sign-in methods: this route must paint a page."""
+
+    async def _unavailable(_entitlements: object) -> list[str]:
+        raise SQLAlchemyError("database is down")
+
+    monkeypatch.setattr(BaseEntitlementAdapter, "entitlements", _unavailable)
+    app = create_app(_standalone(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get(f"{API_ROOT}/bootstrap")
+
+    assert response.status_code == 200
+    assert response.json()["capabilities"] == []
 
 
 def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
@@ -336,6 +388,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "deployment_type": "hybrid",
         "session_type": "none",
         "surfaces": [],
+        "capabilities": [],
         "sign_in_methods": [],
         "management_url": "https://otari.ai",
         "data_plane_url": None,

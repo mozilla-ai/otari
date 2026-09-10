@@ -1,8 +1,12 @@
-"""Entitlement adapter granting the base build's capability set.
+"""Entitlement adapter granting the base build's capability set plus what is installed.
 
 Satisfies :class:`gateway.ports.entitlement_port.EntitlementPort` with the
-fixed set of capabilities Otari's base build ships. An overlay binds a real
-resolver behind the same port.
+capabilities Otari's base build ships and the ones a bootstrap installed into
+this process by contributing a router for them. Whether a capability is
+*installed* and whether the deployment is *entitled* to it are two axes; with no
+real resolver bound, installed is the only evidence this build has, so it
+grants what it mounts. An overlay that binds a real resolver replaces this
+adapter entirely, so the entitlement axis is its own there.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,15 +28,17 @@ BASE_CAPABILITIES: frozenset[str] = frozenset()
 
 
 class BaseEntitlementAdapter:
-    """Entitlement adapter granting the fixed base capability set.
+    """Entitlement adapter granting the base capability set plus ``installed``.
 
-    The set is per deployment, so the request's database session is unused.
+    ``installed`` is what the composition root's contributions name. The set is
+    per deployment, so the request's database session is unused.
     """
 
-    def __init__(self, session: AsyncSession | None) -> None:
-        # Accepted to match the container's per-request factory; unused, because
-        # the base entitlement set is static per deployment.
+    def __init__(self, session: AsyncSession | None, installed: frozenset[str] = frozenset()) -> None:
+        # The session is accepted to match the container's per-request factory
+        # and unused, because the answer is static per deployment.
         del session
+        self._installed = installed
 
     async def entitlements(self) -> set[str]:
-        return set(BASE_CAPABILITIES)
+        return set(BASE_CAPABILITIES | self._installed)

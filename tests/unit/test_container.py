@@ -6,6 +6,7 @@ end-to-end path (an overlay module rebinding a port and adding a route to a
 running app) is in ``tests/integration/test_bootstrap_overlay.py``.
 """
 
+import asyncio
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -16,7 +17,7 @@ from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.billing_adapter import NullBillingAdapter
-from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.entitlement_adapter import BASE_CAPABILITIES, BaseEntitlementAdapter
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
@@ -289,6 +290,56 @@ def test_an_async_callable_object_bootstrap_is_refused_too(tmp_path: Path, monke
 
     with pytest.raises(BootstrapError, match="returned an awaitable"):
         build_container("async_callable_bootstrap:register")
+
+
+def test_the_base_build_grants_only_the_base_capabilities() -> None:
+    container = build_container()
+
+    assert container.contributed_capabilities() == frozenset()
+    entitlements = container.resolve(EntitlementPort, NO_SESSION)
+    assert asyncio.run(entitlements.entitlements()) == set(BASE_CAPABILITIES)
+
+
+def test_a_contributed_router_capability_is_granted_by_the_base_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A bootstrap that only adds a surface: it rebinds nothing, so the base
+    # adapter is still what answers, and it has to grant the capability it
+    # mounted or the route it contributed answers 404 in its own build.
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "contributing_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import Container, RouterContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_router(RouterContribution(capability="probe", router=APIRouter()))
+""",
+    )
+
+    container = build_container("contributing_bootstrap:register")
+
+    assert container.contributed_capabilities() == frozenset({"probe"})
+    entitlements = container.resolve(EntitlementPort, NO_SESSION)
+    assert isinstance(entitlements, BaseEntitlementAdapter)
+    assert asyncio.run(entitlements.entitlements()) == set(BASE_CAPABILITIES) | {"probe"}
+    assert container.summary == "contributing_bootstrap:register rebound no ports, contributed routers for probe"
+
+
+def test_the_contributed_set_is_read_when_the_port_is_resolved() -> None:
+    # The factory is bound before any bootstrap runs, so it must not capture the
+    # (empty) set at bind time.
+    container = build_container()
+    before = container.resolve(EntitlementPort, NO_SESSION)
+
+    container.contribute_router(RouterContribution(capability="late", router=APIRouter()))
+
+    assert asyncio.run(before.entitlements()) == set(BASE_CAPABILITIES)
+    assert asyncio.run(container.resolve(EntitlementPort, NO_SESSION).entitlements()) == {"late"}
 
 
 def test_router_contributions_keep_their_order() -> None:

@@ -30,10 +30,16 @@ describe("normalizeBootstrap", () => {
 
   it("empties a collection the gateway did not publish", () => {
     const completed = normalizeBootstrap(
-      omitting("surfaces", "sign_in_methods", "oauth_providers"),
+      omitting(
+        "surfaces",
+        "capabilities",
+        "sign_in_methods",
+        "oauth_providers",
+      ),
     )
 
     expect(completed.surfaces).toEqual([])
+    expect(completed.capabilities).toEqual([])
     expect(completed.sign_in_methods).toEqual([])
     expect(completed.oauth_providers).toEqual([])
   })

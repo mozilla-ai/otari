@@ -63,6 +63,8 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
   return {
     ...wire,
     surfaces: wire.surfaces ?? [],
+    // A gateway too old to publish the entitlement axis installs nothing gated.
+    capabilities: wire.capabilities ?? [],
     // Empty rather than `["master_key"]`, which is what a gateway old enough to
     // omit this would in fact have accepted. Naming a credential the server
     // never published is the guess this file exists to avoid, and the sign-in

@@ -126,6 +126,9 @@ export function bootstrap(
     deployment_type: "standalone",
     session_type: "local_operator",
     surfaces: [...STANDALONE_SURFACES],
+    // Nothing installed and nothing gated in the base build; a test about an
+    // entitled plugin overrides it.
+    capabilities: [],
     // The master key, because an unclaimed deployment is what a fixture
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],

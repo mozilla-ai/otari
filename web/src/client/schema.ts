@@ -842,6 +842,8 @@ export interface paths {
          *     marker, and the identity it names, to answer whether *that* identity holds a
          *     password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
          *     and ``get_db_if_needed`` hands it no session to read one from.
+         *     ``EntitlementPort`` is resolved in both modes on the same (possibly absent)
+         *     session, and the base adapter never reads it.
          */
         get: operations["bootstrap-get_bootstrap"];
         put?: never;
@@ -5986,6 +5988,11 @@ export interface components {
          * @description What the dashboard shell needs before it can render anything.
          */
         DeploymentBootstrap: {
+            /**
+             * Capabilities
+             * @description Capabilities this deployment resolves as entitled, sorted. The licensing (installed) axis, as distinct from surfaces, the topology axis: a surface says this process hosts a management API group, a capability says this deployment may use a gated feature, and a nav item is shown only where both agree. In the base build this is the set a bootstrap installed by contributing routers, so it is empty with no bootstrap; an overlay with a real entitlement resolver answers with whatever that resolver grants. Names are open-ended domain strings, not a closed enum, because an overlay ships capabilities the base cannot enumerate.
+             */
+            capabilities: string[];
             /**
              * Data Plane Url
              * @description Where this deployment's inference traffic belongs, when it is not served here. The mirror of management_url: that one says where management lives when this deployment is not the control plane, this one says where the data plane is when this deployment is not it. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone and hybrid, both of which serve inference at the address that reached this page. Not a human link target like management_url: it is the gateway's bare address, which the dashboard suffixes with the API root to build its request snippets. So it must carry no API root anywhere (a value ending in /api/v1, or a whole endpoint like /api/v1/chat/completions, renders that path twice) and no credential, since this response is unauthenticated. This gateway refuses both at startup; any deployment serving this contract should publish the same shape. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.

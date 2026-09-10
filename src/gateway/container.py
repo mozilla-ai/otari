@@ -160,15 +160,33 @@ class Container:
         """Return the recorded router contributions, in contribution order."""
         return tuple(self._router_contributions)
 
+    def contributed_capabilities(self) -> frozenset[str]:
+        """Return the capabilities the recorded router contributions name.
+
+        The installed axis, as distinct from the entitled one: a capability is
+        here because a router for it was mounted into this process, whatever a
+        real entitlement resolver would say about it.
+        """
+        return frozenset(contribution.capability for contribution in self._router_contributions)
+
 
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
     """Build the core ``BillingPort`` adapter for one request."""
     return NullBillingAdapter(session)
 
 
-def _entitlement_adapter(session: AsyncSession | None) -> EntitlementPort:
-    """Build the core ``EntitlementPort`` adapter for one request."""
-    return BaseEntitlementAdapter(session)
+def _entitlement_adapter(container: Container) -> PortFactory[EntitlementPort]:
+    """Build the core ``EntitlementPort`` factory, granting what ``container`` installs.
+
+    The contributed set is read when a request resolves the port, not when the
+    factory is bound, because the bootstrap that contributes routers runs after
+    the core bindings are in place.
+    """
+
+    def factory(session: AsyncSession | None) -> EntitlementPort:
+        return BaseEntitlementAdapter(session, installed=container.contributed_capabilities())
+
+    return factory
 
 
 def _model_provider_adapter(session: AsyncSession | None) -> ModelProviderPort:
@@ -264,9 +282,11 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     # Billing has no core implementation, so the default is the Null Object:
     # this deployment runs billing-free, holding and charging nothing.
     container.bind(BillingPort, _billing_adapter)
-    # Entitlement: the base grants the capability set it ships, which is
-    # currently empty, and reports every overlay-only capability as absent.
-    container.bind(EntitlementPort, _entitlement_adapter)
+    # Entitlement: the base grants the capability set it ships (currently
+    # empty) plus every capability a contributed router names, so a bootstrap
+    # that only adds a surface does not also have to rebind this port to
+    # unlock it. A bootstrap that binds a real resolver replaces the adapter.
+    container.bind(EntitlementPort, _entitlement_adapter(container))
     # Model inference: the base has no hosted-inference fleet, so every
     # candidate with no BYO credential is unavailable. Self-hosting is served
     # upstream of this port, not behind it.
