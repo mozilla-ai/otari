@@ -8,9 +8,12 @@ import { UserComboBox } from "./UserComboBox"
 /**
  * The owner picker: choose an existing user, or type an id that does not exist yet.
  *
- * It takes `users` as a prop rather than fetching, which is what lets the same
- * control serve the keys, budgets and routing pages without each of them growing
- * its own copy of the list.
+ * It takes `users` as a prop rather than fetching them, which is what lets the
+ * same control serve the keys and routing pages without each of them growing its
+ * own copy of the list. The one thing it does read for itself is the organization
+ * roster, which is how a member's row reads as their name with the id they are
+ * billed under beneath it; these stories run against no roster, so every row here
+ * is a plain id.
  *
  * Fixtures come from `src/tests/fixtures.ts`, so a field the gateway adds to
  * `User` arrives in these stories at the same time as in the tests.
@@ -58,29 +61,6 @@ export const WithDescription: Story = {
   args: {
     value: "ops@example.com",
     description: "The key is attributed to this user in usage and activity.",
-  },
-  render: (args) => (
-    <div className="w-[24rem]">
-      <UserComboBox {...args} />
-    </div>
-  ),
-}
-
-/**
- * `memberLabels` puts a human name beside an opaque id, for a deployment where a
- * user id is a UUID rather than an email.
- */
-export const WithMemberLabels: Story = {
-  args: {
-    value: "018f0000-0000-4000-8000-000000000001",
-    users: [
-      user({ user_id: "018f0000-0000-4000-8000-000000000001" }),
-      user({ user_id: "018f0000-0000-4000-8000-000000000002" }),
-    ],
-    memberLabels: new Map([
-      ["018f0000-0000-4000-8000-000000000001", "Ada Lovelace"],
-      ["018f0000-0000-4000-8000-000000000002", "Grace Hopper"],
-    ]),
   },
   render: (args) => (
     <div className="w-[24rem]">

@@ -1,18 +1,74 @@
-import { render, screen } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import type { ReactElement } from "react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { User } from "@/client"
+import type { DeploymentBootstrap, OrganizationMember, User } from "@/client"
 import { UserComboBox } from "@/features/users/UserComboBox"
+import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationMember } from "@/tests/fixtures"
 
 // Only the fields the picker reads; the rest of User is irrelevant here.
 function user(user_id: string, alias: string | null = null): User {
   return { user_id, alias } as User
 }
 
+// A roster row for the owner id it bills through, which is the join the picker
+// reads to put a name on that id.
+function member(
+  attributionUserId: string,
+  fullName: string,
+): OrganizationMember {
+  return organizationMember({
+    organization_member_id: attributionUserId,
+    attribution_user_id: attributionUserId,
+    full_name: fullName,
+  })
+}
+
+// Mocked at the transport rather than at the hook, so the component's own query,
+// its key and its surface gate all run.
+function mockRoster(members: OrganizationMember[], status = 200) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const isRoster = String(input).includes(
+      `${API_ROOT}/organizations/me/members`,
+    )
+    const body = isRoster
+      ? { data: members, count: members.length }
+      : { detail: "not mocked" }
+    return new Response(JSON.stringify(body), {
+      status: isRoster ? status : 501,
+      headers: { "Content-Type": "application/json" },
+    })
+  })
+}
+
+function renderBox(
+  ui: ReactElement,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <DeploymentProvider value={deployment}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
+  )
+}
+
+const UUID = "33333333-3333-3333-3333-333333333333"
+
 describe("UserComboBox", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("caps its width so the field and dropdown trigger stay within reach", () => {
-    render(<UserComboBox value="" onChange={() => {}} users={[]} />)
+    mockRoster([])
+    renderBox(<UserComboBox value="" onChange={() => {}} users={[]} />)
 
     // The field is bounded rather than stretching across the whole form (#328).
     const field = screen.getByRole("combobox").closest(".max-w-md")
@@ -20,7 +76,8 @@ describe("UserComboBox", () => {
   })
 
   it("says why the popover is empty rather than opening a silent box", async () => {
-    render(<UserComboBox value="" onChange={() => {}} users={[]} />)
+    mockRoster([])
+    renderBox(<UserComboBox value="" onChange={() => {}} users={[]} />)
 
     await userEvent.click(screen.getByRole("combobox"))
 
@@ -31,79 +88,133 @@ describe("UserComboBox", () => {
     ).toBeInTheDocument()
   })
 
-  it("names a member by the roster instead of the UUID they were minted under", async () => {
-    const uuid = "33333333-3333-3333-3333-333333333333"
-    render(
+  it("names a member by the roster, with their owner id as the second line", async () => {
+    mockRoster([member(UUID, "Alice Example")])
+    renderBox(
       <UserComboBox
         value=""
         onChange={() => {}}
-        users={[user(uuid, "alice@example.com"), user("ci-bot")]}
-        memberLabels={new Map([[uuid, "Alice Example"]])}
+        users={[user(UUID, "alice@example.com"), user("ci-bot")]}
       />,
     )
 
     await userEvent.click(screen.getByRole("combobox"))
 
-    // The member reads as a person. Without the map this option would render as
+    // The name leads and the id follows it as a muted line, which is what the
+    // row's accessible name carries too: without the roster this option read as
     // "33333333-… (alice@example.com)", which nobody can pick out of a list.
-    expect(
-      screen.getByRole("option", { name: "Alice Example" }),
-    ).toBeInTheDocument()
-    // A hand-made owner is already readable, so it is left exactly as it was.
+    const row = await screen.findByRole("option", {
+      name: `Alice Example (${UUID})`,
+    })
+    expect(within(row).getByText("Alice Example")).toBeInTheDocument()
+    expect(within(row).getByText(UUID)).toBeInTheDocument()
+    // A hand-made owner is already its own name, so it is left exactly as it was
+    // rather than given a hint that repeats the label.
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
-  it("sorts members ahead of the ids nobody named", async () => {
-    const uuid = "33333333-3333-3333-3333-333333333333"
-    render(
+  it("finds a member by the id they are billed under, not only by name", async () => {
+    mockRoster([member(UUID, "Alice Example")])
+    renderBox(
       <UserComboBox
         value=""
         onChange={() => {}}
-        users={[user("aaa-bot"), user(uuid, "zoe@example.com")]}
-        memberLabels={new Map([[uuid, "Zoe Example"]])}
+        users={[user(UUID), user("ci-bot")]}
       />,
+    )
+
+    await userEvent.type(screen.getByRole("combobox"), UUID)
+
+    // The id an operator pastes out of a log or an API response still reaches
+    // the person, even though the row no longer leads with it.
+    expect(
+      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
+  })
+
+  it("falls back to the bare id when the roster cannot be read", async () => {
+    mockRoster([], 500)
+    renderBox(
+      <UserComboBox value="" onChange={() => {}} users={[user(UUID)]} />,
     )
 
     await userEvent.click(screen.getByRole("combobox"))
 
+    // A failed roster read leaves the owner as findable as it was before names
+    // existed, rather than an empty row.
+    expect(
+      await screen.findByRole("option", { name: UUID }),
+    ).toBeInTheDocument()
+  })
+
+  it("asks for no roster on a deployment that hosts none", async () => {
+    const fetchMock = mockRoster([member(UUID, "Alice Example")])
+    renderBox(
+      <UserComboBox value="" onChange={() => {}} users={[user(UUID)]} />,
+      bootstrap({ surfaces: [] }),
+    )
+
+    await userEvent.click(screen.getByRole("combobox"))
+
+    expect(
+      await screen.findByRole("option", { name: UUID }),
+    ).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("sorts members ahead of the ids nobody named", async () => {
+    mockRoster([member(UUID, "Zoe Example")])
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        users={[user("aaa-bot"), user(UUID)]}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("combobox"))
+    await screen.findByRole("option", { name: `Zoe Example (${UUID})` })
+
     // Alphabetically "aaa-bot" wins; by relevance the member does, because a
-    // member is who someone means when issuing a key.
-    const options = screen.getAllByRole("option").map((o) => o.textContent)
-    expect(options).toEqual(["Zoe Example", "aaa-bot"])
+    // member is who someone means when issuing a key. The member's row reads as
+    // its two lines, name then id; the bot's is one line.
+    const rows = screen.getAllByRole("option").map((o) => o.textContent)
+    expect(rows).toEqual([`Zoe Example${UUID}`, "aaa-bot"])
   })
 
   it("submits the owner id, not the label shown for it", async () => {
-    const uuid = "33333333-3333-3333-3333-333333333333"
+    mockRoster([member(UUID, "Alice Example")])
     const changes: string[] = []
-    render(
+    renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(uuid, "alice@example.com")]}
-        memberLabels={new Map([[uuid, "Alice Example"]])}
+        users={[user(UUID, "alice@example.com")]}
       />,
     )
 
     await userEvent.click(screen.getByRole("combobox"))
-    await userEvent.click(screen.getByRole("option", { name: "Alice Example" }))
+    await userEvent.click(
+      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
+    )
 
     // The value that reaches POST /v1/keys has to be the id. Submitting the
     // label would have the keys API create a second user called "Alice Example".
-    expect(changes.at(-1)).toBe(uuid)
+    expect(changes.at(-1)).toBe(UUID)
   })
 
   it("submits a typed id even when it is another owner's roster name", async () => {
-    const uuid = "33333333-3333-3333-3333-333333333333"
+    // The collision: this member's roster name is exactly another user's id, and
+    // a member sorts ahead of it. Matching either field in one scan would
+    // resolve the typed id to the member's UUID and bill the key to them.
+    mockRoster([member(UUID, "ci-bot")])
     const changes: string[] = []
-    render(
+    renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(uuid), user("ci-bot")]}
-        // The collision: this member's roster name is exactly another user's id,
-        // and a member sorts ahead of it. Matching either field in one scan would
-        // resolve the typed id to the member's UUID and bill the key to them.
-        memberLabels={new Map([[uuid, "ci-bot"]])}
+        users={[user(UUID), user("ci-bot")]}
       />,
     )
 
@@ -113,52 +224,51 @@ describe("UserComboBox", () => {
   })
 
   it("submits the picked member, not the owner whose id is their roster name", async () => {
-    const uuid = "33333333-3333-3333-3333-333333333333"
+    // The same collision as above, reached from the other side: the row that was
+    // picked is the member, and their label is the other owner's id.
+    mockRoster([member(UUID, "ci-bot")])
     const changes: string[] = []
-    render(
+    renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(uuid), user("ci-bot")]}
-        // The same collision as above, reached from the other side: the row that
-        // was picked is the member, and their label is the other owner's id.
-        memberLabels={new Map([[uuid, "ci-bot"]])}
+        users={[user(UUID), user("ci-bot")]}
       />,
     )
 
     await userEvent.click(screen.getByRole("combobox"))
-    await userEvent.click(screen.getAllByRole("option", { name: "ci-bot" })[0])
+    await userEvent.click(
+      await screen.findByRole("option", { name: `ci-bot (${UUID})` }),
+    )
 
     // The member, not the `ci-bot` owner. This is what the display-text echo
     // would get wrong: the label reported after the id resolves by id first, and
     // an id match on "ci-bot" is a different row than the one that was clicked.
-    expect(changes.at(-1)).toBe(uuid)
+    expect(changes.at(-1)).toBe(UUID)
   })
 
   it("submits the member that was picked when two of them share a name", async () => {
     const first = "11111111-1111-1111-1111-111111111111"
     const second = "22222222-2222-2222-2222-222222222222"
+    // Two people, one name. A roster carries no uniqueness rule over
+    // `full_name`, so this is ordinary rather than a corner case.
+    mockRoster([member(first, "Alex Smith"), member(second, "Alex Smith")])
     const changes: string[] = []
-    render(
+    renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
         users={[user(first), user(second)]}
-        // Two people, one name. A roster carries no uniqueness rule over
-        // `full_name`, so this is ordinary rather than a corner case.
-        memberLabels={
-          new Map([
-            [first, "Alex Smith"],
-            [second, "Alex Smith"],
-          ])
-        }
       />,
     )
 
     await userEvent.click(screen.getByRole("combobox"))
-    const rows = screen.getAllByRole("option", { name: "Alex Smith" })
-    expect(rows).toHaveLength(2)
-    await userEvent.click(rows[1])
+    // One name on screen twice, told apart by the id under it, which is the
+    // whole reason the hint joins the accessible name.
+    expect(await screen.findAllByText("Alex Smith")).toHaveLength(2)
+    await userEvent.click(
+      screen.getByRole("option", { name: `Alex Smith (${second})` }),
+    )
 
     // Resolving the label back to a row would always answer with the first one,
     // so the second person could never be picked.

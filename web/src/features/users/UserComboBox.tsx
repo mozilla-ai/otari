@@ -6,10 +6,9 @@ import {
   ComboBoxField,
   type ComboBoxOption,
 } from "@/design-system/forms/ComboBoxField"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
 
-interface Option extends ComboBoxOption {
-  isMember: boolean
-}
+import { userOptionText } from "./userOptions"
 
 // A required "owner" picker for a new API key: choose an existing user or type a
 // new id to create one (the keys API creates a named user for any id it does not
@@ -24,7 +23,6 @@ export function UserComboBox({
   label = "Owner",
   placeholder = "Pick a user, or type a new id…",
   unknownHint,
-  memberLabels,
 }: {
   value: string
   onChange: (userId: string) => void
@@ -32,33 +30,28 @@ export function UserComboBox({
   description?: ReactNode
   label?: ReactNode
   placeholder?: string
-  // Names the organization members among these users, keyed by the owner id
-  // they bill through. Without it a member reads as the bare UUID their
-  // identity was minted under, which nobody can pick from a list.
-  memberLabels?: ReadonlyMap<string, string>
   // What to say when the typed id is not an existing user. Defaults to the
   // keys-page truth (that endpoint creates the user); callers whose endpoint
   // rejects an unknown id must override it rather than promise a creation that
   // will 404.
   unknownHint?: ReactNode
 }) {
-  // A member is named by the roster and sorted to the front: those are the
-  // owners someone means when issuing a key, and their raw id is a UUID that
-  // reads as noise next to a hand-made one like `ci-bot`. The id stays the
-  // value submitted either way; only the label changes.
-  const options: Option[] = users
+  // Read here rather than taken as a prop, so no call site can forget it and
+  // leave a person reading as the UUID their identity was minted under. The
+  // read is gated on the `organizations` surface and shares its query key with
+  // every other reader of the roster.
+  const memberLabels = useMemberAttributionLabels()
+
+  // The id stays the value submitted whatever the row reads as, and rides along
+  // as the hint so it is still what a search can match.
+  const options: ComboBoxOption[] = users
     .filter((u) => !u.user_id.startsWith("apikey-"))
-    .map((u) => {
-      const member = memberLabels?.get(u.user_id)
-      if (member) return { value: u.user_id, label: member, isMember: true }
-      return {
-        value: u.user_id,
-        label: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
-        isMember: false,
-      }
-    })
+    .map((u) => ({ value: u.user_id, ...userOptionText(u, memberLabels) }))
     .sort((a, b) => {
-      if (a.isMember !== b.isMember) return a.isMember ? -1 : 1
+      // A roster-named row is the one carrying a hint, and it sorts to the
+      // front: a member is who someone means when issuing a key, where a
+      // hand-made id like `ci-bot` is a tool.
+      if (Boolean(a.hint) !== Boolean(b.hint)) return a.hint ? -1 : 1
       return a.label.localeCompare(b.label)
     })
 

@@ -442,7 +442,6 @@ function CreateKeyForm({
     useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
-  const memberLabels = useMemberAttributionLabels()
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [userId, setUserId] = useState("")
   const [allowedModels, setAllowedModels] = useState<string[] | null>(null)
@@ -539,7 +538,6 @@ function CreateKeyForm({
           value={userId}
           onChange={setUserId}
           users={users.data ?? []}
-          memberLabels={memberLabels}
         />
       ) : (
         <p className="text-caption">

@@ -22,8 +22,16 @@ export interface ComboBoxOption {
   isDisabled?: boolean
 }
 
-const optionText = (option: ComboBoxOption) =>
-  option.hint ? `${option.label} (${option.hint})` : option.label
+/**
+ * A row's accessible name: its label, with its hint in parentheses.
+ *
+ * Exported for a picker that renders its own `ListBox` rows rather than going
+ * through this field, so two controls an operator reads as a pair cannot
+ * describe one row differently.
+ */
+export const comboBoxOptionText = (
+  option: Pick<ComboBoxOption, "label" | "hint">,
+) => (option.hint ? `${option.label} (${option.hint})` : option.label)
 
 /**
  * One of a set, searchable, in a form the operator submits.
@@ -142,7 +150,7 @@ export function ComboBoxField({
       onSelectionChange={(key) => {
         if (key == null) return
         const picked = options.find((option) => option.value === String(key))
-        echoRef.current = picked ? optionText(picked) : undefined
+        echoRef.current = picked ? comboBoxOptionText(picked) : undefined
         onChange(String(key))
       }}
       isRequired={isRequired}
@@ -187,12 +195,12 @@ export function ComboBoxField({
           {(option: ComboBoxOption) => (
             <ListBoxItem
               id={option.value}
-              textValue={optionText(option)}
+              textValue={comboBoxOptionText(option)}
               // Spelled out, because the row has two text nodes and the name
               // computed from them runs the hint onto the end of the label with
               // no separator. The hint belongs in the name rather than being
               // dropped from it: it is what tells two rows with one label apart.
-              aria-label={option.hint ? optionText(option) : undefined}
+              aria-label={option.hint ? comboBoxOptionText(option) : undefined}
               isDisabled={option.isDisabled}
             >
               <span className="flex flex-col">

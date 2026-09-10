@@ -12,7 +12,8 @@ import type {
 import { RoutingPage } from "@/features/routing/RoutingPage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
-import { organizationContext } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const policy = (
@@ -165,6 +166,11 @@ function mockApi(
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())
       }
+      // The user picker's roster read. Empty here: these tests are about
+      // policies, and every owner in `USERS` is a plain id rather than a member.
+      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
+        return jsonResponse({ data: [], count: 0 })
+      }
       if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
         return jsonResponse({
           name: "fast",
@@ -286,12 +292,17 @@ function mockApi(
   return { spy, calls }
 }
 
+// The user picker asks the organization roster what to call each owner, and that
+// read is gated on the `organizations` surface, so these pages need the
+// deployment context the shell always gives them.
 function renderPage(ui: ReactElement, url = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url }) },
   )
 }
@@ -307,9 +318,11 @@ function renderInWorkspace(ui: ReactElement, url = "/") {
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url }) },
   )
 }
@@ -1468,9 +1481,11 @@ describe("RoutingPage", () => {
       memberPolicies: [policy("mine", CHAIN)],
     })
     render(
-      <QueryClientProvider client={client}>
-        <RoutingPage />
-      </QueryClientProvider>,
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <RoutingPage />
+        </QueryClientProvider>
+      </DeploymentProvider>,
       { wrapper: withRouter({ url: "/" }) },
     )
 
