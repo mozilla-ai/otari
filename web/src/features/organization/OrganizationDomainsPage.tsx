@@ -9,12 +9,13 @@ import { CopyField } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
+import { Select } from "@/design-system/forms/Select"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   useCreateOrganizationDomain,
   useDeleteOrganizationDomain,
@@ -68,7 +69,13 @@ const AUTO_JOIN_ROLE_OPTIONS = [
   { value: "viewer", label: "Viewer" },
 ]
 
-function ClaimForm({ onClose }: { onClose: () => void }) {
+function ClaimForm({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) {
   const create = useCreateOrganizationDomain()
   const [domain, setDomain] = useState("")
   const [role, setRole] = useState("member")
@@ -79,21 +86,24 @@ function ClaimForm({ onClose }: { onClose: () => void }) {
       default_role: role === "viewer" ? "viewer" : "member",
       enabled: true,
     }
-    create.mutate(body, {
-      onSuccess: () => {
-        setDomain("")
-        onClose()
-      },
-    })
+    create.mutate(body, { onSuccess: onClose })
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="sm"
+      title="New domain"
+      submitLabel="Claim domain"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={domain.trim() === ""}
+      isDirty={domain.trim() !== ""}
+      error={create.error}
     >
-      <h2 className="text-title">Claim an email domain</h2>
-      <ErrorBanner error={create.error} />
       <Field
         label="Domain"
         value={domain}
@@ -103,30 +113,18 @@ function ClaimForm({ onClose }: { onClose: () => void }) {
         placeholder="example.com"
         description="The domain your colleagues' addresses end in. A whole address works too; only its domain is stored. Public providers like gmail.com can't be claimed."
       />
-      <FilterSelect
+      <Select
         label="They join as"
         value={role}
         onChange={setRole}
         options={AUTO_JOIN_ROLE_OPTIONS}
+        reserveMessage={false}
       />
       <p className="text-caption">
         Nothing happens until you publish the DNS record this creates and verify
         it. Anyone who already has an account joins on their next sign-in.
       </p>
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={domain.trim() === ""}
-          isPending={create.isPending}
-          onPress={submit}
-        >
-          Claim domain
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -191,6 +189,7 @@ export function OrganizationDomainsPage() {
   const update = useUpdateOrganizationDomain()
   const remove = useDeleteOrganizationDomain()
   const [adding, setAdding] = useState(false)
+  const [openCount, setOpenCount] = useState(0)
   const [pendingDelete, setPendingDelete] = useState<OrganizationDomain>()
 
   const rows = domains.data?.data ?? []
@@ -286,8 +285,15 @@ export function OrganizationDomainsPage() {
       <PageIntro
         title="Email domains"
         action={
-          canEdit && !adding ? (
-            <Button variant="primary" onPress={() => setAdding(true)}>
+          canEdit ? (
+            <Button
+              // Visible while the dialog is open: the dialog is over the page.
+              variant="primary"
+              onPress={() => {
+                setOpenCount((count) => count + 1)
+                setAdding(true)
+              }}
+            >
               Claim domain
             </Button>
           ) : null
@@ -309,7 +315,14 @@ export function OrganizationDomainsPage() {
         </InfoBanner>
       ) : null}
 
-      {adding ? <ClaimForm onClose={() => setAdding(false)} /> : null}
+      {/* Keyed on the open count, so each open remounts a blank form. Clearing
+          the draft on close instead would blank the fields while the dialog is
+          still animating away. */}
+      <ClaimForm
+        key={openCount}
+        isOpen={adding}
+        onClose={() => setAdding(false)}
+      />
 
       {pending.map((row) => (
         <PendingProof key={row.id} row={row} />

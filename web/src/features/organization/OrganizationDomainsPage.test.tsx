@@ -220,6 +220,40 @@ describe("OrganizationDomainsPage", () => {
     })
   })
 
+  it("keeps the header trigger on screen while the dialog is open", async () => {
+    // The dialog sits over the page rather than replacing the action, so the
+    // control that opened it does not vanish from under the pointer.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    const trigger = await screen.findByRole("button", { name: "Claim domain" })
+    await user.click(trigger)
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(trigger).toBeVisible()
+  })
+
+  it("opens on a blank draft after a close, not on the last one typed", async () => {
+    // Reset on the way in: clearing on the way out would blank the fields
+    // while the dialog is still animating away.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Claim domain" }),
+    )
+    await user.type(screen.getByLabelText(/Domain/), "acme.example")
+    // A draft this far along is dirty, so the way out is through the guard.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Claim domain" }))
+    expect(await screen.findByLabelText(/Domain/)).toHaveValue("")
+  })
+
   it("never offers a management role, because a DNS record must not mint admins", async () => {
     mockApi()
     renderPage(<OrganizationDomainsPage />)
