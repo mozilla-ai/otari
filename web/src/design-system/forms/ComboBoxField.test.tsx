@@ -112,6 +112,50 @@ describe("ComboBoxField", () => {
     expect(seen.at(-1)).toBe("Ada Lovelace!")
   })
 
+  it("keeps text typed over a picked row when the field is left", async () => {
+    const seen: string[] = []
+    render(
+      <Harness
+        allowsCustomValue
+        options={[{ value: "018f-0001", label: "Ada Lovelace" }]}
+        onValue={(value) => seen.push(value)}
+      />,
+    )
+
+    const field = screen.getByRole("combobox", { name: "Serves" })
+    await userEvent.click(field)
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Ada Lovelace" }),
+    )
+    await userEvent.clear(field)
+    await userEvent.type(field, "ci-bot")
+    await userEvent.tab()
+
+    // Leaving the field is what commits it, and react-aria clears its selection
+    // there when the text no longer matches the row. The typed value has to
+    // survive that: it is what the form submits.
+    expect(seen.at(-1)).toBe("ci-bot")
+    expect(field).toHaveValue("ci-bot")
+  })
+
+  it("returns to the picked row when custom values are not allowed", async () => {
+    render(
+      <Harness options={[{ value: "018f-0001", label: "Ada Lovelace" }]} />,
+    )
+
+    const field = screen.getByRole("combobox", { name: "Serves" })
+    await userEvent.click(field)
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Ada Lovelace" }),
+    )
+    await userEvent.type(field, "zzz")
+    await userEvent.tab()
+
+    // A whitelist keeps no text nobody offered, so the box goes back to
+    // reading as the value rather than sitting on a search that lost.
+    expect(field).toHaveValue("Ada Lovelace")
+  })
+
   it("publishes the input's text for a caller that filters", async () => {
     const queries: string[] = []
     render(
