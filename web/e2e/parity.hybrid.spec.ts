@@ -42,8 +42,8 @@ test.describe("hybrid deployment", () => {
       // Empty, not a subset: this gateway mounts none of the management API, so
       // a surface named here would be a page with no server behind it.
       surfaces: [],
-      // Empty, for the other axis: nothing here installs a capability, and a
-      // hybrid gateway's entitlements are otari.ai's to resolve.
+      // The entitlement axis, answered by the same base adapter in every mode:
+      // empty because no bootstrap contributes a router in this environment.
       capabilities: [],
       // No session to mint, so no credential to offer. This is why the shell
       // renders the landing page rather than a sign-in screen.

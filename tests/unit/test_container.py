@@ -339,7 +339,9 @@ def test_the_contributed_set_is_read_when_the_port_is_resolved() -> None:
     container.contribute_router(RouterContribution(capability="late", router=APIRouter()))
 
     assert asyncio.run(before.entitlements()) == set(BASE_CAPABILITIES)
-    assert asyncio.run(container.resolve(EntitlementPort, NO_SESSION).entitlements()) == {"late"}
+    assert asyncio.run(container.resolve(EntitlementPort, NO_SESSION).entitlements()) == set(BASE_CAPABILITIES) | {
+        "late"
+    }
 
 
 def test_router_contributions_keep_their_order() -> None:
