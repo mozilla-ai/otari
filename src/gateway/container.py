@@ -141,9 +141,9 @@ class MigrationContribution:
     declared value only to refuse a collision with core's ``alembic_version``
     and with another contribution. A contributed chain must not
     reference a core table by foreign key in a way that would block a core
-    migration: the core chain runs first and knows nothing about the
-    contributed tables, so a core revision that rebuilds a table (SQLite has
-    no ``ALTER`` for constraints) fails on a foreign key it did not create.
+    migration: the core chain runs first and knows nothing about contributed
+    tables, so a core revision that drops or rebuilds a table the contribution
+    points at fails on a constraint the core chain did not create.
 
     ``name`` identifies the chain in the startup log and in errors; it is
     unique among contributions, as is ``version_table``.
@@ -264,11 +264,15 @@ class Container:
         the database.
 
         Raises:
-            MigrationContributionError: If the contribution claims Otari's own
-                version table, or a version table or name another
-                contribution already holds.
+            MigrationContributionError: If a field is blank, if the contribution
+                claims Otari's own version table, or if it claims a version
+                table or name another contribution already holds.
 
         """
+        for field in ("name", "script_location", "version_table"):
+            if not getattr(contribution, field).strip():
+                msg = f"Migration contribution {contribution.name!r} has a blank {field}"
+                raise MigrationContributionError(msg)
         if contribution.version_table == CORE_VERSION_TABLE:
             msg = (
                 f"Migration contribution {contribution.name!r} claims {CORE_VERSION_TABLE!r}, "

@@ -443,3 +443,15 @@ def register(container: Container) -> None:
 
     assert [contribution.name for contribution in container.migration_contributions()] == ["alerts"]
     assert container.summary == "chain_bootstrap:register rebound no ports, contributed migration chains alerts"
+
+
+@pytest.mark.parametrize("field", ["name", "script_location", "version_table"])
+def test_a_migration_contribution_with_a_blank_field_is_refused(field: str) -> None:
+    container = Container()
+    values = {"name": "one", "script_location": "/plugins/one/alembic", "version_table": "one_alembic_version"}
+    values[field] = "   "
+
+    with pytest.raises(MigrationContributionError, match=f"blank {field}"):
+        container.contribute_migrations(MigrationContribution(**values))
+
+    assert container.migration_contributions() == ()

@@ -170,7 +170,9 @@ A contributed **migration chain** is the other additive half, for a module that 
 ```python
 def register(container: Container) -> None:
     container.contribute_migrations(
-        MigrationContribution(name="alerts", script_location=str(ALERTS_ALEMBIC_DIR), version_table="alerts_alembic_version")
+        MigrationContribution(
+            name="alerts", script_location=str(ALERTS_ALEMBIC_DIR), version_table="alerts_alembic_version"
+        )
     )
 ```
 
