@@ -75,7 +75,7 @@ says the same about React Aria popovers under "Checks".
 
 ## Dialog
 
-Modal and centered. Three of them, and the question sorts them:
+Modal. Three of them, and the question sorts them:
 
 - **`FormDialog`** when the operator is creating or editing an object. Every
   create flow in the product, no exceptions. See [feedback.md](feedback.md).
