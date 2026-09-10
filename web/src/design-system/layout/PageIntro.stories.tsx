@@ -57,3 +57,25 @@ export const TwoActions: Story = {
     ),
   },
 }
+
+/**
+ * `docsHref` trails the description rather than taking the action slot, which
+ * is the distinction worth keeping: the action slot is the one thing the band
+ * exists to do, and a link to the manual competing for it is how a page ends up
+ * with two things claiming to be that.
+ */
+export const WithDocsLink: Story = {
+  args: {
+    children: "A key authenticates a caller against this gateway.",
+    docsHref: "https://example.com/docs/api-keys",
+  },
+}
+
+/** Both, so the link and the primary action are visibly not the same slot. */
+export const DocsLinkAndAction: Story = {
+  args: {
+    children: "A key authenticates a caller against this gateway.",
+    docsHref: "https://example.com/docs/api-keys",
+    action: <Button variant="primary">Create key</Button>,
+  },
+}

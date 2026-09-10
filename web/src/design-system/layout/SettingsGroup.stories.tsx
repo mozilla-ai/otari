@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-
 import { Button } from "../actions/Button"
 import { Field } from "../forms/Field"
 import { Toggle } from "../forms/Toggle"
+import { SettingRow } from "./SettingRow"
 import { SettingsGroup } from "./SettingsGroup"
 
 /**
@@ -89,6 +89,70 @@ export const WithSave: Story = {
           <Button variant="primary">Save</Button>
         </div>
       </div>
+    </SettingsGroup>
+  ),
+}
+
+/**
+ * `bounded` is the other shape: the heading sits unruled above a framed block of
+ * rows, inside the page column rather than bleeding to the scroll area's edges.
+ * It reads as one object on a page that stacks several small groups, where the
+ * full-width bands run together into a single striped field.
+ *
+ * It is also what carries `.otari-settings`, the dense place, so **the controls
+ * inside a bounded group are 32px rather than the form height**, and 44px at
+ * 16px below `md` where a row's control stacks full width. Compare a row here
+ * with one in `Default` above.
+ */
+export const Bounded: Story = {
+  render: () => (
+    <div className="flex max-w-2xl flex-col gap-6">
+      <SettingsGroup
+        bounded
+        title="Web search"
+        description="Which backend answers a search tool call."
+      >
+        <SettingRow
+          label="Backend URL"
+          configKey="web_search_url"
+          help="Reachable from the gateway, not from the browser."
+          control={
+            <Field
+              label="Backend URL"
+              value="https://search.internal"
+              onChange={() => {}}
+            />
+          }
+        />
+        <SettingRow
+          label="Max uses per request"
+          configKey="web_search_max_uses"
+          control={<Field label="Max uses" value="5" onChange={() => {}} />}
+        />
+      </SettingsGroup>
+    </div>
+  ),
+}
+
+/**
+ * `docsHref` trails the description, for the page of the manual this group is
+ * about. It renders a `DocsLink`, so it is always external and always opens in
+ * a new tab.
+ */
+export const WithDocsLink: Story = {
+  render: () => (
+    <SettingsGroup
+      bounded
+      title="Code execution"
+      description="Whether a request may run code, and where."
+      docsHref="https://example.com/docs/tools#code-execution"
+    >
+      <SettingRow
+        label="Allow code execution"
+        control={
+          <Field label="Allow code execution" value="off" onChange={() => {}} />
+        }
+      />
     </SettingsGroup>
   ),
 }

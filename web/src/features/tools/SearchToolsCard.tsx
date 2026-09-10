@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
 import type {
   ConfigSearchTool,
@@ -6,6 +5,7 @@ import type {
   StoredSearchTool,
   UpdateSearchToolRequest,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"

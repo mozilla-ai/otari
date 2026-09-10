@@ -8,6 +8,35 @@ import { buildManifest } from "../../pwaManifest"
 // Resolved from the Vitest root (web/) rather than import.meta.url, which the
 // jsdom environment reports as an http URL. Same reason as src/routes.test.ts.
 const WEB = process.cwd()
+
+/**
+ * Every path under `root`, with the probe directory skipped and the walk
+ * retried once.
+ *
+ * Nine sweeps in this file read the source tree, and `architecture.test.ts`
+ * plants a throwaway module under `src/<layer>/__boundary_probe__/` for the
+ * length of one assertion and removes it again. Vitest runs the two files in
+ * parallel, so without this a sweep either reads the probe and reports it as an
+ * offender, or recurses into a directory that vanished mid-walk and throws
+ * instead of yielding a short list. Both are intermittent, which is the worst
+ * kind of red.
+ *
+ * `overlaySeams.test.ts` and `shared/telemetry/overlayTelemetry.test.ts` each
+ * already carry their own version of this; that they had to is what says it
+ * belongs in one place per file that sweeps. Separators are normalized here
+ * too, since every call site wanted that anyway.
+ */
+function walk(root: string): string[] {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return readdirSync(root, { recursive: true })
+        .map((name) => String(name).replaceAll("\\", "/"))
+        .filter((name) => !name.split("/").includes("__boundary_probe__"))
+    } catch (error) {
+      if (attempt > 0) throw error
+    }
+  }
+}
 const CSS = readFileSync(join(WEB, "src", "styles", "globals.css"), "utf8")
 
 /**
@@ -683,9 +712,7 @@ describe("a table is a region, not a card", () => {
 
 describe("a token named as a class is registered", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => /\.tsx?$/.test(name))
+  const sources = walk(SRC).filter((name) => /\.tsx?$/.test(name))
 
   // Every `--color-*` this stylesheet declares anywhere.
   const declared = new Set(
@@ -772,14 +799,12 @@ describe("semantic tokens only", () => {
   // share card is rasterized through an <img>-loaded SVG document, where a
   // custom property does not resolve, so its palette has to be literal.
   const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter(
-      (name) =>
-        /\.tsx?$/.test(name) &&
-        !/\.test\.tsx?$/.test(name) &&
-        !EXCEPTIONS.has(name),
-    )
+  const sources = walk(SRC).filter(
+    (name) =>
+      /\.tsx?$/.test(name) &&
+      !/\.test\.tsx?$/.test(name) &&
+      !EXCEPTIONS.has(name),
+  )
 
   it("covers the source tree", () => {
     // A guard on the guard: a moved directory or a broken filter would leave
@@ -846,9 +871,9 @@ describe("semantic tokens only", () => {
 // rule without a test does.
 describe("headings wear a type role", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   it("covers the source tree", () => {
     // Same guard as the token sweep above: an empty list passes vacuously.
@@ -982,9 +1007,9 @@ describe("content text wears a type role", () => {
   }
 
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+  const sources = walk(SRC).filter(
+    (name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name),
+  )
   // Block comments go first, for the reason the heading sweep drops them:
   // `ActivityPage` explains in a JSX comment, in backticks, why a `<th>` on
   // `text-overline` carries no `text-muted`.
@@ -1264,8 +1289,7 @@ describe("the shell chrome's type roles", () => {
     // exempting the layer the call site moved to.
     const ROOTS = [join(WEB, "src", "app"), join(WEB, "src", "design-system")]
     const users = ROOTS.flatMap((root) =>
-      readdirSync(root, { recursive: true })
-        .map((name) => String(name).replaceAll("\\", "/"))
+      walk(root)
         .filter(
           (name) =>
             /\.tsx$/.test(name) &&
@@ -1290,8 +1314,7 @@ describe("the shell chrome's type roles", () => {
 describe("no font size is written at a call site", () => {
   it("leaves no arbitrary font size anywhere in the tree", () => {
     const SRC = join(WEB, "src")
-    const offenders = readdirSync(SRC, { recursive: true })
-      .map((name) => String(name).replaceAll("\\", "/"))
+    const offenders = walk(SRC)
       .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
       .filter((name) =>
         // `text-[` followed by a digit: an arbitrary size, as opposed to an
@@ -1392,9 +1415,9 @@ describe("the phone viewport's touch-target floor", () => {
 // target is meant to be 44.
 describe("checkboxes come from the design foundation", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   it("covers the source tree", () => {
     expect(sources.length).toBeGreaterThan(30)
@@ -1413,9 +1436,9 @@ describe("checkboxes come from the design foundation", () => {
 // are not `DataTable`, which gets this from react-aria) are where they live.
 describe("every column header says what it heads", () => {
   const SRC = join(WEB, "src")
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   it("covers the source tree", () => {
     expect(sources.length).toBeGreaterThan(30)
@@ -1484,9 +1507,9 @@ describe("a field's trailing glyph is spaced once", () => {
 describe("buttons come in three variants", () => {
   const SRC = join(WEB, "src")
   const RETIRED = ["outline", "secondary", "tertiary", "danger-soft"]
-  const sources = readdirSync(SRC, { recursive: true })
-    .map((name) => String(name).replaceAll("\\", "/"))
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+  const sources = walk(SRC).filter(
+    (name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"),
+  )
 
   /**
    * The index just past the balanced region starting at `text[start]`, which is

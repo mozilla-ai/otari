@@ -1,7 +1,6 @@
-import { Button } from "@heroui/react"
 import { useId, useState } from "react"
-
 import type { ToolSettingField } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { SettingRow } from "@/design-system/layout/SettingRow"

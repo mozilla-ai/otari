@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useRef, useState } from "react"
 import { FiCheck } from "react-icons/fi"
-
 import type {
   ToolServiceName,
   ToolSettingField,
   UpdateToolSettingsRequest,
 } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { isDeploymentOperator } from "@/features/organization/roles"
@@ -254,17 +254,6 @@ function SaveToast({ message }: { message: string | null }) {
   )
 }
 
-// A box at the size of what is coming. Drawn here rather than shared: this is
-// the only place in the product holding a settings row's shape open.
-function Placeholder({ className }: { className: string }) {
-  return (
-    <span
-      aria-hidden
-      className={`block animate-pulse bg-surface-subtle motion-reduce:animate-none ${className}`}
-    />
-  )
-}
-
 /** The frames, at the real row height, so settings arriving does not move the page. */
 function LoadingGroups() {
   return (
@@ -277,10 +266,10 @@ function LoadingGroups() {
               className="flex min-h-11 items-center gap-6 px-4 py-3"
             >
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <Placeholder className="h-4 w-40" />
-                <Placeholder className="h-3.5 w-64" />
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3.5 w-64" />
               </div>
-              <Placeholder className="h-8 w-[13.75rem] shrink-0" />
+              <Skeleton className="h-8 w-[13.75rem] shrink-0" />
             </div>
           ))}
         </SettingsGroup>
