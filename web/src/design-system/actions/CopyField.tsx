@@ -197,6 +197,16 @@ export function CopyField({
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   )
+  // The value on screen right now, which is not what `copy` below closes over:
+  // that is the value of the render the press happened in, and a credential can
+  // arrive while the attempt is in flight. Controlled mode needs it because
+  // `onRevealChange` carries a bare boolean and cannot say which value a reveal
+  // was asked for; uncontrolled mode keys on the value itself through
+  // `revealedValue`.
+  const latestValue = useRef(value)
+  useEffect(() => {
+    latestValue.current = value
+  }, [value])
   // The value a failed copy asked to have selected, once revealing it has put
   // it on the field: `select()` in the failure's own tick would span the
   // stand-in, and the value React writes on the revealing render discards a
@@ -246,7 +256,7 @@ export function CopyField({
       if (ref.current?.value === copying) {
         ref.current.focus()
         ref.current.select()
-      } else {
+      } else if (latestValue.current === copying) {
         selectOnReveal.current = copying
         setRevealed(true)
       }

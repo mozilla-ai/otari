@@ -470,6 +470,48 @@ describe("CopyField, concealed", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("asks for no reveal when a controlled field's value changed mid-copy", async () => {
+    // The controlled twin of the case above, and the one the value keying does
+    // not cover: `onRevealChange` carries a bare boolean, so a caller told to
+    // reveal has no way to know which value the reveal was for and would put
+    // the replacement on screen unasked.
+    const user = userEvent.setup()
+    let refuse: (reason: Error) => void = () => {}
+    vi.spyOn(navigator.clipboard, "writeText").mockReturnValue(
+      new Promise((_resolve, reject) => {
+        refuse = reject
+      }),
+    )
+    const onRevealChange = vi.fn()
+    const { rerender } = render(
+      <CopyField
+        label="Secret key"
+        value="gw-first-secret"
+        concealed={CONCEALED_SECRET}
+        isRevealed={false}
+        onRevealChange={onRevealChange}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Copy" }))
+    rerender(
+      <CopyField
+        label="Secret key"
+        value="gw-second-secret"
+        concealed={CONCEALED_SECRET}
+        isRevealed={false}
+        onRevealChange={onRevealChange}
+      />,
+    )
+    refuse(new Error("not a secure context"))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
+    })
+    expect(onRevealChange).not.toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain("gw-second-secret")
+  })
+
   it("rejects concealing a field that carries an action, at the type level", () => {
     render(
       // @ts-expect-error nothing hands out a credential beside a
