@@ -224,27 +224,6 @@ describe("UserComboBox", () => {
     expect(changes.at(-1)).toBe("ci-bot")
   })
 
-  it("does not turn a typed display name into the id it names", async () => {
-    mockRoster([member(UUID, "Alice Example")])
-    const changes: string[] = []
-    renderBox(
-      <UserComboBox
-        value=""
-        onChange={(id) => changes.push(id)}
-        users={[user(UUID)]}
-      />,
-    )
-
-    await userEvent.type(screen.getByRole("combobox"), "Alice Example")
-
-    // Deliberate, and the honest version of the case that produced the two
-    // collisions above: picking the row is how an existing person is chosen,
-    // and a typed name is an id of its own. Resolving it to Alice's UUID would
-    // be a guess, since a roster puts no uniqueness rule on a name.
-    expect(changes.at(-1)).toBe("Alice Example")
-    expect(changes).not.toContain(UUID)
-  })
-
   it("submits the picked member, not the owner whose id is their roster name", async () => {
     // The same collision as above, reached from the other side: the row that was
     // picked is the member, and their label is the other owner's id.
@@ -263,9 +242,8 @@ describe("UserComboBox", () => {
       await screen.findByRole("option", { name: `ci-bot (${UUID})` }),
     )
 
-    // The member, not the `ci-bot` owner. This is what the display-text echo
-    // would get wrong: the label reported after the id resolves by id first, and
-    // an id match on "ci-bot" is a different row than the one that was clicked.
+    // The member, not the `ci-bot` owner. A picked row reports its own id, so
+    // the row that was clicked is the only answer this can have.
     expect(changes.at(-1)).toBe(UUID)
   })
 
@@ -295,5 +273,26 @@ describe("UserComboBox", () => {
     // Resolving the label back to a row would always answer with the first one,
     // so the second person could never be picked.
     expect(changes.at(-1)).toBe(second)
+  })
+
+  it("does not turn a typed display name into the id it names", async () => {
+    mockRoster([member(UUID, "Alice Example")])
+    const changes: string[] = []
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={(id) => changes.push(id)}
+        users={[user(UUID)]}
+      />,
+    )
+
+    await userEvent.type(screen.getByRole("combobox"), "Alice Example")
+
+    // Deliberate, and the honest version of the two collisions above: picking
+    // the row is how an existing person is chosen, and a typed name is an id of
+    // its own. Resolving it to Alice's UUID would be a guess, since a roster
+    // puts no uniqueness rule on a name.
+    expect(changes.at(-1)).toBe("Alice Example")
+    expect(changes).not.toContain(UUID)
   })
 })
