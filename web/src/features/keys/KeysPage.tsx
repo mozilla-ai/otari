@@ -25,6 +25,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
@@ -106,61 +107,71 @@ const label = (k: ApiKey): string => k.key_name ?? k.id
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
 const getKeyRowKey = (k: ApiKey): string => k.id
 
-// ---------- one-time reveal ----------
+// ---------- the one-time secret ----------
 
 /**
- * The highest-stakes moment: the plaintext key, shown once.
+ * The line under the key, naming what was just made.
  *
- * A strip between the page header and the table rather than a modal. The modal
- * existed to make the acknowledgement unavoidable, and it bought that with a
- * focus trap, a swallowed Esc and a backdrop that ignored clicks, all of which
- * are a dialog fighting its own conventions. A strip that stays until it is
- * acknowledged does the same job without pretending to be dismissible: there is
- * one control and it is the acknowledgement. The page scrolls to it on reveal,
- * so it is never announced somewhere the operator is not looking.
+ * Three facts, each dropped when it is not there rather than printed empty. The
+ * owner is a name or nothing: `user_id` is an identifier, and an identifier in a
+ * sentence is noise to the person who just chose the owner from a list. There is
+ * deliberately no spend figure, though the frame it sits in is where one would
+ * look for it: a key has no budget of its own, only its owner's, which is what
+ * the paragraph above the table already says and links to.
  */
-function RevealSecretStrip({
-  title,
+export function secretCaption(
+  result: CreateKeyResponse,
+  memberLabels: ReadonlyMap<string, string>,
+): string {
+  const owner =
+    result.user_id && !isVirtualUser(result.user_id)
+      ? memberLabels.get(result.user_id)
+      : undefined
+  return [
+    owner ? `Owner ${owner}` : null,
+    accessLabel(result.allowed_models).text,
+    result.expires_at
+      ? `expires ${formatDate(result.expires_at)}`
+      : "never expires",
+  ]
+    .filter((part) => part !== null)
+    .join(" · ")
+}
+
+/**
+ * The plaintext key, shown once, and everything that has to travel with it.
+ *
+ * This was a strip between the page header and the table, and its docstring
+ * argued against exactly the modal it now lives in: a focus trap, a swallowed
+ * Esc and a backdrop that ignored clicks were a dialog fighting its own
+ * conventions. The objection was to those behaviors rather than to the surface,
+ * and `FormDialog` has none of them, except where this content needs one:
+ * `isDismissable={false}` is the strip's "there is one control and it is the
+ * acknowledgement", kept because a stray backdrop click here loses the key
+ * forever.
+ *
+ * The snippets come with it. An operator creating their first key arrives from
+ * the empty state, and "make your first call" is the next thing they need, so
+ * leaving it behind on the page would have made this dialog the one place the
+ * flow got worse.
+ */
+function KeySecretStep({
+  announce,
   result,
-  returnFocusRef,
-  onClose,
+  memberLabels,
+  secretRef,
 }: {
-  title: string
+  /** The dialog's title, repeated as the alert's own name. */
+  announce: string
   result: CreateKeyResponse
-  returnFocusRef: RefObject<HTMLButtonElement | null>
-  onClose: () => void
+  memberLabels: ReadonlyMap<string, string>
+  secretRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
 }) {
-  const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
   // Where a request from this deployment belongs, which is not always the address
   // that served this page: a hosted control plane serves the dashboard and not
   // the API. Undefined when it has not said where its gateway is (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
   const secret = result.key
-
-  useEffect(() => {
-    // The strip is above the fold only if the page is at the top, and a reveal
-    // can arrive after a scroll. Move there first, then take focus, so the
-    // keyboard lands on the key and its two controls rather than wherever the
-    // operator was. Focus without a selection: the field is concealed, and
-    // selecting the stand-in would invite a Ctrl/Cmd-C that copies bullets.
-    window.scrollTo({ top: 0 })
-    secretRef.current?.focus()
-  }, [])
-
-  useEffect(
-    () => () => {
-      // The reveal opens from a mutation result rather than a press, so nothing
-      // here is the control focus should return to. A frame later anything else
-      // that wanted it has had its turn: an empty document.body then means
-      // nothing caught the focus, and the create button takes it.
-      requestAnimationFrame(() => {
-        if (document.activeElement === document.body) {
-          returnFocusRef.current?.focus()
-        }
-      })
-    },
-    [returnFocusRef],
-  )
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
@@ -174,10 +185,7 @@ function RevealSecretStrip({
         // show until the operator asks for the key. Without them the snippets
         // would print the plaintext key under a concealed key field and hand it
         // to anyone reading the screen, which is what concealing it prevents.
-        concealedCurl: buildCurlSnippet({
-          baseUrl,
-          apiKey: CONCEALED_SECRET,
-        }),
+        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: CONCEALED_SECRET }),
         concealedPython: buildPythonSnippet({
           baseUrl,
           apiKey: CONCEALED_SECRET,
@@ -186,33 +194,27 @@ function RevealSecretStrip({
     : undefined
 
   return (
-    <Section
-      // `alert` rather than `status`: this is the one message on the page that
-      // is gone forever if it is missed.
-      role="alert"
-      aria-labelledby="reveal-title"
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
-    >
-      <div className="flex items-start gap-3">
-        <Dot className="mt-2 bg-danger" />
-        <div className="min-w-0">
-          <h2 id="reveal-title" className="text-title">
-            {title}
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            Copy this key now. For security it is shown only once and cannot be
-            retrieved later. If you lose it, use Regenerate to issue a new
-            secret. Model access: {accessLabel(result.allowed_models).text}.
-          </p>
-        </div>
+    // `alert` rather than `status`: this is the one message in the product that
+    // is gone forever if it is missed, which is also why the dialog around it
+    // does not dismiss.
+    <div role="alert" aria-label={announce} className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        Copy this key now. For security it is shown only once and cannot be
+        retrieved later. If you lose it, use Regenerate to issue a new secret.
+      </p>
+      {/* The name above the field rather than as its label: `CopyField`'s label
+          is a real one and answers "which field is this" for a screen reader,
+          which "deploy-key" does not, and these arrive in threes. */}
+      <div className="flex flex-col gap-1">
+        <p className="truncate text-emphasis">{result.key_name ?? result.id}</p>
+        <CopyField
+          label="Secret key"
+          value={secret}
+          concealed={CONCEALED_SECRET}
+          fieldRef={secretRef}
+        />
+        <p className="text-caption">{secretCaption(result, memberLabels)}</p>
       </div>
-      <CopyField
-        label="Secret key"
-        value={secret}
-        concealed={CONCEALED_SECRET}
-        fieldRef={secretRef}
-      />
       <div className="flex flex-col gap-2">
         <div>
           <div className="text-body">Make your first call</div>
@@ -242,12 +244,7 @@ function RevealSecretStrip({
           </>
         ) : null}
       </div>
-      <div className="flex justify-end border-t border-border pt-4">
-        <Button variant="primary" onPress={onClose}>
-          I&rsquo;ve saved this key
-        </Button>
-      </div>
-    </Section>
+    </div>
   )
 }
 
@@ -426,14 +423,32 @@ function UserMismatchPicker({
 // operator names an owner and may exempt the key from budget; a member's key is
 // always their own and always enforced, so neither control is rendered and the
 // body sent is the member surface's narrower shape.
-function CreateKeyForm({
+/**
+ * Create a key, and hand back the secret, in one frame.
+ *
+ * Two steps rather than two surfaces: the form submits, and when it resolves the
+ * same dialog swaps its title, its body and its submit label. That is what makes
+ * the secret arrive where the operator is already looking, and it is why the
+ * success step is not a prop on `FormDialog` but a branch here.
+ *
+ * `lg` on both steps, and that is the reason the size is set at all: the form is
+ * five fields and would sit happily at `md`, but the secret step carries two
+ * snippets, and a frame that changed width between pressing Create and reading
+ * the key would read as a second dialog.
+ */
+function CreateKeyDialog({
   isDeploymentWide,
-  onClose,
-  onCreated,
+  isOpen,
+  onOpenChange,
+  memberLabels,
+  returnFocusRef,
 }: {
   isDeploymentWide: boolean
-  onClose: () => void
-  onCreated: (result: CreateKeyResponse) => void
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
+  memberLabels: ReadonlyMap<string, string>
+  /** Where focus goes when nothing else claims it. See `close`. */
+  returnFocusRef: RefObject<HTMLButtonElement | null>
 }) {
   const create = useCreateKey()
   // `/users` is operator-only; a member's form has no owner picker to feed.
@@ -450,6 +465,17 @@ function CreateKeyForm({
     null,
   )
   const [scopeValid, setScopeValid] = useState(true)
+  // The secret, once there is one. Its presence is the step: null is the form.
+  const [created, setCreated] = useState<CreateKeyResponse | null>(null)
+  const [createAnother, setCreateAnother] = useState(false)
+  const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    // The secret field is what the operator came for, so it takes focus when the
+    // step arrives. Focus without a selection: the field is concealed, and
+    // selecting the stand-in would invite a Ctrl/Cmd-C that copies bullets.
+    if (created) secretRef.current?.focus()
+  }, [created])
 
   const expiresInPast =
     expiresAt !== "" && new Date(expiresAt).getTime() < Date.now()
@@ -468,10 +494,39 @@ function CreateKeyForm({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
+  const blocked = !scopeValid || ownerMissing || workspaceUnresolved
+
+  const resetForm = () => {
+    setKeyName("")
+    setExpiresAt("")
+    setShowAdvanced(false)
+    setAllowedModels(null)
+    setRejectUserMismatch(null)
+    setScopeValid(true)
+    create.reset()
+  }
+
+  const close = () => {
+    onOpenChange(false)
+    // React Aria returns focus to whatever had it when the dialog opened, which
+    // is right for the heading's own button and wrong for the empty state's:
+    // that one is gone by now, because creating a key is what fills the table.
+    // A frame later anything with a claim has had its turn, and an empty
+    // document.body means nothing took it.
+    requestAnimationFrame(() => {
+      if (document.activeElement === document.body) {
+        returnFocusRef.current?.focus()
+      }
+    })
+    // The frame keeps its content while it animates out, so the reset waits for
+    // the next open rather than blanking the dialog as it goes.
+    setCreated(null)
+    setCreateAnother(false)
+    resetForm()
+  }
 
   const submit = () => {
-    if (create.isPending || !scopeValid || ownerMissing || workspaceUnresolved)
-      return
+    if (create.isPending || blocked) return
     const shared = {
       key_name: keyName.trim() || null,
       // The workspace the shell is on. A key belongs to exactly one, and it is
@@ -493,46 +548,103 @@ function CreateKeyForm({
       : shared
     create.mutate(body, {
       onSuccess: (result) => {
-        // Capture the secret into the reveal BEFORE closing the form, so a render
-        // hiccup can never drop the one-time key.
-        onCreated(result)
-        onClose()
+        // "Create another" trades the secret step for a cleared form. The row is
+        // already in the table either way; what is given up is the one chance to
+        // read this key, which is why the checkbox says so.
+        if (createAnother) {
+          resetForm()
+          return
+        }
+        setCreated(result)
       },
     })
   }
 
+  if (created) {
+    return (
+      <FormDialog
+        isOpen={isOpen}
+        onOpenChange={close}
+        size="lg"
+        // A dismiss here loses the key for good, so there is one way out and it
+        // is the acknowledgement. `FormDialog` drops its close control and its
+        // Cancel to match.
+        isDismissable={false}
+        title="Key created"
+        description="Copy it now. Otari stores a hash and cannot show it again."
+        // The strip's own words, not "Done": this control is an
+        // acknowledgement rather than a dismissal, and it is the only way out.
+        submitLabel="I’ve saved this key"
+        onSubmit={close}
+        isPending={false}
+        footerStart={
+          <Button
+            variant="ghost"
+            onPress={() => {
+              setCreated(null)
+              resetForm()
+            }}
+          >
+            Create another
+          </Button>
+        }
+      >
+        <KeySecretStep
+          announce="API key created"
+          result={created}
+          memberLabels={memberLabels}
+          secretRef={secretRef}
+        />
+      </FormDialog>
+    )
+  }
+
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => (open ? onOpenChange(true) : close())}
+      size="lg"
+      title="New key"
+      description="The secret is shown once, right after you create it."
+      submitLabel="Create key"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={blocked}
+      error={create.error}
+      isDirty={
+        keyName.trim() !== "" || expiresAt !== "" || userId.trim() !== ""
+      }
+      footerStart={
+        <Checkbox isSelected={createAnother} onChange={setCreateAnother}>
+          Create another
+        </Checkbox>
+      }
     >
-      <h2 className="text-title">Create API key</h2>
-      <ErrorBanner error={create.error} />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Name"
-          value={keyName}
-          onChange={setKeyName}
-          placeholder="ci-bot"
-          autoFocus
-          description="A label to recognize this key later."
-        />
-        <Field
-          label="Expires (optional)"
-          value={expiresAt}
-          onChange={setExpiresAt}
-          type="datetime-local"
-          description={
-            expiresInPast ? (
-              <span className="text-danger">
-                That time is in the past; the key would be rejected immediately.
-              </span>
-            ) : (
-              "Leave blank for a key that never expires."
-            )
-          }
-        />
-      </div>
+      <Field
+        label="Name"
+        value={keyName}
+        onChange={setKeyName}
+        placeholder="ci-bot"
+        autoFocus
+        description="A label to recognize this key later."
+        reserveMessage
+      />
+      <Field
+        label="Expires (optional)"
+        value={expiresAt}
+        onChange={setExpiresAt}
+        type="datetime-local"
+        description={
+          expiresInPast ? (
+            <span className="text-danger">
+              That time is in the past; the key would be rejected immediately.
+            </span>
+          ) : (
+            "Leave blank for a key that never expires."
+          )
+        }
+        reserveMessage
+      />
       {isDeploymentWide ? (
         <UserComboBox
           value={userId}
@@ -588,26 +700,50 @@ function CreateKeyForm({
           />
         </div>
       ) : null}
-      {/* The actions sit under a rule of their own, so the row that commits the
-          form is divided from the fields rather than floating after them. */}
-      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          isDisabled={
-            create.isPending ||
-            !scopeValid ||
-            ownerMissing ||
-            workspaceUnresolved
-          }
-          onPress={submit}
-        >
-          {create.isPending ? "Creating…" : "Create key"}
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
+  )
+}
+
+/**
+ * The secret a regenerate produced, in the same frame a create's arrives in.
+ *
+ * No form step and no "Create another": the key already exists and this is the
+ * new secret for it, so the dialog opens where the create flow ends up.
+ */
+function RegeneratedSecretDialog({
+  title,
+  result,
+  memberLabels,
+  onClose,
+}: {
+  title: string
+  result: CreateKeyResponse
+  memberLabels: ReadonlyMap<string, string>
+  onClose: () => void
+}) {
+  const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
+  useEffect(() => {
+    secretRef.current?.focus()
+  }, [])
+  return (
+    <FormDialog
+      isOpen
+      onOpenChange={onClose}
+      size="lg"
+      isDismissable={false}
+      title={title}
+      description="Copy it now. Otari stores a hash and cannot show it again."
+      submitLabel="I’ve saved this key"
+      onSubmit={onClose}
+      isPending={false}
+    >
+      <KeySecretStep
+        announce={title}
+        result={result}
+        memberLabels={memberLabels}
+        secretRef={secretRef}
+      />
+    </FormDialog>
   )
 }
 
@@ -645,7 +781,7 @@ function EditKeyForm({
       allowed_models: allowedModels,
       reject_user_mismatch: rejectUserMismatch,
     }
-    // The member surface has no budget exemption to send (see CreateKeyForm).
+    // The member surface has no budget exemption to send (see CreateKeyDialog).
     const body: UpdateKeyRequest | UpdateOwnKeyRequest = isDeploymentWide
       ? { ...shared, exclude_from_budget: excludeFromBudget }
       : shared
@@ -823,14 +959,14 @@ export function KeysPage() {
 
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
-  const [revealed, setRevealed] = useState<{
+  const [regenerated, setRegenerated] = useState<{
     title: string
     result: CreateKeyResponse
   } | null>(null)
-  // Where focus lands when the reveal closes. The control that opened it is
-  // either gone (the create form) or behind a confirm that has been consumed
-  // (a regenerate), so the page's own primary action is the stable landing
-  // spot nearest to where the operator was.
+  // Where focus lands when a dialog opened from a consumed confirm closes.
+  // `FormDialog` returns focus to whatever had it, and a regenerate's trigger is
+  // a row action that has already disarmed itself, so the page's own primary
+  // action is the stable landing spot nearest to where the operator was.
   const createButtonRef = useRef<HTMLButtonElement>(null)
 
   const rows = keys.data ?? []
@@ -839,7 +975,7 @@ export function KeysPage() {
   // context answers, and a disabled query reports `isLoading` false.
   const loading = !scope.isReady || keys.isLoading
   const editingKey = rows.find((k) => k.id === editing) ?? null
-  const showOnboarding = !loading && rows.length === 0 && !addOpen
+  const showOnboarding = !loading && rows.length === 0
   const selection = useTableSelection()
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkError, setBulkError] = useState<unknown>(undefined)
@@ -861,7 +997,7 @@ export function KeysPage() {
     (k: ApiKey) =>
       rotateKey.mutate(k.id, {
         onSuccess: (result) =>
-          setRevealed({ title: `New secret for ${label(k)}`, result }),
+          setRegenerated({ title: `New secret for ${label(k)}`, result }),
       }),
     [rotateKey.mutate],
   )
@@ -1106,20 +1242,21 @@ export function KeysPage() {
       <PageIntro
         title="API keys"
         action={
-          addOpen ? undefined : (
-            <Button
-              // The reveal strip hands focus back here when it closes, so the
-              // control that opened it has to stay addressable.
-              ref={createButtonRef}
-              variant="primary"
-              onPress={() => {
-                setEditing(null)
-                setAddOpen(true)
-              }}
-            >
-              Create key
-            </Button>
-          )
+          <Button
+            // Focus returns here when a dialog opened from a row action closes,
+            // so the control has to stay addressable. It also no longer hides
+            // while the create dialog is open: the dialog is over the page, and
+            // a heading that loses its action while you are using it is the
+            // inconsistency this page had.
+            ref={createButtonRef}
+            variant="primary"
+            onPress={() => {
+              setEditing(null)
+              setAddOpen(true)
+            }}
+          >
+            Create key
+          </Button>
         }
       >
         {isDeploymentWide
@@ -1162,16 +1299,17 @@ export function KeysPage() {
         </p>
       )}
 
-      {revealed ? (
-        <RevealSecretStrip
-          title={revealed.title}
-          result={revealed.result}
-          returnFocusRef={createButtonRef}
+      {regenerated ? (
+        <RegeneratedSecretDialog
+          title={regenerated.title}
+          result={regenerated.result}
+          memberLabels={memberLabels}
           onClose={() => {
-            setRevealed(null)
-            // Drop the one-time secret from mutation state so reopening
-            // Create/Regenerate never flashes the previous key.
+            setRegenerated(null)
+            // Drop the one-time secret from mutation state so a later
+            // regenerate never flashes the previous key.
             rotateKey.reset()
+            createButtonRef.current?.focus()
           }}
         />
       ) : null}
@@ -1188,15 +1326,13 @@ export function KeysPage() {
         />
       ) : null}
 
-      {addOpen ? (
-        <CreateKeyForm
-          isDeploymentWide={isDeploymentWide}
-          onClose={() => setAddOpen(false)}
-          onCreated={(result) =>
-            setRevealed({ title: "API key created", result })
-          }
-        />
-      ) : null}
+      <CreateKeyDialog
+        isDeploymentWide={isDeploymentWide}
+        isOpen={addOpen}
+        onOpenChange={setAddOpen}
+        memberLabels={memberLabels}
+        returnFocusRef={createButtonRef}
+      />
       {/* Key on the row id so switching which key is edited remounts the form:
           its fields seed from `apiKey` via useState (mount-only), so without this
           a second Edit would keep the first key's values and PATCH the wrong row. */}

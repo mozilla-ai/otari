@@ -286,6 +286,52 @@ export const PhoneSheet: Story = {
   ),
 }
 
+/**
+ * A submit the form is not ready for. Shown disabled rather than allowed to
+ * fail, with the reason beside the control that is missing: a press that does
+ * nothing teaches nothing.
+ */
+export const SubmitBlocked: Story = {
+  args: { isSubmitDisabled: true },
+  render: (args) => (
+    <FormDialog {...args}>
+      <Field
+        label="Key name"
+        value=""
+        onChange={() => {}}
+        description="Required. Lowercase, hyphens, no spaces."
+        isInvalid
+        errorMessage="Give the key a name."
+        reserveMessage
+      />
+    </FormDialog>
+  ),
+}
+
+/**
+ * Content that cannot be recovered once the frame closes, which is the one case
+ * for taking the dismiss away: a key's plaintext secret is shown once. There is
+ * no close control and no Cancel, because both are dismissals; the footer's one
+ * action is the acknowledgement and the only way out.
+ */
+export const NotDismissable: Story = {
+  args: {
+    isDismissable: false,
+    title: "Key created",
+    description: "Copy it now. Otari stores a hash and cannot show it again.",
+    submitLabel: "I\u2019ve saved this key",
+    footerStart: <Button>Create another</Button>,
+  },
+  render: (args) => (
+    <FormDialog {...args}>
+      <CopyField
+        label="Secret key"
+        value="otari-sk-9f3a1c77b0e244d1e8a972fc0a3bc5d86e10f4b2"
+      />
+    </FormDialog>
+  ),
+}
+
 /** Driven from a trigger, which is how a heading row actually opens it. */
 export const FromTrigger: Story = {
   render: (args) => {

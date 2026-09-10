@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { screen, waitFor, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import userEvent, { type UserEvent } from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -181,6 +181,18 @@ function renderPage(
   )
 }
 
+/**
+ * Press the create dialog's submit.
+ *
+ * Scoped to the dialog because "Create key" is deliberately on screen twice
+ * while it is open: the labels rule makes the page's trigger and the dialog's
+ * submit the same string, and the trigger no longer hides behind the form.
+ */
+async function submitTheCreateDialog(user: UserEvent) {
+  const dialog = await screen.findByRole("dialog")
+  await user.click(within(dialog).getByRole("button", { name: "Create key" }))
+}
+
 describe("KeysPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -248,7 +260,7 @@ describe("KeysPage", () => {
     await user.type(screen.getByLabelText("Name"), "deploy-key")
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
     // The strip offers the secret and a runnable curl snippet with the key
     // injected, both concealed until asked for: a key nobody has asked to see
@@ -277,8 +289,10 @@ describe("KeysPage", () => {
       `${window.location.origin}${API_ROOT}/chat/completions`,
     )
 
+    // The acknowledgement is the dialog's footer action, so it is outside the
+    // alert that holds the key. It is unique on screen either way.
     await user.click(
-      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
+      screen.getByRole("button", { name: /I.?ve saved this key/ }),
     )
 
     // After closing, the list shows only the prefix and the secret is gone from the DOM.
@@ -362,9 +376,9 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
-    const reveal = await screen.findByRole("alert", {
+    await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
     await user.keyboard("{Escape}")
@@ -372,21 +386,23 @@ describe("KeysPage", () => {
       screen.getByRole("alert", { name: /API key created|New secret for/ }),
     ).toBeInTheDocument()
 
+    // The acknowledgement is the dialog's footer action, so it is outside the
+    // alert that holds the key. It is unique on screen either way.
     await user.click(
-      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
+      screen.getByRole("button", { name: /I.?ve saved this key/ }),
     )
     expect(
       screen.queryByRole("alert", { name: /API key created|New secret for/ }),
     ).not.toBeInTheDocument()
   })
 
-  // The reveal is a strip, not a modal: it has no backdrop to press and does
-  // not take the page out of the accessibility tree. Both would be a dialog
-  // fighting its own conventions, as the reveal's own docstring argues.
-  // What has to survive is the part that mattered, that nothing incidental can
-  // dismiss a secret shown once, so that is what this asserts now. The page
-  // behind staying reachable is a deliberate change and not covered here.
-  it("keeps the reveal up through a press elsewhere on the page", async () => {
+  // The reveal is a modal again, and the objection its docstring used to raise
+  // is answered rather than ignored: Escape and the backdrop work everywhere in
+  // this dialog EXCEPT here, where the content cannot be recovered. So the press
+  // that must not dismiss it is the backdrop, which is the only "elsewhere" a
+  // modal has; the page behind is deliberately out of the accessibility tree now
+  // and there is nothing on it to click.
+  it("keeps the reveal up through a press on the backdrop", async () => {
     mockApi({ keys: [] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -397,18 +413,22 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
-    const reveal = await screen.findByRole("alert", {
+    await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
-    await user.click(screen.getByRole("heading", { name: "API keys" }))
+    const backdrop = document.querySelector('[class*="modal__backdrop"]')
+    expect(backdrop).not.toBeNull()
+    await user.click(backdrop as Element)
     expect(
       screen.getByRole("alert", { name: /API key created|New secret for/ }),
     ).toBeInTheDocument()
 
+    // The acknowledgement is the dialog's footer action, so it is outside the
+    // alert that holds the key. It is unique on screen either way.
     await user.click(
-      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
+      screen.getByRole("button", { name: /I.?ve saved this key/ }),
     )
     await waitFor(() =>
       expect(
@@ -430,13 +450,15 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
-    const reveal = await screen.findByRole("alert", {
+    await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
+    // The acknowledgement is the dialog's footer action, so it is outside the
+    // alert that holds the key. It is unique on screen either way.
     await user.click(
-      within(reveal).getByRole("button", { name: /I.?ve saved this key/ }),
+      screen.getByRole("button", { name: /I.?ve saved this key/ }),
     )
 
     // The form that opened the reveal is gone by now, so nothing else has a
@@ -517,7 +539,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
@@ -595,6 +617,89 @@ describe("KeysPage", () => {
     expect(within(reveal).getByDisplayValue(REGEN_SECRET)).toBeInTheDocument()
   })
 
+  it("keeps the page's create action visible while the dialog is open", async () => {
+    // It used to hide itself while the inline form was on the page. The form is
+    // over the page now, so hiding the control that opened it would take the
+    // heading's action away mid-task for no reason, and it is also where focus
+    // returns.
+    mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    const trigger = screen.getByRole("button", { name: "Create key" })
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+
+    await screen.findByRole("dialog")
+    expect(trigger).toBeInTheDocument()
+  })
+
+  it("clears the form instead of showing the secret when Create another is checked", async () => {
+    // The row lands in the table either way. What is given up is the one chance
+    // to read this key, which is why the checkbox is a deliberate press.
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.type(screen.getByLabelText("Name"), "first-key")
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(within(dialog).getByLabelText("Create another"))
+    await submitTheCreateDialog(user)
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([u, init]) =>
+            String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
+        ),
+      ).toHaveLength(1),
+    )
+    // No secret step, and the name is cleared for the next one.
+    expect(
+      screen.queryByRole("alert", { name: /API key created/ }),
+    ).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue(""))
+    expect(document.body.textContent).not.toContain(NEW_SECRET)
+  })
+
+  it("shows a regenerated secret in the same dialog a created one arrives in", async () => {
+    // Create and regenerate hand over the same thing, so they hand it over the
+    // same way. Before this they were a dialog and a full-width strip on one
+    // page.
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "ci-bot", is_active: true })],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Regenerate" }))
+    const armed = screen
+      .getByText(/stops working immediately/)
+      .closest("tr") as HTMLTableRowElement
+    await user.click(within(armed).getByRole("button", { name: "Regenerate" }))
+
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).getByRole("alert", { name: /New secret for ci-bot/ }),
+    ).toBeInTheDocument()
+    // No form step and nothing to create again: the key already exists.
+    expect(
+      within(dialog).queryByLabelText("Create another"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+    ).toBeInTheDocument()
+  })
+
   it("permanently deletes a disabled key after confirm", async () => {
     const fetchMock = mockApi({
       keys: [apiKey({ id: "key-1", key_name: "legacy", is_active: false })],
@@ -645,7 +750,7 @@ describe("KeysPage", () => {
     )
     // Close the combobox popover, which otherwise aria-hides the submit button.
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -719,7 +824,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Create key" }))
+    await submitTheCreateDialog(user)
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -788,8 +893,10 @@ describe("KeysPage", () => {
     await usr.click(
       await screen.findByRole("option", { name: "alice (Alice)" }),
     )
-    await usr.keyboard("{Escape}")
-    await usr.click(screen.getByRole("button", { name: "Create key" }))
+    // No Escape here any more. Picking an option closes the combo box's own
+    // popover, so the keystroke would reach the dialog instead and arm its
+    // unsaved-changes guard, which swaps the submit out of the footer.
+    await submitTheCreateDialog(usr)
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
