@@ -106,8 +106,11 @@ export function FilterMultiComboBox({
             <ComboBoxEmpty
               isSourceEmpty={options.every((o) => values.includes(o.value))}
               emptyMessage="Nothing left to filter by."
+              // `!atLimit` because Enter is inert at the ceiling: `add` returns
+              // without changing `values`, so offering the key would promise
+              // nothing.
               noMatchesMessage={
-                allowsCustom
+                allowsCustom && !atLimit
                   ? "No match. Press Enter to filter on what you typed."
                   : "No match."
               }

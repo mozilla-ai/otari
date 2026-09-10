@@ -111,4 +111,57 @@ describe("UserComboBox", () => {
 
     expect(changes.at(-1)).toBe("ci-bot")
   })
+
+  it("submits the picked member, not the owner whose id is their roster name", async () => {
+    const uuid = "33333333-3333-3333-3333-333333333333"
+    const changes: string[] = []
+    render(
+      <UserComboBox
+        value=""
+        onChange={(id) => changes.push(id)}
+        users={[user(uuid), user("ci-bot")]}
+        // The same collision as above, reached from the other side: the row that
+        // was picked is the member, and their label is the other owner's id.
+        memberLabels={new Map([[uuid, "ci-bot"]])}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("combobox"))
+    await userEvent.click(screen.getAllByRole("option", { name: "ci-bot" })[0])
+
+    // The member, not the `ci-bot` owner. This is what the display-text echo
+    // would get wrong: the label reported after the id resolves by id first, and
+    // an id match on "ci-bot" is a different row than the one that was clicked.
+    expect(changes.at(-1)).toBe(uuid)
+  })
+
+  it("submits the member that was picked when two of them share a name", async () => {
+    const first = "11111111-1111-1111-1111-111111111111"
+    const second = "22222222-2222-2222-2222-222222222222"
+    const changes: string[] = []
+    render(
+      <UserComboBox
+        value=""
+        onChange={(id) => changes.push(id)}
+        users={[user(first), user(second)]}
+        // Two people, one name. A roster carries no uniqueness rule over
+        // `full_name`, so this is ordinary rather than a corner case.
+        memberLabels={
+          new Map([
+            [first, "Alex Smith"],
+            [second, "Alex Smith"],
+          ])
+        }
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("combobox"))
+    const rows = screen.getAllByRole("option", { name: "Alex Smith" })
+    expect(rows).toHaveLength(2)
+    await userEvent.click(rows[1])
+
+    // Resolving the label back to a row would always answer with the first one,
+    // so the second person could never be picked.
+    expect(changes.at(-1)).toBe(second)
+  })
 })

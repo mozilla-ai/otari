@@ -41,7 +41,7 @@ function Harness({
 }
 
 describe("ComboBoxField", () => {
-  it("reports the picked option's value, then the text react-aria writes back", async () => {
+  it("reports a picked option once, as its value rather than its label", async () => {
     const seen: string[] = []
     render(
       <Harness
@@ -55,11 +55,34 @@ describe("ComboBoxField", () => {
       await screen.findByRole("option", { name: "Ada Lovelace" }),
     )
 
-    // Both, in this order, and the order is the whole reason `UserComboBox`
-    // keeps a `resolveId`: react-aria puts the row's display text in the input
-    // after the selection, so a caller whose labels differ from its values sees
-    // the label last and has to map it back.
-    expect(seen).toEqual(["018f-0001", "Ada Lovelace"])
+    // One report, not two. react-aria writes the row's display text into the
+    // input after reporting the selection; forwarding that echo would hand the
+    // caller a label after a key, and a label does not identify a row (two rows
+    // may share one, and one row's label may be another row's value).
+    expect(seen).toEqual(["018f-0001"])
+  })
+
+  it("still reports text the operator edits after picking a row", async () => {
+    const seen: string[] = []
+    render(
+      <Harness
+        allowsCustomValue
+        options={[{ value: "018f-0001", label: "Ada Lovelace" }]}
+        onValue={(value) => seen.push(value)}
+      />,
+    )
+
+    const field = screen.getByRole("combobox", { name: "Serves" })
+    await userEvent.click(field)
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Ada Lovelace" }),
+    )
+    await userEvent.type(field, "!")
+
+    // Only the one echo is swallowed. Anything typed afterwards is the
+    // operator's, so a field that went quiet after a pick would be a worse bug
+    // than the one the swallowing fixes.
+    expect(seen.at(-1)).toBe("018f-0001!")
   })
 
   it("reports free text when the caller allows it", async () => {

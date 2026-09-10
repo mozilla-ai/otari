@@ -7,7 +7,7 @@ import {
   ListBox,
   ListBoxItem,
 } from "@heroui/react"
-import type { ReactNode } from "react"
+import { type ReactNode, useRef } from "react"
 
 import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
@@ -45,11 +45,11 @@ const optionText = (option: ComboBoxOption) =>
  *
  * `value` is the input's text rather than a chosen key, which is what lets a
  * caller with `allowsCustomValue` submit something the list never offered.
- * Picking a row reports that option's `value` through the same `onChange`, and
- * then react-aria writes the row's display text into the input, which reports
- * again. A caller whose labels differ from its values therefore has to map the
- * text back (see `UserComboBox.resolveId`); a caller whose labels *are* its
- * values, as a model selector is, sees the same string twice.
+ * Picking a row reports that option's `value`, and reports it once: react-aria
+ * echoes the row's display text into the input afterwards, and that echo is
+ * swallowed here rather than forwarded. So `onChange` carries a key when a row
+ * was picked and text when text was typed, and never a label. See the handlers
+ * for why the caller cannot be the one to sort those out.
  *
  * No filtering of its own: `options` is what the popover holds. The caller
  * matches and caps, because what counts as a match differs per field (an id as
@@ -112,6 +112,10 @@ export function ComboBoxField({
   /** What it says when the source has options and the query matched none. */
   noMatchesMessage?: ReactNode
 }) {
+  // Not state: nothing renders from it, and a re-render between the pick and
+  // its echo would drop it.
+  const echoRef = useRef<string | undefined>(undefined)
+
   return (
     <ComboBox.Root
       allowsCustomValue={allowsCustomValue}
@@ -121,11 +125,25 @@ export function ComboBoxField({
       allowsEmptyCollection
       menuTrigger={menuTrigger}
       inputValue={value}
-      onInputChange={onChange}
+      // The echo, and why it is caught here. react-aria reports a pick through
+      // `onSelectionChange` and then writes that row's display text into the
+      // input, firing `onInputChange` with a label where the previous call
+      // carried a key. A caller that forwarded both would have to turn the
+      // label back into a key, and two rows may share a label, or one row's
+      // label may be another row's value, so that mapping can land on the wrong
+      // row. Here the picked option is in hand, so the echo is recognized by
+      // identity and dropped. Anything else the operator types passes through.
+      onInputChange={(next) => {
+        const echoed = echoRef.current
+        echoRef.current = undefined
+        if (echoed !== undefined && next === echoed) return
+        onChange(next)
+      }}
       onSelectionChange={(key) => {
-        if (key != null) {
-          onChange(String(key))
-        }
+        if (key == null) return
+        const picked = options.find((option) => option.value === String(key))
+        echoRef.current = picked ? optionText(picked) : undefined
+        onChange(String(key))
       }}
       isRequired={isRequired}
       isDisabled={isDisabled}

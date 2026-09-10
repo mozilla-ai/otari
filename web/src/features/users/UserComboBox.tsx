@@ -73,19 +73,19 @@ export function UserComboBox({
     )
     .slice(0, 50)
 
-  // What the input holds is not necessarily the user_id: when an option is picked
-  // the ComboBox writes that option's display text back into the input, which
-  // re-fires onInputChange. Resolve either form (raw id, or "id (alias)" label) to
+  // What the operator types is not necessarily a user_id: it may be a label they
+  // copied, or an id for a user who does not exist yet. Resolve either form to
   // the canonical id, or the submitted owner would be the label and the keys API
   // would silently create a second user named after it.
   const resolveId = (raw: string): string => {
     const trimmed = raw.trim()
-    // An id match outranks a name match, and the order matters now that a
+    // An id match outranks a name match, and the order matters because a
     // member's label is a free-form roster name rather than its own id: a roster
     // name can equal another user's `user_id`, members sort to the front, and a
     // single scan matching either field would then bill the key to whichever of
-    // the two came first. Only the typed path is affected (picking an option
-    // carries the item's id), which is exactly the path that takes an id.
+    // the two came first. Only the typed path reaches here. Picking a row reports
+    // that row's id, because `ComboBoxField` swallows the display-text echo, so
+    // a label shared by two rows cannot resolve to the wrong one.
     const byId = options.find((o) => o.value === trimmed)
     if (byId) return byId.value
     const byName = options.find((o) => o.label === trimmed)

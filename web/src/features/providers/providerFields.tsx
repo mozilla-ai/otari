@@ -274,9 +274,16 @@ export function ProviderComboBox({
           className="max-h-72 overflow-auto"
           renderEmptyState={() => (
             <ComboBoxEmpty
-              isSourceEmpty={options.length === 0}
+              // A loading catalog counts as an empty source, so a query that
+              // matches none of `extra` says the catalog is still coming rather
+              // than that nothing matches. Both halves are gated on
+              // `includeCatalog`: a picker offering only the API dialects must
+              // not report a catalog it excludes.
+              isSourceEmpty={
+                options.length === 0 || (includeCatalog && catalog.isLoading)
+              }
               emptyMessage={
-                catalog.isLoading
+                includeCatalog && catalog.isLoading
                   ? "Loading the provider catalog…"
                   : "No provider to offer here."
               }
