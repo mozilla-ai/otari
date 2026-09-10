@@ -141,6 +141,12 @@ function KeySecretStep({
   // the API. Undefined when it has not said where its gateway is (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
   const secret = result.key
+  // One reveal for the key and both snippets, because the snippets carry the
+  // same secret: revealing the key while a snippet still printed bullets, or
+  // the reverse, would be one credential in two states on one screen. Open,
+  // because this screen exists to hand the key over and there is no second
+  // chance to read it; the toggle conceals all three.
+  const [isSecretRevealed, setIsSecretRevealed] = useState(true)
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
@@ -150,10 +156,10 @@ function KeySecretStep({
     ? {
         curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
         python: buildPythonSnippet({ baseUrl, apiKey: secret }),
-        // The same two commands around the stand-in, which is what the fields
-        // show until the operator asks for the key. Without them the snippets
-        // would print the plaintext key under a concealed key field and hand it
-        // to anyone reading the screen, which is what concealing it prevents.
+        // The same two commands around the stand-in, which is what the
+        // snippets show whenever the key is concealed. Without them concealing
+        // the key would leave it in plain sight twice over, in the requests
+        // that explain it.
         concealedCurl: buildCurlSnippet({ baseUrl, apiKey: CONCEALED_SECRET }),
         concealedPython: buildPythonSnippet({
           baseUrl,
@@ -180,6 +186,8 @@ function KeySecretStep({
           label="Secret key"
           value={secret}
           concealed={CONCEALED_SECRET}
+          isRevealed={isSecretRevealed}
+          onRevealChange={setIsSecretRevealed}
           fieldRef={secretRef}
         />
         <p className="text-caption">{secretCaption(result, memberLabels)}</p>
@@ -202,12 +210,16 @@ function KeySecretStep({
               label="curl"
               value={snippets.curl}
               concealed={snippets.concealedCurl}
+              isRevealed={isSecretRevealed}
+              onRevealChange={setIsSecretRevealed}
               multiline
             />
             <CopyField
               label="Python (OpenAI SDK)"
               value={snippets.python}
               concealed={snippets.concealedPython}
+              isRevealed={isSecretRevealed}
+              onRevealChange={setIsSecretRevealed}
               multiline
             />
           </>

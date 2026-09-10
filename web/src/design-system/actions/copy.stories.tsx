@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { useRef } from "react"
+import { useRef, useState } from "react"
 
 import { Button as ActionButton } from "./Button"
 import { CopyButton } from "./CopyButton"
@@ -175,6 +175,64 @@ export const Concealed: Story = {
  * dashboard is routinely served from, which is the same reason the field
  * selects on click.
  */
+/**
+ * A field that opens revealed, for the one screen that exists to hand a
+ * credential over.
+ *
+ * `defaultRevealed` is the uncontrolled form of it. The toggle still works and
+ * Copy still copies the real value, so nothing otari-ai#2111 asked for is given
+ * up; what changes is which state the field starts in. Reach for it only where
+ * there is no second chance to read the value.
+ */
+export const RevealedOnArrival: Story = {
+  render: () => (
+    <div className="flex w-[34rem] flex-col gap-4">
+      <CopyField
+        label="Secret key"
+        value="otari-sk-9f3a1c77b0e244d1e8a972fc0a3bc5d8"
+        concealed={CONCEALED_SECRET}
+        defaultRevealed
+      />
+    </div>
+  ),
+}
+
+/**
+ * Several fields carrying one credential, revealing and concealing together.
+ *
+ * `isRevealed` and `onRevealChange` make the field controlled, so the caller
+ * holds one piece of state and the key and the requests that embed it cannot
+ * end up in two states on one screen. The eye stays on every field: whichever
+ * one is pressed moves all of them.
+ */
+export const CoupledReveal: Story = {
+  render: function CoupledRevealStory() {
+    const [isRevealed, setIsRevealed] = useState(true)
+    const key = "otari-sk-9f3a1c77b0e244d1e8a972fc0a3bc5d8"
+    const request = (secret: string) =>
+      `curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer ${secret}"`
+    return (
+      <div className="flex w-[34rem] flex-col gap-4">
+        <CopyField
+          label="Secret key"
+          value={key}
+          concealed={CONCEALED_SECRET}
+          isRevealed={isRevealed}
+          onRevealChange={setIsRevealed}
+        />
+        <CopyField
+          label="Example request"
+          multiline
+          value={request(key)}
+          concealed={request(CONCEALED_SECRET)}
+          isRevealed={isRevealed}
+          onRevealChange={setIsRevealed}
+        />
+      </div>
+    )
+  },
+}
+
 export const WithFieldRef: Story = {
   render: () => {
     const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)

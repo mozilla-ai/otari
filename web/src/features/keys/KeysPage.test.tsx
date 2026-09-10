@@ -262,32 +262,39 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await submitTheCreateDialog(user)
 
-    // The strip offers the secret and a runnable curl snippet with the key
-    // injected, both concealed until asked for: a key nobody has asked to see
-    // is not on screen, and neither is the snippet that carries it (otari-ai#2111).
+    // Open revealed: this screen exists to hand the key over, and there is no
+    // second chance to read it.
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
+    expect(within(reveal).getByLabelText("Secret key")).toHaveValue(NEW_SECRET)
+    const curl = within(reveal).getByLabelText("curl") as HTMLTextAreaElement
+    const python = within(reveal).getByLabelText(
+      "Python (OpenAI SDK)",
+    ) as HTMLTextAreaElement
+    expect(curl.value).toContain(`Otari-Key: ${NEW_SECRET}`)
+    expect(curl.value).toContain(
+      `${window.location.origin}${API_ROOT}/chat/completions`,
+    )
+    expect(python.value).toContain(NEW_SECRET)
+
+    // One credential, one reveal: concealing the key conceals the requests that
+    // carry it, rather than leaving it in plain sight twice over.
+    await user.click(
+      within(reveal).getByRole("button", { name: "Hide Secret key" }),
+    )
     expect(within(reveal).getByLabelText("Secret key")).not.toHaveValue(
       NEW_SECRET,
     )
-    const concealedCurl = within(reveal).getByLabelText(
-      "curl",
-    ) as HTMLTextAreaElement
-    expect(concealedCurl.value).not.toContain(NEW_SECRET)
+    expect(curl.value).not.toContain(NEW_SECRET)
+    expect(python.value).not.toContain(NEW_SECRET)
 
-    await user.click(
-      within(reveal).getByRole("button", { name: "Show Secret key" }),
-    )
-    expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+    // And the affordance is on each field, not only on the key: the snippet's
+    // own toggle brings all three back (otari-ai#2111).
     await user.click(within(reveal).getByRole("button", { name: "Show curl" }))
-    const curl = within(reveal).getByDisplayValue(
-      new RegExp(`Otari-Key: ${NEW_SECRET}`),
-    )
-    expect(curl).toBeInTheDocument()
-    expect((curl as HTMLTextAreaElement).value).toContain(
-      `${window.location.origin}${API_ROOT}/chat/completions`,
-    )
+    expect(within(reveal).getByLabelText("Secret key")).toHaveValue(NEW_SECRET)
+    expect(curl.value).toContain(NEW_SECRET)
+    expect(python.value).toContain(NEW_SECRET)
 
     // The acknowledgement is the dialog's footer action, so it is outside the
     // alert that holds the key. It is unique on screen either way.
@@ -343,8 +350,6 @@ describe("KeysPage", () => {
       `https://gateway.otari.ai${API_ROOT}/chat/completions`,
     )
     expect(curl.value).not.toContain(window.location.origin)
-    // Concealed, so the address it names is readable while the key is not.
-    expect(curl.value).not.toContain(NEW_SECRET)
   })
 
   it("shows no snippet when a hosted deployment published no data plane", async () => {
@@ -544,11 +549,16 @@ describe("KeysPage", () => {
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
+    // Concealed first, because copying without reading is what has to keep
+    // working once the operator puts the key away (otari-ai#2111). The step
+    // opens revealed, so the toggle is how that state is reached now.
+    await user.click(
+      within(reveal).getByRole("button", { name: "Hide Secret key" }),
+    )
     const copyButtons = within(reveal).getAllByRole("button", { name: "Copy" })
     await user.click(copyButtons[0])
 
-    // Copied without being read, which is the point of concealing it: the key
-    // reached the clipboard and never the screen (otari-ai#2111).
+    // The key reached the clipboard and never the screen.
     expect(writeText).toHaveBeenCalledWith(NEW_SECRET)
     expect(
       within(reveal).queryByDisplayValue(NEW_SECRET),
@@ -611,9 +621,8 @@ describe("KeysPage", () => {
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
-    await user.click(
-      within(reveal).getByRole("button", { name: "Show Secret key" }),
-    )
+    // Revealed on arrival, the same as a created key: regenerate hands over the
+    // same thing and hands it over the same way.
     expect(within(reveal).getByDisplayValue(REGEN_SECRET)).toBeInTheDocument()
   })
 
@@ -1249,9 +1258,6 @@ describe("KeysPage", () => {
       const reveal = await screen.findByRole("alert", {
         name: /API key created|New secret for/,
       })
-      await usr.click(
-        within(reveal).getByRole("button", { name: "Show Secret key" }),
-      )
       expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
 
       const post = fetchMock.mock.calls.find(
