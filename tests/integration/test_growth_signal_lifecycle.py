@@ -89,8 +89,8 @@ def growth(client: TestClient) -> RecordingGrowthAdapter:
 
     Through the container and not ``dependency_overrides`` so the resolution
     path under test is the real one: ``get_growth_signal_port`` asking the
-    container for whatever this build bound. The ``client`` fixture boots one
-    app per test, so nothing has to be unbound afterwards.
+    container for whatever this build bound. The ``client`` fixture gives each
+    test a container of its own, so nothing has to be unbound afterwards.
     """
     recorder = RecordingGrowthAdapter()
     container: Any = client.app.state.container  # type: ignore[attr-defined]

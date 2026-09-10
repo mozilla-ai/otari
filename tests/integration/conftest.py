@@ -14,6 +14,7 @@ import pytest_asyncio
 import uvicorn
 from alembic import command
 from alembic.config import Config
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.engine import make_url
@@ -28,9 +29,11 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
+from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app
+from gateway.rate_limit import RateLimiter
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
 
@@ -284,6 +287,44 @@ def test_config(postgres_url: str) -> GatewayConfig:
     )
 
 
+_APP_FOR_CONFIG: tuple[GatewayConfig, FastAPI] | None = None
+
+
+def _app_for(config: GatewayConfig) -> FastAPI:
+    """The app for ``config``, built once per worker for as long as it is the config in use.
+
+    ``create_app`` is where a test's setup time goes: FastAPI analyzes every
+    route's signature and builds its pydantic adapters on each call, which is
+    most of a second on a CI runner, for hundreds of tests. The lifespan still
+    runs per test (``TestClient`` enters it), so the database-backed startup
+    and the cache resets at shutdown are as fresh as they were.
+
+    Keyed on the config's identity, not a session fixture: a module that
+    overrides ``test_config`` per test gets an app per test, as it always did.
+    """
+    global _APP_FOR_CONFIG
+    if _APP_FOR_CONFIG is None or _APP_FOR_CONFIG[0] is not config:
+        _APP_FOR_CONFIG = (config, create_app(config))
+    return _APP_FOR_CONFIG[1]
+
+
+def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
+    """Redo the part of ``create_app`` that a test can observe across boots.
+
+    The lifespan does not touch these, so on a reused app they would carry one
+    test's state into the next: the login limiter counts calls per client IP
+    and the test client always has the same one, and a fixture may rebind a
+    port on the container.
+    """
+    app.state.rate_limiter = RateLimiter(config.rate_limit_rpm) if config.rate_limit_rpm is not None else None
+    app.state.login_rate_limiter = (
+        RateLimiter(config.dashboard_login_rate_limit_per_minute)
+        if config.dashboard_login_rate_limit_per_minute is not None
+        else None
+    )
+    app.state.container = build_container(config.bootstrap)
+
+
 def dispose_async_engine(async_engine: AsyncEngine) -> None:
     """Close an async engine's connections from synchronous teardown."""
     try:
@@ -294,7 +335,7 @@ def dispose_async_engine(async_engine: AsyncEngine) -> None:
         loop.close()
 
 
-def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
+def build_test_client(config: GatewayConfig, *, app: FastAPI | None = None) -> Generator[TestClient]:
     """Boot an app on the worker's database and hand back a client for it.
 
     Where a test client that owns its database lifecycle is assembled: the schema
@@ -303,11 +344,17 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     their own ``yield from`` this rather than restating it. A handful still build
     an app inline through ``build_async_session_override``; those never touched
     the schema, so they were left alone.
+
+    ``app`` is an already-built app for ``config`` to boot instead of a new one;
+    the ``client`` fixture passes the per-worker one from ``_app_for``.
     """
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
     async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(config)
+    if app is None:
+        app = create_app(config)
+    else:
+        _refresh_process_state(app, config)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with async_session_factory() as session:
@@ -325,7 +372,7 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
 @pytest.fixture
 def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
     """Create a test client for the FastAPI app."""
-    yield from build_test_client(test_config)
+    yield from build_test_client(test_config, app=_app_for(test_config))
 
 
 @pytest.fixture
