@@ -17,7 +17,7 @@ import asyncio
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import InvalidRequestError, UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -723,3 +723,47 @@ def test_failure_status_code_keeps_the_upstream_status_for_billing() -> None:
     of my error rate is an empty wallet" stays answerable even though the caller
     saw a 502."""
     assert failure_status_code(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)) == 400
+
+
+# ---------------------------------------------------------------------------
+# InvalidRequestError with no HTTP status maps to 400 (Fixes #989)
+# ---------------------------------------------------------------------------
+
+
+def test_status_less_invalid_request_error_maps_to_400() -> None:
+    """A bare InvalidRequestError with no HTTP status (as raised by gemini,
+    bedrock, and anthropic for bad request shapes) must map to HTTP 400 with
+    the provider's own explanation, not fall through to the generic 502."""
+    exc = InvalidRequestError("max_tokens exceeds context window for this model")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "max_tokens" in mapping.detail
+
+
+def test_status_less_invalid_request_error_survives_wrapped_error() -> None:
+    """The InvalidRequestError type check fires when it lives on
+    ``original_exception`` (the ANY_LLM_UNIFIED_EXCEPTIONS=1 shape)."""
+    original = InvalidRequestError("invalid message role: 'system'")
+    wrapped = _WrappedError(500, original)
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "invalid message role" in mapping.detail
+
+
+def test_status_less_invalid_request_error_is_recorded_as_400() -> None:
+    """failure_status_code records 400 for a status-less InvalidRequestError so
+    the usage log reflects the real classification, not the generic 502."""
+    exc = InvalidRequestError("unknown parameter 'response_format'")
+    assert failure_status_code(exc) == 400
+
+
+def test_invalid_request_error_with_status_is_classified_by_status() -> None:
+    """An InvalidRequestError that already carries an HTTP status must not be
+    rerouted by the type-based branch; the status branch handles it as usual."""
+    exc = InvalidRequestError("bad request shape")
+    exc.status_code = 400
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
