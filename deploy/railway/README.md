@@ -13,7 +13,7 @@ The template stands up two services:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `docker.io/mzdotai/otari:latest` | Target port `8000`, healthcheck `/health`. Pulls the published image; builds nothing. |
+| **otari** | `docker.io/mzdotai/otari:latest` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image; builds nothing. |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 
 Otari is a good fit for a one-click deploy: the app is stateless, its only
@@ -32,7 +32,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Pre-wired; leave as-is. |
 | `OTARI_MASTER_KEY` | auto-generated (`${{secret(48)}}`) | Auto-set; read it from the otari service's Variables tab. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so an env-only deploy serves models that have no configured pricing. |
-| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/v1/pricing` always override it. |
+| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
 | `OPENAI_API_KEY` | your key | Optional input. Set at least one provider key (see below). |
 
 Notes:
@@ -57,7 +57,7 @@ Notes:
   common models are metered using community-maintained rates (the bundled
   genai-prices dataset) instead of being served unpriced. These are estimates
   and can lag real provider rates, so set explicit prices on the dashboard's
-  Models page or via `/v1/pricing` for anything you bill on; database prices
+  Models page or via `/api/v1/pricing` for anything you bill on; database prices
   always win over the fallback. The Models page shows, per model, whether this
   fallback is active.
 
@@ -78,14 +78,14 @@ Once both services are healthy:
 # Replace with your service's public domain.
 export OTARI_URL=https://your-otari.up.railway.app
 
-curl "$OTARI_URL/health"
+curl "$OTARI_URL/api/v1/health"
 ```
 
 Grab the bootstrapped API key from the otari service's deploy logs (printed once
 on first startup), then make a real request:
 
 ```bash
-curl "$OTARI_URL/v1/chat/completions" \
+curl "$OTARI_URL/api/v1/chat/completions" \
   -H "Authorization: Bearer <bootstrapped-or-generated-key>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -108,7 +108,7 @@ mozilla-ai Railway account and the button above points at its deploy link.
 When changing the template:
 
 1. Edit the template on the mozilla-ai Railway account, then deploy it once to a
-   throwaway project and confirm a real `/v1/chat/completions` round-trip plus
+   throwaway project and confirm a real `/api/v1/chat/completions` round-trip plus
    that the bootstrapped key works.
 2. Update [`template.json`](template.json) in the same change so the snapshot
    matches the live config (services, variables, defaults, target port).
