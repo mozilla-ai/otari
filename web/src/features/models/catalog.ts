@@ -2,7 +2,6 @@ import type {
   CatalogCapabilities,
   CatalogModelSummary,
   CatalogOffering,
-  ModelPricingInfo,
 } from "@/client"
 
 // What the list can be narrowed by, and how a row is sorted. Pure, so the page
@@ -108,9 +107,8 @@ export const RELEASE_OPTIONS = [
 ]
 
 // The request size a price is compared at. Not a filter on the rows but on
-// the numbers: a tiered offering is cheap at 8K and not at 500K. The list is
-// re-read from the gateway at the chosen size; a model page reprices its
-// offerings on the spot from the tiers it already holds.
+// the numbers: a tiered offering is cheap at 8K and not at 500K, and the list
+// is re-read from the gateway at the chosen size.
 export const COMPARE_AT_OPTIONS = [
   { value: "0", label: "Base prices" },
   { value: "8000", label: "Compare at 8K" },
@@ -407,40 +405,4 @@ export function defaultOffering(
   offerings: CatalogOffering[],
 ): CatalogOffering | undefined {
   return offerings[0]
-}
-
-/**
- * The input and output rate a request of `atContext` tokens is metered at:
- * the highest tier at or below it, each rate falling back to the base where
- * the tier leaves one unset. The gateway applies the same rule to the list.
- */
-export function ratesAtContext(
-  pricing: ModelPricingInfo,
-  atContext: number,
-): { input: number; output: number } {
-  const base = {
-    input: pricing.input_price_per_million,
-    output: pricing.output_price_per_million,
-  }
-  if (!atContext) return base
-  const tier = (pricing.pricing_tiers ?? [])
-    .filter(
-      (
-        candidate,
-      ): candidate is { min_input_tokens: number } & Record<string, unknown> =>
-        typeof candidate === "object" &&
-        candidate !== null &&
-        typeof (candidate as { min_input_tokens?: unknown })
-          .min_input_tokens === "number" &&
-        (candidate as { min_input_tokens: number }).min_input_tokens <=
-          atContext,
-    )
-    .sort((a, b) => b.min_input_tokens - a.min_input_tokens)[0]
-  if (!tier) return base
-  const input = tier.input_price_per_million
-  const output = tier.output_price_per_million
-  return {
-    input: typeof input === "number" ? input : base.input,
-    output: typeof output === "number" ? output : base.output,
-  }
 }

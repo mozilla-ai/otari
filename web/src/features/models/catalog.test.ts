@@ -8,7 +8,6 @@ import {
   filterModels,
   priceSourceLabel,
   providerOptions,
-  ratesAtContext,
   vendorOptions,
 } from "@/features/models/catalog"
 
@@ -255,32 +254,6 @@ describe("options", () => {
         pricing: "custom",
       }),
     ).toBe(5)
-  })
-})
-
-describe("ratesAtContext", () => {
-  const pricing = {
-    input_price_per_million: 0.5,
-    output_price_per_million: 2,
-    cache_read_price_per_million: null,
-    cache_write_price_per_million: null,
-    cache_write_1h_price_per_million: null,
-    pricing_tiers: [
-      { min_input_tokens: 100_000, input_price_per_million: 1 },
-      {
-        min_input_tokens: 500_000,
-        input_price_per_million: 2,
-        output_price_per_million: 4,
-      },
-    ],
-    unit: "tokens",
-  }
-
-  it("takes the highest tier at or below the size, falling back to the base", () => {
-    expect(ratesAtContext(pricing, 0)).toEqual({ input: 0.5, output: 2 })
-    expect(ratesAtContext(pricing, 8_000)).toEqual({ input: 0.5, output: 2 })
-    expect(ratesAtContext(pricing, 200_000)).toEqual({ input: 1, output: 2 })
-    expect(ratesAtContext(pricing, 1_000_000)).toEqual({ input: 2, output: 4 })
   })
 })
 

@@ -7,12 +7,10 @@ import type { SortDescriptor } from "react-aria-components"
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
 import {
   CAPABILITY_LABELS,
-  COMPARE_AT_OPTIONS,
   credentialLabel,
   defaultOffering,
   MODALITY_LABELS,
   priceSourceLabel,
-  ratesAtContext,
 } from "@/features/models/catalog"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
@@ -154,7 +152,7 @@ function hasUsage(offerings: readonly CatalogOffering[]): boolean {
   return offerings.some((offering) => offering.usage_30d != null)
 }
 
-/** An offering with its rates taken at the comparison size, for the table. */
+/** An offering with its base rates lifted out, for the table's sort. */
 interface OfferingRow {
   offering: CatalogOffering
   input: number | null
@@ -585,7 +583,6 @@ export function ModelDetailView({
   const canOverride = !publicView && !canPrice && canManage(organization.data)
   const catalog = useCatalog()
   const selected = useCatalogModel(modelId)
-  const [compareAt, setCompareAt] = useState("0")
   const [quantization, setQuantization] = useState("all")
   const [quickStart, setQuickStart] = useState(initialQuickStart)
   const [opened, setOpened] = useState<string | null>(null)
@@ -612,7 +609,6 @@ export function ModelDetailView({
     return <PageLoading label="Loading model…" />
   }
 
-  const atContext = Number(compareAt) || 0
   const quantizations = [
     ...new Set(
       model.offerings
@@ -625,16 +621,11 @@ export function ModelDetailView({
       (offering) =>
         quantization === "all" || offering.quantization === quantization,
     )
-    .map((offering) => {
-      const rates = offering.pricing
-        ? ratesAtContext(offering.pricing, atContext)
-        : null
-      return {
-        offering,
-        input: rates?.input ?? null,
-        output: rates?.output ?? null,
-      }
-    })
+    .map((offering) => ({
+      offering,
+      input: offering.pricing?.input_price_per_million ?? null,
+      output: offering.pricing?.output_price_per_million ?? null,
+    }))
     .sort(compareOfferings(sort.column, sort.direction))
   const withUsage = !publicView && hasUsage(model.offerings)
   const first = defaultOffering(model.offerings)
@@ -842,14 +833,8 @@ export function ModelDetailView({
               </p>
             </div>
             <div className="flex flex-col gap-3 border border-border bg-surface p-3">
-              <div className="otari-toolbar flex flex-wrap items-center gap-2">
-                <FilterSelect
-                  ariaLabel="Compare prices at"
-                  value={compareAt}
-                  onChange={setCompareAt}
-                  options={COMPARE_AT_OPTIONS}
-                />
-                {quantizations.length > 0 ? (
+              {quantizations.length > 0 ? (
+                <div className="otari-toolbar flex flex-wrap items-center gap-2">
                   <FilterSelect
                     ariaLabel="Filter quantization"
                     value={quantization}
@@ -859,8 +844,8 @@ export function ModelDetailView({
                       ...quantizations.map((q) => ({ value: q, label: q })),
                     ]}
                   />
-                ) : null}
-              </div>
+                </div>
+              ) : null}
               <TableScrollFrame className="otari-offerings-table">
                 <DataTable
                   ariaLabel={`Offerings of ${model.name}`}

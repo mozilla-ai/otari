@@ -268,40 +268,6 @@ describe("ModelDetailPage", () => {
     ).toHaveAttribute("href", "/keys")
   })
 
-  it("reprices the offerings at a comparison size from their tiers", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      pricing: {
-        input_price_per_million: 0.5,
-        output_price_per_million: 2,
-        cache_read_price_per_million: null,
-        cache_write_price_per_million: null,
-        cache_write_1h_price_per_million: null,
-        pricing_tiers: [
-          { min_input_tokens: 100_000, input_price_per_million: 3 },
-        ],
-        unit: "tokens",
-      },
-    })
-    try {
-      renderPage(<ModelDetailPage modelId="glm-5-3" />)
-      const user = userEvent.setup()
-
-      const grid = await screen.findByRole("grid", {
-        name: "Offerings of GLM-5.3",
-      })
-      expect(within(grid).getByText("$0.50")).toBeInTheDocument()
-      await user.click(screen.getByRole("button", { name: /Base prices/ }))
-      await user.click(screen.getByRole("option", { name: "Compare at 200K" }))
-
-      // Nebius' 100K tier is what a 200K request settles at.
-      expect(await within(grid).findByText("$3.00")).toBeInTheDocument()
-      expect(within(grid).queryByText("$0.50")).toBeNull()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
   it("links an operator to Model pricing to edit a rate, and nobody else", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="glm-5-3" />)
