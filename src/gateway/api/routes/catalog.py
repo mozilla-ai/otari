@@ -302,21 +302,30 @@ async def _usage_by_selector(
         )
         .group_by(UsageLog.provider, UsageLog.model)
     )
-    usage: dict[str, OfferingUsage] = {}
+    # Both spellings of one offering come back as separate groups, so the rows
+    # are summed per selector rather than assigned: a row set that carries the
+    # legacy spelling as well would otherwise report whichever group the
+    # database happened to return last.
+    selectors = set(by_pair.values())
+    totals: dict[str, list[float]] = {}
     for row in (await db.execute(stmt)).all():
         selector = by_pair.get((row.provider or "", row.model))
-        if selector is None and row.model in by_pair.values():
+        if selector is None and row.model in selectors:
             selector = row.model
         if selector is None:
             continue
-        total = int(row.total_tokens)
-        prompt = int(row.prompt_tokens)
-        cached = int(row.cache_read_tokens)
-        spend = float(row.spend)
+        running = totals.setdefault(selector, [0.0, 0.0, 0.0, 0.0, 0.0])
+        running[0] += int(row.requests)
+        running[1] += int(row.total_tokens)
+        running[2] += int(row.prompt_tokens)
+        running[3] += int(row.cache_read_tokens)
+        running[4] += float(row.spend)
+    usage: dict[str, OfferingUsage] = {}
+    for selector, (requests, total, prompt, cached, spend) in totals.items():
         usage[selector] = OfferingUsage(
-            requests=int(row.requests),
-            total_tokens=total,
-            cache_read_tokens=cached,
+            requests=int(requests),
+            total_tokens=int(total),
+            cache_read_tokens=int(cached),
             spend_usd=spend,
             cache_hit_rate=round(cached / prompt, 4) if prompt > 0 else None,
             effective_price_per_million=round(spend / total * 1_000_000, 6) if total > 0 else None,

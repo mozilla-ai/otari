@@ -299,11 +299,11 @@ async def poll_price_updates(session: AsyncSession, policy: str) -> str:
 async def run_price_update_poller(config: GatewayConfig) -> None:
     """Check upstream genai-prices on a schedule, forever.
 
-    The policy and interval are read on every tick rather than captured, because
-    both are runtime settings: an operator who switches from ``manual`` to
-    ``review`` on the dashboard gets the next check without a restart. Every
-    error is swallowed and retried on the next tick, for the reason the snapshot
-    refresher gives.
+    The policy is read on every tick rather than captured, because it is a
+    runtime setting: an operator who switches from ``manual`` to ``review`` on
+    the dashboard gets the next check without a restart. The interval is
+    config-only and re-read for symmetry. Every error is swallowed and retried
+    on the next tick, for the reason the snapshot refresher gives.
     """
     while True:
         await asyncio.sleep(config.pricing_refresh_interval_seconds)

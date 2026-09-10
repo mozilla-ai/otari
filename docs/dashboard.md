@@ -74,7 +74,7 @@ The workspace view contains day-to-day gateway operations:
 - Models and Routing. Models is the catalog grouped by model: the list on the
   left, and the selected model's offerings on the right, one per provider that
   serves it, each with its own context limits and the price your organization
-  is charged. It is read-only; a rate is set on Organization pricing.
+  is charged. It is read-only; a rate is set on Model pricing.
 - Tools
 - API keys, providers, and workspace members
 
