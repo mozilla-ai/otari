@@ -21,14 +21,16 @@ import {
 export function useDashboardBuild() {
   return useQuery({
     queryKey: [BUILD],
-    queryFn: () => apiFetch<DashboardBuild>("/dashboard-build.json"),
+    queryFn: () =>
+      apiFetch<DashboardBuild>("/dashboard-build.json").catch(() => null),
     refetchInterval: BUILD_POLL_MS,
     // A tab left open in the background is the one most likely to be stale, so
     // check again the moment someone comes back to it.
     refetchOnWindowFocus: true,
     staleTime: 0,
     // A failed check is not worth reporting: the tab keeps working, and the next
-    // poll retries anyway.
+    // poll retries anyway. A non-JSON body (ApiError from apiFetch) is treated as
+    // unknown rather than an error so build polling never interrupts the user.
     retry: false,
   })
 }

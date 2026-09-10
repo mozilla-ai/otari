@@ -446,11 +446,12 @@ export async function apiFetch<T>(
   try {
     return (await response.json()) as T
   } catch (error) {
-    // Every caller expects an ApiError; a raw DOMException here would reach the
-    // UI as an unrecognized failure. A malformed body is still its own error.
+    // Every caller expects an ApiError; a raw SyntaxError or DOMException here
+    // would reach the UI as an unrecognized failure. A malformed body is still
+    // its own error, but it must be wrapped so callers can handle it uniformly.
     if (isTimeout(error)) {
       throw new ApiError(0, timeoutMessage)
     }
-    throw error
+    throw new ApiError(response.status, "Gateway returned a non-JSON response")
   }
 }
