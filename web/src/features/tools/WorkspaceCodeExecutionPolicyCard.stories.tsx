@@ -47,7 +47,12 @@ function api(policy: ReturnType<typeof workspaceCodeExecutionPolicy>) {
 const meta = {
   title: "Dashboard/Tools/WorkspaceCodeExecutionPolicyCard",
   component: WorkspaceCodeExecutionPolicyCard,
-  args: { onSaved: () => {} },
+  // `docsHref` is the caller's, the way the page passes it: the card renders the
+  // link and does not know how a docs URL is built. The page uses
+  // `toolsDocs("per-workspace-code-policy")`.
+  args: {
+    docsHref: "https://example.com/docs/tools#per-workspace-code-policy",
+  },
   parameters: {
     api: api(workspaceCodeExecutionPolicy({ workspace_id: WORKSPACE_ID })),
     layout: "padded",

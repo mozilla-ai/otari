@@ -12,10 +12,15 @@ import { SetupGuideCard } from "./SetupGuideCard"
  * The first-request guide: mint a setup key, copy two curl calls, watch for the
  * request to land.
  *
- * `hasProviders` is a prop rather than a query of this component's own, and that is
- * load-bearing: the Overview page already observes providers, and a second observer
- * in here would re-render the guide on every provider refetch while the operator is
- * mid-copy.
+ * `canServeRequests` is a prop rather than a query of this component's own, and
+ * that is load-bearing: the Overview page already owns that query, and a second
+ * observer in here would re-trigger it on mount, flip the page back to its
+ * loading branch, and unmount the observer that asked. One query, one owner.
+ *
+ * It says whether a request from this caller could succeed, which is not the same
+ * question as "a provider exists": an operator's Overview reads it off
+ * `/v1/providers`, which refuses a tenant, and an organization's off the model
+ * catalog, which lists the selectors that caller may name.
  *
  * It polls `/v1/workspaces/{id}/activation` for the payoff, so the states below are
  * that endpoint's: waiting, succeeded, failed. The workspace comes from
@@ -43,7 +48,7 @@ function api(activation: ReturnType<typeof workspaceActivation>) {
 const meta = {
   title: "Dashboard/Onboarding/SetupGuideCard",
   component: SetupGuideCard,
-  args: { hasProviders: true },
+  args: { canServeRequests: true },
   parameters: { api: api(workspaceActivation()), layout: "padded" },
 } satisfies Meta<typeof SetupGuideCard>
 
@@ -63,13 +68,14 @@ export const Waiting: Story = {
 /**
  * No provider configured yet, and the guide renders **nothing at all**.
  *
- * That is deliberate rather than a gap: `hasProviders: false` disables the
- * activation query, so there is no data and the card returns null. With no
- * provider a setup key would be handing out a credential for a call that cannot
- * succeed, so the Overview's own getting-started panel is the right guide instead.
+ * That is deliberate rather than a gap: `canServeRequests: false` disables the
+ * activation query, so there is no data and the card returns null. With nothing
+ * to route to, a setup key would be handing out a credential for a call that
+ * cannot succeed, so the Overview's own getting-started panel is the right guide
+ * instead.
  */
 export const NoProviders: Story = {
-  args: { hasProviders: false },
+  args: { canServeRequests: false },
   render: (args) => (
     <div className="flex w-[46rem] flex-col gap-2">
       <SetupGuideCard {...args} />

@@ -1,4 +1,8 @@
 import type { UpdateWorkspaceWebSearchConfigRequest } from "@/client"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { SettingRow } from "@/design-system/layout/SettingRow"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
   ceilingParser,
@@ -13,10 +17,6 @@ import {
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { SettingRow } from "@/design-system/layout/SettingRow"
-import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 

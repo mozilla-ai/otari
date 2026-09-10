@@ -6,6 +6,9 @@ import type {
   ToolSettingField,
   UpdateToolSettingsRequest,
 } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
@@ -22,9 +25,6 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/tools"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { PageIntro } from "@/design-system/layout/PageIntro"
-import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { docsSourceHref } from "@/shared/helpers/docs"
 
 // One settable field maps onto one key of the update request; cast at this one

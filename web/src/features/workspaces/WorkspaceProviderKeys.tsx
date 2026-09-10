@@ -2,6 +2,10 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrgProviderKey, WorkspaceProviderKeyOverride } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Field } from "@/design-system/forms/Field"
+import { DismissChip } from "@/design-system/indicators/DismissChip"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { useOrgProviderKeys } from "@/shared/api/organizations"
 import {
   useAddWorkspaceProviderKeyModel,
@@ -11,10 +15,6 @@ import {
   useWorkspaceProviderKeyModels,
   useWorkspaceProviderKeys,
 } from "@/shared/api/workspaces"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Field } from "@/design-system/forms/Field"
-import { DismissChip } from "@/design-system/indicators/DismissChip"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
 /**
  * One workspace's departures from the provider keys its organization holds.

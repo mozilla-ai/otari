@@ -9,11 +9,10 @@ import {
   TextField,
 } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
-
-import { useProviderCatalog } from "@/shared/api/providers"
 import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useProviderCatalog } from "@/shared/api/providers"
 
 import {
   type CredentialFieldValues,

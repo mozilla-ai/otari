@@ -6,6 +6,13 @@ import type {
   StoredSearchTool,
   UpdateSearchToolRequest,
 } from "@/client"
+import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import {
   useCreateSearchTool,
@@ -14,13 +21,6 @@ import {
   useSearchTools,
   useUpdateSearchTool,
 } from "@/shared/api/tools"
-import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { errorMessage } from "@/design-system/feedback/errorMessage"
-import { INPUT_CLASS } from "@/design-system/forms/inputClass"
-import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
 // Search tools are what POST /v1/search dispatches against. They used to be

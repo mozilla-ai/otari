@@ -110,12 +110,20 @@ Rules:
 
 A field is **36px**. Inside a named dense place it is **32px**, and below `md`
 every place raises it to **44px**, so the dense size is a desktop size the phone
-layout takes back off. Two places exist:
+layout takes back off. Three places exist:
 
 | Place | Component that puts it on |
 | --- | --- |
 | `.otari-toolbar` | `layout/Toolbar` |
 | `.otari-pagination` | `data/TablePagination` |
+| `.otari-settings` | `layout/SettingsGroup`, and only with `bounded` |
+
+`.otari-settings` differs from the other two in one way worth knowing: on a
+phone its field also gains block padding and 16px type, where a toolbar's keeps
+the dense 4px and 14px. That is because the row's control stops sharing the row
+and stacks full width under its label there, so it is a form field again rather
+than one of a strip of small ones, and iOS zooms the page when a field under
+16px takes focus.
 
 **No call site picks a height.** A page says "this row is a toolbar" and every
 control in it agrees on a size, which is what stopped the six pages with a filter
@@ -133,7 +141,10 @@ the one to copy when adding a place. A place **declares two custom properties**:
 ```
 
 and the rule that reads them sits on `.input` and `.select__trigger`, because it
-has to reach inside HeroUI's own DOM to find a select trigger. It used to be
+has to reach inside HeroUI's own DOM to find a select trigger. Adding a place is
+therefore those two lines plus a class on the container, and `.otari-settings`
+is the one that proves it: it arrived written the old way and converting it
+moved no pixel, measured in all three places at both widths. It used to be
 spelled the other way, as `.otari-toolbar .input { height: 32px }`, which worked
 and had two costs. It was invisible from the call site: nothing on `<Toolbar>`
 said it restyled the controls inside it. And it was unconditional, because a

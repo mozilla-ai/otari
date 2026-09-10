@@ -1345,13 +1345,14 @@ textarea.input {
   min-height: var(--field-height);
   padding-block: var(--field-padding-block);
 }
-/* The two dense places. `input[type="search"]` needs its own rule because it is
+/* The three dense places. `input[type="search"]` needs its own rule because it is
    a native element carrying none of HeroUI's classes, and it stays scoped to
    the toolbar: the only two in the tree are toolbar search boxes, and pulling a
    bare search input into the family would restyle a control nothing here
    renders. */
 .otari-toolbar,
-.otari-pagination {
+.otari-pagination,
+.otari-settings {
   --field-height: 32px;
   --field-padding-block: 4px;
 }
@@ -2019,19 +2020,12 @@ main {
    It takes 16px with it, which is a separate rule from the height: iOS zooms
    the page when a field under 16px takes focus, and a full-width field is the
    one shape where that zoom has nowhere to go. */
-.otari-settings .input,
-.otari-settings .select__trigger {
-  height: 32px;
-  min-height: 32px;
-  padding-block: 4px;
-}
+/* The dense height and its phone override are declared on the place itself,
+   with the other two, further up this file. What is left here is the one part
+   that is not a height: 16px on the phone, because iOS zooms the page when a
+   field under 16px takes focus and a full-width field is the one shape where
+   that zoom has nowhere to go. */
 @media (max-width: 767px) {
-  .otari-settings .input,
-  .otari-settings .select__trigger {
-    height: 44px;
-    min-height: 44px;
-    padding-block: 6px;
-  }
   .otari-settings .input {
     font-size: var(--text-base);
   }
@@ -2073,8 +2067,16 @@ main {
    handing a finger a 32px target. Same 767px boundary as that floor, so the
    toolbar's fields and its buttons come up to 44px together. */
 @media (max-width: 767px) {
-  .otari-toolbar {
+  .otari-toolbar,
+  .otari-settings {
     --field-height: 44px;
+  }
+  /* A settings row's field also gains block padding, where a toolbar's keeps
+     the dense 4px: the row's control stops sharing the row and stacks full
+     width under its label here, so it is a form field again rather than one of
+     a strip of small ones. */
+  .otari-settings {
+    --field-padding-block: 6px;
   }
   /* A select inside a table cell is the third place the dense height outlives
      the floor. Not the same as #927: a row's Edit and Delete cannot reach 44

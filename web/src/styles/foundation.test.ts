@@ -1337,10 +1337,14 @@ describe("the phone viewport's touch-target floor", () => {
     // descendant selector). What is being held is the pair, not the spelling:
     // if a rewrite drops the 767px half, a phone gets a 32px search box.
     expect(CSS).toMatch(
-      /\.otari-toolbar,\s*\.otari-pagination \{\s*--field-height: 32px;/,
+      /\.otari-toolbar,\s*\.otari-pagination,\s*\.otari-settings \{\s*--field-height: 32px;/,
     )
+    // The phone override raises the two places whose height is keyed on width.
+    // The pager is the third and is not here: it raises on `pointer: coarse`
+    // instead, asserted below, because a fine pointer at a narrow width is a
+    // resized desktop window rather than a finger.
     expect(CSS).toMatch(
-      /@media \(max-width: 767px\) \{\s*\.otari-toolbar \{\s*--field-height: 44px;/,
+      /@media \(max-width: 767px\) \{\s*\.otari-toolbar,\s*\.otari-settings \{\s*--field-height: 44px;/,
     )
   })
 

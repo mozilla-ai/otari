@@ -1,13 +1,13 @@
 import { useState } from "react"
 
 import type { ManagedTool } from "@/client"
-import { settingInputId } from "@/features/tools/ToolSettingRows"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { Dot } from "@/design-system/indicators/Dot"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
+import { settingInputId } from "@/features/tools/ToolSettingRows"
 
 /**
  * The declaration a client sends, as a value to take.
