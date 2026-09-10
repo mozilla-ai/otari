@@ -382,8 +382,9 @@ def routing_explain(
     if spec.is_dynamic:
         click.echo(
             "  note: this policy selects per request, so it has no single target or price. It works on "
-            "/v1/chat/completions, /v1/messages and /v1/responses; on the other model-taking endpoints "
-            "(embeddings, images, moderations, rerank, batches) it is not a resolvable model name."
+            f"{API_ROOT}/chat/completions, {API_ROOT}/messages and {API_ROOT}/responses; on the other "
+            "model-taking endpoints (embeddings, images, moderations, rerank, batches) it is not a "
+            "resolvable model name."
         )
 
 

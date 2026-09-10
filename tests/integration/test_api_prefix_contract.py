@@ -6,7 +6,9 @@ allowlists in ``gateway.main`` name routes that exist: the generator reads
 those same lists, so the committed document and the generator agree even when
 both are stale. The routing table is the independent source of truth here.
 Third, that the operation ids hold in every mode, not only in the standalone
-mode the committed document is generated from.
+mode the committed document is generated from. And a fourth that no document
+shows at all: that the roots are spelled nowhere but in their owner, since a
+path built in a helper or a message from the literal is invisible above.
 
 The stamp checks are weaker on purpose. ``custom_openapi`` reads the same
 lists, so a mounted path wrongly added to ``_UNAUTHENTICATED_PATHS`` stamps
@@ -20,12 +22,29 @@ On the worker's PostgreSQL like the rest of ``tests/integration``, because
 
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 
-from gateway.api.routes import hosted_mode, hybrid_mode
+import gateway
+from gateway.api.routes import (
+    audio,
+    batches,
+    chat,
+    embeddings,
+    hosted_mode,
+    hybrid_mode,
+    images,
+    mcp,
+    messages,
+    moderations,
+    rerank,
+    responses,
+    search,
+    web_search_backend,
+)
 from gateway.core.config import API_ROOT, OTLP_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 from gateway.main import (
     _COOKIE_AUTH_PREFIXES,
@@ -281,3 +300,108 @@ def test_a_near_miss_of_a_public_prefix_is_not_treated_as_public() -> None:
         assert not _main_under(f"{prefix}-internal", _PUBLIC_PREFIXES)
         assert not _main_under(f"{prefix}z", _PUBLIC_PREFIXES)
         assert not _main_under(f"{prefix}x/readiness", _PUBLIC_PREFIXES)
+
+
+GATEWAY_SRC = Path(gateway.__file__).resolve().parent
+WEB_SRC = GATEWAY_SRC.parents[1] / "web" / "src"
+
+# The identifiers that look like routes and are not. Each is written to a
+# usage-log or in-flight row and keeps the value it had when routes lived at
+# /v1, so a source line may name one anywhere except where a route is
+# declared. A new name belongs here only after reading what it feeds.
+FROZEN_LABELS = frozenset(
+    {
+        audio.USAGE_ENDPOINT_SPEECH,
+        audio.USAGE_ENDPOINT_TRANSCRIPTIONS,
+        batches.USAGE_ENDPOINT,
+        batches.USAGE_ENDPOINT_RESULTS,
+        chat.USAGE_ENDPOINT,
+        embeddings.USAGE_ENDPOINT,
+        images.USAGE_ENDPOINT,
+        mcp.EXECUTE_ENDPOINT,
+        mcp.TOOLS_ENDPOINT,
+        messages.USAGE_ENDPOINT,
+        moderations.USAGE_ENDPOINT,
+        rerank.USAGE_ENDPOINT,
+        responses.USAGE_ENDPOINT,
+        search.SEARCH_ENDPOINT,
+        web_search_backend.SEARCH_ENDPOINT,
+    }
+)
+# OpenAI's Batch API names the operation each line runs by OpenAI's own path,
+# so batches.py sends this to the provider. Provider contract, not ours.
+BATCH_WIRE_VALUES = frozenset({"/v1/chat/completions"})
+
+_SPELLED_API_ROOT = re.compile(r"""["']/api/v1""")
+# The quoted value, up to the closing quote or the end of the line, so a
+# literal that runs on to the next line is judged on what is visible and fails.
+_QUOTED_OLD_ROOT = re.compile(r"""["'](/v1/[^"']*)""")
+_DECLARES_A_ROUTE = re.compile(r"\bprefix=|@\w+\.(?:get|post|put|patch|delete|head|options|api_route|websocket)\(")
+
+
+def _source_lines(root: Path, suffixes: tuple[str, ...]) -> list[tuple[Path, int, str]]:
+    assert root.is_dir(), f"{root} is not a directory; the guard has nothing to read"
+    lines = [
+        (path.relative_to(root), number, line)
+        for path in sorted(root.rglob("*"))
+        if path.suffix in suffixes and path.is_file()
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+    ]
+    assert lines, f"no {suffixes} source under {root}"
+    return lines
+
+
+def _cite(path: Path, number: int, line: str) -> str:
+    return f"{path}:{number}: {line.strip()}"
+
+
+def test_no_gateway_source_spells_the_api_root() -> None:
+    """The root has one owner, so a path built anywhere else takes the constant.
+
+    The check is on the literal text. A path built as ``f"{API_ROOT}/keys"``
+    never contains it, which is what leaves the constant as the only way
+    through.
+    """
+    stray = [
+        _cite(path, number, line)
+        for path, number, line in _source_lines(GATEWAY_SRC, (".py",))
+        if path != Path("core/config.py") and _SPELLED_API_ROOT.search(line)
+    ]
+    assert not stray, "the API root is spelled outside core/config.py:\n" + "\n".join(stray)
+
+
+def test_no_gateway_source_spells_the_old_root() -> None:
+    """A quoted ``/v1/`` is a frozen label, a wire value, or OTel's tail; anything else is a stale route.
+
+    A string equal to a frozen label may be named anywhere, in its definition,
+    a docstring or a filter description, except on a line that declares a
+    route: there it is a version in a prefix or a decorator, whatever its
+    value. The OTLP module is read past whole, because OTel owns the
+    ``/v1/{traces,logs,metrics}`` tail it declares.
+    """
+    allowed = FROZEN_LABELS | BATCH_WIRE_VALUES
+    stray: list[str] = []
+    for path, number, line in _source_lines(GATEWAY_SRC, (".py",)):
+        if path == Path("api/routes/otlp.py"):
+            continue
+        declares_a_route = _DECLARES_A_ROUTE.search(line) is not None
+        stray.extend(
+            _cite(path, number, line)
+            for match in _QUOTED_OLD_ROOT.finditer(line)
+            if match.group(1) not in allowed or declares_a_route
+        )
+    assert not stray, "the old root is spelled where a route or a built path should be:\n" + "\n".join(stray)
+
+
+def test_no_dashboard_source_doubles_the_root() -> None:
+    """``apiFetch`` prepends the root, so a call site or a mock that spells it too says ``/api/api/v1``.
+
+    Only the doubled form is checked. The dashboard still spells the root on
+    its own in copy and in tests that stub ``fetch``, which see the whole URL.
+    """
+    stray = [
+        _cite(path, number, line)
+        for path, number, line in _source_lines(WEB_SRC, (".ts", ".tsx", ".md", ".css"))
+        if "/api/api/v1" in line
+    ]
+    assert not stray, "the dashboard doubles the API root:\n" + "\n".join(stray)

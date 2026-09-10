@@ -186,7 +186,7 @@ describe("AcceptInvitationPage", () => {
 
     expect(await screen.findByText(/sends no mail/i)).toBeInTheDocument()
     expect(screen.getByText(/An operator can turn that on/)).toBeInTheDocument()
-    // Never this: `PUT /api/api/v1/auth/password` only acts on the caller's own
+    // Never this: `PUT /api/v1/auth/password` only acts on the caller's own
     // identity, so no endpoint here lets an admin set someone else's password.
     expect(screen.queryByText(/ask whoever administers/i)).toBeNull()
     expect(

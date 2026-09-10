@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config, require_deployment_operator
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
 from gateway.services.mail import Mailer, MailNotConfiguredError, normalized_address
 
@@ -46,7 +46,7 @@ class MailSettings(BaseModel):
         description=(
             "Whether a message carrying a link back to this deployment can be sent, which is "
             "what every message the control plane sends needs. Matches 'mail_ready' on "
-            "/api/v1/bootstrap."
+            f"{API_ROOT}/bootstrap."
         )
     )
     from_email: str | None = Field(description="The 'From' address on outgoing mail, if one is configured.")

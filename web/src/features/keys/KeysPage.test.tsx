@@ -48,7 +48,7 @@ const REGEN_SECRET =
   "gw-REGEN00000000000000000000000000000000000000000000000000"
 
 // Both key surfaces answer identical shapes, so one handler serves them: the
-// operator's /api/v1/keys and the member's /api/api/v1/organizations/me/keys
+// operator's /api/v1/keys and the member's /api/v1/organizations/me/keys
 // (otari-ai#1941). Which one the page asked is what the member-view cases
 // assert, off the spy's recorded URLs.
 const KEYS_URL = /\/api\/v1\/(?:organizations\/me\/)?keys(?:\/|\?|$)/
@@ -1087,7 +1087,7 @@ describe("KeysPage", () => {
   })
 
   // The member's view of the same page (otari-ai#1941): every hook reads and
-  // writes /api/api/v1/organizations/me/keys, and the operator-only affordances (the
+  // writes /api/v1/organizations/me/keys, and the operator-only affordances (the
   // owner picker, the budget exemption, the Owner column, the links to pages a
   // member cannot open) are absent rather than present and refused.
   describe("as a member", () => {
