@@ -656,14 +656,9 @@ export function Login() {
                         : undefined
                     }
                     fullWidth
-                    className="h-10 pr-10 font-mono text-base"
+                    className="h-10 pr-14 font-mono text-base"
                   />
-                  {/* A 40-character key pasted into a masked box cannot be
-                        checked against the one in the logs, which is the whole
-                        reason to fail a sign-in twice. The visible target is
-                        the 36px slot inside a 44px field; `before` carries the
-                        44px touch floor past it, rather than a hover fill the
-                        height of the whole field doing it. */}
+                  {/* Center on the field even when the mobile touch target grows. */}
                   <Button
                     type="button"
                     variant="ghost"
@@ -673,7 +668,7 @@ export function Login() {
                       isKeyVisible ? "Hide master key" : "Show master key"
                     }
                     onPress={() => setIsKeyVisible((shown) => !shown)}
-                    className="absolute top-1 right-1 h-9 w-9 text-muted before:absolute before:-inset-1"
+                    className="absolute top-1/2 right-1 h-9 w-9 -translate-y-1/2 text-muted before:absolute before:-inset-1"
                   >
                     <EyeIcon isCrossedOut={isKeyVisible} />
                   </Button>
