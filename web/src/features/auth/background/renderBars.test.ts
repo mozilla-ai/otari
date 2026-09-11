@@ -1,0 +1,91 @@
+import { describe, expect, it, vi } from "vitest"
+import { barLuminance } from "./barWave"
+import { BAR_ROW_RATIO } from "./config"
+import saved from "./login-background.json"
+import { type BarGeometry, drawBars } from "./renderBars"
+
+const palette = {
+  background: "Canvas",
+  foreground: "CanvasText",
+  accent: "Highlight",
+}
+const geometry: BarGeometry = {
+  width: 800,
+  height: 1200,
+  left: 200,
+  top: 200,
+  panelWidth: 400,
+  panelHeight: 400,
+  visibleTop: 100,
+  visibleBottom: 700,
+}
+
+function context() {
+  const fills: { alpha: number; color: string }[] = []
+  const ctx = {
+    globalAlpha: 1,
+    fillStyle: "",
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    beginPath: vi.fn(),
+    roundRect: vi.fn(),
+    fill() {
+      fills.push({ alpha: this.globalAlpha, color: this.fillStyle })
+    },
+  }
+  return { ctx, fills, canvas: ctx as unknown as CanvasRenderingContext2D }
+}
+
+describe("bar renderer", () => {
+  it("draws only visible rows and skips cells hidden by the form", () => {
+    const { ctx, fills, canvas } = context()
+    drawBars(canvas, geometry, palette, saved, 0)
+    expect(fills.length).toBeGreaterThan(0)
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 100, 800, 600)
+    for (const [x, y, width, height] of ctx.roundRect.mock.calls) {
+      expect(y + height).toBeGreaterThan(geometry.visibleTop)
+      expect(y).toBeLessThan(geometry.visibleBottom)
+      expect(x + width).toBeGreaterThan(0)
+      expect(x).toBeLessThan(geometry.width)
+      expect(
+        x >= 200 && x + width <= 600 && y >= 200 && y + height <= 600,
+      ).toBe(false)
+    }
+    expect(ctx.globalAlpha).toBe(1)
+  })
+
+  it("applies the configured wave contrast, intensity, and theme tint", () => {
+    const { ctx, fills, canvas } = context()
+    drawBars(canvas, geometry, palette, saved, 3)
+    const pitchX = geometry.panelWidth / saved.columns
+    const pitchY = pitchX * BAR_ROW_RATIO
+    const [x, y, width, height] = ctx.roundRect.mock.calls[0]
+    const luminance = barLuminance(
+      (x + width / 2) / geometry.width,
+      (y + height / 2) / geometry.height,
+      3,
+      saved.waveScale,
+    )
+    expect(pitchY).toBeGreaterThan(pitchX)
+    expect(fills[0].alpha).toBeCloseTo(
+      luminance ** saved.contrast * saved.intensity,
+    )
+    for (const fill of fills) {
+      expect(fill.alpha).toBeGreaterThanOrEqual(0)
+      expect(fill.alpha).toBeLessThanOrEqual(1)
+      expect(fill.color).toBe("color-mix(in oklab, CanvasText, Highlight 100%)")
+    }
+  })
+
+  it("does not paint a band outside the viewport or a zero-width panel", () => {
+    for (const changes of [
+      { visibleTop: 800, visibleBottom: 700 },
+      { panelWidth: 0 },
+    ]) {
+      const { ctx, canvas } = context()
+      drawBars(canvas, { ...geometry, ...changes }, palette, saved, 0)
+      expect(ctx.fillRect).not.toHaveBeenCalled()
+      expect(ctx.roundRect).not.toHaveBeenCalled()
+    }
+  })
+})

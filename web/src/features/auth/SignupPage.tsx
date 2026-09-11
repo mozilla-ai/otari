@@ -13,7 +13,6 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField, AuthPasswordField, AuthTextField } from "./AuthFields"
-import { LoginPageShell } from "./LoginPageShell"
 import {
   goToPublicAuthPage,
   PublicAuthLayout,
@@ -126,7 +125,6 @@ export function SignupPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout
-      shell={LoginPageShell}
       title="Claim your account"
       description="Set a password for the address an admin invited or added. You will confirm the address by email before your first sign-in."
       footer={

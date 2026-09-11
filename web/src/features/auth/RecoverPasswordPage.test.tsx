@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-
 import { RecoverPasswordPage } from "@/features/auth/RecoverPasswordPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { ThemeProvider } from "@/shared/hooks/useTheme"
 
 // The network boundary, not the hooks: the real hooks, their query keys, and
 // the mutation state the page branches on all stay live.
@@ -18,9 +18,11 @@ function renderPage() {
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <RecoverPasswordPage />
-    </QueryClientProvider>,
+    <ThemeProvider>
+      <QueryClientProvider client={client}>
+        <RecoverPasswordPage />
+      </QueryClientProvider>
+    </ThemeProvider>,
   )
 }
 

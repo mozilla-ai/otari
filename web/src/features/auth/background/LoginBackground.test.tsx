@@ -12,23 +12,28 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function Harness({
-  paused = false,
-  config = saved,
-}: {
-  paused?: boolean
-  config?: typeof saved
-}) {
+function Harness() {
   const ref = useRef<HTMLDivElement>(null)
   return (
     <div>
       <div ref={ref}>Form</div>
-      <LoginBackground panelRef={ref} config={config} paused={paused} />
+      <LoginBackground panelRef={ref} config={saved} />
     </div>
   )
 }
 
 function animationEnvironment(reduced = false) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 800,
+    height: 600,
+    top: 0,
+    left: 0,
+    bottom: 600,
+    right: 800,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  })
   const frames = new Map<number, FrameRequestCallback>()
   let frameId = 0
   const request = vi.fn((callback: FrameRequestCallback) => {
@@ -58,22 +63,18 @@ function animationEnvironment(reduced = false) {
 }
 
 describe("login background lifecycle", () => {
-  it("animates, pauses without advancing time, resumes, and cleans up", () => {
+  it("limits painting to 24 fps and cleans up", () => {
     const env = animationEnvironment()
     const mounted = render(<Harness />)
     env.tick(1000)
-    env.tick(1100)
-    const beforePause = vi.mocked(drawBars).mock.lastCall?.[4]
-    expect(beforePause).toBeGreaterThan(0)
-    mounted.rerender(<Harness paused />)
-    env.tick(1200)
-    expect(env.frames.size).toBe(0)
-    expect(vi.mocked(drawBars).mock.lastCall?.[4]).toBe(beforePause)
-    mounted.rerender(<Harness />)
-    env.tick(1300)
-    env.tick(1400)
-    expect(vi.mocked(drawBars).mock.lastCall?.[4]).toBeGreaterThan(
-      beforePause ?? 0,
+    const count = vi.mocked(drawBars).mock.calls.length
+    env.tick(1016)
+    env.tick(1032)
+    expect(drawBars).toHaveBeenCalledTimes(count)
+    env.tick(1048)
+    expect(drawBars).toHaveBeenCalledTimes(count + 1)
+    expect(vi.mocked(drawBars).mock.lastCall?.[4]).toBeCloseTo(
+      0.048 * saved.speed,
     )
     mounted.unmount()
     expect(env.frames.size).toBe(0)
@@ -86,18 +87,6 @@ describe("login background lifecycle", () => {
     env.tick(1000)
     expect(env.frames.size).toBe(0)
     expect(vi.mocked(drawBars).mock.lastCall?.[4]).toBe(0)
-  })
-
-  it("keeps the animation clock moving while controls are adjusted", () => {
-    const env = animationEnvironment()
-    const config = { ...saved, speed: 1 }
-    const mounted = render(<Harness config={config} />)
-    env.tick(1000)
-    env.tick(1016)
-    mounted.rerender(<Harness config={{ ...config, waveScale: 1.5 }} />)
-    env.tick(1032)
-    expect(vi.mocked(drawBars).mock.lastCall?.[4]).toBeCloseTo(0.032)
-    expect(env.frames.size).toBe(1)
   })
 
   it("does not advance after the tab has been hidden", () => {

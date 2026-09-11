@@ -6,7 +6,6 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField } from "./AuthFields"
-import { LoginPageShell } from "./LoginPageShell"
 import {
   goToPublicAuthPage,
   PublicAuthLayout,
@@ -58,7 +57,6 @@ export function ResendVerificationPage() {
 
   return (
     <PublicAuthLayout
-      shell={LoginPageShell}
       title="Send a new verification link"
       description="Enter the address you signed up with and we will mail a fresh link."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}

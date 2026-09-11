@@ -1,90 +1,63 @@
-import { type ReactNode, useLayoutEffect, useRef } from "react"
-import { FiMoon, FiSun } from "react-icons/fi"
+import { type ReactNode, useRef } from "react"
+import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
 import { Button } from "@/design-system/actions/Button"
-import { useTheme } from "@/shared/hooks/useTheme"
-import { BAR_ROW_RATIO } from "./background/config"
+import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
-import "./login.css"
 
 export function LoginPageShell({ children }: { children: ReactNode }) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const { resolved, setPreference } = useTheme()
-  useLayoutEffect(() => {
-    const panel = panelRef.current
-    const content = contentRef.current
-    if (!panel || !content) return
-    const align = () => {
-      const pitch =
-        (panel.getBoundingClientRect().width / savedBackground.columns) *
-        BAR_ROW_RATIO
-      if (!pitch) return
-      const rows = Math.ceil(
-        (content.getBoundingClientRect().height + 2) / pitch,
-      )
-      // Geometry is measured once per resize; animation never changes layout.
-      panel.style.setProperty("--login-panel-height", `${rows * pitch}px`)
-    }
-    align()
-    let frame = 0
-    const resize = new ResizeObserver(() => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(align)
-    })
-    resize.observe(content)
-    return () => {
-      cancelAnimationFrame(frame)
-      resize.disconnect()
-    }
-  }, [])
+  const { preference, setPreference } = useTheme()
+  const next =
+    THEME_PREFERENCES[
+      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
+    ]
+  const ThemeIcon =
+    preference === "system" ? FiMonitor : preference === "dark" ? FiMoon : FiSun
+
   return (
-    <div className="login-page">
-      <LoginBackground
-        panelRef={panelRef}
-        config={savedBackground}
-        paused={false}
-      />
-      <header className="login-header">
+    <div className="relative isolate flex min-h-screen flex-col bg-background">
+      <header className="relative z-10 flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4 md:px-6">
         <div className="flex items-center gap-3">
           <img
             src={`${import.meta.env.BASE_URL}favicon.svg`}
             alt=""
-            className="h-6 w-auto"
+            width={273}
+            height={250}
+            className="h-6 w-[1.638rem]"
           />
           <span className="text-title">Otari</span>
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            isIconOnly
-            aria-label={
-              resolved === "dark" ? "Use light theme" : "Use dark theme"
-            }
-            onPress={() =>
-              setPreference(resolved === "dark" ? "light" : "dark")
-            }
-          >
-            {resolved === "dark" ? (
-              <FiSun aria-hidden />
-            ) : (
-              <FiMoon aria-hidden />
-            )}
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          isIconOnly
+          aria-label={`Appearance: ${preference}. Switch to ${next}.`}
+          onPress={() => setPreference(next)}
+        >
+          <ThemeIcon aria-hidden />
+        </Button>
       </header>
-      <main className="login-main">
-        <div ref={panelRef} className="login-panel">
-          <span aria-hidden className="login-corner login-corner-start" />
-          <span aria-hidden className="login-corner login-corner-end" />
-          <div ref={contentRef} className="login-panel-content">
-            {children}
-          </div>
+      {/* The viewport sets the top offset; disclosures and errors grow downward. */}
+      <main className="relative isolate flex flex-1 flex-col items-center px-4 pt-8 pb-8 md:pt-[max(3rem,calc(50vh-17.5rem))] md:pb-12">
+        <LoginBackground panelRef={panelRef} config={savedBackground} />
+        <div
+          ref={panelRef}
+          className="relative z-10 flex w-full max-w-md flex-col gap-6 border border-border-strong bg-surface p-6 md:p-8"
+        >
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -top-px -left-px size-2 border-t-2 border-l-2 border-[var(--color-primary)]"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -right-px -bottom-px size-2 border-r-2 border-b-2 border-[var(--color-primary)]"
+          />
+          {children}
         </div>
       </main>
-      <footer className="login-footer">
+      <footer className="relative z-10 flex min-h-14 shrink-0 items-center justify-between gap-4 border-t border-border bg-background px-4 text-subtle md:px-6">
         <span>One gateway. Every model.</span>
-        <span className="font-mono text-xs">Mozilla AI</span>
+        <span className="text-mono-caption">Mozilla AI</span>
       </footer>
     </div>
   )

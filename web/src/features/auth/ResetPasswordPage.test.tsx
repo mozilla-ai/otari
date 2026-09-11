@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { ThemeProvider } from "@/shared/hooks/useTheme"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/shared/api/client")>()
@@ -16,9 +16,11 @@ function renderPage(hash: string) {
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>
-      <ResetPasswordPage hash={hash} />
-    </QueryClientProvider>,
+    <ThemeProvider>
+      <QueryClientProvider client={client}>
+        <ResetPasswordPage hash={hash} />
+      </QueryClientProvider>
+    </ThemeProvider>,
   )
 }
 

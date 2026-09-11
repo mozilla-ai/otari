@@ -33,8 +33,8 @@ import { Button, Link } from "@heroui/react"
 import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useAuth } from "@/features/auth/AuthContext"
+import { LoginPageShell } from "@/features/auth/LoginPageShell"
 import {
-  AuthPageShell,
   goToPublicAuthPage,
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
@@ -85,7 +85,7 @@ export function AcceptInvitationPage() {
     : "#/signup"
 
   return (
-    <AuthPageShell>
+    <LoginPageShell>
       <h1 className="text-display">Organization invitation</h1>
 
       {token === null ? (
@@ -216,6 +216,6 @@ export function AcceptInvitationPage() {
           New to Otari? Open the welcome guide
         </Link>
       </div>
-    </AuthPageShell>
+    </LoginPageShell>
   )
 }

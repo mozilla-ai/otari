@@ -1,14 +1,9 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, expect, it, vi } from "vitest"
-import { ThemeProvider } from "@/shared/hooks/useTheme"
+import { STORAGE_KEY, ThemeProvider } from "@/shared/hooks/useTheme"
 import { LoginPageShell } from "./LoginPageShell"
 
-vi.mock("./background/LoginBackground", () => ({
-  LoginBackground: ({ paused }: { paused: boolean }) => (
-    <span>{paused ? "Motion paused" : "Motion playing"}</span>
-  ),
-}))
 afterEach(() => {
   vi.restoreAllMocks()
   localStorage.clear()
@@ -17,8 +12,8 @@ afterEach(() => {
   document.documentElement.style.removeProperty("color-scheme")
 })
 
-it("offers a theme switch without an animation control", async () => {
-  localStorage.setItem("otari.dashboard.theme", "light")
+it("cycles through light, dark, and system without an animation control", async () => {
+  localStorage.setItem(STORAGE_KEY, "system")
   const user = userEvent.setup()
   render(
     <ThemeProvider>
@@ -30,9 +25,18 @@ it("offers a theme switch without an animation control", async () => {
   expect(
     screen.queryByRole("button", { name: /background animation/ }),
   ).not.toBeInTheDocument()
-  expect(screen.getByText("Motion playing")).toBeInTheDocument()
-  await user.click(screen.getByRole("button", { name: "Use dark theme" }))
-  expect(document.documentElement).toHaveAttribute("data-theme", "dark")
+  for (const [current, next] of [
+    ["system", "light"],
+    ["light", "dark"],
+    ["dark", "system"],
+  ]) {
+    await user.click(
+      screen.getByRole("button", {
+        name: `Appearance: ${current}. Switch to ${next}.`,
+      }),
+    )
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(next)
+  }
   expect(screen.getByRole("main")).toContainElement(
     screen.getByRole("heading", { name: "Sign in" }),
   )

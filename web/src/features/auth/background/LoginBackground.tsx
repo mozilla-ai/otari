@@ -5,21 +5,11 @@ import { type BarGeometry, type BarPalette, drawBars } from "./renderBars"
 export function LoginBackground({
   panelRef,
   config,
-  paused,
 }: {
   panelRef: RefObject<HTMLDivElement | null>
   config: LoginBackgroundConfig
-  paused: boolean
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const settings = useRef({ config, paused })
-  const redraw = useRef<(() => void) | undefined>(undefined)
-
-  useEffect(() => {
-    settings.current = { config, paused }
-    redraw.current?.()
-  }, [config, paused])
-
   useEffect(() => {
     const canvas = canvasRef.current
     const panel = panelRef.current
@@ -32,15 +22,15 @@ export function LoginBackground({
     let palette: BarPalette
     let frame = 0
     let lastFrame = 0
+    let lastPaint = 0
     let time = 0
 
     const canAnimate = () =>
       !document.hidden &&
       !reduced.matches &&
-      !settings.current.paused &&
-      settings.current.config.speed > 0
-    const paint = () =>
-      drawBars(ctx, geometry, palette, settings.current.config, time)
+      geometry.visibleBottom > geometry.visibleTop &&
+      config.speed > 0
+    const paint = () => drawBars(ctx, geometry, palette, config, time)
     const animate = (now: number) => {
       frame = 0
       if (!canAnimate()) {
@@ -48,11 +38,13 @@ export function LoginBackground({
         return
       }
       if (lastFrame)
-        time +=
-          Math.min((now - lastFrame) / 1000, 0.1) *
-          settings.current.config.speed
+        time += Math.min((now - lastFrame) / 1000, 0.1) * config.speed
       lastFrame = now
-      paint()
+      // The slow decorative field needs at most 24 paints per second.
+      if (now - lastPaint >= 1000 / 24) {
+        paint()
+        lastPaint = now
+      }
       frame = requestAnimationFrame(animate)
     }
     const update = () => {
@@ -74,10 +66,15 @@ export function LoginBackground({
         left: anchor.left - bounds.left,
         top: anchor.top - bounds.top,
         panelWidth: anchor.width,
+        panelHeight: anchor.height,
+        visibleTop: Math.max(0, -bounds.top),
+        visibleBottom: Math.min(bounds.height, window.innerHeight - bounds.top),
       }
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
-      canvas.width = Math.round(bounds.width * pixelRatio)
-      canvas.height = Math.round(bounds.height * pixelRatio)
+      const width = Math.round(bounds.width * pixelRatio)
+      const height = Math.round(bounds.height * pixelRatio)
+      if (canvas.width !== width) canvas.width = width
+      if (canvas.height !== height) canvas.height = height
       ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
       const style = getComputedStyle(canvas)
       palette = {
@@ -88,7 +85,6 @@ export function LoginBackground({
       update()
     }
     measure()
-    redraw.current = update
     const resize = new ResizeObserver(measure)
     resize.observe(parent)
     resize.observe(panel)
@@ -99,15 +95,21 @@ export function LoginBackground({
     })
     reduced.addEventListener("change", update)
     document.addEventListener("visibilitychange", update)
+    document.addEventListener("scroll", measure, {
+      passive: true,
+      capture: true,
+    })
+    window.addEventListener("resize", measure)
     return () => {
       cancelAnimationFrame(frame)
-      redraw.current = undefined
       resize.disconnect()
       theme.disconnect()
       reduced.removeEventListener("change", update)
       document.removeEventListener("visibilitychange", update)
+      document.removeEventListener("scroll", measure, true)
+      window.removeEventListener("resize", measure)
     }
-  }, [panelRef])
+  }, [panelRef, config])
 
   return (
     <canvas

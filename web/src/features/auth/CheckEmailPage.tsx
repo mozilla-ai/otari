@@ -1,4 +1,3 @@
-import { LoginPageShell } from "./LoginPageShell"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 
 /**
@@ -19,7 +18,6 @@ export function CheckEmailPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout
-      shell={LoginPageShell}
       title="Check your email"
       description={
         type === "resend"

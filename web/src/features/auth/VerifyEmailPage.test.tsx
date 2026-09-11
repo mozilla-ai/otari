@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-
 import { VerifyEmailPage } from "@/features/auth/VerifyEmailPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
@@ -28,9 +28,11 @@ function renderPage(hash: string) {
   return {
     client,
     ...render(
-      <QueryClientProvider client={client}>
-        <VerifyEmailPage hash={hash} />
-      </QueryClientProvider>,
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <VerifyEmailPage hash={hash} />
+        </QueryClientProvider>
+      </ThemeProvider>,
     ),
   }
 }
@@ -74,9 +76,11 @@ describe("VerifyEmailPage", () => {
 
     render(
       <StrictMode>
-        <QueryClientProvider client={client}>
-          <VerifyEmailPage hash="#/verify-email?token=abc123" />
-        </QueryClientProvider>
+        <ThemeProvider>
+          <QueryClientProvider client={client}>
+            <VerifyEmailPage hash="#/verify-email?token=abc123" />
+          </QueryClientProvider>
+        </ThemeProvider>
       </StrictMode>,
     )
 
@@ -94,9 +98,11 @@ describe("VerifyEmailPage", () => {
     const { client, rerender } = renderPage("#/verify-email?token=abc123")
     await screen.findByRole("heading", { name: "Email verified" })
     rerender(
-      <QueryClientProvider client={client}>
-        <VerifyEmailPage hash="#/verify-email?token=abc123" />
-      </QueryClientProvider>,
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <VerifyEmailPage hash="#/verify-email?token=abc123" />
+        </QueryClientProvider>
+      </ThemeProvider>,
     )
 
     expect(apiFetch).toHaveBeenCalledTimes(1)
@@ -185,9 +191,11 @@ describe("the telemetry the verification page records", () => {
 
     render(
       <StrictMode>
-        <QueryClientProvider client={client}>
-          <VerifyEmailPage hash="#/verify-email?token=abc123" />
-        </QueryClientProvider>
+        <ThemeProvider>
+          <QueryClientProvider client={client}>
+            <VerifyEmailPage hash="#/verify-email?token=abc123" />
+          </QueryClientProvider>
+        </ThemeProvider>
       </StrictMode>,
     )
 
