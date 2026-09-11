@@ -577,14 +577,21 @@ function EditProviderForm({
     credentials,
     stored.redacted,
   )
+  // `replacingKey` is in the snapshot with the secret it reveals: arming the
+  // replacement and then closing without typing one loses nothing, but a typed
+  // key is work, and the flag is what says the field was ever on screen.
+  const { isDirty } = useDirtySnapshot({
+    providerType,
+    apiBase,
+    replacingKey,
+    apiKey,
+    clientArgsText,
+    credentials,
+  })
+  const blocked = !clientArgs.ok || Object.keys(credentialErrors).length > 0
 
   const submit = () => {
-    if (
-      update.isPending ||
-      !clientArgs.ok ||
-      Object.keys(credentialErrors).length > 0
-    )
-      return
+    if (update.isPending || blocked) return
     const body: UpdateStoredProviderRequest = {
       provider_type: providerType.trim() || null,
       api_base: apiBase.trim() || null,
@@ -612,26 +619,38 @@ function EditProviderForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg` as on the add form: the same five fields, plus whatever typed
+      // credentials this provider declares.
+      size="lg"
+      title="Edit provider"
+      description={<code>{provider.instance}</code>}
+      submitLabel="Save"
+      onSubmit={submit}
+      isPending={update.isPending}
+      isSubmitDisabled={blocked}
+      isDirty={isDirty}
+      error={update.error}
     >
-      <div className="text-title">
-        Edit <code>{provider.instance}</code>
-      </div>
-      <ErrorBanner error={update.error} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Provider type"
           value={providerType}
           onChange={setProviderType}
           placeholder="openai"
+          autoFocus
+          reserveMessage={false}
         />
         <Field
           label="API base"
           value={apiBase}
           onChange={setApiBase}
           placeholder="https://api.openai.com/v1"
+          reserveMessage={false}
         />
       </div>
       <div className="flex flex-col gap-2">
@@ -684,23 +703,7 @@ function EditProviderForm({
         onChange={setClientArgsText}
         error={clientArgs.ok ? null : clientArgs.error}
       />
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={
-            update.isPending ||
-            !clientArgs.ok ||
-            Object.keys(credentialErrors).length > 0
-          }
-          onPress={submit}
-        >
-          {update.isPending ? "Saving…" : "Save changes"}
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -1318,9 +1321,9 @@ export function ProvidersPage() {
       />
       {editingProvider ? (
         <EditProviderForm
-          // Remount when the operator switches rows: the fields are seeded from
-          // the provider once, so without this, editing a second provider would
-          // open with the first one's values (and save them onto it).
+          // The fields are seeded from the provider once, so the next Edit has
+          // to arrive at a fresh form rather than the last provider's values,
+          // which a save would then write onto this one.
           key={editingProvider.instance}
           provider={editingProvider}
           onClose={() => setEditing(null)}

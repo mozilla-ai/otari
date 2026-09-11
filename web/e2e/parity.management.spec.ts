@@ -108,14 +108,14 @@ test.describe("standalone provider setup", () => {
     await expect(provider).not.toContainText("Connected.")
 
     await provider.getByRole("button", { name: "Edit" }).click()
-    await page.getByLabel("API base").fill("http://127.0.0.1:9/v2")
-    await page.getByRole("button", { name: "Save changes" }).click()
-    // Wait on Cancel, not on the button that was just pressed: that one reads
-    // "Saving…" while the request is in flight, so asserting "Save changes" is
-    // hidden passes the instant it is pressed, and the reload below then aborts
-    // the PATCH and loses the edit. Cancel is present for as long as the form is,
-    // and the form closes only in the mutation's onSuccess.
-    await expect(page.getByRole("button", { name: "Cancel" })).toBeHidden()
+    const editProvider = page.getByRole("dialog", { name: "Edit provider" })
+    await editProvider.getByLabel("API base").fill("http://127.0.0.1:9/v2")
+    await editProvider.getByRole("button", { name: "Save" }).click()
+    // Wait on the frame, not on the button that was just pressed: the submit
+    // keeps its label through the request, so asserting it is hidden passes the
+    // instant it is pressed and the reload below then aborts the PATCH and loses
+    // the edit. The dialog closes only in the mutation's onSuccess.
+    await expect(editProvider).toBeHidden()
 
     // Reopening is what proves the edit was persisted rather than only echoed
     // back into a form that never closed. Reload first: the form seeds its fields
@@ -126,10 +126,11 @@ test.describe("standalone provider setup", () => {
     await row(page, "Providers", PROVIDER)
       .getByRole("button", { name: "Edit" })
       .click()
-    await expect(page.getByLabel("API base")).toHaveValue(
+    await expect(editProvider.getByLabel("API base")).toHaveValue(
       "http://127.0.0.1:9/v2",
     )
-    await page.getByRole("button", { name: "Cancel" }).click()
+    await editProvider.getByRole("button", { name: "Cancel" }).click()
+    await expect(editProvider).toBeHidden()
 
     // The confirmation is a modal, so it names the provider rather than relying
     // on the row behind the backdrop to say which one this is about.

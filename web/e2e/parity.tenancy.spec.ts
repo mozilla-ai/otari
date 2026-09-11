@@ -186,8 +186,10 @@ test.describe("standalone tenancy", () => {
     await expect(created).toContainText("Created by the parity suite")
 
     await created.getByRole("button", { name: "Edit" }).click()
-    await page.getByLabel("Name").fill(RENAMED_WORKSPACE)
-    await page.getByRole("button", { name: "Save changes" }).click()
+    const editDialog = page.getByRole("dialog", { name: "Edit workspace" })
+    await editDialog.getByLabel("Name").fill(RENAMED_WORKSPACE)
+    await editDialog.getByRole("button", { name: "Save" }).click()
+    await expect(editDialog).toBeHidden()
 
     const renamed = workspaceRow(page, RENAMED_WORKSPACE)
     await expect(renamed).toBeVisible()

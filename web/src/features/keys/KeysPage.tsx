@@ -33,7 +33,6 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
@@ -765,6 +764,14 @@ function EditKeyForm({
     apiKey.reject_user_mismatch,
   )
   const [scopeValid, setScopeValid] = useState(true)
+  const { isDirty } = useDirtySnapshot({
+    keyName,
+    expiresAt,
+    allowedModels,
+    excludeFromBudget,
+    rejectUserMismatch,
+    scopeValid,
+  })
 
   const submit = () => {
     if (update.isPending || !scopeValid) return
@@ -782,30 +789,38 @@ function EditKeyForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg` as on the create form: the same key, the same frame.
+      size="lg"
+      title="Edit key"
+      description={<code>{apiKey.key_name ?? apiKey.id}</code>}
+      submitLabel="Save"
+      onSubmit={submit}
+      isPending={update.isPending}
+      isSubmitDisabled={!scopeValid}
+      isDirty={isDirty}
+      error={update.error}
     >
-      <h2 className="text-title">
-        Edit{" "}
-        <code className="text-mono-title">{apiKey.key_name ?? apiKey.id}</code>
-      </h2>
-      <ErrorBanner error={update.error} />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Name"
-          value={keyName}
-          onChange={setKeyName}
-          placeholder="ci-bot"
-        />
-        <Field
-          label="Expires"
-          value={expiresAt}
-          onChange={setExpiresAt}
-          type="datetime-local"
-          description="Blank clears the expiry."
-        />
-      </div>
+      <Field
+        label="Name"
+        value={keyName}
+        onChange={setKeyName}
+        placeholder="ci-bot"
+        autoFocus
+        reserveMessage={false}
+      />
+      <Field
+        label="Expires"
+        value={expiresAt}
+        onChange={setExpiresAt}
+        type="datetime-local"
+        description="Blank clears the expiry."
+        reserveMessage
+      />
       {isDeploymentWide && apiKey.user_id ? (
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
       ) : null}
@@ -837,19 +852,7 @@ function EditKeyForm({
         value={rejectUserMismatch}
         onChange={setRejectUserMismatch}
       />
-      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          isDisabled={update.isPending || !scopeValid}
-          onPress={submit}
-        >
-          {update.isPending ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -1341,9 +1344,9 @@ export function KeysPage() {
         memberLabels={memberLabels}
         returnFocusRef={createButtonRef}
       />
-      {/* Key on the row id so switching which key is edited remounts the form:
-          its fields seed from `apiKey` via useState (mount-only), so without this
-          a second Edit would keep the first key's values and PATCH the wrong row. */}
+      {/* Keyed on the row id: the fields seed from `apiKey` on mount only, so
+          the next Edit has to arrive at a fresh form rather than the last key's
+          values, which would PATCH the wrong row. */}
       {editingKey ? (
         <EditKeyForm
           key={editingKey.id}

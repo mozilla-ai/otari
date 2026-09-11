@@ -15,7 +15,6 @@ import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
@@ -537,6 +536,12 @@ function EditWorkspaceForm({
     createDefault.isPending ||
     updateDefault.isPending ||
     deleteDefault.isPending
+  // `budgetId` rather than `selectedBudget`: null is "the picker was never
+  // touched", so a default that resolves after mount is part of the seed rather
+  // than a change the guard should arm on. The per-provider defaults and the
+  // provider keys below write as they are changed rather than on save, so
+  // nothing they hold is unsaved work.
+  const { isDirty } = useDirtySnapshot({ name, description, budgetId })
 
   // Three outcomes rather than one call: the default is its own row, so moving
   // between "none" and a budget is a create or a delete, not a field write.
@@ -571,27 +576,58 @@ function EditWorkspaceForm({
   }
 
   const trimmed = name.trim()
+  const save = () => {
+    if (update.isPending || savingDefault || trimmed === "") return
+    update.mutate(
+      {
+        id: workspace.id,
+        body: { name: trimmed, description: description.trim() || null },
+      },
+      {
+        onSuccess: async () => {
+          await saveDefault()
+          onClose()
+        },
+      },
+    )
+  }
+
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg`: the two fields are joined by the default-budget controls and the
+      // workspace's provider keys, which is well past what `md` holds.
+      size="lg"
+      title="Edit workspace"
+      description={<code>{workspace.name}</code>}
+      submitLabel="Save"
+      onSubmit={save}
+      isPending={update.isPending || savingDefault}
+      isSubmitDisabled={trimmed === ""}
+      isDirty={isDirty}
+      error={
+        update.error ??
+        createDefault.error ??
+        updateDefault.error ??
+        deleteDefault.error
+      }
     >
-      <h2 className="text-title">
-        Edit <code>{workspace.name}</code>
-      </h2>
-      <ErrorBanner
-        error={
-          update.error ??
-          createDefault.error ??
-          updateDefault.error ??
-          deleteDefault.error
-        }
+      <Field
+        label="Name"
+        value={name}
+        onChange={setName}
+        isRequired
+        autoFocus
+        reserveMessage={false}
       />
-      <Field label="Name" value={name} onChange={setName} isRequired />
       <Field
         label="Description"
         value={description}
         onChange={setDescription}
+        reserveMessage={false}
       />
       {/* Withheld from a caller who does not operate the deployment: the
           picker's options come from the operator-gated `/budgets` read, so
@@ -629,36 +665,7 @@ function EditWorkspaceForm({
           to its organization arm because the key names come from the
           organization-gated list. */}
       <WorkspaceProviderKeys workspaceId={workspace.id} />
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={trimmed === ""}
-          isPending={update.isPending || savingDefault}
-          onPress={() =>
-            update.mutate(
-              {
-                id: workspace.id,
-                body: {
-                  name: trimmed,
-                  description: description.trim() || null,
-                },
-              },
-              {
-                onSuccess: async () => {
-                  await saveDefault()
-                  onClose()
-                },
-              },
-            )
-          }
-        >
-          Save changes
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -864,8 +871,8 @@ export function WorkspacesPage() {
         returnFocusRef={createButtonRef}
       />
 
-      {/* Keyed on the workspace so switching which one is edited remounts the
-          form: its fields seed from `workspace` on mount only. */}
+      {/* Keyed on the workspace: its fields seed from `workspace` on mount
+          only, so the next Edit has to arrive at a fresh form. */}
       {editingWorkspace ? (
         <EditWorkspaceForm
           key={editingWorkspace.id}

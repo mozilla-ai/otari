@@ -36,7 +36,6 @@ import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
@@ -595,6 +594,14 @@ function MemberEditor({
     })
 
   const canSave = !saving && scopeValid
+  // The workspace rows are a Map, which `JSON.stringify` flattens to `{}`, so
+  // the guard is handed their entries. Both halves seed on mount and neither
+  // changes on its own, so nothing here arms without a keystroke.
+  const { isDirty } = useDirtySnapshot({
+    rows: [...rows],
+    allowedModels,
+    scopeValid,
+  })
 
   const save = async () => {
     if (!canSave || !member.user_id) return
@@ -692,13 +699,22 @@ function MemberEditor({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-5"
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg`: the workspace access table is three columns wide.
+      size="lg"
+      title="Edit member"
+      description={memberLabel(member)}
+      submitLabel="Save"
+      onSubmit={() => void save()}
+      isPending={saving}
+      isSubmitDisabled={!scopeValid}
+      isDirty={isDirty}
+      error={error}
     >
-      <div className="text-title">Edit {memberLabel(member)}</div>
-      <ErrorBanner error={error} />
-
       {/* Withheld entirely from a caller who does not operate the deployment.
           `spendRow` comes from `useUsers(operates)`, so for them it is always
           undefined and the fallback below would report "no spend row yet" for a
@@ -724,7 +740,7 @@ function MemberEditor({
 
       <div className="flex flex-col gap-2">
         <span className="text-body">Workspace access</span>
-        <div className="max-w-3xl overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-lg text-sm">
             <thead>
               <tr className="text-left text-xs text-muted">
@@ -796,7 +812,7 @@ function MemberEditor({
         {/* Gated with the Budget column it explains: "pick a different budget
             here" names a control this caller is not offered. */}
         {operates ? (
-          <span className="max-w-2xl text-xs text-muted">
+          <span className="text-xs text-muted">
             Each workspace holds its own allowance, so someone in two workspaces
             has two. The amount and the reset period belong to the budget, so
             editing one moves everyone held to it; pick a different budget here
@@ -806,16 +822,7 @@ function MemberEditor({
           </span>
         ) : null}
       </div>
-
-      <div className="flex gap-2">
-        <Button variant="primary" isDisabled={!canSave} onPress={save}>
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-        <Button variant="ghost" isDisabled={saving} onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -1284,8 +1291,8 @@ export function OrganizationMembersPage() {
         onClose={() => setInviting(false)}
       />
 
-      {/* Keyed on the row so switching which member is edited remounts the
-          form: its fields seed from the member on mount only. */}
+      {/* Keyed on the row: its fields seed from the member on mount only, so
+          the next Edit has to arrive at a fresh form. */}
       {editingRow ? (
         <MemberEditor
           key={memberRowKey(editingRow)}

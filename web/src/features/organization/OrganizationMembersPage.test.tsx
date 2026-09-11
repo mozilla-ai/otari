@@ -674,6 +674,23 @@ describe("OrganizationMembersPage", () => {
     expect(patch?.body).toEqual({ blocked: true })
   })
 
+  it("opens the member editor in a dialog, naming the member", async () => {
+    mockApi({ members: [OWNER, ANALYST], workspaces: [workspace()] })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+
+    // A dialog rather than a band above the roster: the row keeps its place,
+    // and the page under it does not shift by the height of a form
+    // (otari-ai#2125).
+    const dialog = await screen.findByRole("dialog", { name: "Edit member" })
+    expect(within(dialog).getByText("Workspace access")).toBeInTheDocument()
+  })
+
   it("edits model access, workspace membership and the workspace budget in one save", async () => {
     // One control over three tables underneath, so this asserts all three
     // writes land from a single save, and that the ceiling is written against
@@ -722,7 +739,7 @@ describe("OrganizationMembersPage", () => {
     // Bravo. A budget is picked, never an amount: the figure is the budget's.
     await pickOption(actor, "Budget in Default Workspace", "Large")
     await actor.click(screen.getByLabelText("Bravo"))
-    await actor.click(screen.getByRole("button", { name: "Save changes" }))
+    await actor.click(screen.getByRole("button", { name: "Save" }))
 
     // All three writes land from the one save. Model access goes to the spend
     // row the membership is joined to, and it is the third table the editor
@@ -844,7 +861,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     expect(
       screen.queryByLabelText("Budget in Default Workspace"),
     ).not.toBeInTheDocument()
-    await actor.click(screen.getByRole("button", { name: "Save changes" }))
+    await actor.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
       expect(

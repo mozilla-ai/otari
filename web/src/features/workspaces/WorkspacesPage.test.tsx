@@ -367,6 +367,19 @@ describe("WorkspacesPage", () => {
     expect(screen.getAllByRole("button", { name: "Delete" })[0]).toBeDisabled()
   })
 
+  it("opens the edit form in a dialog, naming the workspace", async () => {
+    mockApi({})
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+
+    // A dialog rather than a band above the table: the row keeps its place, and
+    // the page under it does not shift by the height of a form (otari-ai#2125).
+    const dialog = await screen.findByRole("dialog", { name: "Edit workspace" })
+    expect(within(dialog).getByText("Default Workspace")).toBeInTheDocument()
+  })
+
   it("renames a workspace through the update endpoint", async () => {
     const requests = mockApi({})
     const user = userEvent.setup()
@@ -376,7 +389,7 @@ describe("WorkspacesPage", () => {
     const name = screen.getByLabelText("Name")
     await user.clear(name)
     await user.type(name, "Renamed")
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toContain(
@@ -550,7 +563,7 @@ describe("WorkspacesPage", () => {
     // default: no delete for a "none" the caller never picked.
     await user.clear(name)
     await user.type(name, "Renamed")
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.body).toEqual({ name: "Renamed", description: null })
