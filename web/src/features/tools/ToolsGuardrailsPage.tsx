@@ -117,6 +117,11 @@ function copyFor(field: ToolSettingField): FieldCopy & {
   )
 }
 
+interface ManagedToolSpec {
+  toolId: string
+  pricingKey: string
+}
+
 interface GroupSpec {
   title: string
   blurb: string
@@ -134,10 +139,8 @@ interface ServiceSpec {
   label: string
   intro: string
   docsAnchor: string
-  /** The pricing key for a tool Otari runs itself. Guardrails is a check, not billable work. */
-  pricingKey?: string
-  /** The `/tools` id whose status heads the page. Guardrails declares none. */
-  toolId?: string
+  /** Gateway-run tools whose status and per-call prices belong to this service. */
+  managedTools?: ManagedToolSpec[]
   groups: GroupSpec[]
 }
 
@@ -146,15 +149,17 @@ const SERVICES: ServiceSpec[] = [
     key: "web_search",
     label: "Web search",
     intro:
-      "Give models a live search tool and decide which workspaces may use it. Changes apply immediately.",
+      "Give models live Search and Fetch tools and decide which workspaces may use them. Changes apply immediately.",
     docsAnchor: "web-search",
-    pricingKey: "otari:web_search",
-    toolId: "otari_web_search",
+    managedTools: [
+      { toolId: "otari_web_search", pricingKey: "otari:web_search" },
+      { toolId: "otari_web_fetch", pricingKey: "otari:web_fetch" },
+    ],
     groups: [
       {
         title: "Backend",
         blurb:
-          "A SearXNG-shaped service at the URL below, or a licensed API (web_search_provider), which needs no URL.",
+          "Search uses a SearXNG-shaped service at the URL below or a licensed API. Fetch uses the gateway's bounded retrieval service and needs no separate backend.",
         docsAnchor: "web-search",
         keys: [
           "web_search_url",
@@ -183,8 +188,9 @@ const SERVICES: ServiceSpec[] = [
     intro:
       "Give models a sandbox to run generated code in, and decide which workspaces may use it. Changes apply immediately.",
     docsAnchor: "code-execution",
-    pricingKey: "otari:code_execution",
-    toolId: "otari_code_execution",
+    managedTools: [
+      { toolId: "otari_code_execution", pricingKey: "otari:code_execution" },
+    ],
     groups: [
       {
         title: "Backend",
@@ -342,9 +348,12 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
       {query.isLoading ? <LoadingGroups /> : null}
 
       {shown.map((service) => {
-        const managed = service.toolId
-          ? (tools.data?.data ?? []).find((tool) => tool.id === service.toolId)
-          : undefined
+        const managed = (service.managedTools ?? []).flatMap(({ toolId }) => {
+          const tool = (tools.data?.data ?? []).find(
+            (candidate) => candidate.id === toolId,
+          )
+          return tool ? [tool] : []
+        })
         // Where the "no backend" case sends the operator. Found by type rather
         // than by position, so it survives a group's keys being reordered.
         const urlField = (data?.fields ?? []).find(
@@ -361,13 +370,16 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           <Fragment key={service.key}>
             {/* The question an operator arrives with, above the settings that
                 answer it: can this deployment run the tool at all. */}
-            {managed ? (
+            {managed.map((tool) => (
               <ToolStatusGroup
-                tool={managed}
+                key={tool.id}
+                tool={tool}
                 docsHref={toolsDocs(service.docsAnchor)}
-                urlFieldKey={urlField?.key}
+                urlFieldKey={
+                  tool.id === "otari_web_search" ? urlField?.key : undefined
+                }
               />
-            ) : null}
+            ))}
 
             {service.groups.map((group) => {
               const fields = [
@@ -380,9 +392,9 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               // comes from /api/v1/pricing, whose read is still operator-gated, so
               // a member would get an editable "unpriced" row that can only
               // fail on save.
-              const pricingKey =
-                group.priced && isOperator ? service.pricingKey : undefined
-              if (fields.length === 0 && pricingKey === undefined) return null
+              const pricedTools =
+                group.priced && isOperator ? (service.managedTools ?? []) : []
+              if (fields.length === 0 && pricedTools.length === 0) return null
               return (
                 <SettingsGroup
                   bounded
@@ -412,8 +424,9 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                       />
                     )
                   })}
-                  {pricingKey ? (
+                  {pricedTools.map(({ pricingKey }) => (
                     <ToolPriceRow
+                      key={pricingKey}
                       pricingKey={pricingKey}
                       configured={currentRates.get(pricingKey) ?? null}
                       commit={(perMillion) =>
@@ -435,7 +448,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                           : undefined
                       }
                     />
-                  ) : null}
+                  ))}
                 </SettingsGroup>
               )
             })}
