@@ -175,6 +175,64 @@ Policies appear as model names, but dynamic policies have no single price.
 Price their concrete candidates. Unlike aliases, policies do not hide candidate
 models from the catalog.
 
+## The catalog, grouped by model
+
+`GET /api/v1/catalog/models` reads the same merged catalog as `GET /api/v1/models` and
+folds it by model, so `nebius:zai-org/GLM-5.3` and
+`fireworks:accounts/fireworks/models/glm-5p3` are two offerings of one entry.
+`?at_context=<tokens>` on the list takes each model's minimum from the pricing
+tier a request of that size would settle at, so tiered offerings compare at
+the size that matters rather than at their base rate.
+`GET /api/v1/catalog/models/{id}` lists every offering of one model the caller may
+use, cheapest first, with each provider's context and output limits and the
+price the caller's organization would be charged, labeled by which price list
+it came from: the organization's own override, the deployment's stored rate, or
+the genai-prices default. Both routes accept the same credentials as
+`GET /api/v1/models`, and a model the caller may not use answers 404.
+
+Grouping keys on the models.dev display name where the dataset knows the
+model, and on the provider's id with its path prefixes, org segment and version
+pins removed where it does not. A model's id is its vendor and its name,
+`z-ai/glm-5.3`, or the bare name where nobody could say the vendor. A dated build, a size or tier, and a mode a
+reseller exposes as its own id stay separate models. models.dev's description,
+capabilities and modalities are served to every catalog reader here, where
+`GET /api/v1/models/metadata` stays operator-only.
+
+Each offering also carries the provider's own list price from models.dev,
+where it has one, and for a signed-in caller the organization's last thirty
+days on that offering: requests, cache hit rate, and the effective price per
+million tokens after cache reads and tiers.
+
+### Short selectors
+
+A provider's own id can be long, so the gateway also accepts two spellings the
+catalog shows. `instance:<cleaned id>` (`fireworks:glm-5.3`, spelled as the
+catalog spells the name) resolves to the provider's full id on that instance,
+where only one offering on the instance cleans to it. The model's catalog id
+(`z-ai/glm-5.3`) resolves to the model's cheapest offering by the deployment's
+own rates. Both are relabeled
+like an alias, so a response's `model` is what was sent, and pricing, budgets
+and usage key on the offering reached. A key whose allow-list names some
+instances only should send one of those instances or an alias, since a bare
+model id resolves before the allow-list is consulted. The index behind this is
+rebuilt every minute from the deployment's catalog view and on
+`POST /api/v1/catalog/selectors/refresh`, an operator call, and each offering's
+`short_selector` and each model's `selector` in the catalog say what is in
+force.
+
+The dashboard's Models page is this catalog: one card per model, with a rail
+of filters beside it, and a page per model with its facts and every offering
+compared in a table. "Use this model" opens a drawer beside the table with
+the request to copy, sent to the gateway's pick or to a provider pinned by
+its selector. It is read-only; a deployment rate is set on Model pricing, which the
+offering rows link to for an operator, and an organization admin is linked to
+its own rate override instead. A metered rate that differs from the provider's
+list price is marked with the list price.
+
+With `public_catalog: true` (see [Configuration](configuration.md)), the same
+two routes and the same page are served to a visitor with no session, at the
+deployment's rates and for the configured providers only.
+
 ## Listing available models
 
 ```bash

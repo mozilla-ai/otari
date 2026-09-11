@@ -32,11 +32,15 @@ import {
   WORKSPACES,
 } from "@/shared/api/queryKeys"
 
-export function useOrganizationContext() {
+// `enabled` is for the one page that renders ahead of a session: the public
+// catalog has no organization to ask about, and asking would 401 into the
+// sign-out handler.
+export function useOrganizationContext(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATIONS, "context"],
     queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
+    enabled,
   })
 }
 

@@ -33,6 +33,37 @@
         "title": "AcceptInvitationResultPublic",
         "type": "object"
       },
+      "AcceptedSnapshotResponse": {
+        "description": "One accepted genai-prices snapshot in the history.",
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "accepted_by": {
+            "description": "`operator` for a dashboard confirm, `schedule` for the auto policy.",
+            "title": "Accepted By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "accepted_at",
+          "accepted_by",
+          "model_count"
+        ],
+        "title": "AcceptedSnapshotResponse",
+        "type": "object"
+      },
       "ActivationApiKeyPublic": {
         "description": "The API key the guide hands out, with its plaintext.\n\nReturned once per call and never stored in plaintext, like every other key\nthis gateway mints: a page reload issues a new one and rotates the same row,\nwhich is what makes the guide able to show a working key without keeping a\nreadable secret anywhere.",
         "properties": {
@@ -1956,6 +1987,744 @@
         "title": "CandidateResponse",
         "type": "object"
       },
+      "CatalogCapabilities": {
+        "description": "What a model can do, as models.dev reports it. Any offering's yes is the model's.",
+        "properties": {
+          "attachment": {
+            "default": false,
+            "title": "Attachment",
+            "type": "boolean"
+          },
+          "reasoning": {
+            "default": false,
+            "title": "Reasoning",
+            "type": "boolean"
+          },
+          "structured_output": {
+            "default": false,
+            "title": "Structured Output",
+            "type": "boolean"
+          },
+          "temperature": {
+            "default": false,
+            "title": "Temperature",
+            "type": "boolean"
+          },
+          "tool_call": {
+            "default": false,
+            "title": "Tool Call",
+            "type": "boolean"
+          }
+        },
+        "title": "CatalogCapabilities",
+        "type": "object"
+      },
+      "CatalogElsewhere": {
+        "description": "A provider models.dev lists for this model that this deployment has not configured.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider_type": {
+            "title": "Provider Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_type",
+          "name"
+        ],
+        "title": "CatalogElsewhere",
+        "type": "object"
+      },
+      "CatalogModelDetail": {
+        "description": "One model with everything the detail page shows.",
+        "properties": {
+          "also_available_from": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogElsewhere"
+            },
+            "title": "Also Available From",
+            "type": "array"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CatalogCapabilities"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest any offering serves.",
+            "title": "Context Window"
+          },
+          "deprecated": {
+            "default": false,
+            "description": "True only when every offering with metadata says so.",
+            "title": "Deprecated",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "models.dev's, from the offering that named the model.",
+            "title": "Description"
+          },
+          "discovered": {
+            "description": "Whether any offering was discovered from its provider.",
+            "title": "Discovered",
+            "type": "boolean"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "id": {
+            "description": "The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug.",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest any offering serves.",
+            "title": "Max Output Tokens"
+          },
+          "min_input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cheapest offering's, at the comparison context where one was asked for.",
+            "title": "Min Input Price Per Million"
+          },
+          "min_output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Output Price Per Million"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "offering_count": {
+            "title": "Offering Count",
+            "type": "integer"
+          },
+          "offerings": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogOffering"
+            },
+            "title": "Offerings",
+            "type": "array"
+          },
+          "open_weights": {
+            "default": false,
+            "title": "Open Weights",
+            "type": "boolean"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          },
+          "price_sources": {
+            "description": "Which price lists the priced offerings came from, distinct and sorted.",
+            "items": {
+              "enum": [
+                "organization",
+                "deployment",
+                "defaults"
+              ],
+              "type": "string"
+            },
+            "title": "Price Sources",
+            "type": "array"
+          },
+          "provider_count": {
+            "title": "Provider Count",
+            "type": "integer"
+          },
+          "providers": {
+            "description": "The provider instances offering it, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "resolves_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The offering `selector` resolves to.",
+            "title": "Resolves To"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.",
+            "title": "Selector"
+          },
+          "selectors": {
+            "description": "Every offering's selector, so the list can be searched by one.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Selectors",
+            "type": "array"
+          },
+          "unpriced_count": {
+            "description": "How many offerings carry no price for this caller.",
+            "title": "Unpriced Count",
+            "type": "integer"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "vendor",
+          "capabilities",
+          "input_modalities",
+          "output_modalities",
+          "offering_count",
+          "provider_count",
+          "providers",
+          "selectors",
+          "price_sources",
+          "unpriced_count",
+          "discovered",
+          "offerings",
+          "also_available_from"
+        ],
+        "title": "CatalogModelDetail",
+        "type": "object"
+      },
+      "CatalogModelSummary": {
+        "description": "One model, as the list shows it.",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/CatalogCapabilities"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest any offering serves.",
+            "title": "Context Window"
+          },
+          "deprecated": {
+            "default": false,
+            "description": "True only when every offering with metadata says so.",
+            "title": "Deprecated",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "models.dev's, from the offering that named the model.",
+            "title": "Description"
+          },
+          "discovered": {
+            "description": "Whether any offering was discovered from its provider.",
+            "title": "Discovered",
+            "type": "boolean"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "id": {
+            "description": "The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug.",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest any offering serves.",
+            "title": "Max Output Tokens"
+          },
+          "min_input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cheapest offering's, at the comparison context where one was asked for.",
+            "title": "Min Input Price Per Million"
+          },
+          "min_output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Output Price Per Million"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "offering_count": {
+            "title": "Offering Count",
+            "type": "integer"
+          },
+          "open_weights": {
+            "default": false,
+            "title": "Open Weights",
+            "type": "boolean"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          },
+          "price_sources": {
+            "description": "Which price lists the priced offerings came from, distinct and sorted.",
+            "items": {
+              "enum": [
+                "organization",
+                "deployment",
+                "defaults"
+              ],
+              "type": "string"
+            },
+            "title": "Price Sources",
+            "type": "array"
+          },
+          "provider_count": {
+            "title": "Provider Count",
+            "type": "integer"
+          },
+          "providers": {
+            "description": "The provider instances offering it, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "resolves_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The offering `selector` resolves to.",
+            "title": "Resolves To"
+          },
+          "selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.",
+            "title": "Selector"
+          },
+          "selectors": {
+            "description": "Every offering's selector, so the list can be searched by one.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Selectors",
+            "type": "array"
+          },
+          "unpriced_count": {
+            "description": "How many offerings carry no price for this caller.",
+            "title": "Unpriced Count",
+            "type": "integer"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "vendor",
+          "capabilities",
+          "input_modalities",
+          "output_modalities",
+          "offering_count",
+          "provider_count",
+          "providers",
+          "selectors",
+          "price_sources",
+          "unpriced_count",
+          "discovered"
+        ],
+        "title": "CatalogModelSummary",
+        "type": "object"
+      },
+      "CatalogOffering": {
+        "description": "One way this deployment can call a model: a selector on a provider.",
+        "properties": {
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "credential": {
+            "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.",
+            "enum": [
+              "deployment",
+              "organization",
+              "hosted"
+            ],
+            "title": "Credential",
+            "type": "string"
+          },
+          "discovered": {
+            "description": "Whether the provider itself reported this model.",
+            "title": "Discovered",
+            "type": "boolean"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "metadata_input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.",
+            "title": "Metadata Input Price Per Million"
+          },
+          "metadata_output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Output Price Per Million"
+          },
+          "price_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
+            "title": "Price Reference"
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "organization",
+                  "deployment",
+                  "defaults"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the genai-prices defaults. Null when nothing prices it.",
+            "title": "Price Source"
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelPricingInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "description": "The provider instance the selector names.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_type": {
+            "description": "The any-llm implementation behind the instance.",
+            "title": "Provider Type",
+            "type": "string"
+          },
+          "quantization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the provider's id, when it names one.",
+            "title": "Quantization"
+          },
+          "selector": {
+            "description": "What to send as `model`, in `instance:model` form.",
+            "title": "Selector",
+            "type": "string"
+          },
+          "short_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A shorter spelling the gateway also accepts: the instance with the model's cleaned id (`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or until the gateway has indexed the catalog.",
+            "title": "Short Selector"
+          },
+          "usage_30d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferingUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "selector",
+          "provider",
+          "provider_type",
+          "credential",
+          "discovered"
+        ],
+        "title": "CatalogOffering",
+        "type": "object"
+      },
+      "CatalogResponse": {
+        "description": "The grouped catalog, and the facts a reader needs to interpret its prices.",
+        "properties": {
+          "default_pricing": {
+            "description": "Whether an unpriced model is metered at the genai-prices default.",
+            "title": "Default Pricing",
+            "type": "boolean"
+          },
+          "defaults_as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
+            "title": "Defaults As Of"
+          },
+          "metadata_available": {
+            "description": "False when models.dev could not be read; descriptions are then absent.",
+            "title": "Metadata Available",
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogModelSummary"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "default_pricing",
+          "defaults_as_of",
+          "metadata_available",
+          "models"
+        ],
+        "title": "CatalogResponse",
+        "type": "object"
+      },
       "CeremonyOptions": {
         "additionalProperties": true,
         "description": "The `PublicKeyCredentialCreationOptions`/`RequestOptions` a browser needs.\n\nPassed through as an opaque object rather than modeled field by field. The\nshape is the W3C's, the browser is the only consumer, and it is what\n``navigator.credentials`` is handed verbatim after the two base64url fields\nare decoded. Restating it here would produce a second, slightly wrong copy\nof a spec this deployment does not own, and every field the library adds\nlater would have to be added again to keep the client from dropping it.",
@@ -3533,6 +4302,12 @@
             ],
             "description": "Where this deployment's privacy notice lives. Set, the account menu's Data & Privacy row links to it; null, no address is configured and that row stays disabled, carrying the standing note that there is nothing to configure there yet. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Privacy Url"
+          },
+          "public_catalog": {
+            "default": false,
+            "description": "Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.",
+            "title": "Public Catalog",
+            "type": "boolean"
           },
           "session_type": {
             "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
@@ -6406,6 +7181,11 @@
             },
             "title": "Pricing Tiers",
             "type": "array"
+          },
+          "unit": {
+            "default": "tokens",
+            "title": "Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -6598,6 +7378,61 @@
           "active_organization_id"
         ],
         "title": "OAuthSessionResponse",
+        "type": "object"
+      },
+      "OfferingUsage": {
+        "description": "What the viewer's organization actually paid for one offering, last 30 days.\n\nThe listed rate is what a token costs; this is what the tokens cost, which is\nlower wherever prompt caching hit. Absent for a visitor and for an offering\nthe organization never called.",
+        "properties": {
+          "cache_hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cache-read tokens over prompt tokens. Null when no prompt tokens.",
+            "title": "Cache Hit Rate"
+          },
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "effective_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spend over every token served, per million. Null when no tokens were served.",
+            "title": "Effective Price Per Million"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "spend_usd": {
+            "title": "Spend Usd",
+            "type": "number"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "total_tokens",
+          "cache_read_tokens",
+          "spend_usd",
+          "cache_hit_rate",
+          "effective_price_per_million"
+        ],
+        "title": "OfferingUsage",
         "type": "object"
       },
       "OrgProviderKeyCreateRequest": {
@@ -7806,6 +8641,17 @@
             ],
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
+          },
+          "unit": {
+            "default": "tokens",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint.",
+            "enum": [
+              "tokens",
+              "requests",
+              "images"
+            ],
+            "title": "Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -7903,6 +8749,10 @@
             "title": "Pricing Tiers",
             "type": "array"
           },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -7919,6 +8769,7 @@
           "cache_write_price_per_million",
           "cache_write_1h_price_per_million",
           "pricing_tiers",
+          "unit",
           "effective_from",
           "effective_to",
           "created_at",
@@ -8014,6 +8865,17 @@
             ],
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
+          },
+          "unit": {
+            "default": "tokens",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint.",
+            "enum": [
+              "tokens",
+              "requests",
+              "images"
+            ],
+            "title": "Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -8681,6 +9543,115 @@
         "title": "PoolStatus",
         "type": "object"
       },
+      "PricingDriftRow": {
+        "description": "A stored deployment rate beside the default it shadows.",
+        "properties": {
+          "default_input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What genai-prices would meter this key at today. Null when the dataset does not know it.",
+            "title": "Default Input Price Per Million"
+          },
+          "default_output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Output Price Per Million"
+          },
+          "default_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The genai-prices entry the default came from.",
+            "title": "Default Reference"
+          },
+          "effective_at": {
+            "title": "Effective At",
+            "type": "string"
+          },
+          "input_delta_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "(stored - default) / default, as a percentage.",
+            "title": "Input Delta Percent"
+          },
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "output_delta_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Delta Percent"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key",
+          "unit",
+          "origin",
+          "effective_at",
+          "input_price_per_million",
+          "output_price_per_million",
+          "default_input_price_per_million",
+          "default_output_price_per_million",
+          "default_reference",
+          "input_delta_percent",
+          "output_delta_percent"
+        ],
+        "title": "PricingDriftRow",
+        "type": "object"
+      },
       "PricingRefreshChangeResponse": {
         "description": "One default model price changed by a pending refresh.",
         "properties": {
@@ -8812,6 +9783,18 @@
             "title": "Model Key",
             "type": "string"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+            "title": "Origin"
+          },
           "output_price_per_million": {
             "title": "Output Price Per Million",
             "type": "number"
@@ -8822,6 +9805,11 @@
             },
             "title": "Pricing Tiers",
             "type": "array"
+          },
+          "unit": {
+            "description": "What the rates are per: tokens, requests, or images.",
+            "title": "Unit",
+            "type": "string"
           },
           "updated_at": {
             "title": "Updated At",
@@ -8837,6 +9825,8 @@
           "cache_write_price_per_million",
           "cache_write_1h_price_per_million",
           "pricing_tiers",
+          "unit",
+          "origin",
           "created_at",
           "updated_at"
         ],
@@ -10585,6 +11575,33 @@
         "title": "SearchToolsResponse",
         "type": "object"
       },
+      "SelectorIndexResponse": {
+        "description": "What the rebuilt index knows.",
+        "properties": {
+          "models": {
+            "description": "Slugs that resolve to an offering.",
+            "title": "Models",
+            "type": "integer"
+          },
+          "offerings": {
+            "description": "Selectors the deployment serves.",
+            "title": "Offerings",
+            "type": "integer"
+          },
+          "short_selectors": {
+            "description": "Offerings with an unambiguous short spelling.",
+            "title": "Short Selectors",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offerings",
+          "short_selectors",
+          "models"
+        ],
+        "title": "SelectorIndexResponse",
+        "type": "object"
+      },
       "SendTestMailRequest": {
         "description": "Where to send the test message.",
         "properties": {
@@ -10795,6 +11812,17 @@
             ],
             "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
             "title": "Pricing Tiers"
+          },
+          "unit": {
+            "default": "tokens",
+            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a moderation call (USD per million requests), 'images' for image generation.",
+            "enum": [
+              "tokens",
+              "requests",
+              "images"
+            ],
+            "title": "Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -12009,6 +13037,33 @@
               }
             ],
             "title": "Models Dev Metadata"
+          },
+          "pricing_refresh": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manual",
+                  "review",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Refresh"
+          },
+          "public_catalog": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Catalog"
           },
           "reject_user_mismatch": {
             "anyOf": [
@@ -17815,6 +18870,148 @@
         "summary": "List Budget Reset Logs",
         "tags": [
           "budgets"
+        ]
+      }
+    },
+    "/api/v1/catalog/models": {
+      "get": {
+        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
+        "operationId": "catalog-list_catalog",
+        "parameters": [
+          {
+            "description": "Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare.",
+            "in": "query",
+            "name": "at_context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare.",
+              "title": "At Context"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Catalog",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/models/{model_id}": {
+      "get": {
+        "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
+        "operationId": "catalog-get_catalog_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogModelDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Catalog Model",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/selectors/refresh": {
+      "post": {
+        "description": "Re-index the short spellings now, rather than on the refresher's next tick.",
+        "operationId": "catalog-refresh_selector_index",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectorIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Selector Index",
+        "tags": [
+          "catalog"
         ]
       }
     },
@@ -24001,6 +25198,40 @@
         ]
       }
     },
+    "/api/v1/pricing/drift": {
+      "get": {
+        "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
+        "operationId": "pricing-list_pricing_drift",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PricingDriftRow"
+                  },
+                  "title": "Response Pricing-List Pricing Drift",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Pricing Drift",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
     "/api/v1/pricing/refresh": {
       "post": {
         "description": "Fetch the latest defaults and hold them for operator review.",
@@ -24061,6 +25292,36 @@
         ]
       }
     },
+    "/api/v1/pricing/refresh/pending": {
+      "get": {
+        "description": "The update the scheduled refresh has left waiting for review, if any.\n\nWhat the dashboard's notice reads. 404 when nothing is pending, so a page can\nask on load without treating the common case as an error banner.",
+        "operationId": "pricing-get_pending_pricing_refresh",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Pending Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
     "/api/v1/pricing/refresh/reject": {
       "post": {
         "description": "Discard a reviewed default-price snapshot without applying it.",
@@ -24079,6 +25340,64 @@
           }
         ],
         "summary": "Reject Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/pricing/snapshots": {
+      "get": {
+        "description": "The accepted default-price snapshots, newest first.",
+        "operationId": "pricing-list_pricing_snapshots",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AcceptedSnapshotResponse"
+                  },
+                  "title": "Response Pricing-List Pricing Snapshots",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Pricing Snapshots",
         "tags": [
           "pricing"
         ]

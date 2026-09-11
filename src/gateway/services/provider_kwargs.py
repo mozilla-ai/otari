@@ -39,6 +39,7 @@ from any_llm.exceptions import AnyLLMError
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import GatewayConfig, provider_credential_env_names
 from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.catalog_selectors import resolve_catalog_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
 
@@ -335,6 +336,14 @@ def resolve_provider_selector(
         # different model than the policy describes. The completion routes compile
         # it properly; everywhere else it surfaces as an unknown model.
         alias = resolve_static_policy_target(config, model_selector, user_id, workspace_id=workspace_id)
+    if alias is None:
+        # The catalog's own spellings: ``instance:<cleaned id>`` for one
+        # offering, or a bare slug for the model's cheapest. Consulted last and
+        # only for a selector that names no offering already, so nothing a
+        # caller sends verbatim is ever rewritten. Relabeled like an alias:
+        # the caller sees the spelling they sent, and pricing keys on the
+        # target.
+        alias = resolve_catalog_selector(model_selector)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)

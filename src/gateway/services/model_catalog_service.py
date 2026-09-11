@@ -80,6 +80,19 @@ _lock = asyncio.Lock()
 _MISS = object()
 
 
+def cached_models_dev_catalog(config: GatewayConfig) -> dict[str, Any] | None:
+    """The catalog as last fetched, at any age, without fetching or locking.
+
+    For a reader that runs off the request path and must not bind the fetch
+    lock to its own loop, such as the selector index refresher: it answers
+    from whatever a page load or the catalog refresher last put here, and
+    ``None`` until something has.
+    """
+    if not config.models_dev_metadata or not _cache.ok:
+        return None
+    return _cache.data
+
+
 def clear_catalog_cache() -> None:
     """Reset the cache (tests, and after a config change)."""
     _cache.data = None
@@ -275,6 +288,29 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
     )
 
 
+# models.dev spells a handful of providers differently from any-llm. Looked up
+# by the any-llm implementation name; a provider absent here is spelled the same
+# in both, or is one models.dev does not carry (a local server, a proxy).
+_MODELS_DEV_PROVIDER_IDS: dict[str, str] = {
+    "fireworks": "fireworks-ai",
+    "gemini": "google",
+    "vertexai": "google-vertex",
+    "vertexaianthropic": "google-vertex-anthropic",
+    "bedrock": "amazon-bedrock",
+    "together": "togetherai",
+    "moonshot": "moonshotai",
+    "azureopenai": "azure",
+    "github": "github-copilot",
+    "gmi": "gmicloud",
+    "qiniu": "qiniu-ai",
+}
+
+
+def models_dev_provider_id(provider_type: str) -> str:
+    """The models.dev provider id for an any-llm implementation."""
+    return _MODELS_DEV_PROVIDER_IDS.get(provider_type, provider_type)
+
+
 def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) -> dict[str, ModelCatalogEntry]:
     """Metadata for every model under a configured provider, keyed ``instance:model``.
 
@@ -287,7 +323,7 @@ def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) ->
         return out
     for instance in config.providers:
         provider_type = config.provider_instance_type(instance)
-        provider = catalog.get(provider_type)
+        provider = catalog.get(models_dev_provider_id(provider_type))
         if not isinstance(provider, dict):
             continue
         models = provider.get("models")

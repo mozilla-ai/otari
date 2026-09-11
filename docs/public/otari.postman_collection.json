@@ -1544,6 +1544,88 @@
     {
       "item": [
         {
+          "name": "List Catalog",
+          "request": {
+            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "models"
+              ],
+              "query": [
+                {
+                  "description": "Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare.",
+                  "disabled": true,
+                  "key": "at_context",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context="
+            }
+          }
+        },
+        {
+          "name": "Get Catalog Model",
+          "request": {
+            "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/catalog/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Selector Index",
+          "request": {
+            "description": "Re-index the short spellings now, rather than on the refresher's next tick.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "selectors",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/catalog/selectors/refresh"
+            }
+          }
+        }
+      ],
+      "name": "catalog"
+    },
+    {
+      "item": [
+        {
           "name": "Chat Completions",
           "request": {
             "body": {
@@ -5212,6 +5294,26 @@
           }
         },
         {
+          "name": "List Pricing Drift",
+          "request": {
+            "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pricing",
+                "drift"
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/drift"
+            }
+          }
+        },
+        {
           "name": "Preview Pricing Refresh",
           "request": {
             "description": "Fetch the latest defaults and hold them for operator review.",
@@ -5253,6 +5355,27 @@
           }
         },
         {
+          "name": "Get Pending Pricing Refresh",
+          "request": {
+            "description": "The update the scheduled refresh has left waiting for review, if any.\n\nWhat the dashboard's notice reads. 404 when nothing is pending, so a page can\nask on load without treating the common case as an error banner.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pricing",
+                "refresh",
+                "pending"
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/refresh/pending"
+            }
+          }
+        },
+        {
           "name": "Reject Pricing Refresh",
           "request": {
             "description": "Discard a reviewed default-price snapshot without applying it.",
@@ -5270,6 +5393,34 @@
                 "reject"
               ],
               "raw": "{{baseUrl}}/api/v1/pricing/refresh/reject"
+            }
+          }
+        },
+        {
+          "name": "List Pricing Snapshots",
+          "request": {
+            "description": "The accepted default-price snapshots, newest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pricing",
+                "snapshots"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/snapshots?limit="
             }
           }
         },
@@ -6205,7 +6356,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_estimate_default_output_tokens\": 0,\n  \"default_pricing\": false,\n  \"file_understanding_enabled\": false,\n  \"model_cache_ttl_seconds\": 0,\n  \"model_discovery\": false,\n  \"model_discovery_negative_ttl_seconds\": 0,\n  \"model_discovery_timeout_seconds\": 0,\n  \"models_dev_cache_ttl_seconds\": 0,\n  \"models_dev_metadata\": false,\n  \"reject_user_mismatch\": false,\n  \"require_pricing\": false,\n  \"stream_missing_usage_policy\": \"estimate\",\n  \"vision_describe_max_tokens\": 0,\n  \"vision_describe_model\": \"string\",\n  \"vision_strategy\": \"describe\"\n}"
+              "raw": "{\n  \"budget_estimate_default_output_tokens\": 0,\n  \"default_pricing\": false,\n  \"file_understanding_enabled\": false,\n  \"model_cache_ttl_seconds\": 0,\n  \"model_discovery\": false,\n  \"model_discovery_negative_ttl_seconds\": 0,\n  \"model_discovery_timeout_seconds\": 0,\n  \"models_dev_cache_ttl_seconds\": 0,\n  \"models_dev_metadata\": false,\n  \"pricing_refresh\": \"manual\",\n  \"public_catalog\": false,\n  \"reject_user_mismatch\": false,\n  \"require_pricing\": false,\n  \"stream_missing_usage_policy\": \"estimate\",\n  \"vision_describe_max_tokens\": 0,\n  \"vision_describe_model\": \"string\",\n  \"vision_strategy\": \"describe\"\n}"
             },
             "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Operator-gated: these change\nhow the gateway meters and lists models.",
             "header": [

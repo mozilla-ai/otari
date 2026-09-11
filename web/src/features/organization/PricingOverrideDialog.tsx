@@ -91,6 +91,8 @@ export interface PricingOverrideDialogProps {
   onOpenChange: (open: boolean) => void
   /** The row being edited; absent means this is an add. */
   editing?: OrganizationPricingOverride
+  /** A selector to open an add on, as the catalog's "Set your rate" link arrives with one. */
+  initialModelKey?: string
   /** Every stored override, so an overlapping period is refused before the request. */
   existing: readonly OrganizationPricingOverride[]
   /** Called once a save has landed, so the caller can close this. */
@@ -101,6 +103,7 @@ export function PricingOverrideDialog({
   isOpen,
   onOpenChange,
   editing,
+  initialModelKey = "",
   existing,
   onSaved,
 }: PricingOverrideDialogProps) {
@@ -135,7 +138,7 @@ export function PricingOverrideDialog({
   // nicety: these values set money, and inheriting the last row's rates into a
   // different model is the expensive kind of mistake.
   const seed = {
-    modelKey: editing?.model_key ?? "",
+    modelKey: editing?.model_key ?? initialModelKey,
     input: rateToInput(editing?.input_price_per_million),
     output: rateToInput(editing?.output_price_per_million),
     cacheRead: rateToInput(editing?.cache_read_price_per_million),

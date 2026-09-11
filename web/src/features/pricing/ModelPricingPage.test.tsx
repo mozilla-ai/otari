@@ -5,8 +5,11 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  AcceptedPricingSnapshot,
   GatewaySettings,
   OrganizationContext,
+  PricingDriftRow,
+  PricingRefreshPreview,
   PricingResponse,
 } from "@/client"
 import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
@@ -47,6 +50,8 @@ function price(overrides: Partial<PricingResponse> = {}): PricingResponse {
     cache_write_price_per_million: null,
     cache_write_1h_price_per_million: null,
     pricing_tiers: [],
+    unit: "tokens",
+    origin: null,
     effective_at: "2026-01-01T00:00:00Z",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -54,9 +59,9 @@ function price(overrides: Partial<PricingResponse> = {}): PricingResponse {
   }
 }
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   })
 }
@@ -69,11 +74,17 @@ function mockApi(
     settings?: Partial<GatewaySettings>
     pricing?: PricingResponse[]
     context?: OrganizationContext
+    /** What the scheduled check left for review; none by default. */
+    pending?: PricingRefreshPreview
+    snapshots?: AcceptedPricingSnapshot[]
+    drift?: PricingDriftRow[]
   } = {},
 ) {
   const settings = { ...SETTINGS, ...options.settings }
   const pricing = options.pricing ?? [price()]
   const context = options.context ?? organizationContext()
+  const snapshots = options.snapshots ?? []
+  const drift = options.drift ?? []
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input, init) => {
@@ -94,6 +105,14 @@ function mockApi(
       if (url.includes(`${API_ROOT}/pricing/refresh`) && method === "POST") {
         return jsonResponse(PRICE_REFRESH)
       }
+      if (url.includes(`${API_ROOT}/pricing/refresh/pending`)) {
+        return options.pending
+          ? jsonResponse(options.pending)
+          : jsonResponse({ detail: "No pending price refresh" }, 404)
+      }
+      if (url.includes(`${API_ROOT}/pricing/snapshots`))
+        return jsonResponse(snapshots)
+      if (url.includes(`${API_ROOT}/pricing/drift`)) return jsonResponse(drift)
       // Before the bare /api/v1/pricing arm below and before the context one: the
       // organization's own overrides are a different surface from the catalog,
       // and they answer the paged tenancy shape rather than a list.
@@ -108,13 +127,13 @@ function mockApi(
     })
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(ui: ReactElement, url = "/organization/pricing") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
-    { wrapper: withRouter({ url: "/organization/pricing" }) },
+    { wrapper: withRouter({ url }) },
   )
 }
 
@@ -152,9 +171,10 @@ describe("ModelPricingPage", () => {
   it("keeps a sub-cent rate legible instead of rounding it to nothing", async () => {
     // Two cents to the dollar is not enough precision for a per-million rate: at
     // two digits a cache-read price of 0.0025 renders as "$0.00", which is what
-    // this table's em dash means (no cache-read rate at all). `formatCost` is
-    // what Models formats the same stored numbers with, so the two pages cannot
-    // print different figures for one price.
+    // this table's em dash means (no cache-read rate at all), and 0.075 as
+    // "$0.08", a figure nobody set (otari#700). `formatRate` is what Models
+    // formats the same stored numbers with, so the two pages cannot print
+    // different figures for one price.
     mockApi({
       pricing: [
         price({
@@ -167,7 +187,7 @@ describe("ModelPricingPage", () => {
 
     const table = await screen.findByRole("grid", { name: "Model prices" })
     expect(within(table).getByText("$0.0025")).toBeInTheDocument()
-    expect(within(table).getByText("$0.08")).toBeInTheDocument()
+    expect(within(table).getByText("$0.075")).toBeInTheDocument()
     expect(within(table).queryByText("$0.00")).toBeNull()
   })
 
@@ -302,6 +322,124 @@ describe("ModelPricingPage", () => {
     ).toBe(true)
   })
 
+  it("offers the update the scheduled check left for review, and accepts it", async () => {
+    const fetchMock = mockApi({ pending: PRICE_REFRESH })
+    const user = userEvent.setup()
+
+    renderPage(<ModelPricingPage />)
+
+    expect(
+      await screen.findByText(/The scheduled check found 2 changed, 1 added/),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Review pending update" }),
+    )
+    expect(
+      await screen.findByRole("alertdialog", {
+        name: "Review default price updates",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText("openai:gpt-5: added")).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "Accept price updates" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("alertdialog", {
+          name: "Review default price updates",
+        }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith(`${API_ROOT}/pricing/refresh/confirm`) &&
+          init?.method === "POST",
+      ),
+    ).toBe(true)
+  })
+
+  it("says when the defaults were last accepted and by whom", async () => {
+    mockApi({
+      snapshots: [
+        {
+          id: "s2",
+          accepted_at: "2026-09-01T00:00:00Z",
+          accepted_by: "schedule",
+          model_count: 1450,
+        },
+        {
+          id: "s1",
+          accepted_at: "2026-08-01T00:00:00Z",
+          accepted_by: "operator",
+          model_count: 1400,
+        },
+      ],
+    })
+
+    renderPage(<ModelPricingPage />)
+
+    expect(
+      await screen.findByText(
+        /Last accepted .* by the scheduled check, 1450 priced models\. 2 snapshots on record\./,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("shows how far a stored rate sits from today's default", async () => {
+    mockApi({
+      pricing: [
+        price({ model_key: "openai:gpt-5", origin: "config" }),
+        price({ model_key: "openai:gpt-4o-mini", origin: "api" }),
+      ],
+      drift: [
+        {
+          model_key: "openai:gpt-5",
+          unit: "tokens",
+          origin: "config",
+          effective_at: "2026-01-01T00:00:00Z",
+          input_price_per_million: 1.25,
+          output_price_per_million: 10,
+          default_input_price_per_million: 1,
+          default_output_price_per_million: 10,
+          default_reference: "openai:gpt-5",
+          input_delta_percent: 25,
+          output_delta_percent: 0,
+        },
+        {
+          model_key: "openai:gpt-4o-mini",
+          unit: "tokens",
+          origin: "api",
+          effective_at: "2026-01-01T00:00:00Z",
+          input_price_per_million: 1.25,
+          output_price_per_million: 10,
+          default_input_price_per_million: null,
+          default_output_price_per_million: null,
+          default_reference: null,
+          input_delta_percent: null,
+          output_delta_percent: null,
+        },
+      ],
+    })
+
+    renderPage(<ModelPricingPage />)
+
+    const grid = await screen.findByRole("grid", { name: "Model prices" })
+    expect(
+      within(grid).getByRole("columnheader", { name: "vs default" }),
+    ).toBeInTheDocument()
+    // The drift read lands after the price list, so the cell is waited on.
+    await within(grid).findByText("+25% / ±0%")
+    const gpt5 = within(grid).getByRole("row", { name: /openai:gpt-5/ })
+    expect(gpt5).toHaveTextContent("config")
+    const mini = within(grid).getByRole("row", { name: /gpt-4o-mini/ })
+    expect(mini).toHaveTextContent("dashboard")
+    // A key genai-prices does not know has nothing to drift from.
+    expect(mini).not.toHaveTextContent("%")
+  })
+
   it("gives an organization admin the prices and its own overrides, not the catalog", async () => {
     // The roles matrix puts Model pricing at Edit for an admin (otari-ai#1943),
     // and the page is two halves: the organization's rate overrides, which the
@@ -351,8 +489,47 @@ describe("ModelPricingPage", () => {
     expect(
       await screen.findByText("No model carries a stored price yet."),
     ).toBeInTheDocument()
-    expect(screen.queryByText(/Price one from the Models page/)).toBeNull()
-    expect(screen.queryByText(/A rate is edited beside the model/)).toBeNull()
+    expect(screen.queryByText(/price one by its selector/)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Price a model" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Edit" })).toBeNull()
+  })
+
+  it("opens the editor for the selector the catalog linked with", async () => {
+    // The Models detail links here with `?model=<selector>`; an operator lands
+    // on that model's stored rate with the editor open.
+    mockApi({ pricing: [price({ model_key: "openai:gpt-5" })] })
+    renderPage(<ModelPricingPage />, "/organization/pricing?model=openai:gpt-5")
+
+    expect(
+      await screen.findByRole("heading", { name: /Edit price for/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("openai:gpt-5", { selector: "code" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Edit price" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Reset price" }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers to set a price for a selector with no stored rate", async () => {
+    mockApi({ pricing: [] })
+    renderPage(
+      <ModelPricingPage />,
+      "/organization/pricing?model=home_lab:qwen3-32b",
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /Set price for/ }),
+    ).toBeInTheDocument()
+    // Straight into the fields: there is nothing stored to look at first.
+    expect(
+      screen.getByRole("spinbutton", {
+        name: "Input price for home_lab:qwen3-32b",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("keeps the catalog controls for a deployment operator", async () => {

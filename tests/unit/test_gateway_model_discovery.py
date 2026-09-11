@@ -1056,6 +1056,46 @@ class TestBackgroundDiscovery:
         mock_alist.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_cached_only_never_dials_a_provider_never_checked(self) -> None:
+        """``cached_only`` is the opposite trade from ``serve_stale``.
+
+        A caller off the request path (the selector index rebuild) would
+        otherwise fan out to every configured provider on a timer, and would
+        dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning is
+        that the reads dial for themselves. An undialed provider reads as having
+        no models instead.
+        """
+        config = self._config()
+        cache = ModelCache()
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models") as mock_alist,
+        ):
+            result = await discover_all_models(config, cached_only=True)
+
+        assert result == []
+        mock_alist.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cached_only_serves_an_expired_entry(self) -> None:
+        """What the cache holds is served whatever its age, since nothing refills it here."""
+        config = self._config()
+        cache = ModelCache()
+        cache.set("openai", [_make_model("gpt-4o")])
+        cache._store["openai"].cached_at = time.monotonic() - 10_000
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service.alist_models") as mock_alist,
+        ):
+            result = await discover_all_models(config, cached_only=True)
+
+        assert [model.id for _, model in result] == ["gpt-4o"]
+        mock_alist.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_serve_stale_still_dials_a_provider_never_checked(self) -> None:
         """A cold worker must dial rather than claim the provider has no models."""
         config = self._config()

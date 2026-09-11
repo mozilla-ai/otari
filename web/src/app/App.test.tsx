@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
-import { apiFetch } from "@/shared/api/client"
+import { API_ROOT, apiFetch } from "@/shared/api/client"
 import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
@@ -124,6 +124,38 @@ describe("App", () => {
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(document.title).toBe("Accept invitation · Otari")
     expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+  })
+
+  it("renders the public catalog ahead of the sign-in screen where the deployment opens it", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (String(path).startsWith(`${API_ROOT}/catalog/models`)) {
+        return {
+          default_pricing: true,
+          defaults_as_of: null,
+          metadata_available: false,
+          models: [],
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/models"
+
+    renderApp(bootstrap({ public_catalog: true }))
+
+    expect(
+      await screen.findByRole("heading", { name: "Models" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+  })
+
+  it("keeps the catalog behind the sign-in screen by default", () => {
+    window.location.hash = "#/models"
+
+    renderApp(bootstrap())
+
+    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Models" })).toBeNull()
   })
 
   it("renders a public auth page ahead of the sign-in screen", async () => {

@@ -933,6 +933,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Catalog
+         * @description The models this caller may use, one entry each however many providers serve it.
+         *
+         *     Prices are the caller's: an organization's override where one applies, else
+         *     the deployment's row, else the genai-prices default. Aliases and routing
+         *     policies are not models and are not listed; see Routing. A visitor, where
+         *     the catalog is public, sees the configured instances at the deployment's
+         *     rates and nothing that belongs to a tenant.
+         */
+        get: operations["catalog-list_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog Model
+         * @description One model and every offering of it this caller may use.
+         *
+         *     A model the caller may not see answers 404, the same as one that does not
+         *     exist, so the route cannot be used to probe the catalog behind an allow-list.
+         *     A signed-in caller's offerings also carry their organization's own usage of
+         *     each over the last 30 days.
+         */
+        get: operations["catalog-get_catalog_model"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/selectors/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Selector Index
+         * @description Re-index the short spellings now, rather than on the refresher's next tick.
+         */
+        post: operations["catalog-refresh_selector_index"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/completions": {
         parameters: {
             query?: never;
@@ -2614,6 +2685,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pricing Drift
+         * @description Every stored deployment rate in force today, beside today's default for it.
+         *
+         *     A stored row shadows the genai-prices default silently and forever, whether
+         *     it was a deliberate override or a copy of a then-current default. This is
+         *     what makes the difference visible: a row that matches the default is a row
+         *     that could be deleted, and a row far from it is one worth a second look.
+         *     Tool rows (``otari:``) are per request and have no default to drift from,
+         *     so they are left out.
+         */
+        get: operations["pricing-list_pricing_drift"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/refresh": {
         parameters: {
             query?: never;
@@ -2654,6 +2752,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/refresh/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pending Pricing Refresh
+         * @description The update the scheduled refresh has left waiting for review, if any.
+         *
+         *     What the dashboard's notice reads. 404 when nothing is pending, so a page can
+         *     ask on load without treating the common case as an error banner.
+         */
+        get: operations["pricing-get_pending_pricing_refresh"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/refresh/reject": {
         parameters: {
             query?: never;
@@ -2668,6 +2789,26 @@ export interface paths {
          * @description Discard a reviewed default-price snapshot without applying it.
          */
         post: operations["pricing-reject_pricing_refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pricing Snapshots
+         * @description The accepted default-price snapshots, newest first.
+         */
+        get: operations["pricing-list_pricing_snapshots"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4533,6 +4674,26 @@ export interface components {
             role: string;
         };
         /**
+         * AcceptedSnapshotResponse
+         * @description One accepted genai-prices snapshot in the history.
+         */
+        AcceptedSnapshotResponse: {
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+            /**
+             * Accepted By
+             * @description `operator` for a dashboard confirm, `schedule` for the auto policy.
+             */
+            accepted_by: string;
+            /** Id */
+            id: string;
+            /** Model Count */
+            model_count: number;
+        };
+        /**
          * ActivationApiKeyPublic
          * @description The API key the guide hands out, with its plaintext.
          *
@@ -5424,6 +5585,335 @@ export interface components {
             selection_reason: string;
         };
         /**
+         * CatalogCapabilities
+         * @description What a model can do, as models.dev reports it. Any offering's yes is the model's.
+         */
+        CatalogCapabilities: {
+            /**
+             * Attachment
+             * @default false
+             */
+            attachment: boolean;
+            /**
+             * Reasoning
+             * @default false
+             */
+            reasoning: boolean;
+            /**
+             * Structured Output
+             * @default false
+             */
+            structured_output: boolean;
+            /**
+             * Temperature
+             * @default false
+             */
+            temperature: boolean;
+            /**
+             * Tool Call
+             * @default false
+             */
+            tool_call: boolean;
+        };
+        /**
+         * CatalogElsewhere
+         * @description A provider models.dev lists for this model that this deployment has not configured.
+         */
+        CatalogElsewhere: {
+            /** Name */
+            name: string;
+            /** Provider Type */
+            provider_type: string;
+        };
+        /**
+         * CatalogModelDetail
+         * @description One model with everything the detail page shows.
+         */
+        CatalogModelDetail: {
+            /** Also Available From */
+            also_available_from: components["schemas"]["CatalogElsewhere"][];
+            capabilities: components["schemas"]["CatalogCapabilities"];
+            /**
+             * Context Window
+             * @description The largest any offering serves.
+             */
+            context_window?: number | null;
+            /**
+             * Deprecated
+             * @description True only when every offering with metadata says so.
+             * @default false
+             */
+            deprecated: boolean;
+            /**
+             * Description
+             * @description models.dev's, from the offering that named the model.
+             */
+            description?: string | null;
+            /**
+             * Discovered
+             * @description Whether any offering was discovered from its provider.
+             */
+            discovered: boolean;
+            /** Family */
+            family?: string | null;
+            /**
+             * Id
+             * @description The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug.
+             */
+            id: string;
+            /** Input Modalities */
+            input_modalities: string[];
+            /** Knowledge Cutoff */
+            knowledge_cutoff?: string | null;
+            /**
+             * Max Output Tokens
+             * @description The largest any offering serves.
+             */
+            max_output_tokens?: number | null;
+            /**
+             * Min Input Price Per Million
+             * @description The cheapest offering's, at the comparison context where one was asked for.
+             */
+            min_input_price_per_million?: number | null;
+            /** Min Output Price Per Million */
+            min_output_price_per_million?: number | null;
+            /** Name */
+            name: string;
+            /** Offering Count */
+            offering_count: number;
+            /** Offerings */
+            offerings: components["schemas"]["CatalogOffering"][];
+            /**
+             * Open Weights
+             * @default false
+             */
+            open_weights: boolean;
+            /** Output Modalities */
+            output_modalities: string[];
+            /**
+             * Price Sources
+             * @description Which price lists the priced offerings came from, distinct and sorted.
+             */
+            price_sources: ("organization" | "deployment" | "defaults")[];
+            /** Provider Count */
+            provider_count: number;
+            /**
+             * Providers
+             * @description The provider instances offering it, sorted.
+             */
+            providers: string[];
+            /** Release Date */
+            release_date?: string | null;
+            /**
+             * Resolves To
+             * @description The offering `selector` resolves to.
+             */
+            resolves_to?: string | null;
+            /**
+             * Selector
+             * @description The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.
+             */
+            selector?: string | null;
+            /**
+             * Selectors
+             * @description Every offering's selector, so the list can be searched by one.
+             */
+            selectors: string[];
+            /**
+             * Unpriced Count
+             * @description How many offerings carry no price for this caller.
+             */
+            unpriced_count: number;
+            /** Vendor */
+            vendor: string | null;
+        };
+        /**
+         * CatalogModelSummary
+         * @description One model, as the list shows it.
+         */
+        CatalogModelSummary: {
+            capabilities: components["schemas"]["CatalogCapabilities"];
+            /**
+             * Context Window
+             * @description The largest any offering serves.
+             */
+            context_window?: number | null;
+            /**
+             * Deprecated
+             * @description True only when every offering with metadata says so.
+             * @default false
+             */
+            deprecated: boolean;
+            /**
+             * Description
+             * @description models.dev's, from the offering that named the model.
+             */
+            description?: string | null;
+            /**
+             * Discovered
+             * @description Whether any offering was discovered from its provider.
+             */
+            discovered: boolean;
+            /** Family */
+            family?: string | null;
+            /**
+             * Id
+             * @description The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug.
+             */
+            id: string;
+            /** Input Modalities */
+            input_modalities: string[];
+            /** Knowledge Cutoff */
+            knowledge_cutoff?: string | null;
+            /**
+             * Max Output Tokens
+             * @description The largest any offering serves.
+             */
+            max_output_tokens?: number | null;
+            /**
+             * Min Input Price Per Million
+             * @description The cheapest offering's, at the comparison context where one was asked for.
+             */
+            min_input_price_per_million?: number | null;
+            /** Min Output Price Per Million */
+            min_output_price_per_million?: number | null;
+            /** Name */
+            name: string;
+            /** Offering Count */
+            offering_count: number;
+            /**
+             * Open Weights
+             * @default false
+             */
+            open_weights: boolean;
+            /** Output Modalities */
+            output_modalities: string[];
+            /**
+             * Price Sources
+             * @description Which price lists the priced offerings came from, distinct and sorted.
+             */
+            price_sources: ("organization" | "deployment" | "defaults")[];
+            /** Provider Count */
+            provider_count: number;
+            /**
+             * Providers
+             * @description The provider instances offering it, sorted.
+             */
+            providers: string[];
+            /** Release Date */
+            release_date?: string | null;
+            /**
+             * Resolves To
+             * @description The offering `selector` resolves to.
+             */
+            resolves_to?: string | null;
+            /**
+             * Selector
+             * @description The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.
+             */
+            selector?: string | null;
+            /**
+             * Selectors
+             * @description Every offering's selector, so the list can be searched by one.
+             */
+            selectors: string[];
+            /**
+             * Unpriced Count
+             * @description How many offerings carry no price for this caller.
+             */
+            unpriced_count: number;
+            /** Vendor */
+            vendor: string | null;
+        };
+        /**
+         * CatalogOffering
+         * @description One way this deployment can call a model: a selector on a provider.
+         */
+        CatalogOffering: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Credential
+             * @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.
+             * @enum {string}
+             */
+            credential: "deployment" | "organization" | "hosted";
+            /**
+             * Discovered
+             * @description Whether the provider itself reported this model.
+             */
+            discovered: boolean;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Metadata Input Price Per Million
+             * @description What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.
+             */
+            metadata_input_price_per_million?: number | null;
+            /** Metadata Output Price Per Million */
+            metadata_output_price_per_million?: number | null;
+            /**
+             * Price Reference
+             * @description For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.
+             */
+            price_reference?: string | null;
+            /**
+             * Price Source
+             * @description Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the genai-prices defaults. Null when nothing prices it.
+             */
+            price_source?: ("organization" | "deployment" | "defaults") | null;
+            pricing?: components["schemas"]["ModelPricingInfo"] | null;
+            /**
+             * Provider
+             * @description The provider instance the selector names.
+             */
+            provider: string;
+            /**
+             * Provider Type
+             * @description The any-llm implementation behind the instance.
+             */
+            provider_type: string;
+            /**
+             * Quantization
+             * @description From the provider's id, when it names one.
+             */
+            quantization?: string | null;
+            /**
+             * Selector
+             * @description What to send as `model`, in `instance:model` form.
+             */
+            selector: string;
+            /**
+             * Short Selector
+             * @description A shorter spelling the gateway also accepts: the instance with the model's cleaned id (`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or until the gateway has indexed the catalog.
+             */
+            short_selector?: string | null;
+            usage_30d?: components["schemas"]["OfferingUsage"] | null;
+        };
+        /**
+         * CatalogResponse
+         * @description The grouped catalog, and the facts a reader needs to interpret its prices.
+         */
+        CatalogResponse: {
+            /**
+             * Default Pricing
+             * @description Whether an unpriced model is metered at the genai-prices default.
+             */
+            default_pricing: boolean;
+            /**
+             * Defaults As Of
+             * @description When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.
+             */
+            defaults_as_of: string | null;
+            /**
+             * Metadata Available
+             * @description False when models.dev could not be read; descriptions are then absent.
+             */
+            metadata_available: boolean;
+            /** Models */
+            models: components["schemas"]["CatalogModelSummary"][];
+        };
+        /**
          * CeremonyOptions
          * @description The `PublicKeyCredentialCreationOptions`/`RequestOptions` a browser needs.
          *
@@ -6082,6 +6572,12 @@ export interface components {
              * @description Where this deployment's privacy notice lives. Set, the account menu's Data & Privacy row links to it; null, no address is configured and that row stays disabled, carrying the standing note that there is nothing to configure there yet. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
              */
             privacy_url: string | null;
+            /**
+             * Public Catalog
+             * @description Whether the model catalog is served to a visitor with no session: GET /api/v1/catalog/models answers anonymously and the dashboard renders Models ahead of sign-in. False for a hybrid gateway, which serves no catalog of its own.
+             * @default false
+             */
+            public_catalog: boolean;
             /**
              * Session Type
              * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
@@ -7471,6 +7967,11 @@ export interface components {
             pricing_tiers?: (components["schemas"]["PricingTier"] | {
                 [key: string]: number;
             })[];
+            /**
+             * Unit
+             * @default tokens
+             */
+            unit: string;
         };
         /**
          * ModerationRequest
@@ -7578,6 +8079,34 @@ export interface components {
              * @description The identity this session speaks for.
              */
             user_id: string;
+        };
+        /**
+         * OfferingUsage
+         * @description What the viewer's organization actually paid for one offering, last 30 days.
+         *
+         *     The listed rate is what a token costs; this is what the tokens cost, which is
+         *     lower wherever prompt caching hit. Absent for a visitor and for an offering
+         *     the organization never called.
+         */
+        OfferingUsage: {
+            /**
+             * Cache Hit Rate
+             * @description Cache-read tokens over prompt tokens. Null when no prompt tokens.
+             */
+            cache_hit_rate: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /**
+             * Effective Price Per Million
+             * @description Spend over every token served, per million. Null when no tokens were served.
+             */
+            effective_price_per_million: number | null;
+            /** Requests */
+            requests: number;
+            /** Spend Usd */
+            spend_usd: number;
+            /** Total Tokens */
+            total_tokens: number;
         };
         /**
          * OrgProviderKeyCreateRequest
@@ -8157,6 +8686,13 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /**
+             * Unit
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint.
+             * @default tokens
+             * @enum {string}
+             */
+            unit: "tokens" | "requests" | "images";
         };
         /**
          * OrganizationModelPricingPublic
@@ -8199,6 +8735,8 @@ export interface components {
             output_price_per_million: number;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
+            /** Unit */
+            unit: string;
             /**
              * Updated At
              * Format: date-time
@@ -8269,6 +8807,13 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /**
+             * Unit
+             * @description What the rates are per: tokens for a model, requests or images for a non-token endpoint.
+             * @default tokens
+             * @enum {string}
+             */
+            unit: "tokens" | "requests" | "images";
         };
         /**
          * OrganizationModelPricingsPublic
@@ -8584,6 +9129,43 @@ export interface components {
             warm: boolean;
         };
         /**
+         * PricingDriftRow
+         * @description A stored deployment rate beside the default it shadows.
+         */
+        PricingDriftRow: {
+            /**
+             * Default Input Price Per Million
+             * @description What genai-prices would meter this key at today. Null when the dataset does not know it.
+             */
+            default_input_price_per_million: number | null;
+            /** Default Output Price Per Million */
+            default_output_price_per_million: number | null;
+            /**
+             * Default Reference
+             * @description The genai-prices entry the default came from.
+             */
+            default_reference: string | null;
+            /** Effective At */
+            effective_at: string;
+            /**
+             * Input Delta Percent
+             * @description (stored - default) / default, as a percentage.
+             */
+            input_delta_percent: number | null;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Model Key */
+            model_key: string;
+            /** Origin */
+            origin: string | null;
+            /** Output Delta Percent */
+            output_delta_percent: number | null;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /** Unit */
+            unit: string;
+        };
+        /**
          * PricingRefreshChangeResponse
          * @description One default model price changed by a pending refresh.
          */
@@ -8646,10 +9228,20 @@ export interface components {
             input_price_per_million: number;
             /** Model Key */
             model_key: string;
+            /**
+             * Origin
+             * @description Which writer set this row: config, api, or migration. Null when recorded before origins were.
+             */
+            origin: string | null;
             /** Output Price Per Million */
             output_price_per_million: number;
             /** Pricing Tiers */
             pricing_tiers: components["schemas"]["PricingTier"][];
+            /**
+             * Unit
+             * @description What the rates are per: tokens, requests, or images.
+             */
+            unit: string;
             /** Updated At */
             updated_at: string;
         };
@@ -9381,6 +9973,27 @@ export interface components {
             stored: components["schemas"]["StoredSearchToolSchema"][];
         };
         /**
+         * SelectorIndexResponse
+         * @description What the rebuilt index knows.
+         */
+        SelectorIndexResponse: {
+            /**
+             * Models
+             * @description Slugs that resolve to an offering.
+             */
+            models: number;
+            /**
+             * Offerings
+             * @description Selectors the deployment serves.
+             */
+            offerings: number;
+            /**
+             * Short Selectors
+             * @description Offerings with an unambiguous short spelling.
+             */
+            short_selectors: number;
+        };
+        /**
          * SendTestMailRequest
          * @description Where to send the test message.
          */
@@ -9510,6 +10123,13 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+            /**
+             * Unit
+             * @description What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a moderation call (USD per million requests), 'images' for image generation.
+             * @default tokens
+             * @enum {string}
+             */
+            unit: "tokens" | "requests" | "images";
         };
         /**
          * SignupRequest
@@ -10004,6 +10624,10 @@ export interface components {
             models_dev_cache_ttl_seconds?: number | null;
             /** Models Dev Metadata */
             models_dev_metadata?: boolean | null;
+            /** Pricing Refresh */
+            pricing_refresh?: ("manual" | "review" | "auto") | null;
+            /** Public Catalog */
+            public_catalog?: boolean | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
             /** Require Pricing */
@@ -12596,6 +13220,89 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-list_catalog": {
+        parameters: {
+            query?: {
+                /** @description Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare. */
+                at_context?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-get_catalog_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogModelDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-refresh_selector_index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectorIndexResponse"];
                 };
             };
         };
@@ -15687,6 +16394,26 @@ export interface operations {
             };
         };
     };
+    "pricing-list_pricing_drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingDriftRow"][];
+                };
+            };
+        };
+    };
     "pricing-preview_pricing_refresh": {
         parameters: {
             query?: never;
@@ -15727,6 +16454,26 @@ export interface operations {
             };
         };
     };
+    "pricing-get_pending_pricing_refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingRefreshPreviewResponse"];
+                };
+            };
+        };
+    };
     "pricing-reject_pricing_refresh": {
         parameters: {
             query?: never;
@@ -15742,6 +16489,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "pricing-list_pricing_snapshots": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedSnapshotResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

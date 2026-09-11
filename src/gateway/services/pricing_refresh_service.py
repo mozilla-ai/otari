@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -9,14 +10,15 @@ import httpx
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot, set_custom_snapshot
 from genai_prices.types import Provider, _providers_from_raw
 from genai_prices.update_prices import DEFAULT_UPDATE_URL, UpdatePrices
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import PricingSnapshot
-from gateway.services.pricing_service import reset_price_cache
+from gateway.models.entities import PricingSnapshot, PricingSnapshotHistory
+from gateway.services.pricing_service import normalize_effective_at, reset_price_cache
 
 _PREVIEW_CHANGE_LIMIT = 100
 GENAI_PRICES_SOURCE = "genai-prices"
@@ -166,8 +168,13 @@ async def prepare_price_refresh(session: AsyncSession) -> PricingRefreshPreview:
     return preview
 
 
-async def confirm_price_refresh(session: AsyncSession) -> bool:
-    """Persist and activate the pending snapshot, returning false when absent."""
+async def confirm_price_refresh(session: AsyncSession, *, accepted_by: str = "operator") -> bool:
+    """Persist and activate the pending snapshot, returning false when absent.
+
+    ``accepted_by`` is recorded on the history row: ``operator`` for a confirm
+    from the dashboard, ``schedule`` when :func:`run_price_update_poller`
+    applied it under the ``auto`` policy.
+    """
 
     # Best-effort row lock so a second confirm/reject serializes behind this one.
     # It is a no-op on SQLite (the standalone default) and only actually serializes
@@ -196,6 +203,16 @@ async def confirm_price_refresh(session: AsyncSession) -> bool:
         session.add(PricingSnapshot(source=GENAI_PRICES_SOURCE, snapshot=raw_snapshot))
     else:
         active_row.snapshot = raw_snapshot
+    session.add(
+        PricingSnapshotHistory(
+            source=GENAI_PRICES_SOURCE,
+            accepted_at=datetime.now(UTC),
+            accepted_by=accepted_by,
+            model_count=sum(len(provider.models) for provider in providers),
+            snapshot=raw_snapshot,
+        )
+    )
+    await _prune_history(session)
     await session.delete(pending_row)
     try:
         await session.commit()
@@ -208,6 +225,125 @@ async def confirm_price_refresh(session: AsyncSession) -> bool:
     reset_price_cache()
     _applied_snapshot_raw = raw_snapshot
     return True
+
+
+async def preview_pending_refresh(session: AsyncSession) -> PricingRefreshPreview | None:
+    """The change a stored pending snapshot would make, without fetching again.
+
+    What the dashboard shows when the scheduled refresh has left an update
+    waiting under the ``review`` policy: the same summary ``prepare_price_refresh``
+    produced when it fetched, recomputed against whatever is active now.
+    ``None`` when nothing is pending.
+    """
+    pending_row = await session.get(PricingSnapshot, GENAI_PRICES_PENDING_SOURCE)
+    if pending_row is None:
+        return None
+    try:
+        providers = _parse_snapshot(pending_row.snapshot)
+    except ValueError as exc:
+        raise PricingRefreshError("The pending genai-prices data is invalid") from exc
+    fetched_at = normalize_effective_at(pending_row.updated_at)
+    return _build_preview(get_snapshot(), DataSnapshot(providers=providers, from_auto_update=True), fetched_at)
+
+
+@dataclass(frozen=True)
+class AcceptedSnapshot:
+    """One row of the accepted-snapshot history, without the payload."""
+
+    id: uuid.UUID
+    accepted_at: datetime
+    accepted_by: str
+    model_count: int
+
+
+# How many accepted snapshots are kept, payload included. Each one is the whole
+# upstream dataset, a few hundred kilobytes, and under the auto policy one can
+# land every day, so the history is a window rather than a ledger: enough to
+# answer what a rate was a month ago, not enough to grow without bound.
+PRICING_SNAPSHOT_HISTORY_KEEP = 30
+
+
+async def _prune_history(session: AsyncSession) -> None:
+    """Drop the accepted snapshots older than the newest ``PRICING_SNAPSHOT_HISTORY_KEEP``."""
+    keep = (
+        select(PricingSnapshotHistory.id)
+        .where(PricingSnapshotHistory.source == GENAI_PRICES_SOURCE)
+        .order_by(PricingSnapshotHistory.accepted_at.desc())
+        .limit(PRICING_SNAPSHOT_HISTORY_KEEP)
+    )
+    kept = {row for row in (await session.execute(keep)).scalars()}
+    if len(kept) < PRICING_SNAPSHOT_HISTORY_KEEP:
+        return
+    await session.execute(
+        delete(PricingSnapshotHistory).where(
+            PricingSnapshotHistory.source == GENAI_PRICES_SOURCE,
+            PricingSnapshotHistory.id.not_in(kept),
+        )
+    )
+
+
+async def list_accepted_snapshots(session: AsyncSession, limit: int = 50) -> list[AcceptedSnapshot]:
+    """The accepted snapshots, newest first, payloads left in the database."""
+    stmt = (
+        select(
+            PricingSnapshotHistory.id,
+            PricingSnapshotHistory.accepted_at,
+            PricingSnapshotHistory.accepted_by,
+            PricingSnapshotHistory.model_count,
+        )
+        .where(PricingSnapshotHistory.source == GENAI_PRICES_SOURCE)
+        .order_by(PricingSnapshotHistory.accepted_at.desc())
+        .limit(limit)
+    )
+    return [
+        AcceptedSnapshot(
+            id=row.id,
+            accepted_at=normalize_effective_at(row.accepted_at),
+            accepted_by=row.accepted_by,
+            model_count=row.model_count,
+        )
+        for row in (await session.execute(stmt)).all()
+    ]
+
+
+async def poll_price_updates(session: AsyncSession, policy: str) -> str:
+    """One tick of the scheduled refresh: fetch, then hold or apply per ``policy``.
+
+    Returns what happened, for the log: ``unchanged`` (the fetch matched what is
+    active, and nothing is left pending), ``pending`` (held for review) or
+    ``applied``. A ``manual`` policy never reaches here.
+    """
+    preview = await prepare_price_refresh(session)
+    if preview.added_count + preview.changed_count + preview.removed_count == 0:
+        await reject_price_refresh(session)
+        return "unchanged"
+    if policy == "auto":
+        await confirm_price_refresh(session, accepted_by="schedule")
+        return "applied"
+    return "pending"
+
+
+async def run_price_update_poller(config: GatewayConfig) -> None:
+    """Check upstream genai-prices on a schedule, forever.
+
+    The policy is read on every tick rather than captured, because it is a
+    runtime setting: an operator who switches from ``manual`` to ``review`` on
+    the dashboard gets the next check without a restart. The interval is
+    config-only and re-read for symmetry. Every error is swallowed and retried
+    on the next tick, for the reason the snapshot refresher gives.
+    """
+    while True:
+        await asyncio.sleep(config.pricing_refresh_interval_seconds)
+        if config.pricing_refresh == "manual":
+            continue
+        try:
+            async with create_session() as db:
+                outcome = await poll_price_updates(db, config.pricing_refresh)
+            logger.info("Scheduled genai-prices check: %s", outcome)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Scheduled genai-prices check failed; retrying next interval", exc_info=True)
 
 
 async def reject_price_refresh(session: AsyncSession) -> bool:

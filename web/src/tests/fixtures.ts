@@ -82,6 +82,8 @@ export function pricingResponse(
     cache_write_price_per_million: null,
     cache_write_1h_price_per_million: null,
     pricing_tiers: [],
+    unit: "tokens",
+    origin: "api",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -152,6 +154,9 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
+    // Off by default, matching the config default; the public-catalog tests
+    // turn it on.
+    public_catalog: false,
     // Closed, matching the default posture: the signup tests that want
     // registration turn it on rather than every other test turning it off.
     open_signup: false,

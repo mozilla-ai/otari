@@ -6,8 +6,8 @@ is about the shape of the code inside a feature.
 
 ## File size is a design signal
 
-The largest pages here are past two thousand lines (`features/activity/ActivityPage.tsx`,
-`features/models/ModelsPage.tsx`), and their tests are larger still. Nothing about the domains
+The largest pages here are past two thousand lines (`features/activity/ActivityPage.tsx`),
+and their tests are larger still. Nothing about the domains
 requires that: it is what happens when every dialog, row renderer, and derived table lives in
 the file that renders the page.
 
@@ -99,8 +99,8 @@ imports, pulls that route's whole component graph into the **entry** chunk, whic
 visitor downloads on first paint, including for pages their deployment does not serve.
 
 ```tsx
-// src/routes/models.tsx: the whole file
-export const Route = createFileRoute("/models")({ component: ModelsPage })
+// src/routes/routing.tsx: the whole file
+export const Route = createFileRoute("/routing")({ component: RoutingPage })
 ```
 
 The page component lives in `features/<domain>/`, and anything else the route needs

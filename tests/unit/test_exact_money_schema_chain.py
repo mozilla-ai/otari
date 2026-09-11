@@ -249,13 +249,19 @@ def test_stored_rates_survive_the_conversion_unchanged(sqlite_before_money: tupl
 
     # Read through the ORM, which is what applies the column type: on SQLite the
     # value is still a REAL in the file, and the type is what re-forms it as the
-    # decimal that was written.
+    # decimal that was written. Column by column rather than the mapped row,
+    # because the table at this revision predates columns the model has since
+    # grown.
+    rate_columns = [getattr(ModelPricing, column) for column in _RATE_COLUMNS]
     with Session(engine) as session:
-        rows = {row.model_key: row for row in session.execute(select(ModelPricing)).scalars()}
+        rows = {
+            row[0]: dict(zip(_RATE_COLUMNS, row[1:], strict=True))
+            for row in session.execute(select(ModelPricing.model_key, *rate_columns))
+        }
     for model_key, stored in catalog:
         for column in _RATE_COLUMNS:
             expected = None if stored[column] is None else Decimal(str(stored[column]))
-            assert getattr(rows[model_key], column) == expected, f"{model_key}.{column}"
+            assert rows[model_key][column] == expected, f"{model_key}.{column}"
 
 
 def test_a_settled_cost_survives_the_conversion_rounded_to_the_micro_dollar(

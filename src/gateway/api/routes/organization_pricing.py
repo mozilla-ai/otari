@@ -19,7 +19,7 @@ order (override, deployment row, genai-prices dataset) is
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
@@ -95,6 +95,10 @@ class OrganizationModelPricingRates(BaseModel):
     )
     effective_from: datetime | None = Field(default=None, description=_EFFECTIVE_FROM_DESCRIPTION)
     effective_to: datetime | None = Field(default=None, description=_EFFECTIVE_TO_DESCRIPTION)
+    unit: Literal["tokens", "requests", "images"] = Field(
+        default="tokens",
+        description="What the rates are per: tokens for a model, requests or images for a non-token endpoint.",
+    )
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "OrganizationModelPricingRates":
@@ -162,6 +166,7 @@ class OrganizationModelPricingPublic(BaseModel):
     cache_write_price_per_million: float | None
     cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
+    unit: str
     effective_from: datetime
     effective_to: datetime | None
     created_at: datetime
@@ -182,6 +187,7 @@ class OrganizationModelPricingPublic(BaseModel):
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
             cache_write_1h_price_per_million=as_float(override.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
+            unit=override.unit or "tokens",
             effective_from=override.effective_from,
             effective_to=override.effective_to,
             created_at=override.created_at,
@@ -228,6 +234,7 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
         pricing_tiers=[tier.model_dump(exclude_none=True) for tier in body.pricing_tiers or []],
         effective_from=body.effective_from or datetime.now(tz=UTC),
         effective_to=body.effective_to,
+        unit=body.unit,
     )
 
 

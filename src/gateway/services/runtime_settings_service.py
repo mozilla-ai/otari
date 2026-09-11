@@ -38,7 +38,12 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import STREAM_MISSING_USAGE_POLICIES, VISION_STRATEGIES, GatewayConfig
+from gateway.core.config import (
+    PRICING_REFRESH_POLICIES,
+    STREAM_MISSING_USAGE_POLICIES,
+    VISION_STRATEGIES,
+    GatewayConfig,
+)
 from gateway.log_config import logger
 from gateway.models.entities import RuntimeSetting
 from gateway.services.pricing_service import configure_default_pricing
@@ -58,6 +63,8 @@ VISION_STRATEGY = "vision_strategy"
 VISION_DESCRIBE_MODEL = "vision_describe_model"
 VISION_DESCRIBE_MAX_TOKENS = "vision_describe_max_tokens"
 BUDGET_ESTIMATE_DEFAULT_OUTPUT_TOKENS = "budget_estimate_default_output_tokens"
+PRICING_REFRESH = "pricing_refresh"
+PUBLIC_CATALOG = "public_catalog"
 
 # A settable value is a plain scalar. Stored as a string in ``runtime_settings``
 # (the table is intentionally schema-light) and parsed back per the key's spec.
@@ -99,6 +106,8 @@ _SPECS: dict[str, _Spec] = {
     STREAM_MISSING_USAGE_POLICY: _Spec("str", options=STREAM_MISSING_USAGE_POLICIES),
     VISION_STRATEGY: _Spec("str", options=VISION_STRATEGIES),
     VISION_DESCRIBE_MODEL: _Spec("str", nullable=True),
+    PRICING_REFRESH: _Spec("str", options=PRICING_REFRESH_POLICIES),
+    PUBLIC_CATALOG: _Spec("bool"),
 }
 
 # The config fields the dashboard may override; everything else is config/env only.

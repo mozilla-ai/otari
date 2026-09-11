@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
@@ -17,11 +17,20 @@ from gateway.services.alias_service import all_alias_names, resolve_effective_al
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
     PricingRefreshError,
+    PricingRefreshPreview,
     confirm_price_refresh,
+    list_accepted_snapshots,
     prepare_price_refresh,
+    preview_pending_refresh,
     reject_price_refresh,
 )
-from gateway.services.pricing_service import normalize_effective_at
+from gateway.services.pricing_service import (
+    GATEWAY_TOOL_PRICING_PROVIDER,
+    default_model_pricing,
+    default_pricing_enabled,
+    default_pricing_reference,
+    normalize_effective_at,
+)
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
 
 # Two routers under one prefix, one per authorization rule, so that adding a
@@ -88,6 +97,13 @@ class SetPricingRequest(BaseModel):
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
+    unit: Literal["tokens", "requests", "images"] = Field(
+        default="tokens",
+        description=(
+            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
+            "moderation call (USD per million requests), 'images' for image generation."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
@@ -109,6 +125,10 @@ class PricingResponse(BaseModel):
     cache_write_price_per_million: float | None
     cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
+    unit: str = Field(description="What the rates are per: tokens, requests, or images.")
+    origin: str | None = Field(
+        description="Which writer set this row: config, api, or migration. Null when recorded before origins were.",
+    )
     created_at: str
     updated_at: str
 
@@ -124,6 +144,8 @@ class PricingResponse(BaseModel):
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
             cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
+            unit=pricing.unit or "tokens",
+            origin=pricing.origin,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
         )
@@ -152,6 +174,56 @@ class PricingRefreshConfirmationResponse(BaseModel):
     """Result of activating a reviewed genai-prices refresh."""
 
     applied: bool = True
+
+
+class AcceptedSnapshotResponse(BaseModel):
+    """One accepted genai-prices snapshot in the history."""
+
+    id: str
+    accepted_at: datetime
+    accepted_by: str = Field(description="`operator` for a dashboard confirm, `schedule` for the auto policy.")
+    model_count: int
+
+
+class PricingDriftRow(BaseModel):
+    """A stored deployment rate beside the default it shadows."""
+
+    model_key: str
+    unit: str
+    origin: str | None
+    effective_at: str
+    input_price_per_million: float
+    output_price_per_million: float
+    default_input_price_per_million: float | None = Field(
+        description="What genai-prices would meter this key at today. Null when the dataset does not know it."
+    )
+    default_output_price_per_million: float | None
+    default_reference: str | None = Field(description="The genai-prices entry the default came from.")
+    input_delta_percent: float | None = Field(description="(stored - default) / default, as a percentage.")
+    output_delta_percent: float | None
+
+
+def _delta_percent(stored: float, default: float | None) -> float | None:
+    if default is None:
+        return None
+    if default == 0:
+        return None if stored == 0 else 100.0
+    return round((stored - default) / default * 100, 1)
+
+
+def _preview_response(preview: PricingRefreshPreview, protected_model_count: int) -> PricingRefreshPreviewResponse:
+    return PricingRefreshPreviewResponse(
+        fetched_at=preview.fetched_at,
+        added_count=preview.added_count,
+        changed_count=preview.changed_count,
+        removed_count=preview.removed_count,
+        protected_model_count=protected_model_count,
+        changes=[
+            PricingRefreshChangeResponse(model_key=change.model_key, change=change.change)
+            for change in preview.changes
+        ],
+        changes_truncated=preview.changes_truncated,
+    )
 
 
 def _candidate_model_keys(raw_key: str) -> list[str]:
@@ -205,18 +277,102 @@ async def preview_pricing_refresh(
     protected_model_count = (
         await db.execute(select(func.count(distinct(ModelPricing.model_key))))
     ).scalar_one()
-    return PricingRefreshPreviewResponse(
-        fetched_at=preview.fetched_at,
-        added_count=preview.added_count,
-        changed_count=preview.changed_count,
-        removed_count=preview.removed_count,
-        protected_model_count=protected_model_count,
-        changes=[
-            PricingRefreshChangeResponse(model_key=change.model_key, change=change.change)
-            for change in preview.changes
-        ],
-        changes_truncated=preview.changes_truncated,
+    return _preview_response(preview, protected_model_count)
+
+
+@operator_router.get("/refresh/pending", response_model=PricingRefreshPreviewResponse)
+async def get_pending_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PricingRefreshPreviewResponse:
+    """The update the scheduled refresh has left waiting for review, if any.
+
+    What the dashboard's notice reads. 404 when nothing is pending, so a page can
+    ask on load without treating the common case as an error banner.
+    """
+    try:
+        preview = await preview_pending_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The pending genai-prices data is invalid",
+        ) from None
+    if preview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending genai-prices refresh")
+    protected_model_count = (
+        await db.execute(select(func.count(distinct(ModelPricing.model_key))))
+    ).scalar_one()
+    return _preview_response(preview, protected_model_count)
+
+
+@operator_router.get("/snapshots", response_model=list[AcceptedSnapshotResponse])
+async def list_pricing_snapshots(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[AcceptedSnapshotResponse]:
+    """The accepted default-price snapshots, newest first."""
+    return [
+        AcceptedSnapshotResponse(
+            id=str(row.id), accepted_at=row.accepted_at, accepted_by=row.accepted_by, model_count=row.model_count
+        )
+        for row in await list_accepted_snapshots(db, limit=limit)
+    ]
+
+
+@operator_router.get("/drift", response_model=list[PricingDriftRow])
+async def list_pricing_drift(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[PricingDriftRow]:
+    """Every stored deployment rate in force today, beside today's default for it.
+
+    A stored row shadows the genai-prices default silently and forever, whether
+    it was a deliberate override or a copy of a then-current default. This is
+    what makes the difference visible: a row that matches the default is a row
+    that could be deleted, and a row far from it is one worth a second look.
+    Tool rows (``otari:``) are per request and have no default to drift from,
+    so they are left out.
+    """
+    now = normalize_effective_at(None)
+    latest_effective = (
+        select(ModelPricing.model_key.label("model_key"), func.max(ModelPricing.effective_at).label("effective_at"))
+        .where(ModelPricing.effective_at <= now)
+        .group_by(ModelPricing.model_key)
+        .subquery()
     )
+    stmt = (
+        select(ModelPricing)
+        .join(
+            latest_effective,
+            (ModelPricing.model_key == latest_effective.c.model_key)
+            & (ModelPricing.effective_at == latest_effective.c.effective_at),
+        )
+        .where(ModelPricing.model_key.notlike(f"{GATEWAY_TOOL_PRICING_PROVIDER}:%"))
+        .order_by(ModelPricing.model_key)
+    )
+    rows: list[PricingDriftRow] = []
+    defaults_on = default_pricing_enabled()
+    for pricing in (await db.execute(stmt)).scalars():
+        provider_part, separator, model_part = pricing.model_key.partition(":")
+        provider = provider_part if separator else None
+        model_name = model_part if separator else pricing.model_key
+        default = default_model_pricing(provider, model_name, now) if defaults_on else None
+        default_input = float(default.input_price_per_million) if default is not None else None
+        default_output = float(default.output_price_per_million) if default is not None else None
+        rows.append(
+            PricingDriftRow(
+                model_key=pricing.model_key,
+                unit=pricing.unit or "tokens",
+                origin=pricing.origin,
+                effective_at=pricing.effective_at.isoformat(),
+                input_price_per_million=float(pricing.input_price_per_million),
+                output_price_per_million=float(pricing.output_price_per_million),
+                default_input_price_per_million=default_input,
+                default_output_price_per_million=default_output,
+                default_reference=default_pricing_reference(provider, model_name, now) if default is not None else None,
+                input_delta_percent=_delta_percent(float(pricing.input_price_per_million), default_input),
+                output_delta_percent=_delta_percent(float(pricing.output_price_per_million), default_output),
+            )
+        )
+    return rows
 
 
 @operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
@@ -409,6 +565,8 @@ async def set_pricing(
         pricing.cache_write_price_per_million = cache_write
         pricing.cache_write_1h_price_per_million = cache_write_1h
         pricing.pricing_tiers = pricing_tiers
+        pricing.unit = request.unit
+        pricing.origin = "api"
     else:
         pricing = ModelPricing(
             model_key=normalized_key,
@@ -419,6 +577,8 @@ async def set_pricing(
             cache_write_price_per_million=cache_write,
             cache_write_1h_price_per_million=cache_write_1h,
             pricing_tiers=pricing_tiers,
+            unit=request.unit,
+            origin="api",
         )
         db.add(pricing)
 

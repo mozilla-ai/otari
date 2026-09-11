@@ -85,6 +85,8 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "require_pricing",
             "default_pricing",
+            "pricing_refresh",
+            "pricing_refresh_interval_seconds",
             "reject_user_mismatch",
             "stream_missing_usage_policy",
             "budget_strategy",
@@ -100,11 +102,17 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "model_discovery_negative_ttl_seconds",
             "models_dev_metadata",
             "models_dev_cache_ttl_seconds",
+            "public_catalog",
         ),
     ),
     (
         "Rate limiting & CORS",
-        ("rate_limit_rpm", "dashboard_login_rate_limit_per_minute", "cors_allow_origins"),
+        (
+            "rate_limit_rpm",
+            "dashboard_login_rate_limit_per_minute",
+            "public_catalog_rate_limit_per_minute",
+            "cors_allow_origins",
+        ),
     ),
     (
         "Files",
@@ -301,6 +309,8 @@ class UpdateSettingsRequest(BaseModel):
     budget_estimate_default_output_tokens: int | None = Field(default=None, ge=0)
     model_discovery_timeout_seconds: float | None = Field(default=None, gt=0)
     model_discovery_negative_ttl_seconds: float | None = Field(default=None, ge=0)
+    pricing_refresh: Literal["manual", "review", "auto"] | None = None
+    public_catalog: bool | None = None
     stream_missing_usage_policy: Literal["estimate", "fail", "allow_free"] | None = None
     vision_strategy: Literal["describe", "ocr", "off"] | None = None
     # Nullable: an explicit ``null`` clears the describe model. "Provided" is

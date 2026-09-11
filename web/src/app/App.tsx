@@ -13,6 +13,8 @@ import {
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
+import { PublicCatalogPage } from "@/features/models/PublicCatalogPage"
+import { publicCatalogPath } from "@/features/models/publicCatalog"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -86,7 +88,7 @@ export default function App({
  * again.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { deployment_type, session_type } = useDeployment()
+  const { deployment_type, session_type, public_catalog } = useDeployment()
   const { isAuthenticated } = useAuth()
 
   // A hybrid gateway is data-plane only: otari.ai owns its organizations,
@@ -141,6 +143,15 @@ function DeploymentRoot({ hash }: { hash: string }) {
         <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
       </PublicPageTitle>
     )
+  }
+
+  // The catalog, where the deployment has opened it to visitors. Only for a
+  // visitor: a signed-in caller reaches the same pages through the router,
+  // priced for their organization. Keyed on the hash so a second model opened
+  // in the tab remounts the view with its own selection.
+  const publicCatalog = publicCatalogPath(hash)
+  if (public_catalog && !isAuthenticated && publicCatalog !== null) {
+    return <PublicCatalogPage key={hash} modelId={publicCatalog.modelId} />
   }
 
   // Any deployment that issues a session needs one before the shell renders.

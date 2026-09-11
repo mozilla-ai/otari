@@ -1,7 +1,12 @@
 import { AlertDialog, Button } from "@heroui/react"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
+import { useState } from "react"
 
-import type { PricingRefreshPreview, PricingResponse } from "@/client"
+import type {
+  PricingDriftRow,
+  PricingRefreshPreview,
+  PricingResponse,
+} from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
@@ -10,20 +15,30 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { currentPricing } from "@/features/models/pricing"
+import {
+  type ManualRates,
+  SetPriceDialog,
+} from "@/features/models/SetPriceDialog"
 // Feature-to-feature, which the boundary rules allow: the overrides are the
 // organization's own rates above this catalog, so they belong on this page while
 // the tenancy feature keeps owning them.
 import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { isDeploymentOperator } from "@/features/organization/roles"
+import { PriceEditor } from "@/features/pricing/PriceEditor"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useConfirmPricingRefresh,
+  usePendingPricingRefresh,
   usePreviewPricingRefresh,
   usePricing,
+  usePricingDrift,
+  usePricingSnapshots,
   useRejectPricingRefresh,
+  useSetPricing,
 } from "@/shared/api/pricing"
 import { useSettings } from "@/shared/api/settings"
-import { formatCost, formatRelative } from "@/shared/helpers/format"
+import { formatRate, formatRelative } from "@/shared/helpers/format"
+import { useUrlValue } from "@/shared/helpers/urlState"
 
 // The organization's model pricing: what the gateway meters a request at, and
 // where the numbers come from.
@@ -35,12 +50,11 @@ import { formatCost, formatRelative } from "@/shared/helpers/format"
 // Settings page, next to the master key, and the per-model rates were a column
 // on Models.
 //
-// The split it settles: **this page owns the catalog** (whether unpriced models
-// are metered at all, where the defaults come from, and which models carry a
-// custom rate), and **Models still owns one model's price**, because that is
-// edited next to the model it applies to and reached from three places that all
-// start with a specific model. So the table here links there rather than
-// growing a second copy of that editor.
+// The split it settles: **this page owns pricing**, the policy, the defaults,
+// the stored rates and the editor for one of them. Models is read-only for
+// everyone (otari-ai#2095, #2096): its detail links here with the selector in
+// `?model=`, which opens the editor below for an operator, so the page that
+// compares prices is never the page that changes them.
 //
 // The other split, which is about who is asking (otari-ai#1943): the page holds
 // a deployment-wide half and a tenant-scoped half, and the roles matrix puts it
@@ -119,18 +133,37 @@ function PricingRefreshDialog({
   )
 }
 
+// Who accepted a snapshot, as a word. The schedule is the only non-person.
+function acceptedBy(who: string): string {
+  return who === "schedule" ? "the scheduled check" : `an ${who}`
+}
+
 function PricingRefreshSection() {
   const previewRefresh = usePreviewPricingRefresh()
   const confirmRefresh = useConfirmPricingRefresh()
   const rejectRefresh = useRejectPricingRefresh()
-  const preview = previewRefresh.data
+  // What the scheduled check left for review under `pricing_refresh: review`.
+  // It is the same pending row a manual check writes, so the one dialog and
+  // the same confirm and reject serve both; the only difference is who fetched.
+  const pending = usePendingPricingRefresh()
+  const snapshots = usePricingSnapshots()
+  const [reviewingPending, setReviewingPending] = useState(false)
+  const preview =
+    previewRefresh.data ??
+    (reviewingPending ? pending.data : undefined) ??
+    undefined
   const isPending = confirmRefresh.isPending || rejectRefresh.isPending
+  const latest = snapshots.data?.[0]
 
+  const close = () => {
+    previewRefresh.reset()
+    setReviewingPending(false)
+  }
   const reject = () => {
     if (preview === undefined || isPending) {
       return
     }
-    rejectRefresh.mutate(undefined, { onSuccess: previewRefresh.reset })
+    rejectRefresh.mutate(undefined, { onSuccess: close })
   }
 
   return (
@@ -151,6 +184,16 @@ function PricingRefreshSection() {
               <code>genai-prices</code>; custom prices remain separate and
               always take precedence.
             </p>
+            {latest ? (
+              <p className="mt-1 text-caption">
+                Last accepted {formatRelative(latest.accepted_at)} by{" "}
+                {acceptedBy(latest.accepted_by)}, {latest.model_count} priced
+                models.
+                {snapshots.data && snapshots.data.length > 1
+                  ? ` ${snapshots.data.length} snapshots on record.`
+                  : ""}
+              </p>
+            ) : null}
           </div>
           <Button
             size="sm"
@@ -164,6 +207,25 @@ function PricingRefreshSection() {
           </Button>
         </div>
         <ErrorBanner error={previewRefresh.error} />
+        {pending.data ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <InfoBanner tone="warning">
+              The scheduled check found {pending.data.changed_count} changed,{" "}
+              {pending.data.added_count} added and {pending.data.removed_count}{" "}
+              removed default prices, fetched{" "}
+              {formatRelative(pending.data.fetched_at)}. Nothing changes until
+              you accept.
+            </InfoBanner>
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={isPending}
+              onPress={() => setReviewingPending(true)}
+            >
+              Review pending update
+            </Button>
+          </div>
+        ) : null}
       </Section>
       <AlertDialog
         isOpen={preview !== undefined}
@@ -179,7 +241,7 @@ function PricingRefreshSection() {
             isPending={isPending}
             onAccept={() =>
               confirmRefresh.mutate(undefined, {
-                onSuccess: previewRefresh.reset,
+                onSuccess: close,
               })
             }
             onReject={reject}
@@ -237,7 +299,12 @@ interface PriceRow {
   output: number
   cacheRead: number | null
   tiers: number
+  unit: string
   updatedAt: string
+  /** Where this rate came from: `config`, `api`, or absent for a row older than the column. */
+  origin: string | null
+  /** How far the rate sits from today's genai-prices default, where one exists. */
+  drift?: PricingDriftRow
 }
 
 /**
@@ -249,15 +316,65 @@ interface PriceRow {
  * Models already uses, sorting included, so the two pages cannot disagree about
  * which rate is live.
  */
-function currentRows(all: PricingResponse[]): PriceRow[] {
+function currentRows(
+  all: PricingResponse[],
+  drift: readonly PricingDriftRow[] = [],
+): PriceRow[] {
+  const byKey = new Map(drift.map((row) => [row.model_key, row]))
   return currentPricing(all).map((live) => ({
     modelKey: live.model_key,
     input: live.input_price_per_million,
     output: live.output_price_per_million,
     cacheRead: live.cache_read_price_per_million,
     tiers: live.pricing_tiers.length,
+    unit: live.unit,
     updatedAt: live.updated_at,
+    origin: live.origin ?? null,
+    drift: byKey.get(live.model_key),
   }))
+}
+
+/** A signed percentage, or the dash for a rate with nothing to compare to. */
+export function formatDrift(delta: number | null | undefined): string {
+  if (delta == null) return "—"
+  const rounded = Math.round(delta)
+  if (rounded === 0) return "±0%"
+  return `${rounded > 0 ? "+" : "−"}${Math.abs(rounded)}%`
+}
+
+// Beyond this the stored rate is more than a rounding away from the default,
+// and the cell says so in the danger ink.
+const DRIFT_NOTICE_PERCENT = 10
+
+function DriftCell({ row }: { row: PriceRow }) {
+  const drift = row.drift
+  if (!drift || drift.default_input_price_per_million == null) {
+    return <span className="text-subtle">—</span>
+  }
+  const worst = Math.max(
+    Math.abs(drift.input_delta_percent ?? 0),
+    Math.abs(drift.output_delta_percent ?? 0),
+  )
+  const ink = worst > DRIFT_NOTICE_PERCENT ? "text-danger" : "text-muted"
+  return (
+    <span
+      className={`${ink} tabular-nums`}
+      title={`Default today: ${formatRate(drift.default_input_price_per_million)} in, ${formatRate(
+        drift.default_output_price_per_million ?? 0,
+      )} out${drift.default_reference ? `, from ${drift.default_reference}` : ""}`}
+    >
+      {formatDrift(drift.input_delta_percent)} /{" "}
+      {formatDrift(drift.output_delta_percent)}
+    </span>
+  )
+}
+
+// What a row's rates are per. A tool's row is per million requests, and the
+// column heads say "/ 1M", so the unit is the lane that keeps that honest.
+const UNIT_LABELS: Record<string, string> = {
+  tokens: "tokens",
+  requests: "requests",
+  images: "images",
 }
 
 const COLUMNS: DataTableColumn<PriceRow>[] = [
@@ -271,13 +388,13 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
     id: "input",
     header: "Input / 1M",
     align: "end",
-    cell: (row) => formatCost(row.input),
+    cell: (row) => formatRate(row.input),
   },
   {
     id: "output",
     header: "Output / 1M",
     align: "end",
-    cell: (row) => formatCost(row.output),
+    cell: (row) => formatRate(row.output),
   },
   {
     id: "cacheRead",
@@ -285,13 +402,36 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
     align: "end",
     // An em dash rather than $0.00: a model with no cache-read rate is not the
     // same as one that reads cache for free.
-    cell: (row) => (row.cacheRead === null ? "—" : formatCost(row.cacheRead)),
+    cell: (row) => (row.cacheRead === null ? "—" : formatRate(row.cacheRead)),
   },
   {
     id: "tiers",
     header: "Tiers",
     align: "end",
     cell: (row) => (row.tiers === 0 ? "—" : `${row.tiers} configured`),
+  },
+  {
+    id: "unit",
+    header: "Per 1M",
+    cell: (row) => (
+      <span className="text-muted">{UNIT_LABELS[row.unit] ?? row.unit}</span>
+    ),
+  },
+  // Where the rate was set: the config file or the API. A rate set in config
+  // comes back on every restart, and knowing that before editing it here is
+  // the difference between a change that sticks and one that does not.
+  {
+    id: "origin",
+    header: "Set by",
+    cell: (row) => (
+      <span className="text-muted">
+        {row.origin === "config"
+          ? "config"
+          : row.origin === "api"
+            ? "dashboard"
+            : "—"}
+      </span>
+    ),
   },
   // The row has carried this since it was built and never rendered it. It earns
   // the lane now because something has to absorb the width this table does not
@@ -329,7 +469,69 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
  */
 function PriceTable({ canPrice }: { canPrice: boolean }) {
   const pricing = usePricing()
-  const rows = pricing.data ? currentRows(pricing.data) : []
+  // Operator-only read, so it is gated on the same axis as the editor.
+  const drift = usePricingDrift(canPrice)
+  const navigate = useNavigate()
+  const setPricing = useSetPricing()
+  // The selector whose deployment rate is being edited, carried in the URL so
+  // the catalog's "Edit rate" link lands here with it in hand.
+  const editingKey = useUrlValue("model")
+  const [customOpen, setCustomOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key: it seeds its draft on
+  // mount and owns the refusal, so a remount is what clears both.
+  const [customOpenCount, setCustomOpenCount] = useState(0)
+  const rows = pricing.data ? currentRows(pricing.data, drift.data ?? []) : []
+  const current = pricing.data
+    ? currentPricing(pricing.data).find((row) => row.model_key === editingKey)
+    : undefined
+
+  const edit = (modelKey: string | null) =>
+    void navigate({
+      to: "/organization/pricing",
+      search: modelKey ? { model: modelKey } : {},
+    })
+
+  // A backend with no /v1/models endpoint serves models the catalog never
+  // lists, so the only way to meter them is a key typed by hand. The stored key
+  // is what the server normalized, so the editor opens on that rather than on
+  // the raw input.
+  const priceCustom = async (rates: ManualRates, modelKey: string) => {
+    const created = await setPricing.mutateAsync({
+      model_key: modelKey,
+      input_price_per_million: rates.input_price_per_million,
+      output_price_per_million: rates.output_price_per_million,
+      cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
+      cache_write_price_per_million:
+        rates.cache_write_price_per_million ?? null,
+    })
+    setCustomOpen(false)
+    edit(created.model_key)
+  }
+
+  const columns = canPrice
+    ? [
+        ...COLUMNS.filter((column) => column.id !== "spacer"),
+        {
+          id: "drift",
+          header: "vs default",
+          align: "end" as const,
+          cell: (row: PriceRow) => <DriftCell row={row} />,
+        },
+        {
+          id: "actions",
+          header: "Actions",
+          cell: (row: PriceRow) => (
+            <Link
+              to="/organization/pricing"
+              search={{ model: row.modelKey }}
+              className="text-link hover:text-link-hover"
+            >
+              Edit
+            </Link>
+          ),
+        },
+      ]
+    : COLUMNS
 
   if (pricing.isLoading) return <PageLoading label="Loading model prices…" />
 
@@ -338,37 +540,75 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
       {/* The group's heading and the rule under it are what introduce the rows,
           which then sit straight on the page ground. No box: the header rule
           and the row separators already say where the group starts and ends. */}
-      <Section className="pt-6 pb-3">
+      <Section
+        className="pt-6 pb-3"
+        contentClassName="flex flex-wrap items-center justify-between gap-3"
+      >
         <h2 className="text-title">Model prices</h2>
+        {canPrice ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => {
+              setCustomOpenCount((count) => count + 1)
+              setCustomOpen(true)
+            }}
+          >
+            Price a model
+          </Button>
+        ) : null}
       </Section>
       <ErrorBanner error={pricing.error} />
+      {canPrice && editingKey ? (
+        <Section
+          aria-labelledby="price-editor-title"
+          className="border-y border-border py-5"
+          contentClassName="flex flex-col gap-3"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <h3 id="price-editor-title" className="text-title break-all">
+              {current ? "Edit price for " : "Set price for "}
+              <code className="text-mono-title">{editingKey}</code>
+            </h3>
+            <Button size="sm" variant="ghost" onPress={() => edit(null)}>
+              Close
+            </Button>
+          </div>
+          <div className="max-w-xl">
+            <PriceEditor
+              key={editingKey}
+              modelKey={editingKey}
+              current={current}
+              onDone={() => edit(null)}
+            />
+          </div>
+        </Section>
+      ) : null}
       <TableScrollFrame className="otari-pricing-table">
         <DataTable
           ariaLabel="Model prices"
-          columns={COLUMNS}
+          columns={columns}
           rows={rows}
           getRowKey={(row) => row.modelKey}
           emptyContent={
             canPrice
-              ? "No model carries a stored price yet. Price one from the Models page."
+              ? "No model carries a stored price yet. Pick one on Models, or price one by its selector here."
               : "No model carries a stored price yet."
           }
         />
       </TableScrollFrame>
-      {/* Where to edit a rate, told only to a caller who can edit one. */}
       {canPrice ? (
-        <Section className="pt-3">
-          <p className="text-sm text-muted">
-            A rate is edited beside the model it applies to, on{" "}
-            <Link
-              to="/models"
-              className="font-medium text-link hover:text-link-hover"
-            >
-              Models
-            </Link>
-            .
-          </p>
-        </Section>
+        <SetPriceDialog
+          key={customOpenCount}
+          isOpen={customOpen}
+          onOpenChange={setCustomOpen}
+          onSubmit={priceCustom}
+          collectModelKey
+          title="Price a model"
+          description={() =>
+            "Set what a model costs by its selector, for a backend the catalog cannot list. Requests from now on are costed at these rates and counted against budgets."
+          }
+        />
       ) : null}
     </>
   )

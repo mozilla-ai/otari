@@ -260,6 +260,8 @@ def test_pricing_response_from_model() -> None:
     pricing.output_price_per_million = 60.0
     pricing.cache_read_price_per_million = 5.0
     pricing.cache_write_price_per_million = 15.0
+    pricing.unit = "tokens"
+    pricing.origin = "api"
     pricing.created_at = datetime(2025, 3, 1, tzinfo=UTC)
     pricing.updated_at = datetime(2025, 3, 2, tzinfo=UTC)
 

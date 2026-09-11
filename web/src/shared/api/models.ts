@@ -1,16 +1,51 @@
 import { useQuery } from "@tanstack/react-query"
 import type {
+  CatalogModelDetail,
+  CatalogResponse,
   DiscoverableModelsResponse,
   ModelListResponse,
   ModelMetadataResponse,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
+  CATALOG,
   DISCOVERABLE,
   METADATA,
   MODELS,
   NO_RETRY,
 } from "@/shared/api/queryKeys"
+
+// The catalog folded by model, priced for the caller. Any session may read it,
+// like `/v1/models`; the detail is keyed under the list so a pricing write that
+// invalidates CATALOG takes every open detail with it.
+// Keyed beside the model id so a detail read and a list read never share a
+// cache entry, while both still fall under the CATALOG prefix invalidations use.
+export function useCatalog() {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, "list"],
+    queryFn: () => apiFetch<CatalogResponse>("/catalog/models"),
+    staleTime: 60_000,
+  })
+}
+
+export function useCatalogModel(modelId: string | undefined) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, modelId],
+    queryFn: () =>
+      // Segment by segment: the id carries its vendor, `z-ai/glm-5.3`, and
+      // the slash is the path's, not the id's to encode.
+      apiFetch<CatalogModelDetail>(
+        `/catalog/models/${(modelId ?? "")
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
+      ),
+    staleTime: 60_000,
+    enabled: modelId !== undefined,
+  })
+}
 
 // `enabled` is not the operator composition the reads below use: the catalog is
 // readable by any signed-in caller and is already narrowed server-side to what

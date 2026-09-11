@@ -2638,28 +2638,24 @@ main {
    content on the same pixel, so the lane is given explicit room on its left
    rather than relying on the cell padding both sides already spend. */
 .otari-models-table .otari-table.table-root,
+.otari-offerings-table .otari-table.table-root,
 .otari-domains-table .otari-table.table-root,
 .otari-providers-table .otari-table.table-root,
 .otari-routing-table .otari-table.table-root {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
-.otari-models-table .table__column[data-key="policy"],
-.otari-models-table .table__cell[data-key="policy"] {
-  padding-left: 20px;
+.otari-models-table .table__column[data-key="name"] {
+  min-width: 200px;
 }
-.otari-models-table .table__column[data-key="provider"] {
-  width: 150px;
-}
-.otari-models-table .table__column[data-key="modalities"] {
-  width: 210px;
-}
-.otari-models-table .table__column[data-key="model"] {
-  min-width: 220px;
+.otari-offerings-table .table__column[data-key="provider"] {
+  min-width: 200px;
 }
 /* The identity lane holds while the rest scrolls, as everywhere else. */
 .otari-models-table .table__column:first-child,
 .otari-models-table .table__row .table__cell:first-child,
+.otari-offerings-table .table__column:first-child,
+.otari-offerings-table .table__row .table__cell:first-child,
 .otari-domains-table .table__column:first-child,
 .otari-domains-table .table__row .table__cell:first-child,
 .otari-providers-table .table__column:first-child,
@@ -2673,6 +2669,10 @@ main {
 }
 .otari-models-table[data-scrolled="true"] .table__column:first-child,
 .otari-models-table[data-scrolled="true"] .table__row .table__cell:first-child,
+.otari-offerings-table[data-scrolled="true"] .table__column:first-child,
+.otari-offerings-table[data-scrolled="true"]
+  .table__row
+  .table__cell:first-child,
 .otari-providers-table[data-scrolled="true"] .table__column:first-child,
 .otari-providers-table[data-scrolled="true"]
   .table__row

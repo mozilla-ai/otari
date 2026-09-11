@@ -69,6 +69,7 @@ class PricingOverrideInput:
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
+    unit: str = "tokens"
 
 
 def _describe_period(effective_from: datetime, effective_to: datetime | None) -> str:
@@ -221,6 +222,8 @@ class OrganizationPricingService:
             pricing_tiers=override.pricing_tiers,
             effective_from=effective_from,
             effective_to=effective_to,
+            unit=override.unit,
+            origin="api",
         )
         self.db.add(row)
         await self._flush_or_conflict(organization_id, model_key, effective_from)
@@ -338,6 +341,7 @@ class OrganizationPricingService:
         row.pricing_tiers = override.pricing_tiers
         row.effective_from = effective_from
         row.effective_to = effective_to
+        row.unit = override.unit
         await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id)
         return row
 

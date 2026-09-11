@@ -35,6 +35,7 @@ function pricingOverride(
     cache_write_price_per_million: null,
     cache_write_1h_price_per_million: null,
     pricing_tiers: [],
+    unit: "tokens",
     effective_from: "2026-08-01T00:00:00Z",
     effective_to: null,
     created_at: "2026-08-01T00:00:00Z",
@@ -81,7 +82,7 @@ function mockApi({
 // mounts, so a page that later grows a <Link> or URL state is already covered.
 // Awaited, because the router resolves its first location asynchronously and a
 // synchronous DOM read would race it.
-function renderPage() {
+function renderPage(url = "/organization/pricing") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -89,6 +90,7 @@ function renderPage() {
     <QueryClientProvider client={client}>
       <RateOverridesCard />
     </QueryClientProvider>,
+    { url },
   )
 }
 
@@ -193,6 +195,33 @@ describe("RateOverridesCard", () => {
         output_price_per_million: 15,
       })
     })
+  })
+
+  it("opens an add on the selector the catalog linked with", async () => {
+    mockApi({ overrides: [] })
+
+    await renderPage(
+      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
+    )
+
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      (within(dialog).getByLabelText(/model key/i) as HTMLInputElement).value,
+    ).toBe("nebius:zai-org/GLM-5.3")
+  })
+
+  it("does not open the linked editor for a member who cannot manage", async () => {
+    mockApi({
+      overrides: [],
+      context: organizationContext({ role: "member" }),
+    })
+
+    await renderPage(
+      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
+    )
+
+    await screen.findByText(/no override yet/i)
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   it("puts focus in the first rate when editing, not on the frame's Close", async () => {

@@ -1061,10 +1061,6 @@ describe("content text wears a type role", () => {
       "a workspace description truncated in a cell, and its budget helper",
     ],
     [
-      "features/models/ModelsPage.tsx",
-      "the selector, the family, and the not-discovered label",
-    ],
-    [
       "features/models/ModelScopeControl.tsx",
       "the blocked-from-every-model state banner",
     ],

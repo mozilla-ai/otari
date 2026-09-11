@@ -15,6 +15,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
+from gateway.api.routes.catalog import run_selector_index_refresher
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
@@ -26,6 +27,7 @@ from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budget_reservation_ledger import run_reservation_sweeper
+from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
@@ -54,6 +56,7 @@ from gateway.services.pricing_init_service import (
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
     run_price_snapshot_refresher,
+    run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 from gateway.services.provider_store_service import (
@@ -346,8 +349,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         org_provider_refresher: asyncio.Task[None] | None = None
         search_tool_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
+        price_poller: asyncio.Task[None] | None = None
         discovery_refresher: asyncio.Task[None] | None = None
         catalog_refresher: asyncio.Task[None] | None = None
+        selector_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
@@ -429,6 +434,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # served the confirm; reload it on a TTL so sibling workers and replicas
             # converge, the same way aliases and provider credentials do.
             price_refresher = asyncio.create_task(run_price_snapshot_refresher())
+            # The upstream half: checks genai-prices on a schedule and holds or
+            # applies what it finds per ``pricing_refresh``. Started whatever
+            # the policy, since the policy is runtime-settable and each tick
+            # re-reads it.
+            price_poller = asyncio.create_task(run_price_update_poller(config))
             # Discovery is the one cache that used to be filled on the request
             # path, which put model_discovery_timeout_seconds (10s per
             # unreachable provider) on a dashboard page load and held that
@@ -449,6 +459,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             discovery_refresher = asyncio.create_task(run_discovery_refresher(config))
             # Same shape for the models.dev catalog, whose fetch is bounded at 15s.
             catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
+            # The short spellings a request may use for a model, rebuilt from the
+            # deployment's catalog view so a caller can send what the catalog shows.
+            selector_refresher = asyncio.create_task(run_selector_index_refresher(config))
             # Not a cache refresher like the rest: this one returns leaked budget
             # holds. The per-user reclaim on the reserve path only runs when that
             # user next reserves, so a user whose single request leaked would hold
@@ -479,8 +492,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 (org_provider_refresher, "organization provider key"),
                 (search_tool_refresher, "search tool"),
                 (price_refresher, "price snapshot"),
+                (price_poller, "price update poll"),
                 (discovery_refresher, "model discovery"),
                 (catalog_refresher, "models.dev catalog"),
+                (selector_refresher, "catalog selectors"),
                 (reservation_sweeper, "budget reservation sweep"),
             ]
             await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
@@ -498,6 +513,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 reset_discovery_cache()
             if catalog_refresher is not None:
                 clear_catalog_cache()
+            if selector_refresher is not None:
+                reset_selector_index()
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
@@ -797,6 +814,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
         app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
     else:
         app.state.login_rate_limiter = None
+
+    if config.public_catalog_rate_limit_per_minute is not None:
+        app.state.public_catalog_rate_limiter = RateLimiter(config.public_catalog_rate_limit_per_minute)
+    else:
+        app.state.public_catalog_rate_limiter = None
 
     app.state.config = config
     app.state.gateway_mode = config.effective_mode

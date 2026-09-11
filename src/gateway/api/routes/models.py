@@ -99,6 +99,26 @@ class ModelPricingInfo(BaseModel):
     # pricing_service._pricing_tiers emits (a `min_input_tokens` of 0 fails
     # `gt=0`, and a tier with no rate override fails validate_has_rate_override).
     pricing_tiers: Sequence[PricingTier | dict[str, float | int]] = Field(default_factory=list)
+    # What the rates are per (``PRICING_UNITS``). A gateway-run tool's row is per
+    # million requests, and a reader that assumed tokens would be wrong by the
+    # whole unit; the catalog never lists one, but the field travels with the
+    # price so a caller of GET /api/v1/models/{id} is told too.
+    unit: str = "tokens"
+
+
+def _pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
+    """The wire shape of one stored, default, or override price row."""
+    return ModelPricingInfo(
+        input_price_per_million=float(pricing.input_price_per_million),
+        output_price_per_million=float(pricing.output_price_per_million),
+        cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
+        cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
+        cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
+        pricing_tiers=pricing.pricing_tiers or [],
+        # A transient row (a default, an override) is built without the column
+        # default that an insert would apply, so it reads back None here.
+        unit=pricing.unit or "tokens",
+    )
 
 
 class ModelObject(BaseModel):
@@ -262,14 +282,7 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
         id=pricing.model_key,
         created=created,
         owned_by=_owner_from_key(pricing.model_key),
-        pricing=ModelPricingInfo(
-            input_price_per_million=float(pricing.input_price_per_million),
-            output_price_per_million=float(pricing.output_price_per_million),
-            cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
-            cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
-            pricing_tiers=pricing.pricing_tiers or [],
-        ),
+        pricing=_pricing_info(pricing),
         pricing_source="configured",
         context_window=_context_window_for_key(pricing.model_key),
     )
@@ -292,14 +305,7 @@ def _alias_model(
         id=alias,
         created=0,
         owned_by=ALIAS_OWNED_BY,
-        pricing=ModelPricingInfo(
-            input_price_per_million=float(pricing.input_price_per_million),
-            output_price_per_million=float(pricing.output_price_per_million),
-            cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
-            cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
-            pricing_tiers=pricing.pricing_tiers or [],
-        )
+        pricing=_pricing_info(pricing)
         if pricing
         else None,
         pricing_source="configured" if pricing else "none",
@@ -427,14 +433,7 @@ def _apply_default_pricing(obj: ModelObject, pricing_selector: str | None = None
     model_name = model_part if separator else selector
     default = default_model_pricing(provider, model_name, normalize_effective_at(None))
     if default is not None:
-        obj.pricing = ModelPricingInfo(
-            input_price_per_million=float(default.input_price_per_million),
-            output_price_per_million=float(default.output_price_per_million),
-            cache_read_price_per_million=as_float(default.cache_read_price_per_million),
-            cache_write_price_per_million=as_float(default.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(default.cache_write_1h_price_per_million),
-            pricing_tiers=default.pricing_tiers or [],
-        )
+        obj.pricing = _pricing_info(default)
         obj.pricing_source = "default"
 
 
@@ -494,6 +493,7 @@ async def _catalog_scope(
     *,
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
+    anonymous: bool = False,
 ) -> _CatalogScope:
     """What this caller may be shown, by the rule that fits how they authenticated.
 
@@ -505,6 +505,11 @@ async def _catalog_scope(
     tenant's, and the workspace-scoped rows only where that workspace is theirs
     (otari-ai#1969).
     """
+    # A visitor, while the catalog is public: the deployment's configured
+    # instances and nothing that belongs to a tenant. Not a member of anything,
+    # so no BYO key, no workspace's aliases or policies.
+    if anonymous:
+        return _CatalogScope(allowlist=[f"{instance}:*" for instance in config.providers], reads_workspace_layer=False)
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
             return _CatalogScope(allowlist=None, reads_workspace_layer=True)
@@ -520,19 +525,39 @@ async def _catalog_scope(
     )
 
 
-@catalog_router.get("/models")
-async def list_models(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
-) -> ModelListResponse:
-    """List all available models.
+@dataclass
+class MergedCatalog:
+    """Every selector one caller may be shown, before any presentation.
 
-    Returns models auto-discovered from configured providers, enriched with
-    pricing data from the model_pricing table when available. Models that only
-    exist in the pricing table are also included for backward compatibility.
+    Shared by GET /api/v1/models, which lists it flat, and the grouped catalog under
+    /api/v1/catalog, which folds it by model, so the two cannot disagree about which
+    selectors exist or which of them the caller may see.
+    """
+
+    models: dict[str, ModelObject]
+    aliases: dict[str, str]
+    dynamic_policies: dict[str, PolicySpec]
+    discovered_keys: set[str]
+    """The selectors phase 1 heard from a provider, as opposed to only priced."""
+
+
+async def build_merged_catalog(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    provider: str | None = None,
+    anonymous: bool = False,
+    cached_only: bool = False,
+) -> MergedCatalog:
+    """Merge discovery, stored prices, defaults, aliases and policies for one caller.
+
+    ``anonymous`` is the public catalog's visitor, who is answered from the
+    configured instances alone; see :func:`_catalog_scope`.
+
+    ``cached_only`` builds the view without dialing any provider, for a caller
+    that runs off the request path; see :func:`discover_all_models`.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
@@ -544,7 +569,7 @@ async def list_models(
     # Resolved before the alias and policy layers are read, not only before they
     # are filtered: it decides whether the workspace-scoped rows may be read at
     # all, which no filter over targets can decide afterwards.
-    scope = await _catalog_scope(db, config, auth=auth, session_identity=session_identity)
+    scope = await _catalog_scope(db, config, auth=auth, session_identity=session_identity, anonymous=anonymous)
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
     # alias pricing can still be looked up by the target's canonical key. Keys are
@@ -589,6 +614,7 @@ async def list_models(
     alias_targets = _alias_target_keys(config, configured_aliases)
 
     merged: dict[str, ModelObject] = {}
+    discovered_keys: set[str] = set()
 
     # Phase 1: auto-discovered models from upstream providers.
     if config.model_discovery:
@@ -602,6 +628,7 @@ async def list_models(
                 config,
                 provider_filter=provider,
                 serve_stale=background_discovery_enabled(config),
+                cached_only=cached_only,
             )
         except Exception:
             logger.exception("Model discovery failed unexpectedly")
@@ -611,19 +638,13 @@ async def list_models(
             model_key = f"{provider_name}:{model.id}"
             if normalize_pricing_key(config, model_key) in alias_targets:
                 continue
+            discovered_keys.add(model_key)
             pricing = pricing_map.pop(model_key, None)
             merged[model_key] = ModelObject(
                 id=model_key,
                 created=_created_timestamp(model),
                 owned_by=provider_name,
-                pricing=ModelPricingInfo(
-                    input_price_per_million=float(pricing.input_price_per_million),
-                    output_price_per_million=float(pricing.output_price_per_million),
-                    cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
-                    cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-                    cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
-                    pricing_tiers=pricing.pricing_tiers or [],
-                )
+                pricing=_pricing_info(pricing)
                 if pricing
                 else None,
                 pricing_source="configured" if pricing else "none",
@@ -692,8 +713,30 @@ async def list_models(
 
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
 
-    sorted_models = sorted(merged.values(), key=lambda m: m.id)
-    return ModelListResponse(data=sorted_models)
+    return MergedCatalog(
+        models=merged,
+        aliases=aliases,
+        dynamic_policies=dynamic_policies,
+        discovered_keys=discovered_keys,
+    )
+
+
+@catalog_router.get("/models")
+async def list_models(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
+) -> ModelListResponse:
+    """List all available models.
+
+    Returns models auto-discovered from configured providers, enriched with
+    pricing data from the model_pricing table when available. Models that only
+    exist in the pricing table are also included for backward compatibility.
+    """
+    catalog = await build_merged_catalog(db, config, auth=auth, session_identity=session_identity, provider=provider)
+    return ModelListResponse(data=sorted(catalog.models.values(), key=lambda m: m.id))
 
 
 # Served before GET /models/{model_id:path}, which FastAPI would otherwise match
@@ -875,14 +918,7 @@ async def get_model(
             id=model_key,
             created=_created_timestamp(discovered_model),
             owned_by=discovered_provider,
-            pricing=ModelPricingInfo(
-                input_price_per_million=float(pricing.input_price_per_million),
-                output_price_per_million=float(pricing.output_price_per_million),
-                cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
-                cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-                cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
-                pricing_tiers=pricing.pricing_tiers or [],
-            )
+            pricing=_pricing_info(pricing)
             if pricing
             else None,
             pricing_source="configured" if pricing else "none",
