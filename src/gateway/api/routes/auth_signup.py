@@ -117,6 +117,7 @@ async def signup(
         claimed = await create_user_for_signup(
             db,
             config,
+            background_tasks=background_tasks,
             email=body.email,
             password=body.password,
             full_name=body.full_name,
@@ -157,13 +158,14 @@ async def verify_email_route(
 async def resend_verification(
     body: ResendVerificationRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
-        await resend_verification_email(db, config, email=body.email)
+        await resend_verification_email(db, config, background_tasks=background_tasks, email=body.email)
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     return ResendVerificationResponse(message=_RESEND_MESSAGE)
