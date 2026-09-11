@@ -240,8 +240,8 @@ class OrganizationService:
         return membership
 
     @staticmethod
-    def _enforce_management_role(membership: OrganizationMember, user: User) -> None:
-        if membership.role not in MANAGEMENT_ROLES and not user.is_superuser:
+    def _enforce_management_role(membership: OrganizationMember) -> None:
+        if membership.role not in MANAGEMENT_ROLES:
             raise NotAuthorizedError
 
     async def require_active_organization_management_access(
@@ -252,7 +252,7 @@ class OrganizationService:
     ) -> OrganizationMember:
         """Return the caller's membership, refusing unless it may manage the organization."""
         membership = await self._require_active_membership(user, organization)
-        self._enforce_management_role(membership, user)
+        self._enforce_management_role(membership)
         return membership
 
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:

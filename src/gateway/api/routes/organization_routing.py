@@ -14,7 +14,7 @@ member, Edit for an admin (otari-ai#1942, otari-ai#1969).
   which refuses a pointer with no live membership behind it. No request here
   names an organization.
 * **How much of it a read covers** follows the rule the workspace list uses: an
-  owner, an admin or a superuser reads every workspace in the organization, and
+  owner or an admin reads every workspace in the organization, and
   a member or viewer reads the ones they actively belong to. A member who
   belongs to no workspace still gets the config-file entries, which are
   deployment-wide and in force in every workspace they could ever join.

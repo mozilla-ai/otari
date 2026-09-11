@@ -1886,7 +1886,7 @@ export interface paths {
          *     The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
          *     caller's own attribution user, the key is always budget-enforced, and the
          *     workspace must be visible to the caller (a member of it, or an organization
-         *     owner/admin/superuser, who see every workspace). The secret is returned once.
+         *     owner/admin, who see every workspace). The secret is returned once.
          */
         post: operations["organization-keys-create_own_key"];
         delete?: never;
