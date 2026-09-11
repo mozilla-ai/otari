@@ -24,14 +24,14 @@
     "lint:fix": "biome check --write"
   },
   "dependencies": {
-    "@heroui/react": "3.2.4",
-    "@heroui/styles": "3.2.4",
+    "@heroui/react": "3.2.5",
+    "@heroui/styles": "3.2.5",
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "^1.170.34",
     "canvas-confetti": "^1.9.4",
     "clsx": "2.1.1",
     "react": "^19.3.0",
-    "react-aria-components": "1.20.0",
+    "react-aria-components": "1.21.1",
     "react-dom": "^19.3.0",
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
