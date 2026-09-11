@@ -111,6 +111,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "passkeys_ready": False,
         "oauth_providers": [],
         "mail_ready": False,
+        "open_signup": False,
     }
 
 
@@ -212,6 +213,31 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
 
     with TestClient(create_app(ready)) as client:
         assert client.get(f"{API_ROOT}/bootstrap").json()["mail_ready"] is True
+
+
+def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_path: Path) -> None:
+    """Both halves, because the page reads this to decide whether to invite registrations.
+
+    The route refuses without a transport anyway, so publishing the setting
+    alone would advertise a form whose every submit answers 503.
+    """
+    no_mail = _standalone(tmp_path)
+    no_mail.open_signup = True
+
+    with TestClient(create_app(no_mail)) as client:
+        assert client.get(f"{API_ROOT}/bootstrap").json()["open_signup"] is False
+
+    reset_config()
+    reset_db()
+
+    ready = _standalone(tmp_path)
+    ready.open_signup = True
+    ready.smtp_host = "smtp.example.com"
+    ready.mail_from_email = "otari@example.com"
+    ready.public_base_url = "https://otari.example.com"
+
+    with TestClient(create_app(ready)) as client:
+        assert client.get(f"{API_ROOT}/bootstrap").json()["open_signup"] is True
 
 
 # A surface names its router's ``/api/v1/`` prefix, so the prefix is derived from the
@@ -347,8 +373,8 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "passkeys_ready": False,
         "oauth_providers": [],
         "mail_ready": False,
+        "open_signup": False,
     }
-
 
 
 def test_hybrid_bootstrap_leaks_no_secret(monkeypatch: pytest.MonkeyPatch) -> None:

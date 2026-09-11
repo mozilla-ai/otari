@@ -104,6 +104,31 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.refresh(user)
         return user
 
+    async def any_active_with_password(self) -> bool:
+        """Whether some active identity on this deployment could sign in with a password.
+
+        Asked by the bootstrap so the sign-in screen offers the email and
+        password form to anyone who has one, not only once the *operator*
+        identity does (otari-ai#2100). ``POST /api/v1/auth/session`` has always
+        accepted a password from any identity; publishing the method off the
+        operator alone is what left a member who signed up on an unclaimed
+        deployment looking at a master-key box they hold no key for.
+
+        Deactivated rows are excluded because ``authenticate`` refuses them, so
+        a deployment whose only password-holder has been deactivated is one
+        where the form could not work.
+
+        A ``LIMIT 1`` existence check rather than a count: the answer is a
+        boolean and the table is unbounded.
+        """
+        result = await self.db.execute(
+            select(col(User.id))
+            .where(col(User.hashed_password).is_not(None))
+            .where(col(User.is_active).is_(True))
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def list_all(self, *, skip: int = 0, limit: int = 100) -> tuple[list[User], int]:
         """Return a page of every identity on the deployment, plus the total.
 

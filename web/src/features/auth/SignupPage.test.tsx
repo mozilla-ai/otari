@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SignupPage } from "@/features/auth/SignupPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { bootstrap } from "@/tests/fixtures"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 // The network boundary, not the hooks: the real hooks, their query keys, and
@@ -26,13 +28,26 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 // `PublicAuthPage` passes the whole hash down, so the plain page is the one
 // reached from the sign-in screen and a `?email=` one is the accept page's
 // handoff (otari#835).
-function renderPage(hash = "#/signup") {
+// The page reads `open_signup` and `terms_url` off the bootstrap, so every
+// render goes through a DeploymentProvider. Closed signup and no published
+// terms is the default, matching a deployment that configured neither.
+function renderPage(
+  hash = "#/signup",
+  deployment: { openSignup?: boolean; termsUrl?: string | null } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <SignupPage hash={hash} />
+      <DeploymentProvider
+        value={bootstrap({
+          open_signup: deployment.openSignup ?? false,
+          terms_url: deployment.termsUrl ?? null,
+        })}
+      >
+        <SignupPage hash={hash} />
+      </DeploymentProvider>
     </QueryClientProvider>,
   )
 }
@@ -68,6 +83,59 @@ describe("SignupPage", () => {
       email: "ada@example.com",
       password: "correct-horse",
       full_name: null,
+    })
+  })
+
+  // otari-ai#2100: the same form, reading as registration where the deployment
+  // takes an address nobody added.
+  it("reads as registration where signup is open", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
+    const user = userEvent.setup()
+    renderPage("#/signup", { openSignup: true })
+
+    expect(
+      screen.getByRole("heading", { name: "Create your account" }),
+    ).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Email"), "ada@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Create account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/check-email?type=signup")
+    })
+  })
+
+  it("offers no terms checkbox on a deployment that published none", () => {
+    renderPage()
+
+    expect(screen.queryByRole("checkbox")).toBeNull()
+  })
+
+  it("requires the published terms, and records the acceptance", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
+    const user = userEvent.setup()
+    renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
+
+    await user.type(screen.getByLabelText("Email"), "ada@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
+    const submit = screen.getByRole("button", { name: "Claim account" })
+    expect(submit).toBeDisabled()
+
+    expect(
+      screen.getByRole("link", { name: "terms of service" }),
+    ).toHaveAttribute("href", "https://otari.example.com/terms")
+    await user.click(screen.getByRole("checkbox"))
+    await user.click(submit)
+
+    const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toEqual({
+      email: "ada@example.com",
+      password: "correct-horse",
+      full_name: null,
+      terms_accepted: true,
     })
   })
 

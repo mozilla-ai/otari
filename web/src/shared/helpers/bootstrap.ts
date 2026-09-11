@@ -77,5 +77,6 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     maintenance_mode: wire.maintenance_mode ?? false,
     passkeys_ready: wire.passkeys_ready ?? false,
     mail_ready: wire.mail_ready ?? false,
+    open_signup: wire.open_signup ?? false,
   }
 }

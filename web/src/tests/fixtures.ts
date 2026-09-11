@@ -152,6 +152,9 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
+    // Closed, matching the default posture: the signup tests that want
+    // registration turn it on rather than every other test turning it off.
+    open_signup: false,
     ...overrides,
   }
 }

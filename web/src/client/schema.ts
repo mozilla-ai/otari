@@ -532,10 +532,13 @@ export interface paths {
         put?: never;
         /**
          * Signup
-         * @description Claim a roster identity, or do nothing: the response never says which.
+         * @description Claim a roster identity, register a new one, or do nothing: the response never says which.
          *
-         *     No session is minted. A newly claimed identity is hard-blocked from
-         *     signing in until it verifies, so there is nothing yet to sign it into.
+         *     Which of the three this deployment will do is ``open_signup``, published in
+         *     the bootstrap so the page can say so before anyone types an address.
+         *
+         *     No session is minted. A newly claimed or registered identity is hard-blocked
+         *     from signing in until it verifies, so there is nothing yet to sign it into.
          */
         post: operations["auth-signup"];
         delete?: never;
@@ -6065,6 +6068,11 @@ export interface components {
              */
             oauth_providers: string[];
             /**
+             * Open Signup
+             * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches. False for a hybrid gateway, which holds no identities.
+             */
+            open_signup: boolean;
+            /**
              * Passkeys Ready
              * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.
              */
@@ -6082,7 +6090,7 @@ export interface components {
             session_type: "local_operator" | "hosted_user" | "none";
             /**
              * Sign In Methods
-             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; 'password' replaces it from then on, and the master key stays the credential for the management API. 'passkey' appears alongside either one when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
+             * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
              */
             sign_in_methods: ("master_key" | "password" | "passkey")[];
             /**
@@ -9505,12 +9513,12 @@ export interface components {
         };
         /**
          * SignupRequest
-         * @description Claim an identity already on the roster by setting its password.
+         * @description Set a password for an address, claiming or registering it.
          */
         SignupRequest: {
             /**
              * Email
-             * @description The address an admin added or invited.
+             * @description The address to sign in with. An address an admin added or invited where this deployment keeps signup closed; any address where the bootstrap reports open_signup.
              */
             email: string;
             /**

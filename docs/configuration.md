@@ -242,6 +242,20 @@ Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
 `POST /api/v1/settings/mail/test`.
 
+## Signup
+
+Signup is closed by default: only an address an owner or admin already added or
+invited can set a password. Open it where the deployment serves many tenants and
+each new address should arrive with an organization of its own:
+
+```yaml
+open_signup: true
+```
+
+Mail has to be configured for either posture, since signup sends a verification
+link. See [Access control](access-control.md) for what each posture does with an
+address nobody has added.
+
 ## Built-in tools and guardrails variables
 
 The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,

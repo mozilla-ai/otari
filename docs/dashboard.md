@@ -45,6 +45,11 @@ from Account settings. After that, the sign-in page uses the password rather tha
 the master key. The master key remains valid for management API calls and can
 reset the operator password.
 
+The sign-in page offers the email and password form as soon as any identity holds
+a password, which can be before the operator claims the deployment: a member
+added to the roster and signed up signs in there. While both credentials still
+work, the page offers the master-key box beside the form.
+
 ## First-run walkthrough
 
 1. Start Otari in standalone mode.
@@ -132,9 +137,11 @@ workspace roles. Deployment-wide operations require an operator. See
 
 ## Authentication options
 
-Password sign-in is always tied to an existing identity. Optional passkeys,
-Google OAuth, and GitHub OAuth add ways for that identity to sign in; they do not
-make an unknown account a member. OAuth requires `public_base_url` plus the
+Password sign-in is tied to an existing identity, unless the deployment sets
+`open_signup: true`, which lets an unknown address register itself with an
+organization of its own. Optional passkeys, Google OAuth, and GitHub OAuth add
+ways for an existing identity to sign in; they do not make an unknown account a
+member. OAuth requires `public_base_url` plus the
 provider's client ID and secret. Passkeys can instead use `public_base_url`, or
 an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
 
