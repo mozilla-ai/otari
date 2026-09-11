@@ -80,7 +80,6 @@ export function LoginBackground({
       palette = {
         background: style.getPropertyValue("--color-background").trim(),
         accent: style.getPropertyValue("--color-primary").trim(),
-        foreground: style.getPropertyValue("--color-text").trim(),
       }
       update()
     }

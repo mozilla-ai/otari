@@ -3,7 +3,6 @@ export interface LoginBackgroundConfig {
   speed: number
   intensity: number
   contrast: number
-  tint: number
   spacing: number
   rounding: number
   waveScale: number

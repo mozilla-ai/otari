@@ -16,7 +16,7 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
     preference === "system" ? FiMonitor : preference === "dark" ? FiMoon : FiSun
 
   return (
-    <div className="relative isolate flex min-h-screen flex-col bg-background">
+    <div className="relative isolate flex min-h-svh flex-col bg-background">
       <header className="relative z-10 flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4 md:px-6">
         <div className="flex items-center gap-3">
           <img

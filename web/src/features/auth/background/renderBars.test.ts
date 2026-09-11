@@ -6,7 +6,6 @@ import { type BarGeometry, drawBars } from "./renderBars"
 
 const palette = {
   background: "Canvas",
-  foreground: "CanvasText",
   accent: "Highlight",
 }
 const geometry: BarGeometry = {
@@ -54,7 +53,7 @@ describe("bar renderer", () => {
     expect(ctx.globalAlpha).toBe(1)
   })
 
-  it("applies the configured wave contrast, intensity, and theme tint", () => {
+  it("applies the configured wave contrast, intensity, and theme accent", () => {
     const { ctx, fills, canvas } = context()
     drawBars(canvas, geometry, palette, saved, 3)
     const pitchX = geometry.panelWidth / saved.columns
@@ -73,8 +72,27 @@ describe("bar renderer", () => {
     for (const fill of fills) {
       expect(fill.alpha).toBeGreaterThanOrEqual(0)
       expect(fill.alpha).toBeLessThanOrEqual(1)
-      expect(fill.color).toBe("color-mix(in oklab, CanvasText, Highlight 100%)")
+      expect(fill.color).toBe("Highlight")
     }
+  })
+
+  it("bounds draw calls on very large viewports", () => {
+    const { ctx, canvas } = context()
+    drawBars(
+      canvas,
+      {
+        ...geometry,
+        width: 7680,
+        height: 4320,
+        visibleTop: 0,
+        visibleBottom: 4320,
+      },
+      palette,
+      saved,
+      0,
+    )
+    expect(ctx.roundRect.mock.calls.length).toBeGreaterThan(0)
+    expect(ctx.roundRect.mock.calls.length).toBeLessThanOrEqual(65 * 33)
   })
 
   it("does not paint a band outside the viewport or a zero-width panel", () => {

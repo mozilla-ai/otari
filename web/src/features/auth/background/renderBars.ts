@@ -14,7 +14,6 @@ export interface BarGeometry {
 
 export interface BarPalette {
   background: string
-  foreground: string
   accent: string
 }
 
@@ -35,8 +34,13 @@ export function drawBars(
     visibleTop,
     visibleBottom,
   } = geometry
-  const pitchX = panelWidth / config.columns
-  if (pitchX <= 0 || width <= 0 || height <= 0) return
+  if (panelWidth <= 0 || width <= 0 || height <= 0) return
+  // Bound the visible grid to 64 columns and 32 rows, plus edge cells.
+  const pitchX = Math.max(
+    panelWidth / config.columns,
+    width / 64,
+    (visibleBottom - visibleTop) / (32 * BAR_ROW_RATIO),
+  )
   const pitchY = pitchX * BAR_ROW_RATIO
   const barWidth = pitchX * (1 - config.spacing)
   const barHeight = pitchY * (1 - config.spacing * (0.134 / 0.248))
@@ -49,7 +53,7 @@ export function drawBars(
   ctx.clearRect(0, 0, width, height)
   if (visibleBottom <= visibleTop) return
   ctx.fillRect(0, visibleTop, width, visibleBottom - visibleTop)
-  ctx.fillStyle = `color-mix(in oklab, ${palette.foreground}, ${palette.accent} ${config.tint * 100}%)`
+  ctx.fillStyle = palette.accent
 
   for (
     let row = Math.floor((visibleTop - top) / pitchY);

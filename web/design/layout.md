@@ -1,7 +1,7 @@
 # Layout
 
 A page is a vertical stack of **bands**. Each band sets its own rules and its own
-vertical padding. There is no page-level gap and no card anywhere: two bands are
+vertical padding. For authenticated dashboard pages, there is no page-level gap or card: two bands are
 separated by the hairline one of them draws.
 
 ## The bleed rule
@@ -203,3 +203,23 @@ Elements in repeated rows (a table, a rail, a list) must form vertical lanes. Us
 fixed-width slot with `flex-shrink-0` for icons, indicators and trailing actions,
 **even when the slot is empty in some rows.** Never rely on `gap` alone to align a
 column across rows whose content differs in length.
+
+## Public authentication
+
+Public auth and invitation pages use `features/auth/LoginPageShell`: one square,
+bordered form card over the animated bar field selected for the sign-in redesign
+([#991](https://github.com/mozilla-ai/otari/issues/991)). This is a deliberate
+exception to the dashboard's flat bands, scoped to entry and account-recovery
+flows. Keep the card horizontally centered and its top offset independent of
+content height so errors and disclosures grow downward.
+
+The decorative field uses the theme's primary color with changing opacity and
+slightly rounded bars from the selected studio preset. These are illustration
+marks, not rounded controls or tinted content surfaces. The corner marks and the
+primary action keep their accent alongside the field; readable content stays on
+an opaque semantic surface. Do not extend these exceptions to dashboard pages.
+
+The Otari header and Mozilla AI footer are shared across these public pages,
+including standalone deployments, as intentional product branding. Use existing
+type roles and semantic tokens for both. The appearance control includes system,
+light, and dark preferences; reduced motion renders a static field.

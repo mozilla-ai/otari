@@ -6,7 +6,8 @@ this dashboard to answer "what is this costing me and what is broken", so every
 pixel of chrome is pixels not spent on data.
 
 Read the topic file for what you are building before you build it. The rules below
-apply everywhere and are the ones most often broken.
+apply throughout the dashboard, with the scoped
+[public authentication exception](layout.md#public-authentication) below.
 
 ## The layer rule
 
