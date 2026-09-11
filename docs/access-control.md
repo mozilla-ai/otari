@@ -172,9 +172,18 @@ unknown address does depends on `open_signup`:
   its own. Use it where the deployment serves many tenants.
 
 Either way the response says the same thing whether the address was unknown,
-already claimed, or genuinely just claimed, so the endpoint cannot be used to
-enumerate the roster. Signup needs mail configured, because an account that
-cannot verify its address cannot sign in.
+already claimed, or genuinely just claimed, so its body discloses nothing about
+the address. Response *timing* still does, because the eligible path sends mail
+before it answers; that is [otari#720](https://github.com/mozilla-ai/otari/issues/720)
+and it applies to both postures.
+
+Signup needs mail configured, because an account that cannot verify its address
+cannot sign in.
+
+Open signup puts tenant creation on an unauthenticated route. The per-IP
+throttle on the public auth routes is the only bound on it today, and nothing
+expires the organization an unverified signup leaves behind, so run it behind
+whatever edge controls the deployment has.
 
 ## Invitations
 

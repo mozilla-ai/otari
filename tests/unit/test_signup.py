@@ -352,6 +352,32 @@ def test_open_signup_names_the_organization_from_the_address_when_no_name_is_giv
         assert context["organization"]["name"] == "ada's organization"
 
 
+def test_open_signup_fits_a_long_name_into_the_organization_name_column(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A 255-character name plus the suffix would overflow a 255-character column.
+
+    ``SignupRequest.full_name`` admits exactly what ``Organization.name`` holds,
+    so the wrapper has to come out of the name rather than off the end of the
+    row: untruncated, a perfectly valid signup fails its flush.
+    """
+    with _client(tmp_path, open_signup=True) as client:
+        token = _captured_verification_link(
+            caplog, client, email="ada@example.com", full_name="A" * 255
+        )
+        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+        assert (
+            client.post(
+                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}
+            ).status_code
+            == 200
+        )
+
+        name = client.get(f"{API_ROOT}/organizations/me").json()["organization"]["name"]
+        assert len(name) == 255
+        assert name.endswith("'s organization")
+
+
 def test_open_signup_claims_a_roster_address_rather_than_registering_a_second_tenant(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

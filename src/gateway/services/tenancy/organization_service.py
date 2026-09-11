@@ -174,15 +174,29 @@ def _generated_slug(name: str) -> str:
     return f"{stem or _SLUG_FALLBACK_STEM}-{secrets.token_hex(4)}"
 
 
+# What ``_default_organization_name`` wraps its subject in, and how much of the
+# column that leaves. ``Organization.name`` holds 255 and both possible subjects
+# reach it on their own (``SignupRequest.full_name`` is capped at 255, and so is
+# an address), so an untruncated name overflows the column and fails the flush on
+# a signup that is otherwise perfectly valid.
+_DEFAULT_ORGANIZATION_NAME_SUFFIX = "'s organization"
+_DEFAULT_ORGANIZATION_SUBJECT_LIMIT = 255 - len(_DEFAULT_ORGANIZATION_NAME_SUFFIX)
+
+
 def _default_organization_name(email: str, full_name: str | None) -> str:
     """What to call the organization a self-serve signup lands in.
 
     The platform's own wording, falling back to the address's local part when no
     name was given, because the alternative is every such organization sharing
     one name in a switcher that shows nothing else about them.
+
+    Truncated to fit the column rather than validated against it: the subject is
+    a name somebody typed about themselves, not a value with a contract, so a
+    long one is shortened where refusing the signup over it would be absurd. The
+    owner can rename the organization afterwards either way.
     """
     who = (full_name or "").strip() or email.split("@", 1)[0]
-    return f"{who}'s organization"
+    return f"{who[:_DEFAULT_ORGANIZATION_SUBJECT_LIMIT].strip()}{_DEFAULT_ORGANIZATION_NAME_SUFFIX}"
 
 
 # The most workspaces a switcher seed carries. Above the repository's paging
