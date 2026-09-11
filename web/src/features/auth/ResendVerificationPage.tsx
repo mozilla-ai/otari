@@ -1,11 +1,12 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useResendVerification } from "@/shared/api/auth"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField } from "./AuthFields"
+import { LoginPageShell } from "./LoginPageShell"
 import {
   goToPublicAuthPage,
   PublicAuthLayout,
@@ -57,6 +58,7 @@ export function ResendVerificationPage() {
 
   return (
     <PublicAuthLayout
+      shell={LoginPageShell}
       title="Send a new verification link"
       description="Enter the address you signed up with and we will mail a fresh link."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
