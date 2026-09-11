@@ -243,6 +243,20 @@ describe("ToolsGuardrailsPage", () => {
     )
   })
 
+  it("leaves the page column to the shell rather than capping its own", async () => {
+    mockApi()
+    const { container } = renderWithClient(
+      <ToolsGuardrailsPage only="web_search" />,
+    )
+    await screen.findByLabelText(WEB_SEARCH_URL)
+
+    // `<main>` supplies the page column and centers it, so a cap here is not a
+    // readable measure: it is the whole page pushed against the left edge with
+    // the rest of a wide viewport left empty (otari-ai#2124). Every other page
+    // in the tree opens with `flex flex-col` and no cap of its own.
+    expect(container.firstElementChild?.className).not.toMatch(/\bmax-w-/)
+  })
+
   it("saves a URL change on blur, with no Save button on the page", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()

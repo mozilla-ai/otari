@@ -323,7 +323,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const narrowed = only ? shown[0] : undefined
 
   return (
-    <div className="flex max-w-[56rem] flex-col gap-10 pb-10">
+    <div className="flex flex-col gap-10 pb-10">
       <PageIntro
         title={narrowed?.label ?? "Tools & Guardrails"}
         docsHref={toolsDocs(narrowed?.docsAnchor)}
