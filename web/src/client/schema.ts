@@ -7956,7 +7956,15 @@ export interface components {
         };
         /**
          * OrganizationGuardrailPublic
-         * @description The API-facing shape. Never carries the credential, only whether one is set.
+         * @description The API-facing shape. Never carries the credential, nor a credential-shaped parameter.
+         *
+         *     ``validate_kwargs`` is the second place a credential lives on this row, and
+         *     the one with no column of its own: a guardrail class can take a vendor key
+         *     as a parameter, so the form offers a box for it and whatever is typed there
+         *     is stored as plain JSON. It is masked the way
+         *     ``org_provider_keys.client_args`` is, by the *name* of the entry rather than
+         *     by what the guardrail catalog says about it, so the mask still applies when
+         *     the guardrails service is down and no catalog can be read.
          */
         OrganizationGuardrailPublic: {
             /** Applies To All Workspaces */
@@ -7987,7 +7995,10 @@ export interface components {
             updated_at: string;
             /** Url */
             url: string | null;
-            /** Validate Kwargs */
+            /**
+             * Validate Kwargs
+             * @description Extra kwargs forwarded to the guardrails service /validate call. A parameter whose name looks credential-shaped comes back as *** rather than its stored value; sending that *** back keeps what is stored
+             */
             validate_kwargs: {
                 [key: string]: unknown;
             } | null;
@@ -8034,7 +8045,10 @@ export interface components {
             profile?: string;
             /** Url */
             url?: string | null;
-            /** Validate Kwargs */
+            /**
+             * Validate Kwargs
+             * @description Replaces the stored kwargs whole. A parameter sent as *** keeps the value stored under that name, which is how a credential-shaped one survives an edit of the rest of the entry
+             */
             validate_kwargs?: {
                 [key: string]: unknown;
             } | null;

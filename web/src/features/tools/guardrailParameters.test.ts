@@ -9,6 +9,7 @@ import {
   profileIdentity,
   seedParameters,
 } from "@/features/tools/guardrailParameters"
+import { REDACTED_SECRET } from "@/shared/helpers/redaction"
 
 function spec(
   overrides: Partial<GuardrailParameterSpec> &
@@ -251,5 +252,65 @@ describe("parameterLabel", () => {
   it("reads a snake_case parameter name as a sentence", () => {
     expect(parameterLabel("comparison_text")).toBe("Comparison text")
     expect(parameterLabel("policy")).toBe("Policy")
+  })
+})
+
+describe("a stored secret parameter", () => {
+  // The gateway masks a credential-shaped parameter on read and restores the
+  // stored value wherever the mask comes back, so the form's only job is to
+  // carry it out and back unchanged. `validate_kwargs` is sent whole on every
+  // save, so dropping it or coercing it would delete the credential.
+  const secretString = spec({ name: "patronus_api_key", type: "string" })
+
+  it("seeds the mask into the field rather than an empty box", () => {
+    const seeded = seedParameters([secretString], {
+      patronus_api_key: REDACTED_SECRET,
+    })
+
+    expect(seeded.values.patronus_api_key).toBe(REDACTED_SECRET)
+  })
+
+  it("sends the mask back untouched when nobody edited it", () => {
+    expect(
+      buildValidateKwargs(
+        [secretString, spec({ name: "threshold", type: "number" })],
+        { patronus_api_key: REDACTED_SECRET, threshold: "0.5" },
+        "",
+      ),
+    ).toEqual({ patronus_api_key: REDACTED_SECRET, threshold: 0.5 })
+  })
+
+  it("sends a replacement the operator typed, not the mask", () => {
+    expect(
+      buildValidateKwargs([secretString], { patronus_api_key: "pat-new" }, ""),
+    ).toEqual({ patronus_api_key: "pat-new" })
+  })
+
+  it("does not type-check the mask, whatever the schema says the value is", () => {
+    const typed = [
+      spec({ name: "api_key_id", type: "integer" }),
+      spec({ name: "auth_token", type: "json" }),
+      spec({ name: "credential_tier", type: "enum", choices: ["a", "b"] }),
+    ]
+    const values = {
+      api_key_id: REDACTED_SECRET,
+      auth_token: REDACTED_SECRET,
+      credential_tier: REDACTED_SECRET,
+    }
+
+    expect(parameterErrors(typed, values)).toEqual({})
+    // Coercing would send NaN for the integer and undefined for the JSON one.
+    expect(buildValidateKwargs(typed, values, "")).toEqual(values)
+  })
+
+  it("does not read a masked boolean as off and save that over the stored value", () => {
+    const booleanSecret = spec({ name: "use_api_key", type: "boolean" })
+    const seeded = seedParameters([booleanSecret], {
+      use_api_key: REDACTED_SECRET,
+    })
+
+    expect(buildValidateKwargs([booleanSecret], seeded.values, "")).toEqual({
+      use_api_key: REDACTED_SECRET,
+    })
   })
 })

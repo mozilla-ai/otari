@@ -2,6 +2,14 @@
  * Turning a guardrail profile's parameter schema into form state, and back into
  * the `validate_kwargs` dict the entry stores.
  *
+ * A stored parameter whose name looks credential-shaped reads back as
+ * `REDACTED_SECRET` rather than its value, and `validate_kwargs` is sent whole
+ * on every save, so the mask has to travel back out untouched: the gateway
+ * restores the stored value wherever it sees one, and an entry that arrived
+ * masked and left blank would delete a credential on a save of something else.
+ * That is why the three places a value is read, checked or coerced below each
+ * let the mask through ahead of anything the schema says about its type.
+ *
  * The schema comes from `GET /v1/tool-settings/guardrails/profiles`, which joins
  * the operator's own profile list to the `any_guardrail` parameter registry. So
  * a field here exists because a guardrail actually takes it, and a profile the
@@ -14,6 +22,7 @@
  */
 
 import type { GuardrailCatalog, GuardrailParameterSpec } from "@/client"
+import { REDACTED_SECRET } from "@/shared/helpers/redaction"
 
 export type ParameterValue = string | boolean
 export type ParameterValues = Record<string, ParameterValue>
@@ -79,6 +88,9 @@ function asFieldValue(
   spec: GuardrailParameterSpec,
   stored: unknown,
 ): ParameterValue {
+  // Ahead of the boolean branch, which would otherwise read a masked value as
+  // `false` and save that over the stored one.
+  if (stored === REDACTED_SECRET) return REDACTED_SECRET
   if (spec.type === "boolean") return stored === true
   if (stored === null || stored === undefined) return ""
   if (typeof stored === "object") return JSON.stringify(stored, null, 2)
@@ -178,6 +190,11 @@ export function parameterErrors(
   for (const spec of specs) {
     const value = values[spec.name]
     if (spec.type === "boolean") continue
+    // The mask stands in for a value nobody here has seen, so there is nothing
+    // to check: a secret parameter the schema types as a number or JSON would
+    // otherwise fail on the literal `***` and refuse a save of the rest of the
+    // entry.
+    if (value === REDACTED_SECRET) continue
     if (isBlank(value)) {
       if (spec.required)
         errors[spec.name] = "This guardrail needs a value here."
@@ -205,6 +222,9 @@ function coerce(
   spec: GuardrailParameterSpec,
   value: ParameterValue | undefined,
 ): unknown {
+  // Sent verbatim so the gateway can put the stored value back; coercing it
+  // would send `NaN` for a numeric secret and `undefined` for a JSON one.
+  if (value === REDACTED_SECRET) return REDACTED_SECRET
   if (spec.type === "boolean") return value === true
   const text = String(value)
   // `Number` for both, which is the parser `parameterErrors` approved the input

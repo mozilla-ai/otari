@@ -7426,7 +7426,7 @@
         "type": "object"
       },
       "OrganizationGuardrailPublic": {
-        "description": "The API-facing shape. Never carries the credential, only whether one is set.",
+        "description": "The API-facing shape. Never carries the credential, nor a credential-shaped parameter.\n\n``validate_kwargs`` is the second place a credential lives on this row, and\nthe one with no column of its own: a guardrail class can take a vendor key\nas a parameter, so the form offers a box for it and whatever is typed there\nis stored as plain JSON. It is masked the way\n``org_provider_keys.client_args`` is, by the *name* of the entry rather than\nby what the guardrail catalog says about it, so the mask still applies when\nthe guardrails service is down and no catalog can be read.",
         "properties": {
           "applies_to_all_workspaces": {
             "title": "Applies To All Workspaces",
@@ -7491,6 +7491,7 @@
                 "type": "null"
               }
             ],
+            "description": "Extra kwargs forwarded to the guardrails service /validate call. A parameter whose name looks credential-shaped comes back as *** rather than its stored value; sending that *** back keeps what is stored",
             "title": "Validate Kwargs"
           },
           "workspace_ids": {
@@ -7592,6 +7593,7 @@
                 "type": "null"
               }
             ],
+            "description": "Replaces the stored kwargs whole. A parameter sent as *** keeps the value stored under that name, which is how a credential-shaped one survives an edit of the rest of the entry",
             "title": "Validate Kwargs"
           },
           "workspace_ids": {

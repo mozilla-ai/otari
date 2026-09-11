@@ -1,26 +1,31 @@
 """Credential-shaped entries in a free-form settings dict never round-trip.
 
-Three tables hand a provider SDK arbitrary operator-supplied JSON, and all three
-are places a real credential legitimately lives: standalone Bedrock keeps its
-``aws_secret_access_key`` in ``client_args``, because any-llm's BedrockProvider
-never forwards ``api_key`` into the boto3 client it builds. ``OrgProviderKey``
-has masked its own since it shipped; otari-ai#1880 is the other two, where
-``ProviderCredential.client_args`` returned a live AWS secret to anyone who
-could reach ``GET /api/v1/provider-credentials``.
+Four tables hold arbitrary operator-supplied JSON, and all four are places a
+real credential legitimately lives. Three of them hand it to a provider SDK:
+standalone Bedrock keeps its ``aws_secret_access_key`` in ``client_args``,
+because any-llm's BedrockProvider never forwards ``api_key`` into the boto3
+client it builds. ``OrgProviderKey`` has masked its own since it shipped;
+otari-ai#1880 is the other two, where ``ProviderCredential.client_args``
+returned a live AWS secret to anyone who could reach
+``GET /api/v1/provider-credentials``. The fourth is
+``organization_guardrails.validate_kwargs``, which a guardrail class can take
+its vendor key in (otari-ai#2118).
 
 Masking on read creates the other half of the problem, so it is asserted here
 too: an editor that loads a row and saves it back would otherwise store the mask
 over the credential it was never shown.
 """
 
+import uuid
 from datetime import UTC, datetime
 
-from gateway.models.entities import ProviderCredential, SearchToolCredential
+from gateway.models.entities import OrganizationGuardrail, ProviderCredential, SearchToolCredential
 from gateway.models.secret_fields import (
     REDACTED_VALUE,
     redact_secret_like_values,
     restore_redacted_values,
 )
+from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailPublic
 
 
 class TestRedactSecretLikeValues:
@@ -111,3 +116,39 @@ class TestSerializers:
         # not turn "no options" into null.
         row = ProviderCredential(instance="openai", client_args={}, created_at=datetime.now(UTC))
         assert row.to_public_dict()["client_args"] == {}
+
+    def test_organization_guardrail_masks_its_validate_kwargs(self) -> None:
+        row = OrganizationGuardrail(
+            id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            profile="patronus",
+            mode="block",
+            on_unavailable="block",
+            validate_kwargs={"threshold": 0.8, "patronus_api_key": "live-key"},
+            enabled=True,
+            applies_to_all_workspaces=True,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        public = OrganizationGuardrailPublic.from_model(row, workspace_ids=[])
+
+        assert public.validate_kwargs == {"threshold": 0.8, "patronus_api_key": REDACTED_VALUE}
+
+    def test_organization_guardrail_with_no_validate_kwargs_stays_null(self) -> None:
+        # The column is nullable here, unlike the two above, and null is what the
+        # API stores for "no kwargs": masking must not turn it into an object.
+        row = OrganizationGuardrail(
+            id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            profile="prompt-injection",
+            mode="monitor",
+            on_unavailable="block",
+            validate_kwargs=None,
+            enabled=True,
+            applies_to_all_workspaces=True,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        assert OrganizationGuardrailPublic.from_model(row, workspace_ids=[]).validate_kwargs is None
