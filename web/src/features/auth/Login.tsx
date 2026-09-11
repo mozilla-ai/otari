@@ -241,8 +241,8 @@ export function Login() {
   // Both are published whenever a member holds a password on a deployment its
   // operator never claimed, so which box is on screen is a choice rather than a
   // reading of the bootstrap. The password form is the default wherever it is
-  // offered: it is the credential most people on a deployment have, and the one
-  // a stranger arriving at the URL could conceivably hold.
+  // offered, because a deployment has one master key and as many passwords as
+  // it has people.
   const [typedCredential, setTypedCredential] = useState<
     "password" | "masterKey"
   >(offersPasswordForm ? "password" : "masterKey")

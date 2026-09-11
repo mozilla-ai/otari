@@ -322,12 +322,21 @@ async def create_user_for_signup(
                 email=address,
                 full_name=full_name,
             )
-        except IntegrityError:
+        except IntegrityError as exc:
             # Two registrations of the same address at once. The unique index on
             # email decides, and the loser answers like every other
             # enumeration-safe path rather than reporting a 500 or admitting
             # that the address is now taken.
+            #
+            # Matched on that index rather than on "an IntegrityError happened",
+            # the same discrimination ``update_password`` already makes with
+            # this helper: the other constraints this unit of work can violate
+            # (the organization slug, a membership) are not a taken address, and
+            # swallowing one as though it were would answer a failed
+            # registration with the sentence that says it succeeded.
             await db.rollback()
+            if not _is_email_conflict(exc):
+                raise
             return None
 
     identity.full_name = identity.full_name or full_name
