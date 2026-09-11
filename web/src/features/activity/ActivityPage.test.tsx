@@ -1292,7 +1292,10 @@ describe("ActivityPage", () => {
     )
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
-    await user.click(within(dialog).getByRole("button", { name: "Set price" }))
+    // Trigger and submit say the same string, so this is scoped to the dialog.
+    await user.click(
+      within(dialog).getByRole("button", { name: "Price this model" }),
+    )
 
     await waitFor(() => {
       const call = calls.find(

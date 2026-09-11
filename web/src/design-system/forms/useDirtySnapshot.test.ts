@@ -51,6 +51,54 @@ describe("useDirtySnapshot", () => {
     expect(result.current.isDirty).toBe(true)
   })
 
+  it("keeps one `reset`, so an effect can depend on it", () => {
+    // A `reset` that changed identity every render would re-seed on every
+    // render through an effect that depends on it, and the form would never
+    // read dirty.
+    const { result, rerender } = renderHook(
+      (draft: Record<string, unknown>) => useDirtySnapshot(draft),
+      { initialProps: { name: "" } },
+    )
+    const first = result.current.reset
+
+    rerender({ name: "typed" })
+
+    expect(result.current.reset).toBe(first)
+  })
+
+  it("re-seeds to the latest draft, not the one at the reset's own render", () => {
+    // The late-default case: the seed a form is compared against has to be the
+    // value that landed, which is why `reset` reads a ref rather than closing
+    // over a render.
+    const { result, rerender } = renderHook(
+      (draft: Record<string, unknown>) => useDirtySnapshot(draft),
+      { initialProps: { workspaceIds: [] as string[] } },
+    )
+    const reset = result.current.reset
+
+    rerender({ workspaceIds: ["ws-1"] })
+    act(() => reset())
+    rerender({ workspaceIds: ["ws-1"] })
+
+    expect(result.current.isDirty).toBe(false)
+  })
+
+  it("seeds an explicit draft, for a default that lands after mount", () => {
+    // The caller holds the value the render it is in does not: seeding it there
+    // is what keeps a roster answering from reading as the operator's first
+    // change. An effect cannot do this: a ref written after the commit re-seeds
+    // nothing already rendered.
+    const { result, rerender } = renderHook(
+      (draft: Record<string, unknown>) => useDirtySnapshot(draft),
+      { initialProps: { workspaceIds: [] as string[] } },
+    )
+
+    act(() => result.current.reset({ workspaceIds: ["ws-1"] }))
+    rerender({ workspaceIds: ["ws-1"] })
+
+    expect(result.current.isDirty).toBe(false)
+  })
+
   it("re-seeds on reset, for a form that stays open past a save", () => {
     const { result, rerender } = renderHook(
       (draft: Record<string, unknown>) => useDirtySnapshot(draft),

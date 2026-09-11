@@ -6,15 +6,10 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import {
-  useCreateOrganizationBudget,
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
-  useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-import {
-  OrganizationBudgetDialog,
-  type OrganizationBudgetDraft,
-} from "./OrganizationBudgetDialog"
+import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { budgetLabel, limitLabel, periodLabel } from "./organizationBudget"
 
 // The organization's own budgets: the figures, without yet saying where they
@@ -28,8 +23,6 @@ import { budgetLabel, limitLabel, periodLabel } from "./organizationBudget"
 
 export function OrganizationBudgetsCard() {
   const budgets = useOrganizationBudgets()
-  const create = useCreateOrganizationBudget()
-  const update = useUpdateOrganizationBudget()
   const remove = useDeleteOrganizationBudget()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
@@ -52,15 +45,6 @@ export function OrganizationBudgetsCard() {
     setOpenCount((count) => count + 1)
     setEditing(budget)
     setDialogOpen(true)
-  }
-
-  const submit = (draft: OrganizationBudgetDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
-    if (editing) {
-      update.mutate({ id: editing.budget_id, body: draft }, onDone)
-      return
-    }
-    create.mutate(draft, onDone)
   }
 
   const columns: DataTableColumn<OrganizationBudget>[] = [
@@ -150,9 +134,7 @@ export function OrganizationBudgetsCard() {
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
-        isPending={create.isPending || update.isPending}
-        error={editing ? update.error : create.error}
-        onSubmit={submit}
+        onSaved={() => setDialogOpen(false)}
       />
 
       <ConfirmDialog

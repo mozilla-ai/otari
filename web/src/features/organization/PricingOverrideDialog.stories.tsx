@@ -3,7 +3,6 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
-import { ApiError } from "@/shared/api/client"
 
 import { PricingOverrideDialog } from "./PricingOverrideDialog"
 
@@ -55,9 +54,7 @@ const meta = {
     isOpen: true,
     onOpenChange: () => {},
     existing: EXISTING,
-    isPending: false,
-    error: null,
-    onSubmit: () => {},
+    onSaved: () => {},
   },
 } satisfies Meta<typeof PricingOverrideDialog>
 
@@ -83,18 +80,10 @@ export const NoExistingOverrides: Story = {
   args: { existing: [] },
 }
 
-export const Pending: Story = {
-  args: { isPending: true },
-}
-
-export const WithError: Story = {
-  args: {
-    error: new ApiError(
-      409,
-      "An override for openai:gpt-4o-mini already covers 2026-01-01.",
-    ),
-  },
-}
+// No `Pending` or `WithError` story any more. This dialog owns the create and
+// replace mutations (they live below the caller's key, so a refusal cannot
+// greet the next open), so neither state can be handed in as a prop. Both are
+// asserted where they are now produced, in `RateOverridesCard`'s page tests.
 
 /**
  * Driven from a trigger, so the overlap validation can be exercised: try
@@ -112,7 +101,7 @@ export const FromTrigger: Story = {
           {...args}
           isOpen={open}
           onOpenChange={setOpen}
-          onSubmit={() => setOpen(false)}
+          onSaved={() => setOpen(false)}
         />
       </div>
     )

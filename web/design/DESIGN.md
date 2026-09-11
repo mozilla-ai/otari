@@ -186,7 +186,7 @@ and [web/AGENTS.md](../AGENTS.md).
 | [metrics.md](metrics.md) | KPI strip, trends, meters, status marks, charts |
 | [feedback.md](feedback.md) | Banners, empty states, loading, dialogs |
 | [navigation.md](navigation.md) | `TabRow`, `Segmented`, `FilterChips`, the rail |
-| [overlays.md](overlays.md) | `Tooltip`, `Popover`, `Dialog`, and which of the three a thing wants |
+| [overlays.md](overlays.md) | `Tooltip`, `Popover`, the two dialogs, and which of them a thing wants |
 | [motion-and-access.md](motion-and-access.md) | Durations, press, focus, 44px floor, reduced motion |
 
 Visual reference, in two places. The Paper file `Otari / Neat shell` has the

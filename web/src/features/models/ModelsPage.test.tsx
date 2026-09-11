@@ -1098,7 +1098,11 @@ describe("ModelsPage", () => {
     )
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
-    await user.click(within(dialog).getByRole("button", { name: "Set price" }))
+    // The submit says what its trigger said, word for word (actions.md), so it
+    // carries the selector here too.
+    await user.click(
+      within(dialog).getByRole("button", { name: "Price vllm:mistral-small" }),
+    )
 
     await vi.waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -1123,6 +1127,46 @@ describe("ModelsPage", () => {
     expect(tableRow("vllm:mistral-small")).toBeInTheDocument()
   })
 
+  it("does not greet the next hand-price with the last attempt's refusal", async () => {
+    // The dialog awaits the save and owns the pending and error state itself,
+    // below the page's key, so both go with the draft on the next open. Held as
+    // page state they outlived it: a blank form arrived under the old error.
+    mockApi({
+      post: () => {
+        throw new apiClient.ApiError(409, "A price for that model exists.")
+      },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<ModelsPage />)
+    await screen.findByText("openai:gpt-4o")
+
+    await user.type(screen.getByRole("searchbox"), "vllm:mistral-small")
+    await user.click(
+      await screen.findByRole("button", { name: "Price vllm:mistral-small" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Price vllm:mistral-small" }),
+    )
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A price for that model exists.",
+    )
+
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(
+      screen.getByRole("button", { name: "Price vllm:mistral-small" }),
+    )
+
+    const reopened = await screen.findByRole("dialog")
+    expect(within(reopened).queryByRole("alert")).toBeNull()
+    expect(within(reopened).getByLabelText("Input $ / 1M")).toHaveValue("")
+  })
+
   it("rejects a model key with no provider prefix", async () => {
     mockApi()
     const user = userEvent.setup()
@@ -1142,7 +1186,7 @@ describe("ModelsPage", () => {
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
 
     expect(
-      within(dialog).getByRole("button", { name: "Set price" }),
+      within(dialog).getByRole("button", { name: "Price a model by hand" }),
     ).toBeDisabled()
     expect(
       within(dialog).getByText(/Include the provider or instance prefix/),
@@ -1172,9 +1216,10 @@ describe("ModelsPage", () => {
 
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:")
-    // A bare prefix is not yet a key, so the price cannot be submitted.
+    // A bare prefix is not yet a key, so the price cannot be submitted. The
+    // submit carries the banner trigger's own label.
     expect(
-      within(dialog).getByRole("button", { name: "Set price" }),
+      within(dialog).getByRole("button", { name: "Price a model" }),
     ).toBeDisabled()
   })
 

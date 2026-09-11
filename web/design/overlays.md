@@ -11,12 +11,13 @@ Does the operator need to interact with what appears?
       ├── Is it about the control that opened it?
       │    └── Yes -> Popover      (anchored, takes focus, not modal)
       └── Does it want the whole screen's attention?
-           └── Yes -> Dialog       (modal, dismissed deliberately)
+           └── Yes -> FormDialog   (a place to work: creating or editing)
+                or ConfirmDialog   (one question: are you sure)
 ```
 
-`Dialog` lives in [feedback.md](feedback.md)'s directory rather than this one,
-because a dialog is nearly always feedback about an action; it is listed here
-because it is the third answer to the same question.
+The dialogs live in [feedback.md](feedback.md)'s directory rather than this one,
+because a dialog is nearly always feedback about an action; they are listed here
+because they are the third answer to the same question.
 
 ## Tooltip
 
@@ -59,7 +60,7 @@ Anchored to its trigger, takes focus, and is dismissed deliberately. Right for a
 column picker, a small confirm about one row, a panel of detail about the thing
 that opened it.
 
-Uncontrolled by default, which is the opposite of `Dialog` and deliberate: a
+Uncontrolled by default, which is the opposite of the dialogs and deliberate: a
 popover's trigger is inside it, so it can own that state. Pass `isOpen` and
 `onOpenChange` for the case where something else has to close it, such as a
 route change or a mutation landing.
@@ -75,19 +76,21 @@ says the same about React Aria popovers under "Checks".
 
 ## Dialog
 
-Modal. Three of them, and the question sorts them:
+Modal. Two of them, and the question sorts them:
 
 - **`FormDialog`** when the operator is creating or editing an object. Every
   create flow in the product, no exceptions. See [feedback.md](feedback.md).
 - **`ConfirmDialog`** when the dialog's whole job is "are you sure", which
   includes every delete of a record.
-- **`Dialog`** is the bare `AlertDialog` shell the other pattern was built from.
-  It has no call sites; a form wants `FormDialog`, which is a `Modal`, because
-  an alert interrupts to ask one question and a form is a place to work.
 
-All three are controlled only, because a dialog opens from something elsewhere
+There was a third, a bare `AlertDialog` shell the form pattern was built from.
+It is gone: a form wants `FormDialog`, which is a `Modal`, because an alert
+interrupts to ask one question and a form is a place to work, and once nothing
+hand-rolled a form dialog the shell had no call sites left.
+
+Both are controlled only, because a dialog opens from something elsewhere
 on the page (a row's Edit, a heading row's Create) rather than from a trigger
-inside itself. All three mount their body only while open, which is not an
+inside itself. Both mount their body only while open, which is not an
 optimization: the body of a form dialog holds controlled inputs, and leaving
 them mounted carries one row's draft into the next row's dialog.
 

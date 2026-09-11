@@ -12,16 +12,11 @@ import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
-  useCreateOrganizationPricing,
   useDeleteOrganizationPricing,
   useOrganizationPricing,
-  useReplaceOrganizationPricing,
 } from "@/shared/api/pricing"
 import { formatCost, formatDateTime } from "@/shared/helpers/format"
-import {
-  PricingOverrideDialog,
-  type PricingOverrideDraft,
-} from "./PricingOverrideDialog"
+import { PricingOverrideDialog } from "./PricingOverrideDialog"
 import { overrideStatus } from "./pricingOverride"
 import { canManage } from "./roles"
 
@@ -84,8 +79,6 @@ function period(override: OrganizationPricingOverride): string {
 export function RateOverridesCard() {
   const context = useOrganizationContext()
   const overrides = useOrganizationPricing()
-  const create = useCreateOrganizationPricing()
-  const replace = useReplaceOrganizationPricing()
   const remove = useDeleteOrganizationPricing()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
@@ -109,29 +102,6 @@ export function RateOverridesCard() {
     setOpenCount((count) => count + 1)
     setEditing(override)
     setDialogOpen(true)
-  }
-
-  const submit = (draft: PricingOverrideDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
-    if (editing) {
-      // model_key is absent from the update body: the endpoint refuses to
-      // repoint an override at another model.
-      const { model_key: _unused, ...rest } = draft
-      // The endpoint requires a start on a replacement, so that an omitted one
-      // cannot silently move a stored period to the present. The dialog blocks a
-      // blank start while editing; this narrows the type and is the belt to that
-      // brace.
-      if (rest.effective_from === null) return
-      replace.mutate(
-        {
-          id: editing.id,
-          body: { ...rest, effective_from: rest.effective_from },
-        },
-        onDone,
-      )
-      return
-    }
-    create.mutate(draft, onDone)
   }
 
   const columns: DataTableColumn<OrganizationPricingOverride>[] = [
@@ -272,9 +242,7 @@ export function RateOverridesCard() {
         onOpenChange={setDialogOpen}
         editing={editing}
         existing={rows}
-        isPending={create.isPending || replace.isPending}
-        error={editing ? replace.error : create.error}
-        onSubmit={submit}
+        onSaved={() => setDialogOpen(false)}
       />
 
       <ConfirmDialog

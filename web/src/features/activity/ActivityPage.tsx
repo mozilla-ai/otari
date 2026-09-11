@@ -1851,8 +1851,12 @@ export function ActivityPage() {
   // requests are billed at. Deliberately does not touch the rows already logged:
   // a gateway row's cost is what it was served at, and rewriting history from an
   // activity view would move spend that budgets were already enforced against.
-  const onSetModelPrice = (rates: ManualRates, modelKey: string) => {
-    setModelPrice.mutate(
+  // Awaited by the dialog, which owns the pending and error state below its own
+  // key: a refusal cannot then greet the next open. `mutateAsync`, so a
+  // rejection reaches it rather than being reported from page state that
+  // outlives the form.
+  const onSetModelPrice = (rates: ManualRates, modelKey: string) =>
+    setModelPrice.mutateAsync(
       {
         model_key: modelKey,
         input_price_per_million: rates.input_price_per_million,
@@ -1864,10 +1868,9 @@ export function ActivityPage() {
       },
       { onSuccess: () => setModelPriceKey(null) },
     )
-  }
 
-  const onSetPrice = (rates: ManualRates) => {
-    setPrice.mutate(
+  const onSetPrice = (rates: ManualRates) =>
+    setPrice.mutateAsync(
       { ...selectionBody(), ...rates },
       {
         onSuccess: () => {
@@ -1876,7 +1879,6 @@ export function ActivityPage() {
         },
       },
     )
-  }
 
   // Refresh means "same view, newer rows", so it deliberately does *not* re-anchor
   // a rolling preset's window. Re-anchoring recomputed "now", which changed
@@ -2278,9 +2280,11 @@ export function ActivityPage() {
         isOpen={priceOpen}
         onOpenChange={setPriceOpen}
         targetCount={effectiveCount}
-        isPending={setPrice.isPending}
-        error={setPrice.error}
         onSubmit={onSetPrice}
+        submitLabel="Set price"
+        // The object rather than the verb: the submit and its trigger are both
+        // "Set price", so the default title was a third copy of that string.
+        title="Imported row costs"
       />
 
       <SetPriceDialog
@@ -2289,9 +2293,8 @@ export function ActivityPage() {
         onOpenChange={(open) =>
           setModelPriceKey(open ? (modelPriceKey ?? "") : null)
         }
-        isPending={setModelPrice.isPending}
-        error={setModelPrice.error}
         onSubmit={onSetModelPrice}
+        submitLabel="Price this model"
         collectModelKey
         initialModelKey={modelPriceKey ?? ""}
         title="Price this model"

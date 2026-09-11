@@ -3,6 +3,7 @@ import { useState } from "react"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
 // output are required; the cache rates are optional (blank folds those tokens
@@ -62,11 +63,20 @@ export interface SetPriceDialogProps {
   onOpenChange: (open: boolean) => void
   /** How many rows the price will be applied to, for the dialog copy. */
   targetCount?: number
-  isPending: boolean
-  error: unknown
-  onSubmit: (rates: ManualRates, modelKey: string) => void
+  /**
+   * Saves the rates. Awaited, and a rejection is reported inside this dialog:
+   * the pending and error state live here, below the caller's key, so a refused
+   * save cannot greet the next open (feedback.md). The callers each own a
+   * different endpoint, which is why the mutation itself stays with them.
+   */
+  onSubmit: (rates: ManualRates, modelKey: string) => Promise<unknown>
   /** Dialog heading; defaults to "Set price". */
   title?: string
+  /**
+   * The submit's label, which is also its trigger's, word for word
+   * (actions.md). Defaults to "Set price".
+   */
+  submitLabel?: string
   /** Body copy explaining what the rates apply to; a sensible usage default is used when omitted. */
   description?: (count: number) => string
   /**
@@ -92,9 +102,8 @@ export function SetPriceDialog({
   isOpen,
   onOpenChange,
   targetCount = 0,
-  isPending,
-  error,
   onSubmit,
+  submitLabel = "Set price",
   title = "Set price",
   description = defaultDescription,
   collectModelKey = false,
@@ -110,12 +119,13 @@ export function SetPriceDialog({
   const [cacheWrite, setCacheWrite] = useState("")
   // One predicate naming every field, so what "unsaved" means cannot drift
   // from what the form holds.
-  const isPristine =
-    modelKey === initialModelKey &&
-    input === "" &&
-    output === "" &&
-    cacheRead === "" &&
-    cacheWrite === ""
+  const { isDirty } = useDirtySnapshot({
+    modelKey,
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+  })
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)
@@ -133,8 +143,16 @@ export function SetPriceDialog({
     Number.isNaN(cacheReadRate ?? 0) ||
     Number.isNaN(cacheWriteRate ?? 0)
 
+  // Owned here rather than by the caller: below its key, so both reset with the
+  // draft on the next open.
+  const [isSaving, setIsSaving] = useState(false)
+  const [failure, setFailure] = useState<unknown>(undefined)
+
   const submit = () => {
     if (invalid || inputRate === null || outputRate === null) return
+    if (isSaving) return
+    setFailure(undefined)
+    setIsSaving(true)
     onSubmit(
       {
         input_price_per_million: inputRate,
@@ -148,6 +166,8 @@ export function SetPriceDialog({
       },
       modelKey.trim(),
     )
+      .catch((error: unknown) => setFailure(error))
+      .finally(() => setIsSaving(false))
   }
 
   return (
@@ -157,12 +177,12 @@ export function SetPriceDialog({
       size="lg"
       title={title}
       description={description(targetCount)}
-      submitLabel="Set price"
+      submitLabel={submitLabel}
       onSubmit={submit}
-      isPending={isPending}
+      isPending={isSaving}
       isSubmitDisabled={invalid}
-      isDirty={!isPristine}
-      error={error}
+      isDirty={isDirty}
+      error={failure}
     >
       {collectModelKey ? (
         <Field

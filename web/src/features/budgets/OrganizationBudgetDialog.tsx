@@ -4,6 +4,11 @@ import type { OrganizationBudget } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import {
+  useCreateOrganizationBudget,
+  useUpdateOrganizationBudget,
+} from "@/shared/api/budgets"
 
 import {
   PERIOD_OPTIONS,
@@ -44,19 +49,32 @@ export interface OrganizationBudgetDialogProps {
   onOpenChange: (open: boolean) => void
   /** The budget being edited; absent means this is an add. */
   editing?: OrganizationBudget
-  isPending: boolean
-  error: unknown
-  onSubmit: (draft: OrganizationBudgetDraft) => void
+  /** Called once a save has landed, so the caller can close this. */
+  onSaved: () => void
 }
 
 export function OrganizationBudgetDialog({
   isOpen,
   onOpenChange,
   editing,
-  isPending,
-  error,
-  onSubmit,
+  onSaved,
 }: OrganizationBudgetDialogProps) {
+  // The mutations live here, below the caller's key, so a refused save is
+  // cleared by the same remount that clears the draft. Held in the card they
+  // outlived it: a refusal's banner greeted the next open, and a failed edit of
+  // one row was what the next row's dialog showed. See feedback.md, "The
+  // component that renders the FormDialog owns everything that resets between
+  // opens: the draft *and* its mutation".
+  const create = useCreateOrganizationBudget()
+  const update = useUpdateOrganizationBudget()
+  const save = (draft: OrganizationBudgetDraft) => {
+    const onDone = { onSuccess: onSaved }
+    if (editing) {
+      update.mutate({ id: editing.budget_id, body: draft }, onDone)
+      return
+    }
+    create.mutate(draft, onDone)
+  }
   // Seeded on mount only, because the caller remounts this on each open. That
   // matters more here than on most forms: these values decide what colleagues
   // may spend, so inheriting the last budget's figure into a different one is
@@ -72,10 +90,9 @@ export function OrganizationBudgetDialog({
 
   const amount = parseLimit(limit)
   const limitInvalid = limit.trim() !== "" && amount === undefined
-  // One predicate naming every field, so what "unsaved" means cannot drift
-  // from what the form holds.
-  const isPristine =
-    name === seed.name && limit === seed.limit && period === seed.period
+  // The whole draft against what it was seeded with, so what "unsaved" means
+  // cannot drift from what the form holds.
+  const { isDirty } = useDirtySnapshot({ name, limit, period })
 
   // A duration-carrying budget (one the deployment surface created) opens on
   // "No reset", and saving would clear the duration rather than keep it. Said
@@ -92,7 +109,7 @@ export function OrganizationBudgetDialog({
     const option = PERIOD_OPTIONS.find(
       (candidate) => candidate.value === period,
     )
-    onSubmit({
+    save({
       name: name.trim() === "" ? null : name.trim(),
       max_budget: amount ?? null,
       // Only ever one of the two is sent with a value, because a budget resets
@@ -110,10 +127,10 @@ export function OrganizationBudgetDialog({
       description="A budget is an amount and the period it is spent over. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
       submitLabel={editing ? "Save budget" : "Add budget"}
       onSubmit={submit}
-      isPending={isPending}
+      isPending={create.isPending || update.isPending}
       isSubmitDisabled={limitInvalid}
-      isDirty={!isPristine}
-      error={error}
+      isDirty={isDirty}
+      error={editing ? update.error : create.error}
     >
       <Field
         label="Name"

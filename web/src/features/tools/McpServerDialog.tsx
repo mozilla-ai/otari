@@ -5,6 +5,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 
 // The form behind both Add and Edit, one component rather than two: the only
 // field that behaves differently between them is the bearer token, and keeping
@@ -116,14 +117,15 @@ export function McpServerDialog({
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // One predicate naming every field the operator can change, so "is there
   // anything to lose" cannot drift from what the form actually holds.
-  const isPristine =
-    name === seed.name &&
-    url === seed.url &&
-    token === "" &&
-    !clearToken &&
-    hint === seed.hint &&
-    allowedTools === seed.allowedTools &&
-    enabled === seed.enabled
+  const { isDirty } = useDirtySnapshot({
+    name,
+    url,
+    token,
+    clearToken,
+    hint,
+    allowedTools,
+    enabled,
+  })
 
   const submit = () => {
     if (invalid) return
@@ -147,12 +149,19 @@ export function McpServerDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title={editing ? "Edit MCP server" : "New MCP server"}
-      description="An MCP endpoint this workspace's requests can reach by naming its id in mcp_server_ids. The gateway connects to it while a request runs, so it has to be reachable from the gateway rather than from this browser."
+      description={
+        <>
+          An MCP endpoint this workspace's requests can reach by naming its id
+          in <code className="font-mono">mcp_server_ids</code>. The gateway
+          connects to it while a request runs, so it has to be reachable from
+          the gateway rather than from this browser.
+        </>
+      }
       submitLabel={editing ? "Save server" : "Add MCP server"}
       onSubmit={submit}
       isPending={isPending}
       isSubmitDisabled={invalid}
-      isDirty={!isPristine}
+      isDirty={isDirty}
       error={error}
     >
       <Field

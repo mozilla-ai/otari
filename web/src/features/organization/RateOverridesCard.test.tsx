@@ -195,6 +195,40 @@ describe("RateOverridesCard", () => {
     })
   })
 
+  it("does not greet the next open with the last attempt's refusal", async () => {
+    // The create and replace mutations live inside the dialog, below the card's
+    // key, so the remount that clears the draft clears the refusal with it.
+    // Held in the card they outlived both: a blank form arrived under the
+    // previous attempt's banner.
+    mockApi({ overrides: [], writeStatus: 409 })
+    const user = userEvent.setup()
+
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: /add override/i }),
+    )
+    await user.type(
+      await screen.findByLabelText(/model key/i),
+      "anthropic:claude-sonnet-5",
+    )
+    await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
+    await user.type(screen.getByLabelText(/output, per 1m tokens/i), "15")
+    await user.click(screen.getByRole("button", { name: /^add override$/i }))
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+
+    // Out through the guard, then in again.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: /add override/i }))
+
+    const reopened = await screen.findByRole("dialog")
+    expect(within(reopened).queryByRole("alert")).toBeNull()
+    expect(within(reopened).getByLabelText(/model key/i)).toHaveValue("")
+  })
+
   it("refuses a model key with no provider prefix before sending it", async () => {
     const requests = mockApi({ overrides: [] })
     const user = userEvent.setup()

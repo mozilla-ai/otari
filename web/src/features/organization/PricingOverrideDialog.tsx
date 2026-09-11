@@ -4,6 +4,11 @@ import { useState } from "react"
 import type { OrganizationPricingOverride } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import {
+  useCreateOrganizationPricing,
+  useReplaceOrganizationPricing,
+} from "@/shared/api/pricing"
 
 import {
   findOverlapping,
@@ -85,9 +90,8 @@ export interface PricingOverrideDialogProps {
   editing?: OrganizationPricingOverride
   /** Every stored override, so an overlapping period is refused before the request. */
   existing: readonly OrganizationPricingOverride[]
-  isPending: boolean
-  error: unknown
-  onSubmit: (draft: PricingOverrideDraft) => void
+  /** Called once a save has landed, so the caller can close this. */
+  onSaved: () => void
 }
 
 export function PricingOverrideDialog({
@@ -95,10 +99,35 @@ export function PricingOverrideDialog({
   onOpenChange,
   editing,
   existing,
-  isPending,
-  error,
-  onSubmit,
+  onSaved,
 }: PricingOverrideDialogProps) {
+  // Below the caller's key with the draft, so a refused save cannot greet the
+  // next open (feedback.md: the component that renders the FormDialog owns the
+  // draft *and* its mutation).
+  const create = useCreateOrganizationPricing()
+  const replace = useReplaceOrganizationPricing()
+  const save = (draft: PricingOverrideDraft) => {
+    const onDone = { onSuccess: onSaved }
+    if (editing) {
+      // model_key is absent from the update body: the endpoint refuses to
+      // repoint an override at another model.
+      const { model_key: _unused, ...rest } = draft
+      // The endpoint requires a start on a replacement, so that an omitted one
+      // cannot silently move a stored period to the present. The form blocks a
+      // blank start while editing; this narrows the type and is the belt to
+      // that brace.
+      if (rest.effective_from === null) return
+      replace.mutate(
+        {
+          id: editing.id,
+          body: { ...rest, effective_from: rest.effective_from },
+        },
+        onDone,
+      )
+      return
+    }
+    create.mutate(draft, onDone)
+  }
   // Seeded on mount only, because the caller remounts this on each open. Not a
   // nicety: these values set money, and inheriting the last row's rates into a
   // different model is the expensive kind of mistake.
@@ -122,15 +151,16 @@ export function PricingOverrideDialog({
   const [to, setTo] = useState(seed.to)
   // One predicate naming every field, so what "unsaved" means cannot drift
   // from what the form holds.
-  const isPristine =
-    modelKey === seed.modelKey &&
-    input === seed.input &&
-    output === seed.output &&
-    cacheRead === seed.cacheRead &&
-    cacheWrite === seed.cacheWrite &&
-    cacheWrite1h === seed.cacheWrite1h &&
-    from === seed.from &&
-    to === seed.to
+  const { isDirty } = useDirtySnapshot({
+    modelKey,
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    cacheWrite1h,
+    from,
+    to,
+  })
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)
@@ -181,7 +211,7 @@ export function PricingOverrideDialog({
 
   const submit = () => {
     if (invalid || inputRate === undefined || outputRate === undefined) return
-    onSubmit({
+    save({
       model_key: modelKey.trim(),
       input_price_per_million: inputRate,
       output_price_per_million: outputRate,
@@ -208,10 +238,10 @@ export function PricingOverrideDialog({
       description="What this organization pays for a model, above the deployment's own price list. Requests in the period below are billed at these rates; a model with no override here keeps being priced by the deployment."
       submitLabel={editing ? "Save override" : "Add override"}
       onSubmit={submit}
-      isPending={isPending}
+      isPending={create.isPending || replace.isPending}
       isSubmitDisabled={invalid}
-      isDirty={!isPristine}
-      error={error}
+      isDirty={isDirty}
+      error={editing ? replace.error : create.error}
     >
       {editing ? (
         <div className="flex flex-col gap-1">

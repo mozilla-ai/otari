@@ -46,7 +46,9 @@ describe("RenameOrganizationDialog", () => {
 
     await user.clear(newNameField())
     await user.type(newNameField(), "  Platform  ")
-    await user.click(dialog().getByRole("button", { name: "Change name" }))
+    await user.click(
+      dialog().getByRole("button", { name: "Change organization name" }),
+    )
 
     expect(onSubmit).toHaveBeenCalledWith("Platform")
   })
@@ -55,7 +57,9 @@ describe("RenameOrganizationDialog", () => {
     const user = userEvent.setup()
     renderDialog()
 
-    const confirm = dialog().getByRole("button", { name: "Change name" })
+    const confirm = dialog().getByRole("button", {
+      name: "Change organization name",
+    })
     expect(confirm).toBeDisabled()
 
     await user.clear(newNameField())

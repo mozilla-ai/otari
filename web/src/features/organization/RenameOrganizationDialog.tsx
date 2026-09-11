@@ -45,8 +45,11 @@ export function RenameOrganizationDialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       size="sm"
-      title="Change organization name"
-      submitLabel="Change name"
+      // The object, not the action: the trigger and the submit both say
+      // "Change organization name", so a title repeating it would be the third
+      // copy of one string (actions.md).
+      title="Organization name"
+      submitLabel="Change organization name"
       onSubmit={() => onSubmit(trimmed)}
       isPending={isPending}
       isSubmitDisabled={isUnchanged || trimmed === ""}
