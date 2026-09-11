@@ -123,9 +123,16 @@ function SetupFlow({
 
   const isActivated = data.status === "activated"
   const isOffered = data.experience_eligible && !isClosed && !isActivated
-  if (isOffered) {
-    wasOffered.current = true
-  }
+  // Recorded after the commit rather than during the render that decided it.
+  // Render has to stay pure, and the React Compiler is what makes that more
+  // than a principle here: a render React discards would leave the latch set,
+  // and a workspace that activated later would then be congratulated on an
+  // offer no one was ever shown. The sheet and the payoff are never the same
+  // render (`experience_eligible` goes false as `status` becomes activated), so
+  // the effect has always run by the time the branch below reads it.
+  useEffect(() => {
+    if (isOffered) wasOffered.current = true
+  }, [isOffered])
 
   // The key is minted when the sheet opens rather than on a press, because the
   // sheet *is* the press: it is the whole screen, it exists to hand a key over,

@@ -139,10 +139,16 @@ export function SetupSheet({
       <ErrorBanner error={keyError} />
       <ErrorBanner error={skipError} />
 
-      <InfoBanner tone="warning">
-        Copy this key now. It is shown once, and reopening this guide issues a
-        new one in its place.
-      </InfoBanner>
+      {/* Tied to the key existing, like the field below it. Unconditional, this
+          told an operator to copy a key that was still being minted, and told
+          one whose mint had just failed to copy it now because it is shown
+          once, directly under the banner saying it could not be created. */}
+      {apiKey !== undefined ? (
+        <InfoBanner tone="warning">
+          Copy this key now. It is shown once, and reopening this guide issues a
+          new one in its place.
+        </InfoBanner>
+      ) : null}
       {apiKey === undefined ? (
         // Not a `CopyField` holding an empty string: every credential field here
         // conceals, so an empty one would show the same run of bullets a real

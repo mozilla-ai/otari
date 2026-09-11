@@ -235,6 +235,26 @@ describe("SetupGuide", () => {
     expect(await screen.findByLabelText("API key")).toBeInTheDocument()
   })
 
+  it("does not tell an operator to copy a key that failed to mint", async () => {
+    // The contradiction this pins: "the key could not be created" and "copy
+    // this key now, it is shown once" on the same first-run screen, where the
+    // reader has no context to reconcile them.
+    const fetchMock = mockApi()
+    const real = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/activation/key")) {
+        return new Response(JSON.stringify({ detail: "no" }), { status: 500 })
+      }
+      return real?.(input, init) as Promise<Response>
+    })
+    await renderGuide()
+
+    await screen.findByRole("heading", { name: "Send your first request" })
+    await waitFor(() => {
+      expect(screen.queryByText(/Copy this key now/)).toBeNull()
+    })
+  })
+
   it("conceals the key and the example built around it until asked", async () => {
     // A key nobody has asked to see is not on screen (otari-ai#2111), and the
     // example carries the same secret, so revealing is one decision.
