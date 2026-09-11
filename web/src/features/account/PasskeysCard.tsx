@@ -293,21 +293,19 @@ export function PasskeysCard() {
               startRegistration()
             }}
           >
-            {/* The button sits beside the input rather than beside the whole
-              field, because the description below it is a paragraph whose
-              height depends on the width it is given. Aligned against the
-              field, the button would have to be pushed up by however tall
-              that paragraph happened to render, which is a number no class
-              can know. */}
+            {/* The button is inside the field, beside the input, because this
+              field's description wraps: the width a wrapped message costs is
+              not a number `FieldAction` can reserve. See forms.md, "Control
+              rows". */}
             <TextField
               value={newName}
               onChange={setNewName}
-              className="flex max-w-xl flex-col gap-1"
+              className="flex max-w-2xl flex-col gap-1"
             >
               <Label className="text-body">Name</Label>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Input
-                  className="flex-1"
+                  className="w-full max-w-md"
                   placeholder="Work laptop"
                   maxLength={MAX_PASSKEY_NAME_LENGTH}
                 />
