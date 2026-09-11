@@ -1,6 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef, useState } from "react"
+import { FiActivity, FiEdit2, FiTrash2 } from "react-icons/fi"
 import type {
   CreateStoredProviderRequest,
   ProviderHealth,
@@ -1185,26 +1186,28 @@ export function ProvidersPage() {
           <div className="flex flex-col items-end gap-1.5">
             <RowActionRow>
               <RowAction
+                icon={FiActivity}
+                label="Test"
                 // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
                 isDisabled={
                   tests[row.instance]?.status === "pending" ||
                   row.stored?.decryptable === false
                 }
                 onPress={() => void runTest(row.instance)}
-              >
-                Test
-              </RowAction>
+              />
               <RowAction
+                icon={FiEdit2}
+                label="Edit"
                 onPress={() => {
                   setAddOpen(false)
                   setEditing(row.instance)
                 }}
-              >
-                Edit
-              </RowAction>
-              <RowAction onPress={() => setPendingDelete(row.instance)}>
-                Delete
-              </RowAction>
+              />
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(row.instance)}
+              />
             </RowActionRow>
             <TestOutcome state={tests[row.instance]} />
           </div>

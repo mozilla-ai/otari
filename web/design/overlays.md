@@ -34,21 +34,46 @@ Anything an operator needs in order to *act* goes on the page. A description
 under a field, a caption under a value, or a `Badge` on the row: all three are
 readable on a phone and none of them needs a pointer.
 
-It wraps its trigger rather than taking one as a prop, so the trigger keeps its
-own type: an `IconButton` inside one is still an `IconButton`, with its required
-label and its 44px box intact.
+It takes its trigger as `children` rather than as a prop, so the trigger keeps
+its own type: an `IconButton` inside one is still an `IconButton`, with its
+required label and its 44px box intact.
+
+**Which of the two forms you want depends on whether the trigger takes DOM
+props.** HeroUI's own trigger is a `div` the library gives `role="button"` and
+`tabIndex=0`, which is what makes a non-interactive trigger reachable at all and
+is wrong around a real `<button>`: it announces "Delete button" inside "Delete
+button", takes a tab stop of its own, and gives every `getByRole("button")` two
+matches instead of one. Hand the function form a native control instead, and it
+spreads the props it is given onto that control, so the trigger and the control
+are one element. `RowAction`'s glyph is the worked example.
+
+A HeroUI `Button` (so `IconButton` too) is the exception and keeps the wrapper:
+its props are react-aria's rather than the DOM's, so the trigger's `onClick` and
+`onPointerEnter` do not typecheck against it, let alone reach an element. Its 44px
+box and required label are unharmed by the wrapper; the duplicate name is the
+cost, and #2123 is where that is written down rather than solved.
 
 ```tsx
-// Correct: the tooltip repeats the button's own accessible name
-<Tooltip content="Delete this key">
-  <IconButton label="Delete this key" variant="danger">
-    <FiTrash2 aria-hidden className="size-4" />
-  </IconButton>
+// Correct: a native control takes the trigger's props rather than a wrapper
+<Tooltip content="Delete">
+  {(props) => (
+    <button {...props} type="button" aria-label="Delete">
+      <FiTrash2 aria-hidden className="h-3.5 w-3.5" />
+    </button>
+  )}
+</Tooltip>
+
+// Correct: a node that is not a control is wrapped, which is what gives it the
+// keyboard reach it has none of on its own
+<Tooltip content="2026-09-11 14:02:11 UTC">
+  <span className="text-caption">6m ago</span>
 </Tooltip>
 
 // Incorrect: the reason a control is refused has to be reachable without a
 // pointer, and a disabled control takes no focus, so this reaches nobody who
-// needs it. Put it in the accessible name (see RowAction's ariaLabel).
+// needs it. Put it in the accessible name (see RowAction's ariaLabel), which is
+// what `RowAction` does for its own glyphs, with a native `title` beside it for
+// the pointer the tooltip cannot reach.
 <Tooltip content="An organization owner manages this key">
   <RowAction isDisabled onPress={revoke}>Revoke</RowAction>
 </Tooltip>

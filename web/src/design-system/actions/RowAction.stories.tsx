@@ -1,5 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
+import {
+  FiCheckCircle,
+  FiClock,
+  FiEdit2,
+  FiRefreshCw,
+  FiSlash,
+  FiTrash2,
+} from "react-icons/fi"
 
 import { RowAction, RowActionRow } from "./RowAction"
 
@@ -8,9 +16,15 @@ import { RowAction, RowActionRow } from "./RowAction"
  *
  * Not a `Button`, and that is the rule rather than a preference: a row of
  * buttons in every table row turns a dense table into a grid of boxes, so a row
- * action is caption-sized text. `RowActionRow` is the lane; reach for it rather
+ * action wears a bare glyph. `RowActionRow` is the lane; reach for it rather
  * than `deprecated/RowActions`, which is a near-duplicate with a tighter gap
  * still on one call site.
+ *
+ * The glyph form is what a lane should reach for, and the word is not lost to
+ * it: `label` is the accessible name and the tooltip both, so it is still read
+ * aloud, still matched by speech input, and still spelled out on hover. The
+ * text form is left for what no glyph says, which in practice is the armed half
+ * of a confirm.
  *
  * The danger prop paints the danger ink, and `src/styles/dotRamp.test.ts`
  * enforces something about it worth knowing: a row action never paints danger
@@ -24,7 +38,7 @@ import { RowAction, RowActionRow } from "./RowAction"
 const meta = {
   title: "Design system/Actions/RowAction",
   component: RowAction,
-  args: { onPress: () => {}, children: "Edit" },
+  args: { onPress: () => {}, icon: FiEdit2, label: "Edit" },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof RowAction>
 
@@ -38,11 +52,48 @@ export const Default: Story = {}
 export const InALane: Story = {
   render: () => (
     <RowActionRow>
-      <RowAction onPress={() => {}}>Edit</RowAction>
-      <RowAction onPress={() => {}}>Rotate</RowAction>
-      <RowAction onPress={() => {}}>Revoke</RowAction>
+      <RowAction icon={FiClock} label="History" onPress={() => {}} />
+      <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
+      <RowAction icon={FiRefreshCw} label="Regenerate" onPress={() => {}} />
+      <RowAction icon={FiTrash2} label="Delete" onPress={() => {}} />
     </RowActionRow>
   ),
+}
+
+/**
+ * The words the glyphs replaced, for comparison: four of them per row, re-read
+ * on every row, against four shapes that are recognized rather than read
+ * (otari-ai#2123). The text form is still what a confirm's armed half uses,
+ * which is why it is public rather than retired.
+ */
+export const TheTextFormItReplaced: Story = {
+  render: () => (
+    <RowActionRow>
+      <RowAction onPress={() => {}}>History</RowAction>
+      <RowAction onPress={() => {}}>Edit</RowAction>
+      <RowAction onPress={() => {}}>Regenerate</RowAction>
+      <RowAction onPress={() => {}}>Delete</RowAction>
+    </RowActionRow>
+  ),
+}
+
+/**
+ * A pair whose glyph carries the state as well as the act, which is what a
+ * label alone cannot do: the lane says at a glance which rows are blocked.
+ */
+export const AToggledAction: Story = {
+  render: () => {
+    const [blocked, setBlocked] = useState(false)
+    return (
+      <RowActionRow>
+        <RowAction
+          icon={blocked ? FiCheckCircle : FiSlash}
+          label={blocked ? "Unblock" : "Block"}
+          onPress={() => setBlocked(!blocked)}
+        />
+      </RowActionRow>
+    )
+  },
 }
 
 /**
@@ -53,14 +104,14 @@ export const InALane: Story = {
 export const DisabledWithReason: Story = {
   render: () => (
     <RowActionRow>
-      <RowAction onPress={() => {}}>Edit</RowAction>
+      <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
       <RowAction
+        icon={FiSlash}
+        label="Revoke"
         onPress={() => {}}
         isDisabled
         ariaLabel="Revoke this key. Unavailable: an organization owner manages it."
-      >
-        Revoke
-      </RowAction>
+      />
     </RowActionRow>
   ),
 }
@@ -78,12 +129,18 @@ export const InContext: Story = {
             {name}
           </span>
           <RowActionRow>
-            <RowAction onPress={() => {}} ariaLabel={`Edit ${name}`}>
-              Edit
-            </RowAction>
-            <RowAction onPress={() => {}} ariaLabel={`Revoke ${name}`}>
-              Revoke
-            </RowAction>
+            <RowAction
+              icon={FiEdit2}
+              label="Edit"
+              ariaLabel={`Edit ${name}`}
+              onPress={() => {}}
+            />
+            <RowAction
+              icon={FiSlash}
+              label="Revoke"
+              ariaLabel={`Revoke ${name}`}
+              onPress={() => {}}
+            />
           </RowActionRow>
         </div>
       ))}
@@ -109,7 +166,7 @@ export const ArmedPaintsDanger: Story = {
     return (
       <div className="flex flex-col gap-3">
         <RowActionRow>
-          <RowAction onPress={() => {}}>Edit</RowAction>
+          <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
           <RowAction isDanger={armed} onPress={() => setArmed(!armed)}>
             {armed ? "Confirm remove" : "Remove"}
           </RowAction>

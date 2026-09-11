@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { FiClock, FiEdit2, FiTrash2 } from "react-icons/fi"
 import type {
   Budget,
   BudgetResetLog,
@@ -719,23 +720,27 @@ function DeploymentBudgetsPage() {
         cell: (b) => (
           <RowActionRow>
             <RowAction
+              icon={FiClock}
+              label={historyOpen === b.budget_id ? "Hide history" : "History"}
               onPress={() =>
                 setHistoryOpen((current) =>
                   current === b.budget_id ? null : b.budget_id,
                 )
               }
-            >
-              {historyOpen === b.budget_id ? "Hide history" : "History"}
-            </RowAction>
+            />
             <RowAction
+              icon={FiEdit2}
+              label="Edit"
               onPress={() => {
                 setAddOpen(false)
                 setEditing(b.budget_id)
               }}
-            >
-              Edit
-            </RowAction>
-            <RowAction onPress={() => setPendingDelete(b)}>Delete</RowAction>
+            />
+            <RowAction
+              icon={FiTrash2}
+              label="Delete"
+              onPress={() => setPendingDelete(b)}
+            />
           </RowActionRow>
         ),
       },

@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -207,8 +208,16 @@ export function WorkspaceMcpServersCard({
       header: "",
       cell: (row) => (
         <RowActionRow>
-          <RowAction onPress={() => openEdit(row)}>Edit</RowAction>
-          <RowAction onPress={() => openDelete(row)}>Delete</RowAction>
+          <RowAction
+            icon={FiEdit2}
+            label="Edit"
+            onPress={() => openEdit(row)}
+          />
+          <RowAction
+            icon={FiTrash2}
+            label="Delete"
+            onPress={() => openDelete(row)}
+          />
         </RowActionRow>
       ),
     })

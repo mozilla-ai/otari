@@ -1,5 +1,12 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import {
+  FiArchive,
+  FiEdit2,
+  FiRotateCcw,
+  FiStar,
+  FiTrash2,
+} from "react-icons/fi"
 
 import type {
   CreateOrgProviderKeyRequest,
@@ -395,37 +402,41 @@ export function OrganizationProviderKeysPage() {
           {row.archived_at ? (
             <>
               <RowAction
+                icon={FiRotateCcw}
+                label="Restore"
                 isDisabled={restore.isPending}
                 onPress={() => restore.mutate(row.id)}
-              >
-                Restore
-              </RowAction>
+              />
               {/* Permanent, and the only place it is offered: the API
                     accepts a delete for an archived key alone. */}
-              <RowAction onPress={() => setPendingDelete(row)}>
-                Delete
-              </RowAction>
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(row)}
+              />
             </>
           ) : (
             <>
               <RowAction
+                icon={FiStar}
+                label="Make default"
                 isDisabled={row.is_org_default || setDefault.isPending}
                 onPress={() => setDefault.mutate(row.id)}
-              >
-                Make default
-              </RowAction>
+              />
               <RowAction
+                icon={FiEdit2}
+                label="Edit"
                 onPress={() => {
                   setAdding(false)
                   setEditingId(row.id)
                 }}
-              >
-                Edit
-              </RowAction>
+              />
               {/* Archive rather than delete: it is reversible, it is what
                     clears the default, and it is the step the API requires
                     before a key can be removed for good. */}
               <ConfirmRowAction
+                icon={FiArchive}
+                label="Archive"
                 confirmLabel="Archive"
                 isPending={archive.isPending}
                 onConfirm={() =>
@@ -435,9 +446,7 @@ export function OrganizationProviderKeysPage() {
                     },
                   })
                 }
-              >
-                Archive
-              </ConfirmRowAction>
+              />
             </>
           )}
         </RowActionRow>

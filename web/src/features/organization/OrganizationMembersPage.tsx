@@ -1,5 +1,12 @@
 import { Button } from "@heroui/react"
 import { useMemo, useState } from "react"
+import {
+  FiCheckCircle,
+  FiEdit2,
+  FiSlash,
+  FiUserMinus,
+  FiXCircle,
+} from "react-icons/fi"
 
 import type {
   User as ApiUser,
@@ -1122,11 +1129,11 @@ export function OrganizationMembersPage() {
             return (
               <RowActionRow>
                 <RowAction
+                  icon={FiXCircle}
+                  label="Revoke"
                   isDisabled={!manages}
                   onPress={() => setRevoking(member)}
-                >
-                  Revoke
-                </RowAction>
+                />
               </RowActionRow>
             )
           }
@@ -1142,13 +1149,15 @@ export function OrganizationMembersPage() {
             <RowActionRow>
               {manages ? (
                 <RowAction
+                  icon={FiEdit2}
+                  label="Edit"
                   onPress={() => setEditingMember(memberRowKey(member))}
-                >
-                  Edit
-                </RowAction>
+                />
               ) : null}
               {manages && spendRow ? (
                 <RowAction
+                  icon={spendRow.blocked ? FiCheckCircle : FiSlash}
+                  label={spendRow.blocked ? "Unblock" : "Block"}
                   isDisabled={updateUser.isPending}
                   onPress={() =>
                     updateUser.mutate({
@@ -1156,25 +1165,23 @@ export function OrganizationMembersPage() {
                       body: { blocked: !spendRow.blocked },
                     })
                   }
-                >
-                  {spendRow.blocked ? "Unblock" : "Block"}
-                </RowAction>
+                />
               ) : null}
-              <span title={blocked}>
-                <RowAction
-                  // See the Role cell: the reason has to be in the name, not only
-                  // in the tooltip, to reach anything but a pointer.
-                  ariaLabel={
-                    blocked
-                      ? `Remove ${memberLabel(member)} (${blocked})`
-                      : undefined
-                  }
-                  isDisabled={blocked !== undefined}
-                  onPress={() => setRemoving(member)}
-                >
-                  Remove
-                </RowAction>
-              </span>
+              <RowAction
+                icon={FiUserMinus}
+                label="Remove"
+                // See the Role cell: the reason has to be in the name, not only
+                // in the tooltip, to reach anything but a pointer. `RowAction`
+                // puts the same name on a `title` while the action is refused,
+                // which is how the pointer gets it without a wrapper here.
+                ariaLabel={
+                  blocked
+                    ? `Remove ${memberLabel(member)} (${blocked})`
+                    : undefined
+                }
+                isDisabled={blocked !== undefined}
+                onPress={() => setRemoving(member)}
+              />
             </RowActionRow>
           )
         },
