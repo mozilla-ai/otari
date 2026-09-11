@@ -303,7 +303,7 @@ export function PasskeysCard() {
               className="flex max-w-2xl flex-col gap-1"
             >
               <Label className="text-body">Name</Label>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
                 <Input
                   className="w-full max-w-md"
                   placeholder="Work laptop"

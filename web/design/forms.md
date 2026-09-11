@@ -317,7 +317,7 @@ beside the input, and let the message sit under both.
 // Correct: one row for the input line, the message under the whole field
 <TextField className="flex max-w-2xl flex-col gap-1">
   <Label className="text-body">Name</Label>
-  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+  <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
     <Input className="w-full max-w-md" />
     <Button type="submit" variant="primary">Add a passkey</Button>
   </div>
@@ -328,4 +328,8 @@ beside the input, and let the message sit under both.
 ```
 
 The input keeps `max-w-md`, the house field width; the wrapper is widened to hold
-the input, the gap and the button, so the field does not narrow to make room.
+the input, the gap and the button, so the field does not narrow to make room. The
+`items-start` is what keeps the button its own width once the row stacks: a column
+stretches its children by default, and a full-width button does not press (see
+[actions.md](actions.md)). The input carries `w-full` so the stretch it wanted is
+still the width it gets.
