@@ -123,3 +123,103 @@ def test_non_streaming_request_records_no_ttft(
     log = db_session.query(UsageLog).filter(UsageLog.user_id == "ttft-non-streaming-user").first()
     assert log is not None
     assert log.ttft_ms is None
+
+
+def test_streaming_error_after_first_chunk_still_records_ttft(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A stream that yields one chunk and then raises still pins the ``ttft_ms``
+    the first chunk earned; ``_on_error`` reads the same ``first_chunk_at`` as
+    ``_on_complete`` does."""
+    client.post(f"{API_ROOT}/users", json={"user_id": "ttft-error-user"}, headers=master_key_header)
+
+    async def chunk_stream() -> AsyncIterator[ChatCompletionChunk]:
+        await asyncio.sleep(_FIRST_CHUNK_DELAY_SECONDS)
+        yield ChatCompletionChunk(
+            id="chatcmpl-ttft-error",
+            object="chat.completion.chunk",
+            created=0,
+            model=MODEL_NAME,
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason=None)],
+        )
+        raise RuntimeError("provider dropped the connection mid-stream")
+
+    async def mock_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return chunk_stream()
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "ttft-error-user",
+                "stream": True,
+            },
+            headers=master_key_header,
+        )
+        assert response.status_code == 200, response.text
+        response.read()
+
+    log = db_session.query(UsageLog).filter(UsageLog.user_id == "ttft-error-user").first()
+    assert log is not None
+    assert log.status == "error"
+    assert log.ttft_ms is not None
+    assert log.ttft_ms >= round(_FIRST_CHUNK_DELAY_SECONDS * 1000)
+    assert log.latency_ms is not None
+    assert log.ttft_ms <= log.latency_ms
+
+
+def test_streaming_with_no_usage_data_still_records_ttft(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A stream that finishes without provider usage data (billed per
+    ``stream_missing_usage_policy``, 'estimate' by default) still pins the
+    ``ttft_ms`` its first chunk earned; ``_on_no_usage`` reads the same
+    ``first_chunk_at`` as ``_on_complete`` does."""
+    client.post(f"{API_ROOT}/users", json={"user_id": "ttft-no-usage-user"}, headers=master_key_header)
+
+    async def chunk_stream() -> AsyncIterator[ChatCompletionChunk]:
+        await asyncio.sleep(_FIRST_CHUNK_DELAY_SECONDS)
+        yield ChatCompletionChunk(
+            id="chatcmpl-ttft-no-usage",
+            object="chat.completion.chunk",
+            created=0,
+            model=MODEL_NAME,
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason=None)],
+        )
+        yield ChatCompletionChunk(
+            id="chatcmpl-ttft-no-usage",
+            object="chat.completion.chunk",
+            created=0,
+            model=MODEL_NAME,
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(), finish_reason="stop")],
+        )
+
+    async def mock_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return chunk_stream()
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "ttft-no-usage-user",
+                "stream": True,
+            },
+            headers=master_key_header,
+        )
+        assert response.status_code == 200, response.text
+        response.read()
+
+    log = db_session.query(UsageLog).filter(UsageLog.user_id == "ttft-no-usage-user").first()
+    assert log is not None
+    assert log.ttft_ms is not None
+    assert log.ttft_ms >= round(_FIRST_CHUNK_DELAY_SECONDS * 1000)
+    assert log.latency_ms is not None
+    assert log.ttft_ms <= log.latency_ms

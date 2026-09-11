@@ -186,8 +186,10 @@ def test_the_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None
         # column (ttft_ms), so the mapped class now tracks columns this
         # revision does not have yet and session.get(UsageLog, ...) would
         # select one that is not there.
-        row = connection.execute(
-            text(f"SELECT {', '.join(_EXPECTED_TYPES)} FROM usage_logs WHERE id = 'settled-1'")
-        ).mappings().one()
+        row = (
+            connection.execute(text(f"SELECT {', '.join(_EXPECTED_TYPES)} FROM usage_logs WHERE id = 'settled-1'"))
+            .mappings()
+            .one()
+        )
     # The provenance went with the columns; nothing backfills it.
     assert all(value is None for value in row.values())
