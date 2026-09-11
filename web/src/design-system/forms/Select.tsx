@@ -100,10 +100,7 @@ export function Select({
       {/* No manual "*": HeroUI marks a required field's label through CSS, so
           adding one renders two. */}
       <Label className="text-body">{label}</Label>
-      <HeroSelect.Trigger
-        // biome-ignore lint/a11y/noAutofocus: a form's first field takes it; see feedback.md
-        autoFocus={autoFocus}
-      >
+      <HeroSelect.Trigger autoFocus={autoFocus}>
         <HeroSelect.Value>
           {({ selectedText }) => selectedText ?? placeholder}
         </HeroSelect.Value>
