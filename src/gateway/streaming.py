@@ -222,16 +222,26 @@ async def streaming_generator(
             chunk = relabel_model(chunk, display_model)
         return format_chunk(chunk)
 
+    def _format_and_mark_first(chunk: Any) -> str:
+        # Format before marking: on_first_chunk must fire only once a chunk
+        # has actually been turned into something we are about to yield, not
+        # when it was merely pulled off the upstream. This also covers a
+        # chunk that reaches the client via the terminal buffer rather than
+        # the immediate yield below.
+        nonlocal seen_first_chunk
+        formatted = _format(chunk)
+        if not seen_first_chunk:
+            seen_first_chunk = True
+            if on_first_chunk is not None:
+                on_first_chunk()
+        return formatted
+
     try:
         async with aclosing(_chunks_or_keepalive(stream, keepalive_interval)) as source:
             async for chunk in source:
                 if chunk is _KEEPALIVE_DUE:
                     yield fmt.keepalive
                     continue
-                if not seen_first_chunk:
-                    seen_first_chunk = True
-                    if on_first_chunk is not None:
-                        on_first_chunk()
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
                     usage = _merge_usage(usage, chunk_usage)
@@ -245,7 +255,7 @@ async def streaming_generator(
                     # carrier that is not the last, and leaves cost on the chunk
                     # that really ends the stream.
                     for buffered_chunk in terminal_buffer:
-                        yield _format(buffered_chunk)
+                        yield _format_and_mark_first(buffered_chunk)
                     terminal_buffer.clear()
                     cost_carrier = chunk
                     terminal_buffer.append(chunk)
@@ -264,16 +274,16 @@ async def streaming_generator(
                             )
                             overflow_logged = True
                         for buffered_chunk in terminal_buffer:
-                            yield _format(buffered_chunk)
+                            yield _format_and_mark_first(buffered_chunk)
                         terminal_buffer.clear()
                         cost_carrier = None
                         buffering_terminal = False
-                        yield _format(chunk)
+                        yield _format_and_mark_first(chunk)
                         continue
                     terminal_buffer.append(chunk)
                     continue
 
-                yield _format(chunk)
+                yield _format_and_mark_first(chunk)
 
         # Once the upstream is exhausted, hybrid mode settles before emitting
         # the buffered terminal suffix. Standalone mode retains the historical
@@ -308,7 +318,7 @@ async def streaming_generator(
                 except Exception as attach_err:
                     logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
             for buffered_chunk in terminal_buffer:
-                yield _format(buffered_chunk)
+                yield _format_and_mark_first(buffered_chunk)
             terminal_buffer.clear()
             yield fmt.done_marker
         else:
@@ -338,7 +348,7 @@ async def streaming_generator(
         # A carrier may have been buffered just before the upstream failed. It
         # remains an ordinary provider event and must precede the safe error.
         for buffered_chunk in terminal_buffer:
-            yield _format(buffered_chunk)
+            yield _format_and_mark_first(buffered_chunk)
         terminal_buffer.clear()
         yield fmt.error_payload
         if fmt.yield_done_on_error:
