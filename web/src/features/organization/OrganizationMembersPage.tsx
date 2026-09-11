@@ -209,9 +209,13 @@ function AddMemberForm({
     setWorkspaceIds(defaults)
     // Part of the seed, not a change: this lands after mount, so a snapshot
     // taken at first render would report the form dirty the moment the roster
-    // answers, and Escape would ask before closing an untouched form. Seeded
-    // with the explicit value, because this render still holds the old list.
-    reseed({ email, role, workspaceIds: defaults })
+    // answers, and Escape would ask before closing an untouched form.
+    //
+    // The mount values, not `email` and `role` as they stand: the roster pages
+    // through `fetchAllPaged`, so on a cold cache this can fire after the
+    // operator has typed an address, and seeding what they typed would make the
+    // guard forget it.
+    reseed({ email: "", role: "member", workspaceIds: defaults })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -344,9 +348,13 @@ function InviteMemberForm({
     setWorkspaceIds(defaults)
     // Part of the seed, not a change: this lands after mount, so a snapshot
     // taken at first render would report the form dirty the moment the roster
-    // answers, and Escape would ask before closing an untouched form. Seeded
-    // with the explicit value, because this render still holds the old list.
-    reseed({ email, role, workspaceIds: defaults })
+    // answers, and Escape would ask before closing an untouched form.
+    //
+    // The mount values, not `email` and `role` as they stand: the roster pages
+    // through `fetchAllPaged`, so on a cold cache this can fire after the
+    // operator has typed an address, and seeding what they typed would make the
+    // guard forget it.
+    reseed({ email: "", role: "member", workspaceIds: defaults })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>

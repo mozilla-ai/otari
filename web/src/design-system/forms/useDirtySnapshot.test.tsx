@@ -1,4 +1,5 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, render, renderHook } from "@testing-library/react"
+import { useRef } from "react"
 import { describe, expect, it } from "vitest"
 import { useDirtySnapshot } from "./useDirtySnapshot"
 
@@ -81,6 +82,31 @@ describe("useDirtySnapshot", () => {
     rerender({ workspaceIds: ["ws-1"] })
 
     expect(result.current.isDirty).toBe(false)
+  })
+
+  it("corrects the same render a reset(next) was called in", () => {
+    // The precondition that used to be hidden: held in a ref, the seed fixed
+    // nothing already rendered, and a caller that reseeded during render stayed
+    // armed unless it happened to set other state in the same block. The seed
+    // is state now, so this render is re-run and the `isDirty` the caller
+    // receives is the corrected one, with no other update in the block.
+    const seen: boolean[] = []
+    function Host({ landed }: { landed: string[] }) {
+      const { isDirty, reset } = useDirtySnapshot({ workspaceIds: landed })
+      const first = useRef(true)
+      if (first.current && landed.length > 0) {
+        first.current = false
+        reset({ workspaceIds: landed })
+      }
+      seen.push(isDirty)
+      return null
+    }
+
+    const { rerender } = render(<Host landed={[]} />)
+    rerender(<Host landed={["ws-1"]} />)
+
+    // The last render the caller was handed reads clean.
+    expect(seen.at(-1)).toBe(false)
   })
 
   it("seeds an explicit draft, for a default that lands after mount", () => {

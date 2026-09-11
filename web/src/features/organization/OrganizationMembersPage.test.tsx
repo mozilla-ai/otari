@@ -46,6 +46,10 @@ function mockApi(opts: {
   context?: OrganizationContext
   members?: OrganizationMember[]
   workspaces?: Workspace[]
+  // Holds the workspace roster in flight, so the dialog can be typed into
+  // before its default lands: `fetchAllPaged` walks every page, so on a cold
+  // cache that is the real order.
+  workspacesGate?: Promise<unknown>
   inviteResult?: unknown
   // The gateway's spend rows. The roster joins them on `attribution_user_id`
   // to show what a member may call and what they have spent, neither of which
@@ -106,6 +110,7 @@ function mockApi(opts: {
       return jsonResponse(roster[0] ?? {})
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
+      if (opts.workspacesGate) await opts.workspacesGate
       return jsonResponse({ data: workspaces, count: workspaces.length })
     }
     if (url.includes(`${API_ROOT}/users`)) {
@@ -419,6 +424,37 @@ describe("OrganizationMembersPage", () => {
     ).toBeDisabled()
     expect(
       screen.getByText(/Only organization owners and admins/),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps an address typed before the roster lands inside the guard", async () => {
+    // The default workspace is part of the seed; what the operator has already
+    // typed is not. Seeding the fields as they stand when the roster answers
+    // made the guard forget an address typed in the meantime, and Escape then
+    // closed without asking.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+      workspacesGate: gate,
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+
+    // Now the roster answers and seeds the workspace default.
+    release()
+    expect(await screen.findByLabelText("Production")).toBeChecked()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
     ).toBeInTheDocument()
   })
 

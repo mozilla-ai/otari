@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react"
+import { useCallback, useRef, useState } from "react"
 
 /**
  * Whether a form's draft still matches what it was seeded with.
@@ -18,10 +18,14 @@ import { useCallback, useRef } from "react"
  * explicit draft instead, which is what a form whose own default lands after
  * mount needs: that default is part of the seed rather than a change, and the
  * code that computes it holds the new value while the render it is in still
- * holds the old one. Seed it there, during the render that applies it, and not
- * from an effect: a ref write after the commit re-seeds nothing that has
- * already been rendered, so the guard stays armed until something else
- * re-renders.
+ * holds the old one. Call it there, during the render that applies the default:
+ * the seed is state, so a reset during render re-runs the component and the
+ * `isDirty` the caller receives is the corrected one. From an effect it also
+ * works, one render later.
+ *
+ * A reset during render has to be guarded by whatever made the default arrive
+ * (`if (!seeded && rows.length > 0)`), the same as any other set-state-while-
+ * rendering: unconditional, it is an endless render.
  *
  * `reset`'s identity is stable, so an effect may depend on it; a `reset` that
  * changed every render would re-seed on every render and the form would never
@@ -32,13 +36,22 @@ export function useDirtySnapshot(draft: unknown): {
   reset: (next?: unknown) => void
 } {
   const snapshot = JSON.stringify(draft)
-  const seeded = useRef(snapshot)
+  // State rather than a ref, so a reset during render corrects that render.
+  // Held in a ref it corrected nothing already rendered, and the two callers
+  // that appeared to work did so only because they set other state in the same
+  // block, which is what re-ran the component.
+  const [seed, setSeed] = useState(snapshot)
   // Read by `reset`, which has no dependencies and so cannot close over the
   // current render's snapshot.
   const latest = useRef(snapshot)
   latest.current = snapshot
+  // Not reflexive memoization, which the frontend standards rule out: the
+  // compiler memoizes nothing in this hook (it bails with "Cannot access refs
+  // during render" on the `latest` read above, measured with
+  // babel-plugin-react-compiler 1.0.0 against both this version and the one
+  // before it), so this `useCallback` is what actually keeps `reset` stable.
   const reset = useCallback((next?: unknown) => {
-    seeded.current = next === undefined ? latest.current : JSON.stringify(next)
+    setSeed(next === undefined ? latest.current : JSON.stringify(next))
   }, [])
-  return { isDirty: snapshot !== seeded.current, reset }
+  return { isDirty: snapshot !== seed, reset }
 }
