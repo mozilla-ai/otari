@@ -164,6 +164,7 @@ async def streaming_generator(
     settle_before_done: bool = False,
     is_cost_carrier: Callable[[Any], bool] | None = None,
     attach_settlement: Callable[[Any, S], bool] | None = None,
+    on_first_chunk: Callable[[], None] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -198,11 +199,16 @@ async def streaming_generator(
             object (a chat tool loop forwards one usage chunk per iteration) costs no
             buffering beyond the chunks between that match and the next one.
         attach_settlement: Mutates that carrier with the opaque settlement value.
+        on_first_chunk: Called synchronously, at most once, the moment the first
+            non-keepalive chunk is about to be formatted and yielded. Lets the
+            caller record time-to-first-token without this generator knowing
+            anything about how that timing gets used or persisted.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     has_usage = False
     settled = False
+    seen_first_chunk = False
     terminal_buffer: list[Any] = []
     cost_carrier: Any | None = None
     buffering_terminal = False
@@ -222,6 +228,10 @@ async def streaming_generator(
                 if chunk is _KEEPALIVE_DUE:
                     yield fmt.keepalive
                     continue
+                if not seen_first_chunk:
+                    seen_first_chunk = True
+                    if on_first_chunk is not None:
+                        on_first_chunk()
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
                     usage = _merge_usage(usage, chunk_usage)

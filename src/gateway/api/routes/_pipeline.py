@@ -2922,6 +2922,20 @@ def _elapsed_ms(started_at: float | None) -> int | None:
     return round((time.monotonic() - started_at) * 1000)
 
 
+def _ttft_ms(started_at: float | None, first_chunk_at: float | None) -> int | None:
+    """Milliseconds between ``started_at`` and the first streamed chunk.
+
+    Unlike ``_elapsed_ms`` this is not measured against "now": time-to-first-token
+    is fixed the moment the first chunk arrives, and every settlement callback
+    (on_complete, on_no_usage, on_error, on_incomplete) fires after the stream has
+    finished, when "now" is the wrong end of the interval. None when no chunk ever
+    arrived (a stream that failed before yielding anything has no TTFT to record).
+    """
+    if started_at is None or first_chunk_at is None:
+        return None
+    return round((first_chunk_at - started_at) * 1000)
+
+
 async def log_usage(
     db: AsyncSession,
     log_writer: LogWriter,
@@ -2936,6 +2950,7 @@ async def log_usage(
     status_code: int | None = None,
     cost_override: Decimal | float | None = None,
     latency_ms: int | None = None,
+    ttft_ms: int | None = None,
     counts_toward_budget: bool = True,
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
@@ -2977,6 +2992,8 @@ async def log_usage(
         cost_override: Fixed amount to record when billing without provider usage
         latency_ms: Total server-side request duration in milliseconds, or None
             when the caller has no meaningful duration to record
+        ttft_ms: Milliseconds from request start to the first streamed chunk, or
+            None for a non-streaming request or a stream that never yielded one
         attribution: Which routing policy produced this row and where in its plan,
             or None for a request that named a plain model
         workspace_id: The workspace already resolved for this request (from
@@ -3007,6 +3024,7 @@ async def log_usage(
         error_message=error,
         status_code=status_code,
         latency_ms=latency_ms,
+        ttft_ms=ttft_ms,
         counts_toward_budget=counts_toward_budget,
         policy_name=attribution.policy_name if attribution else None,
         selection_reason=attribution.selection_reason if attribution else None,
@@ -3611,6 +3629,11 @@ def build_streaming_response(
       reservation does not leak.
     """
     platform_active = platform_correlation_id is not None
+    first_chunk_at: float | None = None
+
+    def _on_first_chunk() -> None:
+        nonlocal first_chunk_at
+        first_chunk_at = time.monotonic()
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
         if platform_active:
@@ -3639,6 +3662,7 @@ def build_streaming_response(
             user_id=user_id,
             usage_override=usage_data,
             latency_ms=_elapsed_ms(started_at),
+            ttft_ms=_ttft_ms(started_at, first_chunk_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
             attribution=attribution,
             tool_tally=tool_tally,
@@ -3684,6 +3708,7 @@ def build_streaming_response(
                 endpoint=adapter.endpoint,
                 user_id=user_id,
                 latency_ms=_elapsed_ms(started_at),
+                ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=reservation.counts_toward_budget,
                 attribution=attribution,
                 tool_tally=tool_tally,
@@ -3711,6 +3736,7 @@ def build_streaming_response(
             error="stream completed without usage data" if policy == "fail" else None,
             cost_override=reservation.estimate,
             latency_ms=_elapsed_ms(started_at),
+            ttft_ms=_ttft_ms(started_at, first_chunk_at),
             counts_toward_budget=reservation.counts_toward_budget,
             attribution=attribution,
             tool_tally=tool_tally,
@@ -3756,6 +3782,7 @@ def build_streaming_response(
             error=str(exc),
             status_code=failure_status_code(exc),
             latency_ms=_elapsed_ms(started_at),
+            ttft_ms=_ttft_ms(started_at, first_chunk_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
             attribution=attribution,
             tool_tally=tool_tally,
@@ -3792,6 +3819,7 @@ def build_streaming_response(
                 user_id=user_id,
                 error="client disconnected before the stream completed",
                 latency_ms=_elapsed_ms(started_at),
+                ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
@@ -3834,6 +3862,7 @@ def build_streaming_response(
             settle_before_done=platform_active,
             is_cost_carrier=adapter.is_stream_cost_carrier if platform_active else None,
             attach_settlement=_attach_inline_cost if platform_active else None,
+            on_first_chunk=_on_first_chunk,
         ),
         media_type="text/event-stream",
         headers=headers,

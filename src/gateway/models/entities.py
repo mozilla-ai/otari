@@ -819,6 +819,11 @@ class UsageLog(Base):
     # provider-never-reached rejections) have no meaningful request duration.
     latency_ms: Mapped[int | None] = mapped_column()
 
+    # Milliseconds from request start to the first streamed chunk. Nullable:
+    # non-streaming requests have no first chunk, historical rows predate the
+    # column, and a stream that failed before yielding anything never reached one.
+    ttft_ms: Mapped[int | None] = mapped_column()
+
     api_key = relationship("APIKey", back_populates="usage_logs")
     user = relationship("User", back_populates="usage_logs")
 

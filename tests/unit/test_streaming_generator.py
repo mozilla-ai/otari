@@ -535,3 +535,64 @@ async def test_keepalives_do_not_mask_an_upstream_error() -> None:
     assert "server_error" in events[-2]
     assert events[-1] == "data: [DONE]\n\n"
     assert errors == [_PROVIDER_CRASHED]
+
+
+@pytest.mark.asyncio
+async def test_on_first_chunk_fires_once_on_the_first_real_chunk() -> None:
+    """``on_first_chunk`` fires exactly once, for a multi-chunk stream."""
+    calls = 0
+
+    def on_first_chunk() -> None:
+        nonlocal calls
+        calls += 1
+
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("hello", "world", "usage"),
+            format_chunk=_format_chunk,
+            extract_usage=_extract_usage,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=_noop_complete,
+            on_error=_fail_on_error,
+            label="test:model",
+            on_first_chunk=on_first_chunk,
+        )
+    ]
+
+    assert events == ["data: hello\n\n", "data: world\n\n", "data: usage\n\n", "data: [DONE]\n\n"]
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_on_first_chunk_is_not_triggered_by_keepalives() -> None:
+    """A keepalive is transport filler, not a chunk: it must not count as TTFT."""
+    release = asyncio.Event()
+    calls = 0
+
+    def on_first_chunk() -> None:
+        nonlocal calls
+        calls += 1
+
+    async def _slow_first_chunk() -> AsyncIterator[str]:
+        await release.wait()
+        yield "hello"
+
+    gen = streaming_generator(
+        stream=_slow_first_chunk(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+        on_first_chunk=on_first_chunk,
+    )
+
+    assert await gen.__anext__() == ": keepalive\n\n"
+    assert await gen.__anext__() == ": keepalive\n\n"
+    assert calls == 0
+    release.set()
+    assert await gen.__anext__() == "data: hello\n\n"
+    assert calls == 1
