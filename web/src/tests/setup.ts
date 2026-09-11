@@ -46,6 +46,14 @@ if (
   window.scrollTo = Object.assign(() => undefined, { __stubbed: true })
 }
 
+// jsdom implements no scrolling at all, so `scrollIntoView` is absent on every
+// element and a component that scrolls its own content into view throws in a
+// passive effect. A no-op is faithful (there is no viewport to scroll) and it is
+// spy-able, which is how the call itself is asserted.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => undefined
+}
+
 // jsdom has no canvas 2D context, no toBlob, no object URLs, no ClipboardItem and
 // no document.fonts, so nothing in lib/shareImage.ts can run for real here. These
 // stubs let the share panel mount and its wiring be asserted; the claim that the

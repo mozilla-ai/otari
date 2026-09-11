@@ -5,6 +5,7 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { GatewaySettings, OrganizationContext } from "@/client"
 import { PricingWarning } from "@/features/models/PricingWarning"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -43,18 +44,18 @@ function mockSettings(
       // it is what tells them whether this caller reads the deployment-wide
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return "failsWith" in context
           ? jsonResponse({ detail: "Not found" }, context.failsWith)
           : jsonResponse(context)
       }
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.includes("/v1/settings")) {
+      if (url.includes(`${API_ROOT}/settings`)) {
         if (method === "PATCH")
           current = { ...current, ...JSON.parse(String(init?.body)) }
         return jsonResponse(current)
       }
-      if (url.includes("/v1/usage/count")) {
+      if (url.includes(`${API_ROOT}/usage/count`)) {
         return jsonResponse({ total: rejectedInLastHour })
       }
       return jsonResponse({})
@@ -67,7 +68,7 @@ type FetchMock = ReturnType<typeof mockSettings>
 function countWindows(fetchMock: FetchMock): string[] {
   return fetchMock.mock.calls
     .map(([u]) => String(u))
-    .filter((u) => u.includes("/v1/usage/count"))
+    .filter((u) => u.includes(`${API_ROOT}/usage/count`))
     .map((u) => String(new URLSearchParams(u.split("?")[1]).get("start_date")))
 }
 
@@ -114,7 +115,8 @@ describe("PricingWarning", () => {
 
     const patch = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/settings") && (init?.method ?? "") === "PATCH",
+        String(u).includes(`${API_ROOT}/settings`) &&
+        (init?.method ?? "") === "PATCH",
     )
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
       default_pricing: true,
@@ -154,7 +156,7 @@ describe("PricingWarning", () => {
     // Counted from the error rows of the last hour, not from all usage.
     const countUrl = String(
       fetchMock.mock.calls.find(([u]) =>
-        String(u).includes("/v1/usage/count"),
+        String(u).includes(`${API_ROOT}/usage/count`),
       )?.[0],
     )
     expect(new URLSearchParams(countUrl.split("?")[1]).get("status")).toBe(
@@ -234,7 +236,9 @@ describe("PricingWarning", () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     expect(
-      fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/usage/count")),
+      fetchMock.mock.calls.some(([u]) =>
+        String(u).includes(`${API_ROOT}/usage/count`),
+      ),
     ).toBe(false)
   })
 
@@ -251,7 +255,9 @@ describe("PricingWarning", () => {
 
     await settleContext(client)
     expect(
-      fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/settings")),
+      fetchMock.mock.calls.some(([u]) =>
+        String(u).includes(`${API_ROOT}/settings`),
+      ),
     ).toBe(false)
     expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
   })
@@ -283,7 +289,7 @@ describe("PricingWarning", () => {
   })
 
   it("still alarms an operator whose organization context fails to load", async () => {
-    // `/v1/settings` refuses with a 403, not a 404, so a failed read of the
+    // /api/v1/settings refuses with a 403, not a 404, so a failed read of the
     // signal fails open the way an `operatorOnly: "refused"` rail row does
     // (`nav/types.ts`). The banner is the only thing reporting that the gateway
     // is dropping traffic, so withholding it on an unrelated failure strands the

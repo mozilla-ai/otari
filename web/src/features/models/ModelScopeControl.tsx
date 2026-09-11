@@ -1,11 +1,12 @@
 import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
+import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
+import { ControlField } from "@/design-system/forms/FieldMessages"
+import { DismissChip } from "@/design-system/indicators/DismissChip"
+import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { useDiscoverableModels } from "@/shared/api/models"
 import { useProviders } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
-import { ControlField } from "@/shared/components/forms/FieldMessages"
-import { DismissChip } from "@/shared/components/indicators/DismissChip"
-import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
 
 // The per-key model access-list is a tri-state:
 //   null  -> "any"   (unrestricted, the default)
@@ -203,7 +204,23 @@ export function ModelScopeControl({
                 <ComboBox.Trigger />
               </ComboBox.InputGroup>
               <ComboBox.Popover>
-                <ListBox items={visible} className="max-h-72 overflow-auto">
+                <ListBox
+                  items={visible}
+                  className="max-h-72 overflow-auto"
+                  renderEmptyState={() => (
+                    <ComboBoxEmpty
+                      isSourceEmpty={catalog.every((o) =>
+                        entries.includes(o.id),
+                      )}
+                      emptyMessage={
+                        catalog.length === 0
+                          ? "Looking for providers, models and aliases…"
+                          : "Everything discovered is already on the list."
+                      }
+                      noMatchesMessage="Nothing matches what you typed."
+                    />
+                  )}
+                >
                   {(option: CatalogOption) => (
                     <ListBoxItem id={option.id} textValue={option.label}>
                       {option.label}

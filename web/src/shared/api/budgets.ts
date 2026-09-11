@@ -30,7 +30,7 @@ async function fetchAllBudgets(): Promise<Budget[]> {
   const all: Budget[] = []
   for (let page = 0; page < BUDGETS_MAX_PAGES; page += 1) {
     const rows = await apiFetch<Budget[]>(
-      `/v1/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`,
+      `/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`,
     )
     all.push(...rows)
     if (rows.length < BUDGETS_PAGE_SIZE) {
@@ -60,7 +60,7 @@ export function useBudgetResetLogs(budgetId: string | null) {
     queryKey: [BUDGETS, budgetId, "reset-logs"],
     queryFn: () =>
       apiFetch<BudgetResetLog[]>(
-        `/v1/budgets/${encodeURIComponent(budgetId as string)}/reset-logs`,
+        `/budgets/${encodeURIComponent(budgetId as string)}/reset-logs`,
       ),
     enabled: budgetId !== null,
     staleTime: 60_000,
@@ -71,7 +71,7 @@ export function useCreateBudget() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateBudgetRequest) =>
-      apiFetch<Budget>("/v1/budgets", {
+      apiFetch<Budget>("/budgets", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -84,7 +84,7 @@ export function useUpdateBudget() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateBudgetRequest }) =>
-      apiFetch<Budget>(`/v1/budgets/${encodeURIComponent(id)}`, {
+      apiFetch<Budget>(`/budgets/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
@@ -97,7 +97,7 @@ export function useDeleteBudget() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/budgets/${encodeURIComponent(id)}`, {
+      apiFetch<void>(`/budgets/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     onSuccess: () =>
@@ -119,7 +119,7 @@ async function fetchAllScopedBudgets(): Promise<ScopedBudget[]> {
   const all: ScopedBudget[] = []
   for (let page = 0; page < SCOPED_BUDGETS_MAX_PAGES; page += 1) {
     const rows = await apiFetch<ScopedBudget[]>(
-      `/v1/scoped-budgets?skip=${page * SCOPED_BUDGETS_PAGE_SIZE}&limit=${SCOPED_BUDGETS_PAGE_SIZE}`,
+      `/scoped-budgets?skip=${page * SCOPED_BUDGETS_PAGE_SIZE}&limit=${SCOPED_BUDGETS_PAGE_SIZE}`,
     )
     all.push(...rows)
     if (rows.length < SCOPED_BUDGETS_PAGE_SIZE) {
@@ -143,7 +143,7 @@ export function useCreateScopedBudget() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateScopedBudgetRequest) =>
-      apiFetch<ScopedBudget>("/v1/scoped-budgets", {
+      apiFetch<ScopedBudget>("/scoped-budgets", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -162,7 +162,7 @@ export function useUpdateScopedBudget() {
       id: string
       body: UpdateScopedBudgetRequest
     }) =>
-      apiFetch<ScopedBudget>(`/v1/scoped-budgets/${encodeURIComponent(id)}`, {
+      apiFetch<ScopedBudget>(`/scoped-budgets/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
@@ -175,7 +175,7 @@ export function useDeleteScopedBudget() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/scoped-budgets/${encodeURIComponent(id)}`, {
+      apiFetch<void>(`/scoped-budgets/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     onSuccess: () =>
@@ -191,7 +191,7 @@ export function useDeleteScopedBudget() {
 // The organization's own budgets and spend ceilings
 //
 // The tenant-scoped counterpart to `useBudgets` / `useScopedBudgets` above,
-// which read `/v1/budgets` and `/v1/scoped-budgets` and have answered 403 to
+// which read `/budgets` and `/scoped-budgets` and have answered 403 to
 // anyone who does not operate the deployment since #821. These read the
 // caller's own organization instead, and are owner-or-admin on both halves:
 // unlike the rate overrides, a cap is a statement about what colleagues may
@@ -212,7 +212,7 @@ export function useOrganizationBudgets(enabled = true) {
     // server-side, and the cap is what would silently truncate a long-lived
     // organization's list.
     queryFn: () =>
-      fetchAllPaged<OrganizationBudget>("/v1/organizations/me/budgets"),
+      fetchAllPaged<OrganizationBudget>("/organizations/me/budgets"),
     staleTime: 60_000,
     enabled,
   })
@@ -223,7 +223,7 @@ export function useOrganizationSpendCeilings(enabled = true) {
     queryKey: [ORGANIZATION_SPEND_CEILINGS],
     queryFn: () =>
       fetchAllPaged<OrganizationSpendCeiling>(
-        "/v1/organizations/me/spend-ceilings",
+        "/organizations/me/spend-ceilings",
       ),
     staleTime: 60_000,
     enabled,
@@ -247,7 +247,7 @@ export function useCreateOrganizationBudget() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationBudget) =>
-      apiFetch<OrganizationBudget>("/v1/organizations/me/budgets", {
+      apiFetch<OrganizationBudget>("/organizations/me/budgets", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -269,7 +269,7 @@ export function useUpdateOrganizationBudget() {
       body: UpdateOrganizationBudget
     }) =>
       apiFetch<OrganizationBudget>(
-        `/v1/organizations/me/budgets/${encodeURIComponent(id)}`,
+        `/organizations/me/budgets/${encodeURIComponent(id)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
@@ -281,7 +281,7 @@ export function useDeleteOrganizationBudget() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/budgets/${encodeURIComponent(id)}`,
+        `/organizations/me/budgets/${encodeURIComponent(id)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
@@ -292,10 +292,10 @@ export function useCreateOrganizationSpendCeiling() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationSpendCeiling) =>
-      apiFetch<OrganizationSpendCeiling>(
-        "/v1/organizations/me/spend-ceilings",
-        { method: "POST", body: JSON.stringify(body) },
-      ),
+      apiFetch<OrganizationSpendCeiling>("/organizations/me/spend-ceilings", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
   })
 }
@@ -311,7 +311,7 @@ export function useUpdateOrganizationSpendCeiling() {
       body: UpdateOrganizationSpendCeiling
     }) =>
       apiFetch<OrganizationSpendCeiling>(
-        `/v1/organizations/me/spend-ceilings/${encodeURIComponent(id)}`,
+        `/organizations/me/spend-ceilings/${encodeURIComponent(id)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => invalidateOrganizationSpend(queryClient),
@@ -323,7 +323,7 @@ export function useDeleteOrganizationSpendCeiling() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/spend-ceilings/${encodeURIComponent(id)}`,
+        `/organizations/me/spend-ceilings/${encodeURIComponent(id)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrganizationSpend(queryClient),

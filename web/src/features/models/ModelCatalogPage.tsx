@@ -6,6 +6,17 @@ import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
 import type { CatalogModelSummary } from "@/client"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { TablePagination } from "@/design-system/data/TablePagination"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { Badge } from "@/design-system/indicators/Badge"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Segmented } from "@/design-system/navigation/Segmented"
 import {
   activeFilterCount,
   CAPABILITY_FILTERS,
@@ -27,20 +38,6 @@ import {
 } from "@/features/models/catalog"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { useCatalog } from "@/shared/api/models"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { TablePagination } from "@/shared/components/data/TablePagination"
-import { EmptyMessage } from "@/shared/components/feedback/EmptyMessage"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { Badge } from "@/shared/components/indicators/Badge"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
-import { Segmented } from "@/shared/components/navigation/Segmented"
 import {
   formatContext,
   formatRate,

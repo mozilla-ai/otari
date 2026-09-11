@@ -1,12 +1,11 @@
-import { Button } from "@heroui/react"
 import { useId, useState } from "react"
-
 import type { ToolSettingField } from "@/client"
+import { Button } from "@/design-system/actions/Button"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SettingRow } from "@/design-system/layout/SettingRow"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { useTestService } from "@/shared/api/tools"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { SettingRow } from "@/shared/components/layout/SettingRow"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
 // The control lane, one width for text and one for a number, and `scroll-mt-16`
@@ -454,7 +453,7 @@ export function ToolPriceRow({
             onKeyDown={commitOnEnter}
             onBlur={() => {
               if (invalid || trimmed === committed) return
-              // Blank cannot be sent: `/v1/pricing` only writes a rate, so
+              // Blank cannot be sent: `/pricing` only writes a rate, so
               // there is no way to make a priced tool unpriced again from
               // here. Putting the stored value back says that without a
               // message that would nag on every pass through the field.

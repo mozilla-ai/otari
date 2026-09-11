@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
 
 /**
  * Enter commits by leaving the field, so a keyboard save and a pointer save run

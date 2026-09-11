@@ -1,10 +1,21 @@
 import { Button, Chip } from "@heroui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import type {
   CreateOrganizationDomainRequest,
   OrganizationDomain,
 } from "@/client"
+import { CopyField } from "@/design-system/actions/CopyField"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Field } from "@/design-system/forms/Field"
+import { Select } from "@/design-system/forms/Select"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   useCreateOrganizationDomain,
   useDeleteOrganizationDomain,
@@ -13,19 +24,6 @@ import {
   useUpdateOrganizationDomain,
   useVerifyOrganizationDomain,
 } from "@/shared/api/organizations"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { CopyField } from "@/shared/components/actions/CopyField"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Field } from "@/shared/components/forms/Field"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage, membershipLabel } from "./roles"
@@ -71,10 +69,22 @@ const AUTO_JOIN_ROLE_OPTIONS = [
   { value: "viewer", label: "Viewer" },
 ]
 
-function ClaimForm({ onClose }: { onClose: () => void }) {
+function ClaimForm({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean
+  onClose: () => void
+}) {
   const create = useCreateOrganizationDomain()
   const [domain, setDomain] = useState("")
   const [role, setRole] = useState("member")
+  // One snapshot of everything the form owns, seeded on mount: dirty means
+  // "differs from what was seeded", and a field added to the form is added here
+  // or the guard cannot see it. A predicate of the fields had already forgotten
+  // `role`, so changing who joins and pressing Escape discarded it unguarded.
+  const draft = JSON.stringify({ domain, role })
+  const seededDraft = useRef(draft)
 
   const submit = () => {
     const body: CreateOrganizationDomainRequest = {
@@ -82,21 +92,24 @@ function ClaimForm({ onClose }: { onClose: () => void }) {
       default_role: role === "viewer" ? "viewer" : "member",
       enabled: true,
     }
-    create.mutate(body, {
-      onSuccess: () => {
-        setDomain("")
-        onClose()
-      },
-    })
+    create.mutate(body, { onSuccess: onClose })
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="sm"
+      title="New domain"
+      submitLabel="Claim domain"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={domain.trim() === ""}
+      isDirty={draft !== seededDraft.current}
+      error={create.error}
     >
-      <h2 className="text-title">Claim an email domain</h2>
-      <ErrorBanner error={create.error} />
       <Field
         label="Domain"
         value={domain}
@@ -106,30 +119,18 @@ function ClaimForm({ onClose }: { onClose: () => void }) {
         placeholder="example.com"
         description="The domain your colleagues' addresses end in. A whole address works too; only its domain is stored. Public providers like gmail.com can't be claimed."
       />
-      <FilterSelect
+      <Select
         label="They join as"
         value={role}
         onChange={setRole}
         options={AUTO_JOIN_ROLE_OPTIONS}
+        reserveMessage={false}
       />
       <p className="text-caption">
         Nothing happens until you publish the DNS record this creates and verify
         it. Anyone who already has an account joins on their next sign-in.
       </p>
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={domain.trim() === ""}
-          isPending={create.isPending}
-          onPress={submit}
-        >
-          Claim domain
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -194,6 +195,8 @@ export function OrganizationDomainsPage() {
   const update = useUpdateOrganizationDomain()
   const remove = useDeleteOrganizationDomain()
   const [adding, setAdding] = useState(false)
+  const [openCount, setOpenCount] = useState(0)
+  const [pendingDelete, setPendingDelete] = useState<OrganizationDomain>()
 
   const rows = domains.data?.data ?? []
   // Both states need the same card: one has never had a proof, the other's has
@@ -271,13 +274,13 @@ export function OrganizationDomainsPage() {
               {row.enabled ? "Pause" : "Resume"}
             </Button>
           ) : null}
-          <ConfirmButton
-            confirmLabel="Remove claim"
-            isPending={remove.isPending}
-            onConfirm={() => remove.mutate(row.id)}
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => setPendingDelete(row)}
           >
             Remove domain
-          </ConfirmButton>
+          </Button>
         </div>
       ),
     })
@@ -288,8 +291,15 @@ export function OrganizationDomainsPage() {
       <PageIntro
         title="Email domains"
         action={
-          canEdit && !adding ? (
-            <Button variant="primary" onPress={() => setAdding(true)}>
+          canEdit ? (
+            <Button
+              // Visible while the dialog is open: the dialog is over the page.
+              variant="primary"
+              onPress={() => {
+                setOpenCount((count) => count + 1)
+                setAdding(true)
+              }}
+            >
               Claim domain
             </Button>
           ) : null
@@ -301,9 +311,7 @@ export function OrganizationDomainsPage() {
         record is verified.
       </PageIntro>
 
-      <ErrorBanner
-        error={context.error ?? domains.error ?? update.error ?? remove.error}
-      />
+      <ErrorBanner error={context.error ?? domains.error ?? update.error} />
 
       {/* Held back until the context has answered, so an admin is not told for
           one paint that they may not be here. */}
@@ -313,7 +321,14 @@ export function OrganizationDomainsPage() {
         </InfoBanner>
       ) : null}
 
-      {adding ? <ClaimForm onClose={() => setAdding(false)} /> : null}
+      {/* Keyed on the open count, so each open remounts a blank form. Clearing
+          the draft on close instead would blank the fields while the dialog is
+          still animating away. */}
+      <ClaimForm
+        key={openCount}
+        isOpen={adding}
+        onClose={() => setAdding(false)}
+      />
 
       {pending.map((row) => (
         <PendingProof key={row.id} row={row} />
@@ -331,6 +346,32 @@ export function OrganizationDomainsPage() {
           />
         </TableScrollFrame>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out: a refusal otherwise sits on the mutation and
+        // greets the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
+        heading="Remove email domain"
+        body={
+          pendingDelete
+            ? `${pendingDelete.domain} stops admitting anyone to this organization. Members who already joined through it keep their membership, and claiming it again means proving the DNS record over.`
+            : null
+        }
+        confirmLabel="Remove claim"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
     </div>
   )
 }

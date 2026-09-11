@@ -34,6 +34,7 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     default_attempt_kwargs,
     prepare_gateway_tools,
+    provider_error_headers,
     raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
@@ -72,7 +73,10 @@ from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
-router = APIRouter(prefix="/v1", tags=["messages"])
+router = APIRouter(tags=["messages"])
+
+# See chat.USAGE_ENDPOINT.
+USAGE_ENDPOINT = "/v1/messages"
 
 
 def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -> list[str] | None:
@@ -263,11 +267,17 @@ def _is_minted_pair_member(
     return block_type == "mcp_tool_result" and block.get("tool_use_id") in minted_mcp_ids
 
 
-def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
+def _anthropic_error(
+    error_type: str,
+    message: str,
+    status_code: int,
+    headers: dict[str, str] | None = None,
+) -> HTTPException:
     """Create an HTTPException with Anthropic-style error body."""
     return HTTPException(
         status_code=status_code,
         detail={"type": "error", "error": {"type": error_type, "message": message}},
+        headers=headers,
     )
 
 
@@ -297,7 +307,7 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
 
     HTTPExceptions already carrying the Anthropic ``detail`` dict (raised via
     ``_anthropic_error``) pass through unchanged, so this is safe to apply to any
-    HTTPException on the ``/v1/messages`` path, including format-agnostic ones
+    HTTPException on the ``/api/v1/messages`` path, including format-agnostic ones
     raised by the hybrid preamble (platform resolve/auth) and the shared
     execution runners.
     """
@@ -319,6 +329,7 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.INVALID_REQUEST: _ERR_INVALID_REQUEST,
     ErrorKind.API: _ERR_API,
     ErrorKind.PERMISSION: _ERR_PERMISSION,
+    ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
 }
 
 
@@ -404,21 +415,32 @@ class _MessagesAdapter:
     """
 
     name = "messages"
-    endpoint = "/v1/messages"
+    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
     # A successful non-streaming call without provider usage data skips the
     # usage-log row (only the reservation is settled), matching the wire
     # behavior this endpoint has always had.
     log_success_without_usage = False
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
-        return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code)
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
+        return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
             error_type = _STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
-            return _anthropic_error(error_type, mapping.detail, mapping.status_code)
+            return _anthropic_error(
+                error_type,
+                mapping.detail,
+                mapping.status_code,
+                provider_error_headers(exc, mapping.status_code),
+            )
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def format_chunk(self, chunk: MessageStreamEvent) -> str:
@@ -678,7 +700,7 @@ async def create_message(
     except HTTPException as exc:
         # The hybrid preamble (platform resolve / auth) raises format-agnostic
         # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
-        # them in the Anthropic envelope so /v1/messages errors stay structured.
+        # them in the Anthropic envelope so /api/v1/messages errors stay structured.
         raise _ensure_anthropic_error(exc) from exc
 
     if request.container is not None and ctx.hybrid_mode:
@@ -879,7 +901,7 @@ async def count_message_tokens(
             # the plane a cookie may not reach, so it must not report on one.
             await verify_api_key_or_master_key(raw_request, db, config)
     except HTTPException as exc:
-        # Keep /v1/messages/count_tokens auth errors in the Anthropic envelope too.
+        # Keep count_tokens auth errors in the Anthropic envelope too.
         raise _ensure_anthropic_error(exc) from exc
 
     return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

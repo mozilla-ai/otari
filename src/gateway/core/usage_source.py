@@ -2,7 +2,7 @@
 
 The column carries provenance: the bare slug ``gateway`` for a request Otari served,
 and a source slug (``claude_code``, ``codex``) for usage imported through
-``POST /v1/usage/external-events``. Hosted history adds a third shape, because a row
+``POST /api/v1/usage/external-events``. Hosted history adds a third shape, because a row
 backfilled from otari.ai keeps its origin under a legacy prefix: traffic that
 deployment served itself arrives as ``otari-ai:gateway``, and usage a customer had
 imported there as ``otari-ai:claude_code``.

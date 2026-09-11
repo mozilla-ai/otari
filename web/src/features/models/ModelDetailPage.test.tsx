@@ -12,6 +12,7 @@ import type {
   OrganizationContext,
 } from "@/client"
 import { ModelDetailPage } from "@/features/models/ModelDetailPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -152,14 +153,15 @@ function mockApi(
   const context = options.context ?? organizationContext()
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
-    if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
+    if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
       return jsonResponse(GLM_DETAIL)
     }
-    if (url.includes("/v1/catalog/models/")) {
+    if (url.includes(`${API_ROOT}/catalog/models/`)) {
       return jsonResponse({ detail: "Model 'nope' not found" }, 404)
     }
-    if (url.includes("/v1/catalog/models")) return jsonResponse(catalog)
-    if (url.includes("/v1/organizations/me")) return jsonResponse(context)
+    if (url.includes(`${API_ROOT}/catalog/models`)) return jsonResponse(catalog)
+    if (url.includes(`${API_ROOT}/organizations/me`))
+      return jsonResponse(context)
     return jsonResponse([])
   })
 }
@@ -360,7 +362,7 @@ describe("ModelDetailPage", () => {
   it("says why an offering is unpriced when defaults are off", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
+      if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
         return jsonResponse({
           ...GLM_DETAIL,
           offerings: [
@@ -372,10 +374,10 @@ describe("ModelDetailPage", () => {
           ],
         })
       }
-      if (url.includes("/v1/catalog/models")) {
+      if (url.includes(`${API_ROOT}/catalog/models`)) {
         return jsonResponse({ ...CATALOG, default_pricing: false })
       }
-      if (url.includes("/v1/organizations/me"))
+      if (url.includes(`${API_ROOT}/organizations/me`))
         return jsonResponse(organizationContext())
       return jsonResponse([])
     })

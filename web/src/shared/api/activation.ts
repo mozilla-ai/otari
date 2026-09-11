@@ -31,7 +31,7 @@ export function useWorkspaceActivation(
     queryKey: [ACTIVATION, workspaceId],
     queryFn: () =>
       apiFetch<WorkspaceActivation>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/activation`,
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/activation`,
       ),
     enabled: enabled && workspaceId !== null,
     refetchInterval: (query) =>
@@ -51,7 +51,7 @@ export function useCreateActivationKey() {
   return useMutation({
     mutationFn: (workspaceId: string) =>
       apiFetch<ActivationApiKey>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/key`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/activation/key`,
         { method: "POST" },
       ),
     onSuccess: () => {
@@ -69,7 +69,7 @@ export function useDismissActivation() {
   return useMutation({
     mutationFn: (workspaceId: string) =>
       apiFetch<{ message: string }>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/dismiss`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/activation/dismiss`,
         { method: "POST" },
       ),
     onSuccess: () => {

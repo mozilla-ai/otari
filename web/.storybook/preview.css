@@ -1,0 +1,21 @@
+/*
+ * The catalog's stylesheet: the app's own, plus the source globs Tailwind cannot
+ * discover on its own here.
+ *
+ * Tailwind v4 detects content automatically, and that detection *respects
+ * gitignore*. The catalog is deliberately hidden from git (`.git/info/exclude`),
+ * so Tailwind skips every `*.stories.tsx` and this directory: any utility used
+ * only in a story is never generated, and a class that does not exist raises
+ * nothing at any stage. It renders as a silently collapsed layout -- `w-[60rem]`
+ * came out as 316px before this file existed.
+ *
+ * `@source` is the documented override. Declared here rather than in
+ * `globals.css` so the tracked stylesheet stays byte-identical to otari-ai's,
+ * which web/AGENTS.md asks for.
+ *
+ * `@source` paths are relative to this file.
+ */
+@import "../src/styles/globals.css";
+
+@source "../src/**/*.stories.tsx";
+@source "./*.tsx";

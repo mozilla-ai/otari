@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { OrgProviderKey, WorkspaceProviderKeyOverride } from "@/client"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
+import { API_ROOT } from "@/shared/api/client"
 import { orgProviderKey, workspaceProviderKeyOverride } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
 
@@ -70,11 +71,11 @@ function mockApi(
       const keyId = url.split("/provider-keys/")[1]?.split("/")[0] ?? ""
       return jsonResponse({ models: models[keyId] ?? [] })
     }
-    if (url.includes("/v1/workspaces/")) {
+    if (url.includes(`${API_ROOT}/workspaces/`)) {
       if (method !== "GET") return jsonResponse({ message: "ok" })
       return jsonResponse({ data: overrides })
     }
-    if (url.includes("/v1/organizations/me/provider-keys")) {
+    if (url.includes(`${API_ROOT}/organizations/me/provider-keys`)) {
       if (opts.keysRefusal) {
         return jsonResponse(
           { detail: opts.keysRefusal.detail },
@@ -147,7 +148,7 @@ describe("WorkspaceProviderKeys", () => {
 
     const removed = requests.find((request) => request.method === "DELETE")
     expect(removed?.url).toBe(
-      `/v1/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}/models/gpt-4o`,
+      `${API_ROOT}/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}/models/gpt-4o`,
     )
   })
 
@@ -164,7 +165,7 @@ describe("WorkspaceProviderKeys", () => {
 
     const added = requests.find((request) => request.method === "POST")
     expect(added?.url).toBe(
-      `/v1/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}/models`,
+      `${API_ROOT}/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}/models`,
     )
     expect(added?.body).toEqual({ model: "gpt-4o" })
   })
@@ -185,7 +186,7 @@ describe("WorkspaceProviderKeys", () => {
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toBe(
-      `/v1/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}`,
+      `${API_ROOT}/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}`,
     )
     expect(patch?.body).toEqual({ is_default: true })
   })
@@ -222,7 +223,7 @@ describe("WorkspaceProviderKeys", () => {
 
     const reset = requests.find((request) => request.method === "DELETE")
     expect(reset?.url).toBe(
-      `/v1/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}`,
+      `${API_ROOT}/workspaces/${WORKSPACE}/provider-keys/${OPENAI_KEY}`,
     )
   })
 

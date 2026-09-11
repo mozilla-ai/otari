@@ -3,10 +3,10 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { PricingResponse, PricingTier } from "@/client"
+import { ConfirmButton } from "@/design-system/actions/ConfirmButton"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { useDeletePricing, useSetPricing } from "@/shared/api/pricing"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
 import { formatRate } from "@/shared/helpers/format"
 
 // The one place a deployment rate is edited. It used to sit in the Models

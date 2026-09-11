@@ -79,14 +79,30 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    [typescript-and-react.md](../skills/frontend-standards/typescript-and-react.md) and
    [performance.md](../skills/frontend-standards/performance.md).
 
-6. **New code lands in a layer.** A domain's page and the parts only it uses go in
-   `web/src/features/<domain>/`; something no domain owns goes in `web/src/shared/`
-   (`components/`, `helpers/`, `api/`); test harnesses go in `web/src/tests/`; only
-   `web/src/app/` composes the tree. The layout mirrors `otari-ai/frontend/src`, so
-   prefer its names for a new directory. A feature may not
+6. **New code lands in a layer.** A presentational component with no knowledge of this
+   application goes in `web/src/design-system/<topic>/`; a domain's page and the parts only
+   it uses go in `web/src/features/<domain>/`; something no domain owns but that does read
+   the app goes in `web/src/shared/` (`components/`, `helpers/`, `api/`); test harnesses go
+   in `web/src/tests/`; only `web/src/app/` composes the tree. The layout mirrors
+   `otari-ai/frontend/src`, so prefer its names for a new directory. A feature may not
    import `app/`, and `shared/` may not import `features/` or `app/`. `pnpm --dir web run lint` (Biome)
    rejects both, so flag placement in review rather than leaving it to the lint to reject
    after the fact. Adding a directory directly under `src/` needs a rule to go with it.
+
+   **`design-system/` may import nothing else under `src/`**, which is the one layer rule
+   whose direction is "none" rather than "not upward": it is meant to leave as a package,
+   so it gets React, HeroUI, react-aria, react-icons, recharts, react-markdown and its own modules and
+   nothing more. In review, an import of `@/shared`, `@/features`, `@/app`, `@/routes` or
+   `@/client` from a file under `design-system/` is the finding, and the fix is not a
+   different import: the component reads the app, so it is an application component and
+   belongs in `shared/components/` composing the primitive. Likewise a primitive that
+   fetches, reads `useDeployment()`, or holds state a caller should own.
+
+   Reach for `Button` from `@/design-system/actions/Button` rather than `@heroui/react`.
+   The wrapper narrows the variant union to the three that exist, so a retired variant
+   (`outline`, `secondary`, `tertiary`, `danger-soft`) is a compile error rather than a
+   silently unstyled button. A new primitive owes a `.stories.tsx` beside it covering each
+   variant, which is what the published catalog renders.
 
 7. **A page composes; it does not also implement.** A dialog body, a second table, or a pure
    derivation added to a page file belongs in its own file in the same feature. A route file

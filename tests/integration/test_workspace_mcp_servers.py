@@ -53,6 +53,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerCreate,
     WorkspaceMcpServerService,
     WorkspaceMcpServerUpdate,
+    resolve_workspace_mcp_server,
     resolve_workspace_mcp_servers,
 )
 
@@ -881,3 +882,124 @@ async def test_mcp_server_ids_is_bounded_on_the_request() -> None:
             messages=[{"role": "user", "content": "hi"}],
             mcp_server_ids=[uuid.uuid4() for _ in range(MAX_MCP_SERVER_IDS + 1)],
         )
+
+
+# --------------------------------------------------------------------------- #
+# Single stored-server resolution, for the caller-orchestrated endpoints
+# --------------------------------------------------------------------------- #
+
+
+async def test_single_resolution_returns_the_stored_server_and_its_revision(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(
+        user=owner,
+        workspace_id=workspace.id,
+        request=_create(authorization_token="ghp_token", allowed_tools=["list_issues"], purpose_hint="Issues"),
+    )
+
+    resolved = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    assert resolved is not None
+    assert resolved.id == created.id
+    assert resolved.url == PUBLIC_URL
+    assert resolved.authorization_token == "ghp_token"
+    assert resolved.enabled is True
+    assert resolved.allowed_tools == ["list_issues"]
+    assert resolved.revision
+
+
+async def test_single_resolution_of_an_unchanged_server_is_stable(async_db: AsyncSession) -> None:
+    """R-RES-3: the revision has to survive being derived twice, on any worker."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create())
+
+    first = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+    second = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    assert first is not None and second is not None
+    assert first.revision == second.revision
+
+
+async def test_single_resolution_revision_moves_when_the_stored_url_changes(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create())
+    before = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    await service.update_server(
+        user=owner,
+        workspace_id=workspace.id,
+        server_id=created.id,
+        request=WorkspaceMcpServerUpdate(url=OTHER_PUBLIC_URL),
+    )
+    after = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    assert before is not None and after is not None
+    assert before.revision != after.revision
+
+
+async def test_single_resolution_revision_ignores_a_rename(async_db: AsyncSession) -> None:
+    """Retitling a server must not invalidate an authorization already granted."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create())
+    before = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    await service.update_server(
+        user=owner,
+        workspace_id=workspace.id,
+        server_id=created.id,
+        request=WorkspaceMcpServerUpdate(name="github-enterprise", purpose_hint="Tickets"),
+    )
+    after = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    assert before is not None and after is not None
+    assert before.revision == after.revision
+
+
+async def test_single_resolution_reports_a_disabled_server_rather_than_skipping_it(async_db: AsyncSession) -> None:
+    """The plural resolver drops a disabled server; this one has to name it.
+
+    The stored-server endpoints answer a disabled server with a 404 that both
+    modes share, and a resolver that silently returned nothing would be
+    indistinguishable from an id belonging to another workspace.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create(enabled=False))
+
+    resolved = await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=created.id)
+
+    assert resolved is not None
+    assert resolved.enabled is False
+
+
+async def test_single_resolution_of_another_workspaces_server_finds_nothing(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    first = await _workspace(async_db, organization, name="First", owner=owner)
+    second = await _workspace(async_db, organization, name="Second", owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(user=owner, workspace_id=first.id, request=_create())
+
+    assert await resolve_workspace_mcp_server(async_db, workspace_id=second.id, server_id=created.id) is None
+
+
+async def test_single_resolution_of_an_unknown_id_finds_nothing(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+
+    assert await resolve_workspace_mcp_server(async_db, workspace_id=workspace.id, server_id=uuid.uuid4()) is None

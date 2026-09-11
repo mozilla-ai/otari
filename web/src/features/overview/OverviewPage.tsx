@@ -4,6 +4,18 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
+import { RefreshButton } from "@/design-system/actions/RefreshButton"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { Sparkline } from "@/design-system/metrics/charts"
+import { KpiCell } from "@/design-system/metrics/KpiCell"
+import { KpiStrip } from "@/design-system/metrics/KpiStrip"
+import { SpendMeter } from "@/design-system/metrics/SpendMeter"
+import { TrendChip } from "@/design-system/metrics/TrendChip"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
@@ -25,21 +37,6 @@ import {
 } from "@/shared/api/usage"
 import { useUsers } from "@/shared/api/users"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
-import { RefreshButton } from "@/shared/components/actions/RefreshButton"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { Sparkline } from "@/shared/components/metrics/charts"
-import { KpiCell } from "@/shared/components/metrics/KpiCell"
-import { KpiStrip } from "@/shared/components/metrics/KpiStrip"
-import { SpendMeter } from "@/shared/components/metrics/SpendMeter"
-import { TrendChip } from "@/shared/components/metrics/TrendChip"
 import {
   deltaFraction,
   formatNumber,
@@ -329,7 +326,7 @@ function UsageKpiCells({
  * nav rail take the same answer from, so nothing on screen can hold a different
  * one (otari-ai#1936). Two sources compose into a page that reports nothing
  * while being wrong: the deployment-wide panels beside usage tiles quietly
- * reading `/v1/organizations/me/usage`, every number disagreeing with its
+ * reading `/organizations/me/usage`, every number disagreeing with its
  * neighbor and each query happy with its own. It also costs no request, since
  * the shell reads this context before it paints.
  *
@@ -363,7 +360,7 @@ export function OverviewIndex() {
  * (otari-ai#1946), so this is a real page rather than a card apologizing for
  * the operator one (otari-ai#1929), and it is built from the same primitives:
  * the usage cells, the spend chart, the recent-request preview and the rail,
- * served by the scope-aware hooks, which read `/v1/organizations/me/...` for
+ * served by the scope-aware hooks, which read `/organizations/me/...` for
  * this caller. The server narrows those rows to what the caller may read (their
  * organization for an admin, the workspaces they belong to for a member;
  * otari#837), so nothing here re-derives roles for them.
@@ -386,7 +383,7 @@ function OrganizationOverview() {
   const managesSpend = canManage(context.data)
   const ceilings = useOrganizationSpendCeilings(managesSpend)
   // What this caller could route a request to, which is the setup guide's gate
-  // here: `/v1/providers`, the operator page's answer to the same question,
+  // here: `/providers`, the operator page's answer to the same question,
   // refuses this caller. The catalog is not operator-gated and is filtered to
   // the selectors this caller may name, the deployment's configured instances
   // plus their organization's own keys, so an empty one means there is nothing
@@ -394,7 +391,7 @@ function OrganizationOverview() {
   // guide is about one.
   const models = useModels(scope !== undefined)
   // The two rail counts, both on surfaces this caller already reads:
-  // `useKeys` picks `/v1/organizations/me/keys` for a non-operator
+  // `useKeys` picks `/organizations/me/keys` for a non-operator
   // (otari-ai#1941), and a workspace's roster is readable by any member of it.
   const keys = useKeys(scope)
   const members = useWorkspaceMembers(scope ?? null)
@@ -822,7 +819,7 @@ function OverviewHeader({
 // available here" panel.
 //
 // Only correct for *adding* one, which is why provider health does not use it:
-// `/v1/providers/health` reports on `config.providers`, the process-global
+// `/providers/health` reports on `config.providers`, the process-global
 // table, so on a hosted deployment an unreachable instance is not a row the
 // organization page could show. `AttentionStrip` drops the link there rather
 // than sending somebody to a page the instance is not on.

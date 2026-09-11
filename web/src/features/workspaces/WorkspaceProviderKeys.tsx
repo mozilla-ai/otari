@@ -2,6 +2,10 @@ import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrgProviderKey, WorkspaceProviderKeyOverride } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Field } from "@/design-system/forms/Field"
+import { DismissChip } from "@/design-system/indicators/DismissChip"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { useOrgProviderKeys } from "@/shared/api/organizations"
 import {
   useAddWorkspaceProviderKeyModel,
@@ -11,10 +15,6 @@ import {
   useWorkspaceProviderKeyModels,
   useWorkspaceProviderKeys,
 } from "@/shared/api/workspaces"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { Field } from "@/shared/components/forms/Field"
-import { DismissChip } from "@/shared/components/indicators/DismissChip"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 /**
  * One workspace's departures from the provider keys its organization holds.
@@ -34,7 +34,7 @@ import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
  * means every model that key serves. It is what
  * `services/tenancy/organization_model_access.py` reads when it builds a
  * session's catalog scope, so emptying a workspace's catalog here also takes
- * `/v1/models` down to nothing for it, and with it the first-request setup guide
+ * `/models` down to nothing for it, and with it the first-request setup guide
  * that asks the same endpoint whether a call could succeed (#980).
  */
 
@@ -130,7 +130,7 @@ function ModelAllowList({
         </ul>
       )}
       {/* A text input rather than a picker over the catalog: the only listing a
-          tenant may read is `/v1/models`, which is already filtered through
+          tenant may read is `/models`, which is already filtered through
           these very restrictions, so a picker built on it would stop offering
           the models this control exists to add back. */}
       <div className="flex items-end gap-2">

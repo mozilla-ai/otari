@@ -1,6 +1,6 @@
 """The caller's own organization's usage, for a tenant who does not operate the deployment.
 
-``/v1/usage`` is deployment-wide and has been operator-only since #821, which
+``/api/v1/usage`` is deployment-wide and has been operator-only since #821, which
 was right: it reads every tenant's rows and its ``workspace_id`` parameter is a
 filter the client supplies, so nothing but the operator gate stands between a
 signed-in member and another organization's traffic. On a deployment serving
@@ -9,7 +9,7 @@ ordinary case, with no endpoint a member is allowed to call at all
 (mozilla-ai/otari#837).
 
 The answer is not a looser gate on that router. A mode that widened
-``/v1/usage`` for a non-operator would inherit its client-supplied
+``/api/v1/usage`` for a non-operator would inherit its client-supplied
 ``workspace_id`` and rebuild the escalation #821 closed. So the deployment-wide
 routes keep the gate they have, unchanged, and this router is a second, narrower
 reading of the same rows:
@@ -18,7 +18,7 @@ reading of the same rows:
   ``active_organization_id`` by way of ``resolve_visible_workspace_scope``,
   which refuses a pointer with no live membership behind it. No request here
   names an organization. Moving between organizations is
-  ``POST /v1/organizations/me/switch``, which 404s on one the caller does not
+  ``POST /api/v1/organizations/me/switch``, which 404s on one the caller does not
   belong to.
 * **How much of the organization** follows the rule the workspace list already
   uses: an owner, an admin or a superuser reads every workspace in it, and a
@@ -31,7 +31,7 @@ reading of the same rows:
   404 exactly as a workspace that does not exist does.
 
 Reads only. Deleting rows and repricing them stay deployment-wide, as does
-``/v1/usage/in-flight``: its registry entries carry no workspace at all
+``/api/v1/usage/in-flight``: its registry entries carry no workspace at all
 (see ``usage.list_in_flight``), so there is nothing there to scope yet.
 
 Every aggregation is the one ``usage.py`` already runs. This module contributes
@@ -92,9 +92,9 @@ from gateway.services.tenancy.authorization import (
 )
 
 router = APIRouter(
-    prefix="/v1/organizations/me/usage",
+    prefix="/organizations/me/usage",
     tags=["organization-usage"],
-    # Authentication only, like the rest of the ``/v1/organizations/me`` surface.
+    # Authentication only, like the rest of the ``/api/v1/organizations/me`` surface.
     # What the caller may read is decided per request by the scope below, which
     # is the pattern the tenant-scoped routers already follow and the reason the
     # deployment operator gate does not belong here.
@@ -185,7 +185,7 @@ async def list_organization_usage(
 ) -> list[UsageEntry]:
     """List the caller's organization's usage logs, most recent first.
 
-    The tenant-scoped counterpart of ``GET /v1/usage``: same filters, same bare
+    The tenant-scoped counterpart of ``GET /api/v1/usage``: same filters, same bare
     JSON array, same separate ``/count`` for a paginator's total, confined to
     what the caller's membership lets them see. Scope is never a parameter here.
     """
@@ -253,7 +253,7 @@ async def count_organization_usage(
     Serves the paginator's "N of M" beside the list above, and is scoped the
     same way, so the total can never describe more rows than the list will show.
 
-    Unlike the deployment-wide ``GET /v1/usage/count``, ``counts_toward_budget=false``
+    Unlike the deployment-wide ``GET /api/v1/usage/count``, ``counts_toward_budget=false``
     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
     this surface has none. So this total keeps matching the list beside it.
     """
@@ -306,7 +306,7 @@ async def organization_usage_summary(
 ) -> UsageSummary:
     """Aggregate spend, tokens and request volume for the caller's organization.
 
-    The tenant-scoped counterpart of ``GET /v1/usage/summary``, running the same
+    The tenant-scoped counterpart of ``GET /api/v1/usage/summary``, running the same
     aggregation over a narrower row set: the same bounded window, the same
     breakdowns, the same ``dimensions`` selector for paying only for the passes a
     caller reads. The breakdown by user names the people inside the caller's own
@@ -369,7 +369,7 @@ async def organization_usage_series(
 ) -> UsageGroupedSeries:
     """Time series split by one dimension, for the caller's organization.
 
-    The tenant-scoped counterpart of ``GET /v1/usage/series``, and kept in
+    The tenant-scoped counterpart of ``GET /api/v1/usage/series``, and kept in
     lockstep with the summary above for the reason that endpoint gives: the
     dashboard serializes one filter object for both, so a filter one of them
     ignored would make the stacked chart disagree with the tiles beside it.

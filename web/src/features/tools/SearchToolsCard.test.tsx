@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { SearchProviderInfo, SearchToolsResponse } from "@/client"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
+import { API_ROOT } from "@/shared/api/client"
 import { pickOption } from "@/tests/select"
 
 const PROVIDERS: SearchProviderInfo[] = [
@@ -84,10 +85,10 @@ function mockApi(opts: MockOpts = {}) {
     .mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.includes("/v1/search-tools/providers")) {
+      if (url.includes(`${API_ROOT}/search-tools/providers`)) {
         return jsonResponse(opts.providers ?? PROVIDERS)
       }
-      if (url.includes("/v1/search-tools")) {
+      if (url.includes(`${API_ROOT}/search-tools`)) {
         if (method !== "GET") {
           if (opts.writeStatus && opts.writeStatus >= 400) {
             return jsonResponse(
@@ -138,14 +139,14 @@ describe("SearchToolsCard", () => {
 
   it("does not read a failed request as an empty deployment", async () => {
     // `isLoading` goes false with no data behind it, so the fallback would
-    // otherwise claim no tools are configured and that POST /v1/search refuses
+    // otherwise claim no tools are configured and that POST /api/v1/search refuses
     // every request, on a read that never answered.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/search-tools/providers")) {
+      if (url.includes(`${API_ROOT}/search-tools/providers`)) {
         return jsonResponse(PROVIDERS)
       }
-      if (url.includes("/v1/search-tools")) {
+      if (url.includes(`${API_ROOT}/search-tools`)) {
         return jsonResponse({ detail: "boom" }, 500)
       }
       return jsonResponse([])
@@ -291,10 +292,10 @@ describe("SearchToolsCard", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.includes("/v1/search-tools/providers")) {
+      if (url.includes(`${API_ROOT}/search-tools/providers`)) {
         return jsonResponse(PROVIDERS)
       }
-      if (url.includes("/v1/search-tools") && method === "PATCH") {
+      if (url.includes(`${API_ROOT}/search-tools`) && method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>
         bodies.push(body)
         return jsonResponse({
@@ -324,22 +325,34 @@ describe("SearchToolsCard", () => {
     expect(bodies[1].api_key).toBe("sk-second")
   })
 
-  it("removes a tool after the confirm step", async () => {
+  it("removes a tool only through the confirm dialog", async () => {
+    // otari-ai#2110. The trigger names the object and the dialog names the
+    // consequence, which the armed button had no room to say.
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderOpened(user)
     await screen.findByText("local")
 
-    // The two steps read differently now: the trigger names the object and the
-    // armed confirm names the consequence, which is what the second click does.
-    await user.click(screen.getByRole("button", { name: "Remove" }))
-    await user.click(screen.getByRole("button", { name: "Remove permanently" }))
+    await user.click(screen.getByRole("button", { name: "Remove local" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/local and the key stored with it/),
+    ).toBeVisible()
+    expect(
+      fetchMock.mock.calls.some(
+        ([, init]) => (init?.method ?? "") === "DELETE",
+      ),
+    ).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove permanently" }),
+    )
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([, init]) => (init?.method ?? "") === "DELETE",
       )
-      expect(String(call?.[0])).toContain("/v1/search-tools/local")
+      expect(String(call?.[0])).toContain(`${API_ROOT}/search-tools/local`)
     })
   })
 })

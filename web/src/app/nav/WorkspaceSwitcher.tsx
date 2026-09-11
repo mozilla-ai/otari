@@ -1,7 +1,9 @@
-import { Button, Modal, Popover } from "@heroui/react"
+import { Button, Popover } from "@heroui/react"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiCheck, FiChevronDown, FiMail, FiPlus } from "react-icons/fi"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { ProductMark } from "@/design-system/ProductMark"
 import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import { CreateWorkspaceForm } from "@/features/workspaces/WorkspacesPage"
@@ -11,8 +13,6 @@ import {
   usePendingOrganizationInvitations,
   useSwitchOrganization,
 } from "@/shared/api/organizations"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { ProductMark } from "@/shared/components/ProductMark"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { NAV_TRANSITION, navBandRowClass, navIndicatorClass } from "./rowStyles"
 
@@ -88,6 +88,22 @@ export function WorkspaceSwitcher({
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [creatingOrganization, setCreatingOrganization] = useState(false)
+  // Bumped on each open, and the create form is keyed on it, so the draft is
+  // fresh every time and untouched through the exit: the dialog keeps its
+  // content while it animates out, so clearing on the way out would blank the
+  // body in front of the operator. See feedback.md, "A draft is fresh on every
+  // open and untouched through the exit".
+  const [creatingCount, setCreatingCount] = useState(0)
+  const openCreateWorkspace = () => {
+    setOpen(false)
+    setCreatingCount((n) => n + 1)
+    setCreating(true)
+  }
+  const [creatingOrganizationCount, setCreatingOrganizationCount] = useState(0)
+  const openCreateOrganization = () => {
+    setCreatingOrganizationCount((n) => n + 1)
+    setCreatingOrganization(true)
+  }
   // Owners and admins only, which is what the server says of
   // `POST /v1/workspaces` and what the Workspaces page gates its own create
   // control on. Without it a member or a viewer is handed the whole form from
@@ -317,10 +333,7 @@ export function WorkspaceSwitcher({
               <button
                 type="button"
                 className={`${MENU_ROW} font-semibold text-muted hover:bg-surface-alt hover:text-foreground`}
-                onClick={() => {
-                  setOpen(false)
-                  setCreating(true)
-                }}
+                onClick={openCreateWorkspace}
               >
                 <PlusMark />
                 <span className="min-w-0 flex-1 truncate">
@@ -337,7 +350,7 @@ export function WorkspaceSwitcher({
               className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
               onClick={() => {
                 setOpen(false)
-                setCreatingOrganization(true)
+                openCreateOrganization()
               }}
             >
               <PlusMark />
@@ -348,73 +361,41 @@ export function WorkspaceSwitcher({
           </Popover.Dialog>
         </Popover.Content>
       </Popover>
-      {/* Reuses the Workspaces page's own form rather than restating its fields:
-          the popover has no room for a form, and it dismisses on the first click
-          outside itself, which a name field cannot survive. */}
-      <Modal isOpen={creating} onOpenChange={setCreating}>
-        {/* The menu row is the trigger, and it lives inside a popover that has
-            already dismissed by the time this opens, so the modal is driven from
-            state instead. HeroUI still renders a press responder for the trigger
-            slot and warns when nothing fills it, which is why this is hidden
-            rather than absent; `SettingsPage` does the same for its own dialog. */}
-        <Modal.Trigger className="hidden">Create workspace</Modal.Trigger>
-        {/* An explicit dim: HeroUI maps `--backdrop` to opaque black, which the
-            AlertDialog softens itself and the Modal does not, so without this the
-            page behind the form goes fully black. */}
-        <Modal.Backdrop className="bg-backdrop/50">
-          {/* A fixed width, not the content's own. The container is the
-              `sm:w-fit` element and `size="md"` only caps the dialog at
-              `max-w-md`, so the modal was as wide as whatever was in it: a
-              message longer than the fields made it jump out to the cap the
-              moment one appeared. 28rem is that cap, so this pins the width it
-              was already growing to, and the dialog's own `w-full` fills it.
-              Below `sm` the container is `w-full` and this does not apply. */}
-          <Modal.Container
-            placement="center"
-            size="md"
-            className="sm:w-[28rem]"
-          >
-            <Modal.Dialog aria-label="Create workspace" className="p-0">
-              <CreateWorkspaceForm
-                onClose={() => setCreating(false)}
-                // Creating from the scope switcher is a request to work in the
-                // new workspace, so the flow ends inside it rather than back on
-                // the page it was started from: the shell's scope moves, and the
-                // overview is where that scope reads. Selecting by id is enough
-                // even though the switcher's list comes from the organization
-                // context: the mutation invalidates that context, and the
-                // selection resolves against the membership as soon as it
-                // arrives. Navigating also leaves whatever organization-scoped
-                // page the operator was on, which the new scope does not apply
-                // to.
-                onCreated={(workspace) => {
-                  select(workspace.id)
-                  void navigate({ to: "/" })
-                }}
-                hold={createHold}
-              />
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
-      {/* Its own modal rather than one dialog switching on which row opened it:
-          the two forms share no field, and a single state would have to encode
-          "which" as well as "open". */}
-      <Modal
+      {/* Both entry points from this menu open the dialog every create in the
+          dashboard opens in, rather than a Modal wrapped by hand here: the two
+          forms were already the page's, and what was local was the frame. */}
+      {/* Keyed on an open counter like its sibling below: nothing here unmounts
+          either form, so the remount on the way in is what clears the draft,
+          and with it the `holding` flag a create that navigates leaves set. An
+          unkeyed mount leaves the next open spinning, its Cancel and Close
+          disabled. */}
+      <CreateWorkspaceForm
+        // Namespaced, not the bare counter: the two forms are siblings and both
+        // counters start at 0, so bare numbers collide on every open where they
+        // match and React resolves its sibling key map last-write-wins.
+        key={`workspace-${creatingCount}`}
+        isOpen={creating}
+        onClose={() => setCreating(false)}
+        // Creating from the scope switcher is a request to work in the new
+        // workspace, so the flow ends inside it rather than back on the page it
+        // was started from: the shell's scope moves, and the overview is where
+        // that scope reads. Selecting by id is enough even though the switcher's
+        // list comes from the organization context: the mutation invalidates
+        // that context, and the selection resolves against the membership as
+        // soon as it arrives. Navigating also leaves whatever
+        // organization-scoped page the operator was on, which the new scope does
+        // not apply to.
+        onCreated={(workspace) => {
+          select(workspace.id)
+          void navigate({ to: "/" })
+        }}
+        hold={createHold}
+      />
+      <CreateOrganizationForm
+        key={`organization-${creatingOrganizationCount}`}
         isOpen={creatingOrganization}
-        onOpenChange={setCreatingOrganization}
-      >
-        <Modal.Trigger className="hidden">Create organization</Modal.Trigger>
-        <Modal.Backdrop className="bg-backdrop/50">
-          <Modal.Container placement="center" size="md">
-            <Modal.Dialog aria-label="Create organization" className="p-0">
-              <CreateOrganizationForm
-                onClose={() => setCreatingOrganization(false)}
-              />
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
+        onClose={() => setCreatingOrganization(false)}
+      />
     </>
   )
 }

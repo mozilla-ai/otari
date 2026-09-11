@@ -1,7 +1,7 @@
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { ModelCatalogView } from "@/features/models/ModelCatalogPage"
 import { ModelDetailView } from "@/features/models/ModelDetailPage"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 
 // The catalog ahead of a session, where the deployment has opened it
 // (`public_catalog`). Rendered by `DeploymentRoot` before the auth gate, like

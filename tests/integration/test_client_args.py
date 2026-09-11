@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
 from .conftest import build_test_client
 
@@ -57,7 +57,7 @@ async def test_client_args_passed_to_acompletion(
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
     response = client_with_client_args.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -65,7 +65,7 @@ async def test_client_args_passed_to_acompletion(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client_with_client_args.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -96,7 +96,7 @@ async def test_provider_config_without_client_args(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],

@@ -1,4 +1,8 @@
 import type { UpdateWorkspaceWebSearchConfigRequest } from "@/client"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { SettingRow } from "@/design-system/layout/SettingRow"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
   ceilingParser,
@@ -13,10 +17,6 @@ import {
   useSetWorkspaceWebSearchConfig,
   useWorkspaceWebSearchConfig,
 } from "@/shared/api/tools"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { SettingRow } from "@/shared/components/layout/SettingRow"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
@@ -73,7 +73,7 @@ const parseDomains: Parse<string[] | null> = (raw) => {
  * Whether requests billed to this workspace may search the web, and how far a
  * search may reach.
  *
- * Blocking covers both doors: the `otari_web_search` tool and `POST /v1/search`.
+ * Blocking covers both doors: the `otari_web_search` tool and `POST /api/v1/search`.
  * The rest narrows the in-loop tool only. Nothing here grants a backend the
  * deployment has not configured, and nothing here holds a credential.
  */
@@ -169,14 +169,14 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
           <InfoBanner>
             This deployment has no in-loop search backend configured, so
             otari_web_search is unavailable here whatever this workspace allows.
-            Blocking still takes effect on POST /v1/search.
+            Blocking still takes effect on POST /api/v1/search.
           </InfoBanner>
         </div>
       ) : null}
 
       <SettingRow
         label="Web search"
-        help="Allow or block the otari_web_search tool and POST /v1/search for requests billed here."
+        help="Allow or block the otari_web_search tool and POST /api/v1/search for requests billed here."
         error={
           stanceSave.error ||
           (query.isError
@@ -192,9 +192,9 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
               { value: "default", label: "Deployment default" },
               { value: "allowed", label: "Allowed" },
               // Named for what it covers: an admin choosing this is also
-              // switching off the workspace's POST /v1/search calls, which
+              // switching off the workspace's POST /api/v1/search calls, which
               // "Blocked" alone would not have told them.
-              { value: "blocked", label: "Blocked (tool and /v1/search)" },
+              { value: "blocked", label: "Blocked (tool and /api/v1/search)" },
             ]}
             disabled={unreadable || stanceSave.isSaving}
           />

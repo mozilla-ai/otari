@@ -53,6 +53,9 @@ function mockApi(
     memberships?: CallerOrganizationMembership[]
     context?: Parameters<typeof organizationContext>[0]
     switchFails?: boolean
+    // Holds the switch in flight, so the created step's pending line can be
+    // read before the refusal lands.
+    switchGate?: Promise<unknown>
     pendingInvitations?: PendingOrganizationInvitation[]
     pendingInvitationsFail?: boolean
   } = {},
@@ -71,14 +74,14 @@ function mockApi(
       method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
-    if (url.startsWith("/v1/budgets")) {
+    if (url.startsWith("/budgets")) {
       return [] as never
     }
-    if (url === "/v1/workspaces" && method === "POST") {
+    if (url === "/workspaces" && method === "POST") {
       createdWorkspace = true
       return workspace({ id: CREATED_WORKSPACE_ID, name: "Staging" }) as never
     }
-    if (url === "/v1/organizations/me") {
+    if (url === "/organizations/me") {
       const base = organizationContext(options.context)
       if (!createdWorkspace) return base as never
       return {
@@ -93,24 +96,34 @@ function mockApi(
         ],
       } as never
     }
-    if (url.startsWith("/v1/organizations/me/pending-memberships")) {
+    if (url.startsWith("/organizations/me/pending-memberships")) {
       if (options.pendingInvitationsFail) {
         throw new apiClient.ApiError(404, "Not found")
       }
       const pending = options.pendingInvitations ?? []
       return { data: pending, count: pending.length } as never
     }
-    if (url.startsWith("/v1/organizations/me/memberships")) {
+    if (url.startsWith("/organizations/me/memberships")) {
       return { data: memberships, count: memberships.length } as never
     }
-    if (url === "/v1/organizations/me/switch") {
+    if (url === "/organizations/me/switch") {
+      if (options.switchGate) await options.switchGate
       if (options.switchFails) {
         throw new apiClient.ApiError(404, "Organization not found")
       }
       return organizationContext() as never
     }
-    if (url === "/v1/organizations") {
-      return organization({ id: SECOND_ORGANIZATION_ID }) as never
+    if (url === "/organizations") {
+      // Echoes the posted name, as the server does: the created step names the
+      // organization back to the operator, so a fixture name would let that
+      // copy pass while showing the wrong one.
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as { name?: string })
+        : {}
+      return organization({
+        id: SECOND_ORGANIZATION_ID,
+        ...(body.name ? { name: body.name } : {}),
+      }) as never
     }
     return organizationContext(options.context) as never
   })
@@ -170,7 +183,7 @@ describe("the organization half of the scope switcher", () => {
     )
 
     const posted = requests.find((request) => request.method === "POST")
-    expect(posted?.url).toBe("/v1/organizations/me/switch")
+    expect(posted?.url).toBe("/organizations/me/switch")
     expect(posted?.body).toEqual({ organization_id: SECOND_ORGANIZATION_ID })
   })
 
@@ -204,6 +217,32 @@ describe("the organization half of the scope switcher", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
+  it("offers a fresh draft on each open of the organization form", async () => {
+    // Reset on the way in, not on the way out: the dialog keeps its content
+    // while it animates out, so clearing on close blanks the body in front of
+    // the operator. The switcher keys the form on an open counter instead.
+    mockApi()
+    await renderSwitcher()
+
+    const { user, menu } = await openMenu()
+    await user.click(
+      within(menu).getByRole("button", { name: /Create organization/ }),
+    )
+    await user.type(await screen.findByLabelText(/Name/), "half-typed")
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    const reopened = await openMenu()
+    await reopened.user.click(
+      within(reopened.menu).getByRole("button", {
+        name: /Create organization/,
+      }),
+    )
+    expect(await screen.findByLabelText(/Name/)).toHaveValue("")
+  })
+
   it("creates an organization and moves into it", async () => {
     const requests = mockApi()
     await renderSwitcher()
@@ -220,13 +259,93 @@ describe("the organization half of the scope switcher", () => {
 
     const posts = requests.filter((request) => request.method === "POST")
     expect(posts.map((request) => request.url)).toEqual([
-      "/v1/organizations",
-      "/v1/organizations/me/switch",
+      "/organizations",
+      "/organizations/me/switch",
     ])
     expect(posts[0]?.body).toEqual({ name: "Research" })
     // The second call is what makes the new organization the one on screen; the
     // server deliberately does not switch as a side effect of creating.
     expect(posts[1]?.body).toEqual({
+      organization_id: SECOND_ORGANIZATION_ID,
+    })
+  })
+
+  it("says the switch is running before it says the switch failed", async () => {
+    // Two states, one step: the organization exists the moment the create
+    // lands, so the body has to say what is happening rather than announcing a
+    // failure that has not happened yet.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({ switchFails: true, switchGate: gate })
+    await renderSwitcher()
+
+    const { user, menu } = await openMenu()
+    await user.click(
+      within(menu).getByRole("button", { name: /Create organization/ }),
+    )
+    await user.type(await screen.findByLabelText(/Name/), "Research")
+    const form = await screen.findByRole("dialog")
+    await user.click(
+      within(form).getByRole("button", { name: "Create organization" }),
+    )
+
+    // In flight: the create is done and the switch is not.
+    expect(
+      await within(form).findByText("Research was created. Switching into it…"),
+    ).toBeVisible()
+    expect(
+      await within(form).findByRole("heading", {
+        name: "Organization created",
+      }),
+    ).toBeVisible()
+
+    release()
+
+    expect(
+      await within(form).findByText(
+        "Research was created. Switching into it failed.",
+      ),
+    ).toBeVisible()
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      "Organization not found",
+    )
+  })
+
+  it("retries only the switch when the switch after a create was refused", async () => {
+    // The create succeeded, so pressing the button again has to send the second
+    // call and not the first: a retry that repeats the pair leaves a second
+    // organization behind, and nothing in this menu removes one.
+    const requests = mockApi({ switchFails: true })
+    await renderSwitcher()
+
+    const { user, menu } = await openMenu()
+    await user.click(
+      within(menu).getByRole("button", { name: /Create organization/ }),
+    )
+    await user.type(await screen.findByLabelText(/Name/), "Research")
+    const form = await screen.findByRole("dialog")
+    await user.click(
+      within(form).getByRole("button", { name: "Create organization" }),
+    )
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      "Organization not found",
+    )
+
+    // The label is the retry: it names the one call that is left.
+    const retry = within(form).getByRole("button", {
+      name: "Switch to organization",
+    })
+    await user.click(retry)
+
+    const posts = requests.filter((request) => request.method === "POST")
+    expect(posts.map((request) => request.url)).toEqual([
+      "/organizations",
+      "/organizations/me/switch",
+      "/organizations/me/switch",
+    ])
+    expect(posts[2]?.body).toEqual({
       organization_id: SECOND_ORGANIZATION_ID,
     })
   })
@@ -295,7 +414,9 @@ async function fillCreateForm(user: ReturnType<typeof userEvent.setup>) {
       name: "Create workspace",
     }),
   )
-  const form = await screen.findByRole("dialog", { name: "Create workspace" })
+  // The dialog's title names the object and its submit names the action, so
+  // this is "New workspace" and the button below is "Create workspace".
+  const form = await screen.findByRole("dialog", { name: "New workspace" })
   await user.type(within(form).getByLabelText(/^Name/), "Staging")
   return form
 }
@@ -343,6 +464,55 @@ describe("the workspace half of the scope switcher", () => {
     ],
   }
 
+  // The form is shared with the Workspaces page, which frames it in a band.
+  // `.otari-bleed` sizes itself off `<main>`, and this modal is portalled out of
+  // `<main>`, so a band that travelled here measured a viewport wide and the
+  // dialog's `overflow-clip` cropped it to an empty modal (otari-ai#2107). jsdom
+  // computes no layout, so what is pinned is the class that causes it.
+  it("opens the same dialog the workspaces page opens", async () => {
+    // The same form once had two frames, a bleeding band on the page and a
+    // Modal here, and this asserted it was not the band. There is one frame and
+    // neither entry point owns it, so the fact worth holding is that this is
+    // the shared dialog.
+    mockApi({ context: startedInAWorkspace })
+    const user = userEvent.setup()
+    await renderSwitcherOnAPage({})
+
+    const form = await fillCreateForm(user)
+
+    expect(form).toHaveClass("otari-form-dialog")
+    expect(form.querySelector(".otari-bleed")).toBeNull()
+    expect(within(form).getByLabelText(/^Name/)).toBeInTheDocument()
+  })
+
+  it("offers a fresh draft on each open of the workspace form", async () => {
+    // Nothing here unmounts the form, so the remount on the way in is the only
+    // thing that clears it. Reset on the way out would blank the body while the
+    // dialog is still animating away.
+    mockApi({ context: startedInAWorkspace })
+    const user = userEvent.setup()
+    await renderSwitcherOnAPage({})
+
+    await fillCreateForm(user)
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch workspace/ }),
+    )
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Create workspace",
+      }),
+    )
+    const reopened = await screen.findByRole("dialog", {
+      name: "New workspace",
+    })
+    expect(within(reopened).getByLabelText(/^Name/)).toHaveValue("")
+  })
+
   it("enters the workspace it just created", async () => {
     mockApi({ context: startedInAWorkspace })
     const beat = pendingHold()
@@ -358,7 +528,13 @@ describe("the workspace half of the scope switcher", () => {
     // The press is acknowledged before the page moves, rather than the create
     // landing them somewhere else with nothing in between. The button keeps its
     // name through the beat, so it is still the control it was.
-    expect(submit).toHaveAttribute("data-pending", "true")
+    //
+    // On the form, not the button: `FormDialog` withholds `isPending` from the
+    // submit because the prop paints it at the disabled 0.4, and a submit in
+    // flight is working rather than refused. React-aria filters `aria-busy` off
+    // a Button anyway.
+    expect(submit.closest("form")).toHaveAttribute("aria-busy", "true")
+    expect(submit).toHaveAccessibleName(/Create and open/)
     expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
 
     beat.release()
@@ -371,9 +547,32 @@ describe("the workspace half of the scope switcher", () => {
         name: /^Switch workspace, currently Staging/,
       }),
     ).toBeInTheDocument()
+
+    // And the next open is usable. This is the path that leaves `holding` set:
+    // the create navigated, so nothing unmounted the form and nothing cleared
+    // the flag, and an unkeyed mount reopens spinning with its Cancel and Close
+    // disabled and no way out. The remount on the way in is what clears it.
+    await user.click(
+      await screen.findByRole("button", { name: /^Switch workspace/ }),
+    )
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Create workspace",
+      }),
+    )
+    const reopened = await screen.findByRole("dialog", {
+      name: "New workspace",
+    })
+    expect(reopened.querySelector("form")).not.toHaveAttribute(
+      "aria-busy",
+      "true",
+    )
+    expect(
+      within(reopened).getByRole("button", { name: "Cancel" }),
+    ).toBeEnabled()
   })
 
-  it("does not enter a workspace the operator dismissed the form over", async () => {
+  it("cannot be dismissed mid-create, so the entry it promised happens", async () => {
     // The beat is a gate this test opens, so the window the guard exists for is
     // entered and left on purpose rather than by sleeping long enough to have
     // been inside it. Nothing here waits on a duration.
@@ -386,9 +585,13 @@ describe("the workspace half of the scope switcher", () => {
     await user.click(
       within(form).getByRole("button", { name: /Create and open/ }),
     )
-    // Escape rather than Cancel: Cancel is disabled while the create is in
-    // flight, so dismissal is what is left, and it is the path that bypasses
-    // every button.
+    // This asserted the opposite until the form moved into `FormDialog`, and the
+    // change is deliberate rather than incidental. Escape used to dismiss the
+    // form mid-flight and suppress the navigation, which was the one path that
+    // bypassed a Cancel the form had already disabled for the same window.
+    // `FormDialog` closes that path: while a submit is in flight neither
+    // Escape, the backdrop nor the close control dismisses it, so there is one
+    // answer to "can I abandon this" rather than two that disagree.
     await user.keyboard("{Escape}")
     beat.release()
 
@@ -402,16 +605,10 @@ describe("the workspace half of the scope switcher", () => {
     const staging = await within(menu).findByRole("button", { name: /Staging/ })
     expect(staging).toBeVisible()
 
-    // The workspace was created and the switcher offers it; what must not
-    // happen is being taken there after saying not to.
-    expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
-    expect(screen.getByText("USAGE PAGE")).toBeInTheDocument()
-    // Read from the menu rather than the trigger, which the open menu hides
-    // from the accessibility tree: the scope never moved.
-    expect(
-      within(menu).getByRole("button", { name: /Default Workspace/ }),
-    ).toHaveTextContent("Selected")
-    expect(staging).not.toHaveTextContent("Selected")
+    // The workspace was created and the operator is in it, because the create
+    // they started was never abandoned.
+    expect(staging).toHaveTextContent("Selected")
+    expect(screen.getByText("OVERVIEW PAGE")).toBeInTheDocument()
   })
 
   it("still completes after StrictMode's development remount", async () => {
@@ -501,7 +698,7 @@ describe("the invitations row in the scope switcher", () => {
 
   it("stays silent when the read fails, rather than breaking the chrome", async () => {
     // A gateway older than this bundle does not serve the route, and a hybrid
-    // one answers 404 for every `/v1/organizations` path. The switcher still
+    // one answers 404 for every /api/v1/organizations path. The switcher still
     // has to switch.
     mockApi({
       memberships: twoOrganizations(),

@@ -24,7 +24,7 @@ import { createPasskey } from "@/shared/helpers/webauthn"
 export function useRotateMasterKey() {
   return useMutation({
     mutationFn: () =>
-      apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", {
+      apiFetch<RotateMasterKeyResponse>("/settings/master-key/rotate", {
         method: "POST",
       }),
   })
@@ -54,7 +54,7 @@ export function useSetPassword() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetPasswordRequest) =>
-      apiFetch<PasswordResponse>("/v1/auth/password", {
+      apiFetch<PasswordResponse>("/auth/password", {
         method: "PUT",
         body: JSON.stringify(body),
       }),
@@ -77,7 +77,7 @@ export function useSetPassword() {
 export function usePasskeys() {
   return useQuery({
     queryKey: [PASSKEYS],
-    queryFn: () => apiFetch<PasskeysResponse>("/v1/auth/webauthn/credentials"),
+    queryFn: () => apiFetch<PasskeysResponse>("/auth/webauthn/credentials"),
     staleTime: 60_000,
     ...NO_RETRY,
   })
@@ -107,13 +107,13 @@ export function useRegisterPasskey() {
   return useMutation({
     mutationFn: async (name: string | undefined) => {
       const options = await apiFetch<Record<string, unknown>>(
-        "/v1/auth/webauthn/register/options",
+        "/auth/webauthn/register/options",
         { method: "POST" },
       )
       const credential = await createPasskey(
         options as Parameters<typeof createPasskey>[0],
       )
-      return apiFetch<Passkey>("/v1/auth/webauthn/register", {
+      return apiFetch<Passkey>("/auth/webauthn/register", {
         method: "POST",
         body: JSON.stringify({ credential, name }),
       })
@@ -129,7 +129,7 @@ export function useRenamePasskey() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
-      apiFetch<Passkey>(`/v1/auth/webauthn/credentials/${id}`, {
+      apiFetch<Passkey>(`/auth/webauthn/credentials/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ name } satisfies RenamePasskeyRequest),
       }),
@@ -144,7 +144,7 @@ export function useDeletePasskey() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/auth/webauthn/credentials/${id}`, {
+      apiFetch<void>(`/auth/webauthn/credentials/${id}`, {
         method: "DELETE",
       }),
     onSuccess: () => {
@@ -165,7 +165,7 @@ export function useDeletePasskey() {
 export function useSignup() {
   return useMutation({
     mutationFn: (body: SignupRequest) =>
-      apiFetch<SignupResponse>("/v1/auth/signup", {
+      apiFetch<SignupResponse>("/auth/signup", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -199,7 +199,7 @@ export function useVerifyEmail(token: string) {
   return useQuery({
     queryKey: ["verify-email", token],
     queryFn: () =>
-      apiFetch<VerifyEmailResponse>("/v1/auth/verify-email", {
+      apiFetch<VerifyEmailResponse>("/auth/verify-email", {
         method: "POST",
         body: JSON.stringify({ token }),
       }),
@@ -218,7 +218,7 @@ export function useVerifyEmail(token: string) {
 export function useResendVerification() {
   return useMutation({
     mutationFn: (email: string) =>
-      apiFetch<ResendVerificationResponse>("/v1/auth/resend-verification", {
+      apiFetch<ResendVerificationResponse>("/auth/resend-verification", {
         method: "POST",
         body: JSON.stringify({ email }),
       }),
@@ -228,7 +228,7 @@ export function useResendVerification() {
 export function useRequestPasswordReset() {
   return useMutation({
     mutationFn: (email: string) =>
-      apiFetch<RequestPasswordResetResponse>("/v1/auth/password/reset", {
+      apiFetch<RequestPasswordResetResponse>("/auth/password/reset", {
         method: "POST",
         body: JSON.stringify({ email }),
       }),
@@ -240,7 +240,7 @@ export function useRequestPasswordReset() {
 export function useResetPassword() {
   return useMutation({
     mutationFn: (body: ResetPasswordRequest) =>
-      apiFetch<void>("/v1/auth/password/reset/confirm", {
+      apiFetch<void>("/auth/password/reset/confirm", {
         method: "POST",
         body: JSON.stringify(body),
       }),

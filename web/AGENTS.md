@@ -11,7 +11,7 @@ topic guide it points to for the work at hand.
 
 [design/DESIGN.md](design/DESIGN.md) is the design system: what to reach for, which
 variant applies where, which token layer is allowed, and which components exist but
-must not be used in new code. It is ten short topic files, so load only the one
+must not be used in new code. It is eleven short topic files, so load only the one
 covering what you are building. Written for a reader who cannot ask a question,
 which is what an agent is.
 
@@ -20,7 +20,7 @@ foundations, components with their states, and the page archetypes as artboards.
 
 ## Runtime contract
 
-`src/main.tsx` fetches unauthenticated `GET /v1/bootstrap` before mounting
+`src/main.tsx` fetches unauthenticated `GET /api/v1/bootstrap` before mounting
 React. Do not guess a deployment when that request fails.
 
 A gateway older than a bootstrap field does not send it, whatever the generated
@@ -58,11 +58,20 @@ Biome enforces these dependencies:
 
 | Layer | May import |
 | --- | --- |
-| `shared/` | `client/` and itself |
-| `features/` | `shared/`, `client/`, and other features |
+| `design-system/` | **nothing under `src/`.** React, HeroUI, react-aria, react-icons, recharts, react-markdown, and itself |
+| `shared/` | `design-system/`, `client/`, and itself |
+| `features/` | `design-system/`, `shared/`, `client/`, and other features |
 | `app/` | any dashboard layer |
 | `routes/` | feature pages and shared composition |
 | `tests/` | any layer |
+
+`design-system/` is the odd one, and its rule is the inverse of the others: they
+name the few layers a layer may not reach, it names all of them. The question it
+answers is not "does this import point the wrong way" but "would this directory
+still compile with the rest of `src/` deleted", because it is the one layer here
+meant to leave as a package. See [design/DESIGN.md](design/DESIGN.md), "The
+extraction contract", for what that buys and what it costs; the probes are in
+`src/architecture.test.ts`.
 
 Do not import an overlay tree from the base dashboard. Otari.ai composes its UI
 through the explicit overlay seams.
@@ -103,6 +112,13 @@ Import API shapes from `@/client`, not directly from the generated schema.
 `src/client/schema.ts` is generated from `docs/public/openapi.json` and
 committed. Keep `src/client/local.ts` limited to shapes OpenAPI cannot own.
 
+`apiFetch` in `shared/api/client.ts` prepends `API_ROOT` to every request. A
+call site passes the resource only, `apiFetch("/keys")`, and never spells
+`/api/v1`. A test that stubs `fetch` sees the whole URL; one that spies on
+`apiFetch` sees the resource. The gateway's
+`tests/integration/test_api_prefix_contract.py` fails on a doubled root
+anywhere under `src/`.
+
 File routes live in `src/routes/`. Each route file exports `Route` and
 nothing else so automatic code splitting works. The generated
 `src/routeTree.gen.ts` is committed.
@@ -130,6 +146,12 @@ Two build inputs are committed when changed:
 
 - `web/src/client/schema.ts`
 - `web/src/routeTree.gen.ts`
+
+`storybook-static/` is the third generated directory and is **not** committed,
+like the dashboard bundle: `.github/workflows/otari-design-system.yml` builds it
+and publishes it to Pages from `main`. `STORYBOOK_BASE_PATH` is what makes the
+published build resolve its assets under `/<repo>/`, since the merged
+`vite.config.ts` carries the app's own `base: "/"`.
 
 The bundled dashboard guide imports `docs/dashboard.md`. It remains available
 at `/#/docs` even when `docs_url` points the visible links elsewhere.

@@ -3,9 +3,9 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
-import { CopyField } from "@/shared/components/actions/CopyField"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
-import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
+import { CopyField } from "@/design-system/actions/CopyField"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { formatRate } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,

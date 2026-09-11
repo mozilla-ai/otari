@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, seriesPoint, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -196,9 +197,9 @@ function mockApi(
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     for (const [path, answer] of Object.entries(extra)) {
-      // Matched at a path boundary rather than anywhere in the URL. `/v1/usage`
-      // and `/v1/organizations/me` are both prefixes of routes this page reads
-      // (`/v1/organizations/me/usage/summary` is the tenant's own), so a bare
+      // Matched at a path boundary rather than anywhere in the URL. /api/v1/usage
+      // and /api/v1/organizations/me are both prefixes of routes this page reads
+      // (/api/v1/organizations/me/usage/summary is the tenant's own), so a bare
       // `includes` would answer a summary request with an organization context.
       if (url === path || url.endsWith(path) || url.includes(`${path}?`)) {
         return jsonResponse(answer)
@@ -209,7 +210,7 @@ function mockApi(
     // the organization-scoped ones (otari#837). After `extra`, so a test that
     // supplies its own context still wins, and on an exact match so it cannot
     // shadow /v1/organizations/me/usage.
-    if (url.endsWith("/v1/organizations/me")) {
+    if (url.endsWith(`${API_ROOT}/organizations/me`)) {
       return jsonResponse(organizationContext())
     }
     if (url.includes("/usage/summary")) {
@@ -263,13 +264,13 @@ function mockApi(
         ],
       })
     }
-    if (url.includes("/v1/users")) {
+    if (url.includes(`${API_ROOT}/users`)) {
       return jsonResponse([
         { user_id: "alice", alias: "Alice" },
         { user_id: "bob", alias: "Bob" },
       ])
     }
-    if (url.includes("/v1/keys")) {
+    if (url.includes(`${API_ROOT}/keys`)) {
       return jsonResponse([
         {
           id: "key-1",
@@ -327,7 +328,7 @@ describe("UsagePage", () => {
 
   it("scopes the workspace view to the switcher's selection", async () => {
     const fetchMock = mockApi(summary(), {
-      "/v1/organizations/me": organizationContext({
+      [`${API_ROOT}/organizations/me`]: organizationContext({
         workspace_memberships: [
           {
             workspace_id: "ws-1",
@@ -343,7 +344,7 @@ describe("UsagePage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url]) =>
-          String(url).includes("/v1/usage/summary") &&
+          String(url).includes(`${API_ROOT}/usage/summary`) &&
           String(url).includes("workspace_id=ws-1"),
       ),
     ).toBe(true)
@@ -351,7 +352,7 @@ describe("UsagePage", () => {
     // workspace picker, so the roster this page never shows is not fetched.
     expect(
       fetchMock.mock.calls.some(([url]) =>
-        String(url).includes("/v1/workspaces"),
+        String(url).includes(`${API_ROOT}/workspaces`),
       ),
     ).toBe(false)
   })
@@ -360,9 +361,9 @@ describe("UsagePage", () => {
     // The switcher holds a selection and the fixture's caller even operates the
     // deployment; the organization page must let neither leak in. Narrowed by
     // the switcher it would repeat the workspace page, and widened to
-    // `/v1/usage` it would title every tenant's traffic as this organization's.
+    // /api/v1/usage it would title every tenant's traffic as this organization's.
     const fetchMock = mockApi(summary(), {
-      "/v1/organizations/me": organizationContext({
+      [`${API_ROOT}/organizations/me`]: organizationContext({
         workspace_memberships: [
           {
             workspace_id: "ws-1",
@@ -380,7 +381,7 @@ describe("UsagePage", () => {
       .filter((url) => url.includes("/usage/"))
     expect(reads).not.toHaveLength(0)
     for (const url of reads) {
-      expect(url).toContain("/v1/organizations/me/usage/")
+      expect(url).toContain(`${API_ROOT}/organizations/me/usage/`)
       expect(url).not.toContain("workspace_id=")
     }
   })
@@ -388,7 +389,7 @@ describe("UsagePage", () => {
   it("narrows the organization page through its own workspace filter", async () => {
     const user = userEvent.setup()
     const fetchMock = mockApi(summary(), {
-      "/v1/workspaces": {
+      [`${API_ROOT}/workspaces`]: {
         data: [
           {
             id: "ws-2",
@@ -412,7 +413,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes("/v1/organizations/me/usage/summary"))
+      .filter((u) => u.includes(`${API_ROOT}/organizations/me/usage/summary`))
     expect(summaryCalls.some((u) => u.includes("workspace_id=ws-2"))).toBe(true)
     // The narrowing is visible and revocable where every other filter is.
     expect(
@@ -445,7 +446,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes("/v1/usage/summary"))
+      .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
     expect(summaryCalls.some((u) => u.includes("api_key_id=key-1"))).toBe(true)
   })
 
@@ -517,7 +518,7 @@ describe("UsagePage", () => {
     await vi.waitFor(() => {
       const summaryCalls = fetchMock.mock.calls
         .map(([u]) => String(u))
-        .filter((u) => u.includes("/v1/usage/summary"))
+        .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
       // The sub-day extent buckets hourly (both the context histogram and the tiles).
       expect(summaryCalls.some((u) => u.includes("bucket=hour"))).toBe(true)
     })
@@ -610,7 +611,9 @@ describe("UsagePage", () => {
     const calls = fetchMock.mock.calls.map(([u]) => String(u))
     expect(
       calls.some(
-        (u) => u.includes("/v1/usage/series") && u.includes("group_by=model"),
+        (u) =>
+          u.includes(`${API_ROOT}/usage/series`) &&
+          u.includes("group_by=model"),
       ),
     ).toBe(true)
   })
@@ -627,12 +630,13 @@ describe("UsagePage", () => {
       // it is what tells them whether this caller reads the deployment-wide
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes("/v1/usage/series"))
+      if (url.includes(`${API_ROOT}/usage/series`))
         return jsonResponse({ detail: "Not Found" }, 404)
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary())
+      if (url.includes(`${API_ROOT}/usage/summary`))
+        return jsonResponse(summary())
       return jsonResponse([])
     })
     renderPage(<UsagePage />)
@@ -901,7 +905,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes("/v1/usage/summary"))
+      .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
     const main = summaryCalls.find(
       (u) => u.includes("dimensions=model") && u.includes("dimensions=user"),
     )
@@ -1192,7 +1196,7 @@ describe("UsagePage", () => {
     await vi.waitFor(() => {
       const last = fetchMock.mock.calls
         .map(([u]) => String(u))
-        .filter((u) => u.includes("/v1/usage/summary"))
+        .filter((u) => u.includes(`${API_ROOT}/usage/summary`))
         .at(-1)
       expect(last).toContain("model=gpt-5.6")
       expect(last).toContain("model=claude-sonnet-5")

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-
+import { API_ROOT } from "@/shared/api/client"
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 
 describe("MissingGatewayAddressNotice", () => {
@@ -12,7 +12,7 @@ describe("MissingGatewayAddressNotice", () => {
     expect(
       screen.getByText(/has not published the gateway address/),
     ).toBeInTheDocument()
-    expect(screen.getByText("/v1/chat/completions")).toBeInTheDocument()
+    expect(screen.getByText(`${API_ROOT}/chat/completions`)).toBeInTheDocument()
     expect(screen.getByText("Otari-Key")).toBeInTheDocument()
   })
 })

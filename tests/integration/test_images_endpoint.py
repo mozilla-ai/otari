@@ -1,4 +1,4 @@
-"""Tests for the POST /v1/images/generations endpoint."""
+"""Tests for the POST /api/v1/images/generations endpoint."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -8,6 +8,7 @@ import pytest
 from any_llm.types.image import Image, ImagesResponse
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
@@ -30,9 +31,9 @@ def _mock_images_response(n: int = 1) -> ImagesResponse:
 
 
 def test_images_requires_auth(client: TestClient) -> None:
-    """POST /v1/images/generations requires authentication."""
+    """POST /api/v1/images/generations requires authentication."""
     resp = client.post(
-        "/v1/images/generations",
+        f"{API_ROOT}/images/generations",
         json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
     )
     assert resp.status_code == 401
@@ -42,11 +43,11 @@ def test_images_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations works with API key authentication."""
+    """POST /api/v1/images/generations works with API key authentication."""
     mock_resp = _mock_images_response()
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=api_key_header,
         )
@@ -60,11 +61,11 @@ def test_images_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations with master key requires 'user' field."""
+    """POST /api/v1/images/generations with master key requires 'user' field."""
     mock_resp = _mock_images_response()
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=master_key_header,
         )
@@ -77,11 +78,11 @@ def test_images_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations with master key + user field succeeds."""
+    """POST /api/v1/images/generations with master key + user field succeeds."""
     mock_resp = _mock_images_response()
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={
                 "model": "openai:dall-e-3",
                 "prompt": "a cute cat",
@@ -96,14 +97,14 @@ def test_images_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations returns 502 when the provider fails."""
+    """POST /api/v1/images/generations returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.images.aimage_generation",
         new_callable=AsyncMock,
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=api_key_header,
         )
@@ -117,19 +118,19 @@ def test_images_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations creates a usage log entry."""
+    """POST /api/v1/images/generations creates a usage log entry."""
     mock_resp = _mock_images_response()
     user_id = api_key_obj["user_id"]
 
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     image_logs = [log for log in logs if log["endpoint"] == "/v1/images/generations"]
@@ -145,7 +146,7 @@ def test_images_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations logs an error entry when the provider fails."""
+    """POST /api/v1/images/generations logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -154,13 +155,13 @@ def test_images_logs_error_on_failure(
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=api_key_header,
         )
     assert resp.status_code == 502
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     error_logs = [log for log in logs if log["endpoint"] == "/v1/images/generations" and log["status"] == "error"]
@@ -174,12 +175,12 @@ def test_images_optional_fields(
     api_key_header: dict[str, str],
     extra_field: str,
 ) -> None:
-    """POST /v1/images/generations forwards optional fields."""
+    """POST /api/v1/images/generations forwards optional fields."""
     mock_resp = _mock_images_response()
     values = {"n": 2, "size": "1792x1024", "quality": "hd", "style": "natural"}
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp) as mock:
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={
                 "model": "openai:dall-e-3",
                 "prompt": "a cute cat",
@@ -199,10 +200,10 @@ def test_images_cost_tracked_with_pricing(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/images/generations calculates cost when model pricing exists."""
+    """POST /api/v1/images/generations calculates cost when model pricing exists."""
     # Set up pricing: input_price_per_million is repurposed as price-per-image
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:dall-e-3",
             "input_price_per_million": 0.04,
@@ -216,13 +217,13 @@ def test_images_cost_tracked_with_pricing(
 
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat", "n": 2},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     logs = usage_resp.json()
     image_logs = [log for log in logs if log["endpoint"] == "/v1/images/generations"]
     assert len(image_logs) >= 1
@@ -237,9 +238,9 @@ def test_images_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations records auditable charge lines alongside cost."""
+    """POST /api/v1/images/generations records auditable charge lines alongside cost."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:dall-e-3",
             "input_price_per_million": 0.04,
@@ -252,13 +253,15 @@ def test_images_billing_meters_tracked_with_pricing(
 
     with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
         resp = client.post(
-            "/v1/images/generations",
+            f"{API_ROOT}/images/generations",
             json={"model": "openai:dall-e-3", "prompt": "a cute cat", "n": 2},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/images/generations"}, headers=master_key_header)
+    usage_resp = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/images/generations"}, headers=master_key_header
+    )
     logs = usage_resp.json()
     assert len(logs) >= 1
     assert logs[0]["billing_meters"] == {"images": 2}
@@ -290,7 +293,7 @@ def test_images_ignores_genai_prices_defaults(
             return_value=_mock_images_response(),
         ):
             resp = client.post(
-                "/v1/images/generations",
+                f"{API_ROOT}/images/generations",
                 json={"model": "openai:gpt-image-1", "prompt": "a cute cat"},
                 headers=api_key_header,
             )
@@ -299,7 +302,9 @@ def test_images_ignores_genai_prices_defaults(
         configure_default_pricing(False)
         reset_price_cache()
 
-    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/images/generations"}, headers=master_key_header)
+    usage_resp = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/images/generations"}, headers=master_key_header
+    )
     latest = usage_resp.json()[0]
     assert latest["model"] == "gpt-image-1"
     assert latest["cost"] is None

@@ -7,10 +7,20 @@ An action inside a table row is a `RowAction`, not a `Button`.
 
 `variant`: `primary`, `ghost`, `danger`.
 
-`secondary`, `tertiary`, `outline` and `danger-soft` are retired. HeroUI's union
-still accepts all seven, so a retired name is **not** a type error: it is a silently
-unstyled button. `src/styles/foundation.test.ts` is what stops it, and it names the
-file and line.
+`secondary`, `tertiary`, `outline` and `danger-soft` are retired.
+
+**Import `Button` from `@/design-system/actions/Button`, not from
+`@heroui/react`.** It is the same component with the union narrowed to the three,
+which turns this rule into a compile error at the call site. Against HeroUI's own
+`Button` a retired name is *not* a type error: all seven still typecheck, and a
+retired one compiles, lints, ships, and paints an unstyled button.
+`src/styles/foundation.test.ts` catches that by scanning the source, which works,
+but reports it at the end of a test run rather than in the editor. That gate
+stays, because it still covers the direct imports this tree has not converted;
+new code should not need it.
+
+`ghost` is the wrapper's default, which is the direction the "one primary per
+band" rule wants the friction to point: the accent has to be asked for.
 
 - `primary`: the one thing a band exists to do. **One per band** (see the rule under
   the flowchart, which is the part people get wrong). Filled teal under white ink.
@@ -21,11 +31,13 @@ file and line.
   destructive button read as a second primary, which is the whole reason it is not
   one.
 
-```
+```text
 Is it the single thing this band is for?
  ├── Yes -> variant="primary"          (two in one band means the band has no hierarchy)
  └── No
-      ├── Is it destructive or hard to undo?
+      ├── Does it delete a record?
+      │    └── Yes -> a neutral trigger that opens a ConfirmDialog (see below)
+      ├── Is it destructive or hard to undo, but deletes nothing?
       │    └── Yes -> variant="danger", and reach for ConfirmButton
       └── Default -> variant="ghost"
 ```
@@ -47,8 +59,58 @@ band, the secondary one becomes a ghost.
 <Button variant="outline" onPress={exportCsv}>Export CSV</Button>
 ```
 
-`Button` takes `isPending` while a mutation is in flight; it disables itself and
-shows its own spinner. Do not pair it with `isDisabled` for the same condition.
+`Button` takes `isPending` while a mutation is in flight. **It draws no spinner**,
+whatever this file used to say: HeroUI puts `data-pending` on the element and the
+stylesheet answers that with `pointer-events: none` and nothing else, so the
+spinner is the call site's to render. What `isPending` does supply is the press
+block, `aria-disabled`, and react-aria's announcement, and it paints the button
+at the disabled 0.4. Do not pair it with `isDisabled` for the same condition.
+
+Which means `isPending` is the wrong prop wherever the button should read as
+*working* rather than *refused*, since 0.4 is the denied treatment
+([motion-and-access.md](motion-and-access.md)). `FormDialog`'s submit is the
+worked example: it keeps its fill, blocks its own press, and says `aria-busy`.
+
+## Where a create action lives, and what it says
+
+Two rules, and both are "always the same" rather than "usually". The dashboard
+had the action in a page's top right on one route and halfway down another, and
+pressing it opened a modal on one and appended a section on the next, so an
+operator learned each page separately.
+
+**Placement: the heading row of the collection being created into.** When the
+page is one collection that is `PageIntro`'s `action` slot; when the page holds
+several it is the section's own heading row, right-aligned, the same button. An
+empty state may repeat the call to action, and it opens the same dialog. The
+header button does not hide while the form is open: the form is a dialog now, so
+there is nothing for hiding it to prevent.
+
+**Surface: `FormDialog`, every time.** See [feedback.md](feedback.md).
+
+**Labels: the trigger and the submit are the same string, word for word.** The
+dialog's title names the object instead.
+
+| Trigger | Title | Submit |
+| --- | --- | --- |
+| Create key | New key | Create key |
+| Add MCP server | New MCP server | Add MCP server |
+
+**Create or Add** is not a style choice: *create* is for an object born here (a
+key, a budget, a policy, a workspace), *add* is for attaching something that
+already exists elsewhere (a provider, a provider key, an MCP server, a member,
+an override, a ceiling). *Invite* and *Claim* keep their own verb, because
+neither is either of those.
+
+```tsx
+// Correct
+<PageIntro title="API keys" action={
+  <Button variant="primary" onPress={openCreate}>Create key</Button>
+} />
+
+// Incorrect: a second vocabulary for the same act, and a title that restates
+// the button instead of naming what appears
+<Button variant="primary" onPress={openCreate}>New key +</Button>
+```
 
 ## Sizes
 
@@ -68,14 +130,69 @@ Put the class on the container, not on the button. If you are building a new
 container that holds a row of ghosts and the edges read as a grid of boxes, add a
 place rather than styling the buttons.
 
+Two of those places carry a second job, field density, and
+[forms.md](forms.md) has that half: `.otari-toolbar` and `.otari-pagination`
+declare `--field-height` for the controls inside them. Worth reading before
+adding a place, because the density half is a custom property the place declares
+rather than a rule reaching into its descendants, and a new place should be
+written the same way.
+
 **An icon-only ghost never takes the edge**, and that rule is keyed on what the
 control *is*, not where it sits: `CopyButton` renders in tables, panels, banners and
 bare pages, so no container can reach it.
 
+## Deleting a record: a dialog, never an in-place confirm
+
+**Every delete of a record goes through `ConfirmDialog`** (otari-ai#2110), whether
+it deletes one row or a selection of them. The trigger is a plain `RowAction` or a
+ghost `Button` that only opens the dialog, and the dialog carries the danger
+confirm. A confirmation that armed inside the row read as part of the table rather
+than as a decision, and it had nowhere to put the consequence: the sentence that
+says what the deletion costs does not fit on a row action.
+
+```tsx
+// Correct: a neutral trigger, and the decision in the dialog
+<RowAction onPress={() => setPendingDelete(row)}>Delete</RowAction>
+…
+<ConfirmDialog
+  isOpen={pendingDelete !== undefined}
+  onOpenChange={(open) => {
+    if (open) return
+    setPendingDelete(undefined)
+    remove.reset()
+  }}
+  heading="Delete rate override"
+  body={pendingDelete ? `${pendingDelete.model_key} returns to the catalog rate…` : null}
+  confirmLabel="Delete override"
+  isPending={remove.isPending}
+  error={remove.error}
+  onConfirm={…}
+/>
+
+// Incorrect: the confirmation arms in the row, so the decision reads as a cell
+<ConfirmRowAction confirmLabel="Delete" onConfirm={remove}>Delete</ConfirmRowAction>
+```
+
+`pendingDelete` holding the target row (`undefined` when closed) is the idiom, and
+the mutation's `onSuccess` clears it. The dialog owns `isPending` and `error`, so
+the page's own `ErrorBanner` drops the delete: a message behind the backdrop is a
+message the operator does not read. See [feedback.md](feedback.md).
+
+**Reset the mutation when the dialog closes.** A refusal stays on it until the next
+call, and the dialog reads it on open, so without this the next row's confirm opens
+already reporting a failure that was about the row before it. On close rather than
+on open, so the trigger in the row stays a bare `setPendingDelete` and a memoized
+column keeps its per-row cache.
+
+The dialog names the object and the consequence, and its confirm names the
+consequence rather than repeating the trigger's word: "Delete permanently", not
+"Delete" under a "Delete".
+
 ## The two-step destructive confirm
 
-`ConfirmButton` for a page-level destructive action, `ConfirmRowAction` for one in
-a table row. Both arm on the first click and destroy on the second.
+For a destructive action that **deletes nothing**: a regenerate, an archive, a
+reset to a default. `ConfirmButton` at page level, `ConfirmRowAction` in a table
+row. Both arm on the first click and destroy on the second.
 
 The resting trigger is **neutral** and the armed confirm is danger. The first click
 is safe, so spending the loudest signal in the product on it wastes it; the danger
@@ -86,12 +203,12 @@ names the consequence.
 
 ```tsx
 // Correct
-<ConfirmButton confirmLabel="Remove permanently" onConfirm={remove}>
-  Remove tool
+<ConfirmButton confirmLabel="Reset to default" onConfirm={reset}>
+  Reset price
 </ConfirmButton>
 
 // Incorrect: the same word twice tells the operator nothing about what changed
-<ConfirmButton confirmLabel="Remove" onConfirm={remove}>Remove</ConfirmButton>
+<ConfirmButton confirmLabel="Reset" onConfirm={reset}>Reset</ConfirmButton>
 ```
 
 **The Cancel that appears when armed is load-bearing. Do not simplify it away.**
@@ -108,7 +225,8 @@ hides.
 | `RowAction` | `onPress`, `isDanger?`, `isDisabled?`, `ariaLabel?`, children | An action in a table row. Caption-sized, not a `Button` |
 | `RowActionRow` | children | The trailing lane those sit in. **Use this one** |
 | `RowActions` | children | A near-duplicate with a tighter gap, on 2 call sites. Do not reach for it in new code |
-| `ConfirmButton` | `confirmLabel`, `onConfirm`, `isPending?`, children | The page-level two-step confirm |
-| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, children | The same two-step inside a row. It supplies its own `isDanger` and its own Cancel |
+| `ConfirmButton` | `confirmLabel`, `onConfirm`, `isPending?`, children | The page-level two-step confirm, for a destructive action that deletes nothing |
+| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, children | The same two-step inside a row. It supplies its own `isDanger` and its own Cancel. Not for a delete |
 | `RefreshButton` | `onRefresh`, `isFetching?`, `updatedAt?`, `label?` | A refetch, with its own freshness caption. Pass `updatedAt` or the caption reads nothing |
 | `CopyButton` | `value`, `label` | Copy one value. Icon-only, 44x44 hit area |
+| `CopyField` | `label`, `value`, `multiline?`, `concealed?`, `action?` | A readonly field of a value to paste elsewhere. `concealed` is what it shows until the operator asks for the value, for a credential: Copy copies the real one either way, so a key is handed over without being read off the screen |

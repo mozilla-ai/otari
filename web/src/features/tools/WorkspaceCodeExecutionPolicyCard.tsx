@@ -1,4 +1,10 @@
 import type { UpdateWorkspaceCodeExecutionPolicyRequest } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { SettingRow } from "@/design-system/layout/SettingRow"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
   ceilingParser,
@@ -12,12 +18,6 @@ import {
   useSetWorkspaceCodeExecutionPolicy,
   useWorkspaceCodeExecutionPolicy,
 } from "@/shared/api/tools"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { SettingRow } from "@/shared/components/layout/SettingRow"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 

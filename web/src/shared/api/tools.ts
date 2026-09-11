@@ -3,6 +3,7 @@ import type {
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
+  GuardrailCatalog,
   OrganizationGuardrail,
   SearchProviderInfo,
   SearchToolsResponse,
@@ -24,6 +25,7 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  GUARDRAIL_PROFILES,
   ORGANIZATION_GUARDRAILS,
   SEARCH_PROVIDERS,
   SEARCH_TOOLS,
@@ -35,7 +37,7 @@ import {
 export function useToolSettings(enabled = true) {
   return useQuery({
     queryKey: [TOOL_SETTINGS],
-    queryFn: () => apiFetch<ToolSettingsResponse>("/v1/tool-settings"),
+    queryFn: () => apiFetch<ToolSettingsResponse>("/tool-settings"),
     staleTime: 60_000,
     enabled,
   })
@@ -46,7 +48,7 @@ export function useToolSettings(enabled = true) {
 export function useTools(enabled = true) {
   return useQuery({
     queryKey: [TOOLS],
-    queryFn: () => apiFetch<ToolsResponse>("/v1/tools"),
+    queryFn: () => apiFetch<ToolsResponse>("/tools"),
     staleTime: 60_000,
     enabled,
   })
@@ -56,7 +58,7 @@ export function useUpdateToolSettings() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UpdateToolSettingsRequest) =>
-      apiFetch<ToolSettingsResponse>("/v1/tool-settings", {
+      apiFetch<ToolSettingsResponse>("/tool-settings", {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
@@ -69,6 +71,10 @@ export function useUpdateToolSettings() {
       // which this PATCH may have just changed, so the endpoint a blank box
       // resolves to (and whether one is required at all) has to be re-read.
       void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
+      // Same reasoning one service over: the guardrail catalog is whatever the
+      // host `guardrails_url` names answered with, so pointing that field at a
+      // different sidecar changes which profiles exist.
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_PROFILES] })
     },
   })
 }
@@ -78,7 +84,7 @@ export function useUpdateToolSettings() {
 export function useSearchTools() {
   return useQuery({
     queryKey: [SEARCH_TOOLS],
-    queryFn: () => apiFetch<SearchToolsResponse>("/v1/search-tools"),
+    queryFn: () => apiFetch<SearchToolsResponse>("/search-tools"),
     staleTime: 60_000,
   })
 }
@@ -88,7 +94,7 @@ export function useSearchTools() {
 export function useSearchProviders() {
   return useQuery({
     queryKey: [SEARCH_PROVIDERS],
-    queryFn: () => apiFetch<SearchProviderInfo[]>("/v1/search-tools/providers"),
+    queryFn: () => apiFetch<SearchProviderInfo[]>("/search-tools/providers"),
     staleTime: 300_000,
   })
 }
@@ -97,7 +103,7 @@ export function useCreateSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateSearchToolRequest) =>
-      apiFetch<StoredSearchTool>("/v1/search-tools", {
+      apiFetch<StoredSearchTool>("/search-tools", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -116,13 +122,10 @@ export function useUpdateSearchTool() {
       name: string
       body: UpdateSearchToolRequest
     }) =>
-      apiFetch<StoredSearchTool>(
-        `/v1/search-tools/${encodeURIComponent(name)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        },
-      ),
+      apiFetch<StoredSearchTool>(`/search-tools/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
   })
@@ -132,7 +135,7 @@ export function useDeleteSearchTool() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (name: string) =>
-      apiFetch<void>(`/v1/search-tools/${encodeURIComponent(name)}`, {
+      apiFetch<void>(`/search-tools/${encodeURIComponent(name)}`, {
         method: "DELETE",
       }),
     onSuccess: () =>
@@ -146,7 +149,7 @@ export function useTestService() {
   return useMutation({
     mutationFn: ({ service, url }: { service: string; url: string }) =>
       apiFetch<TestServiceResponse>(
-        `/v1/tool-settings/${encodeURIComponent(service)}/test`,
+        `/tool-settings/${encodeURIComponent(service)}/test`,
         {
           method: "POST",
           body: JSON.stringify({ url }),
@@ -159,11 +162,31 @@ export function useTestService() {
 // rather than truncating: a gateway with a long price history could otherwise
 // have older rows silently vanish from the models table.
 
+// The profiles an organization guardrail may name, and the validate_kwargs each
+// one takes. Read from the guardrails service through the gateway, so an
+// unreachable or unconfigured service resolves to `available: false` with a
+// reason rather than to a query error: the form falls back to naming a profile
+// by hand and has to render either way.
+//
+// Longer-lived than the tool settings beside it, because the answer only changes
+// when the operator edits the sidecar's own YAML and restarts it, which is not
+// something the dashboard can do. The window `useSearchProviders` takes, for the
+// reason it takes it.
+export function useGuardrailProfiles(enabled = true) {
+  return useQuery({
+    queryKey: [GUARDRAIL_PROFILES],
+    queryFn: () =>
+      apiFetch<GuardrailCatalog>("/tool-settings/guardrails/profiles"),
+    staleTime: 300_000,
+    enabled,
+  })
+}
+
 export function useOrganizationGuardrails(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_GUARDRAILS],
     queryFn: () =>
-      fetchAllPaged<OrganizationGuardrail>("/v1/organizations/me/guardrails"),
+      fetchAllPaged<OrganizationGuardrail>("/organizations/me/guardrails"),
     staleTime: 60_000,
     enabled,
   })
@@ -173,7 +196,7 @@ export function useCreateOrganizationGuardrail() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationGuardrailRequest) =>
-      apiFetch<OrganizationGuardrail>("/v1/organizations/me/guardrails", {
+      apiFetch<OrganizationGuardrail>("/organizations/me/guardrails", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -196,7 +219,7 @@ export function useUpdateOrganizationGuardrail() {
       body: UpdateOrganizationGuardrailRequest
     }) =>
       apiFetch<OrganizationGuardrail>(
-        `/v1/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
+        `/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => {
@@ -212,7 +235,7 @@ export function useDeleteOrganizationGuardrail() {
   return useMutation({
     mutationFn: (guardrailId: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
+        `/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => {
@@ -228,7 +251,7 @@ export function useWorkspaceCodeExecutionPolicy(workspaceId: string | null) {
     queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
     queryFn: () =>
       apiFetch<WorkspaceCodeExecutionPolicy>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/code-execution-policy`,
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/code-execution-policy`,
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
@@ -246,7 +269,7 @@ export function useSetWorkspaceCodeExecutionPolicy() {
       body: UpdateWorkspaceCodeExecutionPolicyRequest
     }) =>
       apiFetch<WorkspaceCodeExecutionPolicy>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
         { method: "PUT", body: JSON.stringify(body) },
       ),
     onSuccess: (data, { workspaceId }) => {
@@ -267,7 +290,7 @@ export function useClearWorkspaceCodeExecutionPolicy() {
   return useMutation({
     mutationFn: ({ workspaceId }: { workspaceId: string }) =>
       apiFetch<WorkspaceCodeExecutionPolicy>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
         { method: "DELETE" },
       ),
     onSuccess: (_data, { workspaceId }) => {
@@ -287,7 +310,7 @@ export function useWorkspaceWebSearchConfig(workspaceId: string | null) {
     queryKey: [WORKSPACES, workspaceId, "web-search"],
     queryFn: () =>
       apiFetch<WorkspaceWebSearchConfig>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/web-search`,
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/web-search`,
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
@@ -305,7 +328,7 @@ export function useSetWorkspaceWebSearchConfig() {
       body: UpdateWorkspaceWebSearchConfigRequest
     }) =>
       apiFetch<WorkspaceWebSearchConfig>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
         { method: "PUT", body: JSON.stringify(body) },
       ),
     onSuccess: (data, { workspaceId }) => {
@@ -326,7 +349,7 @@ export function useClearWorkspaceWebSearchConfig() {
   return useMutation({
     mutationFn: ({ workspaceId }: { workspaceId: string }) =>
       apiFetch<WorkspaceWebSearchConfig>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
         { method: "DELETE" },
       ),
     onSuccess: (_data, { workspaceId }) => {
@@ -352,7 +375,7 @@ export function useWorkspaceMcpServers(workspaceId: string | null) {
     queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
     queryFn: () =>
       apiFetch<WorkspaceMcpServers>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers?limit=${MCP_SERVERS_PAGE_SIZE}`,
+        `/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers?limit=${MCP_SERVERS_PAGE_SIZE}`,
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
@@ -370,7 +393,7 @@ export function useCreateWorkspaceMcpServer() {
       body: CreateWorkspaceMcpServerRequest
     }) =>
       apiFetch<WorkspaceMcpServer>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
         { method: "POST", body: JSON.stringify(body) },
       ),
     onSuccess: (_data, { workspaceId }) => {
@@ -396,7 +419,7 @@ export function useUpdateWorkspaceMcpServer() {
       body: UpdateWorkspaceMcpServerRequest
     }) =>
       apiFetch<WorkspaceMcpServer>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: (_data, { workspaceId }) => {
@@ -418,7 +441,7 @@ export function useDeleteWorkspaceMcpServer() {
       serverId: string
     }) =>
       apiFetch<void>(
-        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+        `/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
         { method: "DELETE" },
       ),
     onSuccess: (_data, { workspaceId }) => {

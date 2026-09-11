@@ -74,7 +74,7 @@ async def _identity_with_a_home(db: AsyncSession, *, email: str) -> tuple[User, 
     """An identity that already belongs somewhere, which is who the inbox is for.
 
     An invitation to an address with no identity mints a password-less one that
-    cannot sign in until ``POST /v1/auth/signup`` claims it, so it could not
+    cannot sign in until ``POST /api/v1/auth/signup`` claims it, so it could not
     reach an inbox at all. Every case here starts from an identity that can.
     """
     home = await _organization(db, slug=f"home-{uuid.uuid4().hex[:8]}")

@@ -37,7 +37,7 @@ from gateway.services.alias_service import all_alias_names, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
 
 router = APIRouter(
-    prefix="/v1/aliases",
+    prefix="/aliases",
     tags=["aliases"],
     dependencies=[Depends(require_deployment_operator)],
 )

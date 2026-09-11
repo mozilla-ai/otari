@@ -326,7 +326,7 @@ def _web_search_intercept_enabled(config: GatewayConfig | None = None) -> bool:
 def web_search_declaration_forms(config: GatewayConfig | None = None) -> list[str]:
     """Every ``tools[].type`` this deployment routes to the web-search backend.
 
-    Advertised by ``GET /v1/tools``. The dated form is spelled with a placeholder
+    Advertised by ``GET /api/v1/tools``. The dated form is spelled with a placeholder
     (``web_search_<date>``) because the match is a prefix, not a fixed list: any
     suffix works, including future Anthropic versions.
     """

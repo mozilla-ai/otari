@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentUser } from "@/client"
 import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, deploymentUser } from "@/tests/fixtures"
 
@@ -36,10 +37,10 @@ function mockApi(opts: { granted?: boolean; accounts?: DeploymentUser[] }) {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
-    if (url.includes("/v1/admin/access")) {
+    if (url.includes(`${API_ROOT}/admin/access`)) {
       return jsonResponse({ granted })
     }
-    if (url.includes("/v1/admin/users")) {
+    if (url.includes(`${API_ROOT}/admin/users`)) {
       if (method === "GET") {
         return jsonResponse({ data: accounts, count: accounts.length })
       }
@@ -142,7 +143,7 @@ describe("DeploymentAccountsPage", () => {
     )
 
     const patch = requests.find((request) => request.method === "PATCH")
-    expect(patch?.url).toContain(`/v1/admin/users/${ANALYST.id}`)
+    expect(patch?.url).toContain(`${API_ROOT}/admin/users/${ANALYST.id}`)
     expect(patch?.body).toEqual({ is_active: false })
   })
 
@@ -251,7 +252,7 @@ describe("DeploymentAccountsPage", () => {
     // A 500 leaves `granted` false the same way a refusal does, and the two are
     // not the same thing to tell an operator.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-      String(input).includes("/v1/admin/access")
+      String(input).includes(`${API_ROOT}/admin/access`)
         ? jsonResponse({ detail: "Database error" }, 500)
         : jsonResponse({}),
     )
@@ -267,7 +268,9 @@ describe("DeploymentAccountsPage", () => {
 
     await screen.findByText("Accounts is not available to you")
     expect(
-      requests.some((request) => request.url.includes("/v1/admin/users")),
+      requests.some((request) =>
+        request.url.includes(`${API_ROOT}/admin/users`),
+      ),
     ).toBe(false)
   })
 })

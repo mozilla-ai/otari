@@ -1,8 +1,8 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useSignup } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { emailFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,

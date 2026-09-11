@@ -2,6 +2,9 @@ import { Button, Card, Chip } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationSpendCeiling } from "@/client"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import {
   useCreateOrganizationSpendCeiling,
   useDeleteOrganizationSpendCeiling,
@@ -10,12 +13,6 @@ import {
   useUpdateOrganizationSpendCeiling,
 } from "@/shared/api/budgets"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { formatDate, formatUsd } from "@/shared/helpers/format"
 
 import { limitLabel, periodLabel, scopeLabel } from "./organizationBudget"

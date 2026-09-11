@@ -9,6 +9,7 @@ import type {
   DeploymentBootstrap,
   GatewaySettings,
 } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
@@ -102,16 +103,16 @@ function renderShell(
     // panel. Answered from the same option, because a harness that could tell
     // the rail one thing and the page another would be describing a deployment
     // that does not exist.
-    if (path.startsWith("/v1/admin/access")) {
+    if (path.startsWith(`${API_ROOT}/admin/access`)) {
       return Response.json({ granted: options.operator ?? true })
     }
-    if (path.startsWith("/v1/admin/users")) {
+    if (path.startsWith(`${API_ROOT}/admin/users`)) {
       return Response.json({ data: [], count: 0 })
     }
-    if (path.startsWith("/v1/organizations/me/memberships")) {
+    if (path.startsWith(`${API_ROOT}/organizations/me/memberships`)) {
       return Response.json({ data: memberships, count: memberships.length })
     }
-    if (path.includes("/v1/settings")) {
+    if (path.includes(`${API_ROOT}/settings`)) {
       return Response.json(options.settings ?? SETTINGS_WITH_PRICING)
     }
     // The membership context, which carries the caller axis. An operator by
@@ -568,7 +569,7 @@ describe("AppShell surface gating", () => {
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
     // Awaited, not assumed: two of these rows declare `operatorOnly`, so neither
-    // exists until `GET /v1/organizations/me` answers. Taking the snapshot
+    // exists until `GET /api/v1/organizations/me` answers. Taking the snapshot
     // without waiting is a race that passes on a fast machine and fails on CI,
     // which is what it did. One await covers both, because the caller axis is
     // one read and they appear in the same paint.
@@ -720,7 +721,7 @@ describe("AppShell entitlement gating", () => {
       vi
         .mocked(globalThis.fetch)
         .mock.calls.some((call) =>
-          String(call[0]).includes("/v1/admin/access"),
+          String(call[0]).includes(`${API_ROOT}/admin/access`),
         ),
     ).toBe(false)
   })
@@ -970,7 +971,7 @@ describe("AppShell entitlement gating", () => {
   it("withholds Create workspace from a role the server would refuse", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
-    // `POST /v1/workspaces` is owners and admins only, and the Workspaces page
+    // `POST /api/v1/workspaces` is owners and admins only, and the Workspaces page
     // gates its own create control on the same predicate. Offering it here would
     // hand a member the whole form and report the refusal as a 403 after they
     // had typed a name.

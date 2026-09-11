@@ -337,3 +337,156 @@ test.describe("organization admin", () => {
     await captureScreenshot(page, "organization-spend-budgets")
   })
 })
+
+test.describe("the keys page's one-time secret", () => {
+  // The dialog at rest, which the matrix above cannot reach: its entries open a
+  // route and capture it, and this is a state the page has to be put into.
+  // Captured on every viewport and both themes like the rest, which is how the
+  // phone gets covered: below 640px the dialog is a full-screen sheet, so the
+  // mobile project is the only place that shape appears at all.
+  test("the create dialog, on the form step", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/keys")
+    await expect(
+      page.getByRole("heading", { name: /keys/i }).first(),
+    ).toBeVisible()
+    // The heading's own action, not the empty state's: the seeded database has
+    // rows, so there is no empty state, and this is the placement the whole
+    // change is about.
+    await page.getByRole("button", { name: "Create key" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByLabel("Name")).toBeVisible()
+    await captureScreenshot(page, "keys-create-dialog")
+  })
+
+  // The same dialog with its disclosure open, which is what makes the body
+  // scroll: header and footer pinned, content moving between them.
+  test("the create dialog, with Advanced open", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/keys")
+    await expect(
+      page.getByRole("heading", { name: /keys/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create key" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: "Advanced" }).click()
+    await expect(dialog.getByText("Restrict this key's models")).toBeVisible()
+    await captureScreenshot(page, "keys-create-dialog-advanced")
+  })
+})
+
+test.describe("the routing policy dialog", () => {
+  // The form at rest. The matrix at the top of this file opens routes and
+  // captures them; this is a state the page has to be put into, and on the
+  // mobile project it is also the only place the full-screen sheet appears.
+  test("the create dialog, on the form step", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/routing")
+    await expect(
+      page.getByRole("heading", { name: /routing/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await expect(
+      dialog.getByRole("textbox", { name: /Policy name/ }),
+    ).toBeVisible()
+    await captureScreenshot(page, "routing-create-dialog")
+  })
+
+  // The same dialog once a fallback chain has been summoned, which is the
+  // shortest way to a body taller than the frame: the header and the footer stay
+  // put and the fields scroll between them.
+  test("the create dialog, with a fallback chain", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/routing")
+    await expect(
+      page.getByRole("heading", { name: /routing/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create policy" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
+    await expect(dialog.getByText("If that fails, try")).toBeVisible()
+    await captureScreenshot(page, "routing-create-dialog-fallback")
+  })
+})
+
+test.describe("the budget dialog", () => {
+  test("the create dialog", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/budgets")
+    await expect(
+      page.getByRole("heading", { name: /budgets/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create budget" }).first().click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog.getByLabel("Name (optional)")).toBeVisible()
+    await captureScreenshot(page, "budgets-create-dialog")
+  })
+})
+
+test.describe("the workspace dialogs", () => {
+  test("the create dialog, from the page", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/workspaces")
+    await expect(
+      page.getByRole("heading", { name: /workspaces/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Create workspace" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "New workspace" })
+    await expect(dialog.getByLabel("Name")).toBeVisible()
+    await captureScreenshot(page, "workspaces-create-dialog")
+  })
+})
+
+test.describe("the provider dialog", () => {
+  // The `lg` size with a tab row under the header, which no other dialog in the
+  // product has: both ways to attach a provider share one frame.
+  test("the add dialog, on the known-provider tab", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/providers")
+    await expect(
+      page.getByRole("heading", { name: /providers/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Add provider" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "New provider" })
+    await expect(
+      dialog.getByRole("button", { name: "Known provider" }),
+    ).toBeVisible()
+    await captureScreenshot(page, "providers-add-dialog")
+  })
+
+  test("the add dialog, on the custom-endpoint tab", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/providers")
+    await expect(
+      page.getByRole("heading", { name: /providers/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Add provider" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "New provider" })
+    await dialog.getByRole("button", { name: "Custom endpoint" }).click()
+    await expect(dialog.getByLabel("API base")).toBeVisible()
+    await captureScreenshot(page, "providers-add-dialog-custom")
+  })
+})
+
+test.describe("the domain dialog", () => {
+  // The suite's only `sm` dialog, which is the width nothing else here covers.
+  test("the claim dialog", async ({ page }) => {
+    await login(page)
+    await gotoRoute(page, "/organization/domains")
+    await expect(
+      page.getByRole("heading", { name: /email domains/i }).first(),
+    ).toBeVisible()
+    await page.getByRole("button", { name: "Claim domain" }).first().click()
+    const dialog = page.getByRole("dialog", { name: "New domain" })
+    await expect(dialog.getByLabel(/^Domain/)).toBeVisible()
+    await captureScreenshot(page, "organization-domains-claim-dialog")
+  })
+})
+
+// No capture for the organization provider-key dialog. Its page is gated on the
+// `organization_providers` surface, which only a hosted deployment publishes
+// (bootstrap.py's HOSTED_SURFACES), and this suite boots a standalone gateway,
+// so the route answers with "Providers is not available here". Covering it
+// would mean a third gateway in the harness rather than a test.

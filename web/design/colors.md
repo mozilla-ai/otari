@@ -24,7 +24,7 @@ not a duplicate to collapse.
 
 What background do I use?
 
-```
+```text
 Is it the page itself, the rail, or the top bar?
  ├── Yes -> bg-background   (the shell is flat; hairlines divide it, not levels)
  └── No

@@ -24,7 +24,7 @@ import {
 export function useAliases(enabled = true) {
   return useQuery({
     queryKey: [ALIASES],
-    queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
+    queryFn: () => apiFetch<AliasResponse[]>("/aliases"),
     staleTime: 60_000,
     enabled,
   })
@@ -34,7 +34,7 @@ export function useAliases(enabled = true) {
 export function useRoutingPolicies(enabled = true) {
   return useQuery({
     queryKey: [ROUTING_POLICIES],
-    queryFn: () => apiFetch<RoutingPolicyResponse[]>("/v1/routing/policies"),
+    queryFn: () => apiFetch<RoutingPolicyResponse[]>("/routing/policies"),
     staleTime: 60_000,
     enabled,
   })
@@ -49,9 +49,7 @@ export function useOrganizationRoutingPolicies(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_ROUTING_POLICIES],
     queryFn: () =>
-      apiFetch<RoutingPolicyResponse[]>(
-        "/v1/organizations/me/routing-policies",
-      ),
+      apiFetch<RoutingPolicyResponse[]>("/organizations/me/routing-policies"),
     staleTime: 60_000,
     enabled,
   })
@@ -65,7 +63,7 @@ export function useOrganizationRoutingPolicies(enabled = true) {
 export function useOrganizationAliases(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_ALIASES],
-    queryFn: () => apiFetch<AliasResponse[]>("/v1/organizations/me/aliases"),
+    queryFn: () => apiFetch<AliasResponse[]>("/organizations/me/aliases"),
     staleTime: 60_000,
     enabled,
   })
@@ -75,7 +73,7 @@ export function useSetRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetRoutingPolicyRequest) =>
-      apiFetch<RoutingPolicyResponse>("/v1/routing/policies", {
+      apiFetch<RoutingPolicyResponse>("/routing/policies", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -107,7 +105,7 @@ export function useDeleteRoutingPolicy() {
       const scope =
         userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`
       return apiFetch<void>(
-        `/v1/routing/policies/${encodeURIComponent(name)}${scope}`,
+        `/routing/policies/${encodeURIComponent(name)}${scope}`,
         { method: "DELETE" },
       )
     },
@@ -152,7 +150,7 @@ export function useSetOrganizationRoutingPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetRoutingPolicyRequest & { workspace_id: string }) =>
-      apiFetch<RoutingPolicyResponse>("/v1/organizations/me/routing-policies", {
+      apiFetch<RoutingPolicyResponse>("/organizations/me/routing-policies", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -171,7 +169,7 @@ export function useDeleteOrganizationRoutingPolicy() {
       workspaceId: string
     }) =>
       apiFetch<void>(
-        `/v1/organizations/me/routing-policies/${encodeURIComponent(name)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/organizations/me/routing-policies/${encodeURIComponent(name)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateRoutingLists(queryClient),
@@ -182,7 +180,7 @@ export function useCreateOrganizationAlias() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateAliasRequest & { workspace_id: string }) =>
-      apiFetch<AliasResponse>("/v1/organizations/me/aliases", {
+      apiFetch<AliasResponse>("/organizations/me/aliases", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -201,7 +199,7 @@ export function useDeleteOrganizationAlias() {
       workspaceId: string
     }) =>
       apiFetch<void>(
-        `/v1/organizations/me/aliases/${encodeURIComponent(name)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/organizations/me/aliases/${encodeURIComponent(name)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateRoutingLists(queryClient),
@@ -215,7 +213,7 @@ export function useDeleteOrganizationAlias() {
 export function useExplainPolicy() {
   return useMutation({
     mutationFn: (body: ExplainPolicyRequest) =>
-      apiFetch<ExplainPolicyResponse>("/v1/routing/policies/explain", {
+      apiFetch<ExplainPolicyResponse>("/routing/policies/explain", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -236,7 +234,7 @@ export function useRouterStatus(userId: string | null) {
     queryKey: [ROUTER_STATUS, userId],
     queryFn: () =>
       apiFetch<RouterStatus>(
-        `/v1/routing/status?user_id=${encodeURIComponent(userId ?? "")}`,
+        `/routing/status?user_id=${encodeURIComponent(userId ?? "")}`,
       ),
     enabled: userId !== null && userId !== "",
     staleTime: 30_000,
@@ -248,7 +246,7 @@ export function useRankCandidates() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: RankCandidatesRequest) =>
-      apiFetch<RankCandidatesResponse>("/v1/routing/preferences/rank", {
+      apiFetch<RankCandidatesResponse>("/routing/preferences/rank", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -264,7 +262,7 @@ export function useCreateAlias() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateAliasRequest) =>
-      apiFetch<AliasResponse>("/v1/aliases", {
+      apiFetch<AliasResponse>("/aliases", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -293,7 +291,7 @@ export function useDeleteAlias() {
     }) => {
       const scope =
         userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`
-      return apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}${scope}`, {
+      return apiFetch<void>(`/aliases/${encodeURIComponent(name)}${scope}`, {
         method: "DELETE",
       })
     },

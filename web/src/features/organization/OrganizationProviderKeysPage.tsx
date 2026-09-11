@@ -1,11 +1,24 @@
 import { Button } from "@heroui/react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import type {
   CreateOrgProviderKeyRequest,
   OrgProviderKey,
   UpdateOrgProviderKeyRequest,
 } from "@/client"
+import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
@@ -33,21 +46,6 @@ import {
   useSetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
-import { ConfirmRowAction } from "@/shared/components/actions/ConfirmRowAction"
-import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { Field } from "@/shared/components/forms/Field"
-import { SecretField } from "@/shared/components/forms/SecretField"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatRelative } from "@/shared/helpers/format"
 
 import { canManage } from "./roles"
@@ -63,7 +61,7 @@ import { canManage } from "./roles"
 // (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
 // `src/gateway/api/routes/bootstrap.py`).
 //
-// The per-workspace half of the same API (`/v1/workspaces/{id}/provider-keys`:
+// The per-workspace half of the same API (`/workspaces/{id}/provider-keys`:
 // pin, disable, restrict to models) is deliberately not here. Those are one
 // workspace's departure from what this page sets, so they belong beside that
 // workspace: `WorkspaceProviderKeys`, on the Workspaces page, which has already
@@ -114,9 +112,11 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
 }
 
 function KeyForm({
+  isOpen,
   editing,
   onClose,
 }: {
+  isOpen: boolean
   /** The key being edited, or null when the form is creating one. */
   editing: OrgProviderKey | null
   onClose: () => void
@@ -137,6 +137,10 @@ function KeyForm({
   )
   const spec = credentialSpecFor(draft.provider)
   const pending = create.isPending || update.isPending
+  // The whole draft against what the form was seeded with, so a guard cannot
+  // miss a field the form grows later.
+  const seeded = useRef(JSON.stringify(draft))
+  const isDirty = JSON.stringify(draft) !== seeded.current
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
@@ -177,15 +181,22 @@ function KeyForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title={editing ? "Edit provider key" : "New provider key"}
+      // The key it is about, where the title used to carry it inline. A dialog
+      // title is a noun phrase.
+      description={editing ? editing.name : undefined}
+      submitLabel={editing ? "Save" : "Add provider key"}
+      onSubmit={submit}
+      isPending={pending}
+      isSubmitDisabled={!canSubmit}
+      isDirty={isDirty}
+      error={create.error ?? update.error}
     >
-      <h2 className="text-title">
-        {editing ? `Edit ${editing.name}` : "Add provider key"}
-      </h2>
-      <ErrorBanner error={create.error ?? update.error} />
-
       {editing ? (
         // The provider is part of the key's identity (it is half of the
         // uniqueness constraint and the whole of what dispatch matches on),
@@ -258,23 +269,7 @@ function KeyForm({
         onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
         error={clientArgsError}
       />
-
-      {/* Under a rule of its own, so the row that commits the form is divided
-          from the fields rather than floating after them. */}
-      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
-        <Button variant="ghost" isDisabled={pending} onPress={onClose}>
-          Close
-        </Button>
-        <Button
-          variant="primary"
-          isDisabled={!canSubmit}
-          isPending={pending}
-          onPress={submit}
-        >
-          {editing ? "Save" : "Add provider key"}
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -305,8 +300,23 @@ export function OrganizationProviderKeysPage() {
   const setDefault = useSetOrgProviderKeyDefault()
 
   const [adding, setAdding] = useState(false)
+  const [addOpenCount, setAddOpenCount] = useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<OrgProviderKey>()
+
+  // Bumped on each open, and the create form is keyed on it, so the draft (the
+  // plaintext secret included) is fresh every time and untouched through the
+  // exit: the dialog keeps its content while it animates out, so clearing on
+  // the way out would blank the body in front of the operator. The mutation is
+  // inside `KeyForm`, below the key, so a previous refusal's banner goes with
+  // it. See feedback.md, "A draft is fresh on every open and untouched through
+  // the exit".
+  const openAdd = () => {
+    setEditingId(null)
+    setAddOpenCount((n) => n + 1)
+    setAdding(true)
+  }
 
   const editing = keys.data?.find((key) => key.id === editingId) ?? null
   const archivedCount = (keys.data ?? []).filter((key) =>
@@ -392,13 +402,9 @@ export function OrganizationProviderKeysPage() {
               </RowAction>
               {/* Permanent, and the only place it is offered: the API
                     accepts a delete for an archived key alone. */}
-              <ConfirmRowAction
-                confirmLabel="Delete"
-                isPending={remove.isPending}
-                onConfirm={() => remove.mutate(row.id)}
-              >
+              <RowAction onPress={() => setPendingDelete(row)}>
                 Delete
-              </ConfirmRowAction>
+              </RowAction>
             </>
           ) : (
             <>
@@ -444,14 +450,14 @@ export function OrganizationProviderKeysPage() {
       <PageIntro
         title="Providers"
         action={
-          canEdit && !adding ? (
+          canEdit ? (
             <Button
+              // Visible while the dialog is open; disabled rather than hidden
+              // without a server secret key, which is the rule for a control
+              // that carries its own reason nearby.
               variant="primary"
               isDisabled={!secretKeyConfigured}
-              onPress={() => {
-                setEditingId(null)
-                setAdding(true)
-              }}
+              onPress={openAdd}
             >
               Add provider key
             </Button>
@@ -470,7 +476,6 @@ export function OrganizationProviderKeysPage() {
           keys.error ??
           archive.error ??
           restore.error ??
-          remove.error ??
           setDefault.error
         }
       />
@@ -497,14 +502,18 @@ export function OrganizationProviderKeysPage() {
         </InfoBanner>
       ) : null}
 
-      {adding && secretKeyConfigured ? (
-        <KeyForm editing={null} onClose={() => setAdding(false)} />
-      ) : null}
+      <KeyForm
+        key={addOpenCount}
+        isOpen={adding && secretKeyConfigured}
+        editing={null}
+        onClose={() => setAdding(false)}
+      />
       {editing ? (
         // Remounted per row: the draft is seeded from the key once, so editing a
         // second key would otherwise open with the first one's values.
         <KeyForm
           key={editing.id}
+          isOpen
           editing={editing}
           onClose={() => setEditingId(null)}
         />
@@ -539,6 +548,32 @@ export function OrganizationProviderKeysPage() {
           />
         </TableScrollFrame>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out: a refusal otherwise sits on the mutation and
+        // greets the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
+        heading="Delete provider key"
+        body={
+          pendingDelete
+            ? `${pendingDelete.name} and its stored ${pendingDelete.provider} credential are removed for good. Archiving is the reversible step; this one cannot be undone.`
+            : null
+        }
+        confirmLabel="Delete permanently"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
     </div>
   )
 }

@@ -38,7 +38,7 @@ import {
 export function useOrganizationContext(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATIONS, "context"],
-    queryFn: () => apiFetch<OrganizationContext>("/v1/organizations/me"),
+    queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
     enabled,
   })
@@ -48,7 +48,7 @@ export function useOrganizationContext(enabled = true) {
 // OTARI_SECRET_KEY is set on the server. Both provider-key pages gate their add
 // control on it, so the rule lives here rather than twice.
 //
-// Read off the membership context rather than `/v1/settings`, which reports the
+// Read off the membership context rather than `/settings`, which reports the
 // same fact as `secret_key_configured` but is operator-only: an organization
 // owner is not one, so that query 403s for the whole tenant-facing audience and
 // a refusal used to read as "the key is missing" (#839).
@@ -73,13 +73,13 @@ export function useOrganizationMemberships() {
     queryKey: [ORGANIZATIONS, "memberships"],
     queryFn: () =>
       fetchAllPaged<CallerOrganizationMembership>(
-        "/v1/organizations/me/memberships",
+        "/organizations/me/memberships",
       ),
     staleTime: 60_000,
     // Same guard as `useUsageGroupedSeries` and `useInFlightRequests`, and for
     // both of their reasons: a gateway older than this bundle does not serve
     // this route (the process may not have restarted onto the build that ships
-    // it), and a hybrid gateway answers 404 for every `/v1/organizations` path
+    // it), and a hybrid gateway answers 404 for every `/organizations` path
     // by design. Neither is something a retry fixes; the switcher falls back to
     // stating the one organization the context names.
     retry: (failureCount, error) =>
@@ -94,7 +94,7 @@ export function useCreateOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationRequest) =>
-      apiFetch<Organization>("/v1/organizations", {
+      apiFetch<Organization>("/organizations", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -122,7 +122,7 @@ export function useSwitchOrganization() {
       const body: SwitchOrganizationRequest = {
         organization_id: organizationId,
       }
-      return apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
+      return apiFetch<OrganizationContext>("/organizations/me/switch", {
         method: "POST",
         body: JSON.stringify(body),
       })
@@ -141,7 +141,7 @@ export function useOrganizationMembers(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_MEMBERS],
     queryFn: () =>
-      fetchAllPaged<OrganizationMember>("/v1/organizations/me/members"),
+      fetchAllPaged<OrganizationMember>("/organizations/me/members"),
     staleTime: 60_000,
     enabled,
   })
@@ -151,7 +151,7 @@ export function useUpdateOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UpdateOrganizationRequest) =>
-      apiFetch<OrganizationContext>("/v1/organizations/me", {
+      apiFetch<OrganizationContext>("/organizations/me", {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
@@ -168,7 +168,7 @@ export function useAddOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationMemberRequest) =>
-      apiFetch<CreateOrganizationMemberResult>("/v1/organizations/me/members", {
+      apiFetch<CreateOrganizationMemberResult>("/organizations/me/members", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -196,7 +196,7 @@ export function useUpdateOrganizationMember() {
       body: UpdateOrganizationMemberRequest
     }) =>
       apiFetch<OrganizationMember>(
-        `/v1/organizations/me/members/${encodeURIComponent(id)}`,
+        `/organizations/me/members/${encodeURIComponent(id)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => {
@@ -212,7 +212,7 @@ export function useRemoveOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/organizations/me/members/${encodeURIComponent(id)}`, {
+      apiFetch<void>(`/organizations/me/members/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     onSuccess: () => {
@@ -236,7 +236,7 @@ export function useInviteOrganizationMember() {
   return useMutation({
     mutationFn: (body: InviteOrganizationMemberRequest) =>
       apiFetch<InviteOrganizationMemberResult>(
-        "/v1/organizations/me/member-invitations",
+        "/organizations/me/member-invitations",
         { method: "POST", body: JSON.stringify(body) },
       ),
     onSuccess: () => {
@@ -251,7 +251,7 @@ export function useRevokeOrganizationMemberInvitation() {
   return useMutation({
     mutationFn: (invitationId: string) =>
       apiFetch<void>(
-        `/v1/organizations/me/member-invitations/${encodeURIComponent(invitationId)}`,
+        `/organizations/me/member-invitations/${encodeURIComponent(invitationId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => {
@@ -270,7 +270,7 @@ export function useRevokeOrganizationMemberInvitation() {
 // it along with the rest of the tenancy cache. Same 404 guard as
 // `useOrganizationMemberships`, for both of its reasons: a gateway older than
 // this bundle does not serve this route, and a hybrid gateway answers 404 for
-// every `/v1/organizations` path by design. Neither is something a retry
+// every `/organizations` path by design. Neither is something a retry
 // fixes, and the entry point that reads the count treats a failure as "nothing
 // waiting" rather than showing an error in the chrome.
 export function usePendingOrganizationInvitations() {
@@ -278,7 +278,7 @@ export function usePendingOrganizationInvitations() {
     queryKey: [ORGANIZATIONS, "pending-memberships"],
     queryFn: () =>
       fetchAllPaged<PendingOrganizationInvitation>(
-        "/v1/organizations/me/pending-memberships",
+        "/organizations/me/pending-memberships",
       ),
     staleTime: 60_000,
     retry: (failureCount, error) =>
@@ -296,7 +296,7 @@ export function useAcceptPendingMembership() {
   return useMutation({
     mutationFn: (organizationMemberId: string) =>
       apiFetch<AcceptInvitationResult>(
-        `/v1/organizations/me/pending-memberships/${encodeURIComponent(
+        `/organizations/me/pending-memberships/${encodeURIComponent(
           organizationMemberId,
         )}/accept`,
         { method: "POST" },
@@ -314,7 +314,7 @@ export function useDeclinePendingMembership() {
   return useMutation({
     mutationFn: (organizationMemberId: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/pending-memberships/${encodeURIComponent(
+        `/organizations/me/pending-memberships/${encodeURIComponent(
           organizationMemberId,
         )}/decline`,
         { method: "POST" },
@@ -338,7 +338,7 @@ export function useValidateInvitation(token: string) {
     // token is a bearer credential, and a URL is what an access log or an
     // intermediate proxy routinely retains.
     queryFn: () =>
-      apiFetch<InvitationPreview>("/v1/invitations/validate", {
+      apiFetch<InvitationPreview>("/invitations/validate", {
         method: "POST",
         body: JSON.stringify({ token }),
       }),
@@ -353,7 +353,7 @@ export function useValidateInvitation(token: string) {
 export function useAcceptInvitation() {
   return useMutation({
     mutationFn: (token: string) =>
-      apiFetch<AcceptInvitationResult>("/v1/invitations/accept", {
+      apiFetch<AcceptInvitationResult>("/invitations/accept", {
         method: "POST",
         body: JSON.stringify({ token }),
       }),
@@ -384,7 +384,7 @@ function invalidateOrgProviderKeys(
 }
 
 // The organization's own upstream provider credentials (#670), which every
-// workspace under it inherits. A different table from `/v1/provider-credentials`
+// workspace under it inherits. A different table from `/provider-credentials`
 // above: that one is keyed on an instance name and belongs to the process, this
 // one belongs to the tenant. Only a hosted deployment reports the surface these
 // hooks serve (`organization_providers`).
@@ -401,7 +401,7 @@ export function useOrgProviderKeys(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_PROVIDER_KEYS],
     queryFn: () =>
-      fetchAllPaged<OrgProviderKey>("/v1/organizations/me/provider-keys", {
+      fetchAllPaged<OrgProviderKey>("/organizations/me/provider-keys", {
         include_archived: "true",
       }),
     staleTime: 60_000,
@@ -413,7 +413,7 @@ export function useCreateOrgProviderKey() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrgProviderKeyRequest) =>
-      apiFetch<OrgProviderKey>("/v1/organizations/me/provider-keys", {
+      apiFetch<OrgProviderKey>("/organizations/me/provider-keys", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -432,7 +432,7 @@ export function useUpdateOrgProviderKey() {
       body: UpdateOrgProviderKeyRequest
     }) =>
       apiFetch<OrgProviderKey>(
-        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => invalidateOrgProviderKeys(queryClient),
@@ -447,7 +447,7 @@ export function useArchiveOrgProviderKey() {
   return useMutation({
     mutationFn: (keyId: string) =>
       apiFetch<OrgProviderKey>(
-        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}/archive`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/archive`,
         { method: "POST" },
       ),
     onSuccess: () => invalidateOrgProviderKeys(queryClient),
@@ -459,7 +459,7 @@ export function useRestoreOrgProviderKey() {
   return useMutation({
     mutationFn: (keyId: string) =>
       apiFetch<OrgProviderKey>(
-        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}/restore`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/restore`,
         { method: "POST" },
       ),
     onSuccess: () => invalidateOrgProviderKeys(queryClient),
@@ -471,7 +471,7 @@ export function useSetOrgProviderKeyDefault() {
   return useMutation({
     mutationFn: (keyId: string) =>
       apiFetch<OrgProviderKey>(
-        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
         { method: "POST" },
       ),
     onSuccess: () => invalidateOrgProviderKeys(queryClient),
@@ -484,7 +484,7 @@ export function useDeleteOrgProviderKey() {
   return useMutation({
     mutationFn: (keyId: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrgProviderKeys(queryClient),
@@ -503,7 +503,7 @@ export function useOrganizationDomains(enabled = true) {
     queryKey: [ORGANIZATION_DOMAINS],
     queryFn: () =>
       apiFetch<{ data: OrganizationDomain[]; count: number }>(
-        "/v1/organizations/me/domains",
+        "/organizations/me/domains",
       ),
     staleTime: 60_000,
     enabled,
@@ -520,7 +520,7 @@ export function useCreateOrganizationDomain() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateOrganizationDomainRequest) =>
-      apiFetch<OrganizationDomain>("/v1/organizations/me/domains", {
+      apiFetch<OrganizationDomain>("/organizations/me/domains", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -539,7 +539,7 @@ export function useUpdateOrganizationDomain() {
       body: UpdateOrganizationDomainRequest
     }) =>
       apiFetch<OrganizationDomain>(
-        `/v1/organizations/me/domains/${encodeURIComponent(domainId)}`,
+        `/organizations/me/domains/${encodeURIComponent(domainId)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => invalidateOrganizationDomains(queryClient),
@@ -551,7 +551,7 @@ export function useVerifyOrganizationDomain() {
   return useMutation({
     mutationFn: (domainId: string) =>
       apiFetch<OrganizationDomain>(
-        `/v1/organizations/me/domains/${encodeURIComponent(domainId)}/verify`,
+        `/organizations/me/domains/${encodeURIComponent(domainId)}/verify`,
         { method: "POST" },
       ),
     onSuccess: () => invalidateOrganizationDomains(queryClient),
@@ -563,7 +563,7 @@ export function useDeleteOrganizationDomain() {
   return useMutation({
     mutationFn: (domainId: string) =>
       apiFetch<{ message: string }>(
-        `/v1/organizations/me/domains/${encodeURIComponent(domainId)}`,
+        `/organizations/me/domains/${encodeURIComponent(domainId)}`,
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrganizationDomains(queryClient),

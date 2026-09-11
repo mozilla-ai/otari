@@ -1,11 +1,14 @@
 import { Fragment, useEffect, useRef, useState } from "react"
 import { FiCheck } from "react-icons/fi"
-
 import type {
   ToolServiceName,
   ToolSettingField,
   UpdateToolSettingsRequest,
 } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Skeleton } from "@/design-system/feedback/Skeleton"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
@@ -22,9 +25,6 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/tools"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
 import { docsSourceHref } from "@/shared/helpers/docs"
 
 // One settable field maps onto one key of the update request; cast at this one
@@ -136,7 +136,7 @@ interface ServiceSpec {
   docsAnchor: string
   /** The pricing key for a tool Otari runs itself. Guardrails is a check, not billable work. */
   pricingKey?: string
-  /** The `/v1/tools` id whose status heads the page. Guardrails declares none. */
+  /** The `/tools` id whose status heads the page. Guardrails declares none. */
   toolId?: string
   groups: GroupSpec[]
 }
@@ -254,17 +254,6 @@ function SaveToast({ message }: { message: string | null }) {
   )
 }
 
-// A box at the size of what is coming. Drawn here rather than shared: this is
-// the only place in the product holding a settings row's shape open.
-function Placeholder({ className }: { className: string }) {
-  return (
-    <span
-      aria-hidden
-      className={`block animate-pulse bg-surface-subtle motion-reduce:animate-none ${className}`}
-    />
-  )
-}
-
 /** The frames, at the real row height, so settings arriving does not move the page. */
 function LoadingGroups() {
   return (
@@ -277,10 +266,10 @@ function LoadingGroups() {
               className="flex min-h-11 items-center gap-6 px-4 py-3"
             >
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <Placeholder className="h-4 w-40" />
-                <Placeholder className="h-3.5 w-64" />
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3.5 w-64" />
               </div>
-              <Placeholder className="h-8 w-[13.75rem] shrink-0" />
+              <Skeleton className="h-8 w-[13.75rem] shrink-0" />
             </div>
           ))}
         </SettingsGroup>
@@ -307,7 +296,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // below. Of the deployment-wide reads above them, only the tool settings now
   // answer a tenant, without the service endpoints in them (otari-ai#1969), so
   // that one is asked unconditionally and rendered read-only. The pricing rows
-  // and the /v1/search tools stay operator-only on the server, so they are
+  // and the /api/v1/search tools stay operator-only on the server, so they are
   // still gated on the same answer the sidebar uses rather than fired into a 403.
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
@@ -318,7 +307,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const update = useUpdateToolSettings()
   const [toast, showToast] = useSaveToast()
 
-  // Latest rate per key. /v1/pricing is history-shaped (one row per
+  // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force.
   const currentRates = new Map<string, number>()
   for (const row of pricing.data ?? []) {
@@ -388,7 +377,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 ...(group.catchAll ? unlisted : []),
               ]
               // Operator-only inside a group a member also sees: the rate
-              // comes from /v1/pricing, whose read is still operator-gated, so
+              // comes from /api/v1/pricing, whose read is still operator-gated, so
               // a member would get an editable "unpriced" row that can only
               // fail on save.
               const pricingKey =
@@ -455,9 +444,9 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the
                 one set just above it. Operator-only, like those settings: its
-                rows are the deployment's own /v1/search credentials. The
+                rows are the deployment's own /api/v1/search credentials. The
                 workspace group goes below both, because it narrows the backend
-                above it and the /v1/search tools beside it. */}
+                above it and the /api/v1/search tools beside it. */}
             {service.key === "web_search" ? (
               <>
                 {isOperator ? (

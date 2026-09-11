@@ -62,7 +62,7 @@ from gateway.services.tenancy import webauthn_service
 from gateway.services.tenancy.errors import PasskeysNotConfiguredError, TenancyError
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
-router = APIRouter(prefix="/v1/auth/webauthn", tags=["auth"])
+router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
 
 class CeremonyOptions(BaseModel):
@@ -102,7 +102,7 @@ class AuthenticatePasskeyRequest(BaseModel):
 class PasskeySessionResponse(BaseModel):
     """A dashboard session minted by a passkey (the token travels only in the cookie).
 
-    The same three fields ``POST /v1/auth/session`` answers, deliberately: the
+    The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
     dashboard's sign-in path does not care which credential got it here.
     """
 

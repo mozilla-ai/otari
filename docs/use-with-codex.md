@@ -1,7 +1,7 @@
 # Use with Codex
 
 Codex can call Otari as a custom model provider over the Responses API. Otari
-serves `POST /v1/responses` in standalone and hybrid modes.
+serves `POST /api/v1/responses` in standalone and hybrid modes.
 
 ## Route Codex through Otari
 
@@ -13,7 +13,7 @@ model = "openai:gpt-5.4"
 
 [model_providers.otari]
 name = "Otari"
-base_url = "http://localhost:8000/v1"
+base_url = "http://localhost:8000/api/v1"
 wire_api = "responses"
 env_key = "OTARI_API_KEY"
 ```
@@ -23,7 +23,7 @@ export OTARI_API_KEY="gw-your-otari-key"
 codex
 ```
 
-Codex appends `/responses`, so `base_url` must include `/v1`.
+Codex appends `/responses`, so `base_url` must include `/api/v1`.
 `model_provider` must select the custom provider; otherwise Codex continues
 using its built-in OpenAI provider.
 
@@ -35,7 +35,7 @@ model = "openai:gpt-5.4"
 
 [model_providers.otari]
 name = "Otari"
-base_url = "https://api.otari.ai/v1"
+base_url = "https://api.otari.ai/api/v1"
 wire_api = "responses"
 env_key = "OTARI_API_KEY"
 ```
@@ -57,7 +57,7 @@ The upstream provider must implement the Responses API. Otari rejects unsupporte
 providers before dispatch. A hybrid attempt plan is rejected if any candidate
 cannot serve Responses.
 
-In standalone mode, inspect `GET /v1/models`. Hybrid model IDs come from the
+In standalone mode, inspect `GET /api/v1/models`. Hybrid model IDs come from the
 connected control plane.
 
 ## Model metadata
@@ -75,7 +75,7 @@ documentation. See the official configuration reference above.
 
 - Confirm `model_provider = "otari"` is set at user level. Codex ignores custom
   provider selection in project-local configuration.
-- Include `/v1` in `base_url`.
+- Include `/api/v1` in `base_url`.
 - Start a new Codex session after changing provider configuration.
 - Configure provider credentials and pricing in Otari, not in Codex.
 - Verify the selected provider supports the Responses API.
@@ -93,7 +93,7 @@ HTTP logs exporter with the full Otari logs path:
 [otel]
 environment = "otari"
 log_user_prompt = false
-exporter = { otlp-http = { endpoint = "https://otari.example.com/v1/logs", protocol = "binary", headers = { "Authorization" = "Bearer gw-your-import-key" } } }
+exporter = { otlp-http = { endpoint = "https://otari.example.com/otlp/v1/logs", protocol = "binary", headers = { "Authorization" = "Bearer gw-your-import-key" } } }
 ```
 
 `binary` sends protobuf; `json` also works. Otari does not accept OTLP over

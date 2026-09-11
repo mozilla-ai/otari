@@ -25,7 +25,7 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig, PricingConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, PricingConfig
 from gateway.main import create_app
 from gateway.models.routing import RoutingConfig
 
@@ -180,7 +180,7 @@ def client(learned_config: GatewayConfig) -> Generator[TestClient]:
 
 
 def _create_user(client: TestClient, user_id: str = USER) -> None:
-    resp = client.post("/v1/users", json={"user_id": user_id}, headers=HEADERS)
+    resp = client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
 
 
@@ -188,7 +188,7 @@ def _rank(client: TestClient, prompt: str, scores: dict[str, float], **extra: An
     """One example, through the batch endpoint."""
     example: dict[str, Any] = {"prompt": prompt, "scores": scores, **extra}
     return client.post(
-        "/v1/routing/preferences/rank", json={"user_id": USER, "examples": [example]}, headers=HEADERS
+        f"{API_ROOT}/routing/preferences/rank", json={"user_id": USER, "examples": [example]}, headers=HEADERS
     )
 
 
@@ -217,7 +217,7 @@ def _chat(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": model, "messages": [{"role": "user", "content": prompt}], "user": USER, **extra},
             headers={**HEADERS, **(headers or {})},
         )
@@ -225,7 +225,7 @@ def _chat(
 
 
 def _usage_rows(client: TestClient) -> list[dict[str, Any]]:
-    resp = client.get("/v1/usage", headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/usage", headers=HEADERS)
     assert resp.status_code == 200, resp.text
     payload: Any = resp.json()
     rows: list[dict[str, Any]] = payload["data"] if isinstance(payload, dict) and "data" in payload else payload
@@ -233,7 +233,7 @@ def _usage_rows(client: TestClient) -> list[dict[str, Any]]:
 
 
 def _status(client: TestClient, user_id: str = USER) -> dict[str, Any]:
-    resp = client.get("/v1/routing/status", params={"user_id": user_id}, headers=HEADERS)
+    resp = client.get(f"{API_ROOT}/routing/status", params={"user_id": user_id}, headers=HEADERS)
     assert resp.status_code == 200, resp.text
     status: dict[str, Any] = resp.json()
     return status
@@ -359,7 +359,7 @@ def test_the_ranking_is_the_failover_chain(client: TestClient) -> None:
 
     with patch("gateway.api.routes.chat.acompletion", new=flaky):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "smart-failover",
                 "messages": [{"role": "user", "content": "what is 2 plus 2"}],
@@ -385,7 +385,7 @@ def test_the_router_never_dispatches_a_candidate_the_key_forbids(client: TestCli
     # be served, and the request must still succeed on an allowed candidate.
     _teach(client)
     key = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "restricted", "user_id": USER, "allowed_models": ["openai:gpt-5"]},
         headers=HEADERS,
     )
@@ -426,7 +426,7 @@ def test_routing_applies_on_the_streaming_path(client: TestClient) -> None:
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_stream):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "smart",
                 "messages": [{"role": "user", "content": "what is 2 plus 2"}],
@@ -484,7 +484,7 @@ def test_trace_stickiness_holds_the_decision_across_turns(client: TestClient) ->
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         followup = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "smart",
                 "messages": [
@@ -536,7 +536,7 @@ def test_routing_memory_is_isolated_per_user(client: TestClient) -> None:
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         resp = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "smart",
                 "messages": [{"role": "user", "content": "what is 2 plus 2"}],
@@ -572,7 +572,7 @@ def test_rank_records_a_whole_batch_in_one_call(client: TestClient) -> None:
     job; this is what makes the documented recipe a single command.
     """
     resp = client.post(
-        "/v1/routing/preferences/rank",
+        f"{API_ROOT}/routing/preferences/rank",
         json={
             "user_id": USER,
             "examples": [
@@ -599,7 +599,7 @@ def test_rank_records_a_whole_batch_in_one_call(client: TestClient) -> None:
 
 def test_rank_reports_every_pool_the_batch_touched(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/preferences/rank",
+        f"{API_ROOT}/routing/preferences/rank",
         json={
             "user_id": USER,
             "examples": [
@@ -626,7 +626,7 @@ def test_rank_refuses_a_score_key_that_names_no_model(client: TestClient) -> Non
     line. There is no route that can delete the bad records afterwards.
     """
     resp = client.post(
-        "/v1/routing/preferences/rank",
+        f"{API_ROOT}/routing/preferences/rank",
         json={
             "user_id": USER,
             "examples": [{"prompt": "x", "scores": {"openai:gpt-5-nano-typo-xyz": 1.0}}],
@@ -645,12 +645,12 @@ def test_rank_allows_teaching_before_any_learned_policy_exists(client: TestClien
     # teaching a pool before writing the policy that reads it is a legitimate order
     # of operations, and refusing it would make the API demand a sequence.
     scoped = client.post(
-        "/v1/users", json={"user_id": "policyless"}, headers=HEADERS
+        f"{API_ROOT}/users", json={"user_id": "policyless"}, headers=HEADERS
     )
     assert scoped.status_code == 200, scoped.text
     with patch("gateway.services.policy_store.effective_policies", return_value={}):
         resp = client.post(
-            "/v1/routing/preferences/rank",
+            f"{API_ROOT}/routing/preferences/rank",
             json={"user_id": "policyless", "examples": [{"prompt": "x", "scores": {CHEAP: 1.0}}]},
             headers=HEADERS,
         )
@@ -659,7 +659,7 @@ def test_rank_allows_teaching_before_any_learned_policy_exists(client: TestClien
 
 def test_rank_refuses_a_selector_that_resolves_to_no_provider(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/preferences/rank",
+        f"{API_ROOT}/routing/preferences/rank",
         json={"user_id": USER, "examples": [{"prompt": "x", "scores": {"nope:whatever": 1.0}}]},
         headers=HEADERS,
     )
@@ -731,7 +731,7 @@ def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
         try:
             _create_user(client)
             resp = client.post(
-                "/v1/routing/preferences/rank",
+                f"{API_ROOT}/routing/preferences/rank",
                 json={
                     "user_id": USER,
                     "examples": [
@@ -752,14 +752,14 @@ def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
 
 def test_rank_rejects_an_empty_batch(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/preferences/rank", json={"user_id": USER, "examples": []}, headers=HEADERS
+        f"{API_ROOT}/routing/preferences/rank", json={"user_id": USER, "examples": []}, headers=HEADERS
     )
     assert resp.status_code == 422
 
 
 def test_rank_rejects_an_unknown_user(client: TestClient) -> None:
     resp = client.post(
-        "/v1/routing/preferences/rank",
+        f"{API_ROOT}/routing/preferences/rank",
         json={"user_id": "nobody", "examples": [{"prompt": "x", "scores": {CHEAP: 1.0}}]},
         headers=HEADERS,
     )
@@ -788,14 +788,14 @@ def test_status_reports_each_pool_independently(client: TestClient) -> None:
 def test_the_preference_surfaces_require_the_master_key(client: TestClient) -> None:
     # Which model serves a caller is an operator decision, so a user key must not
     # reach the teaching surfaces at all.
-    key = client.post("/v1/keys", json={"key_name": "plain", "user_id": USER}, headers=HEADERS)
+    key = client.post(f"{API_ROOT}/keys", json={"key_name": "plain", "user_id": USER}, headers=HEADERS)
     assert key.status_code == 200, key.text
     user_headers = {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
 
-    assert client.get("/v1/routing/status", params={"user_id": USER}, headers=user_headers).status_code == 401
+    assert client.get(f"{API_ROOT}/routing/status", params={"user_id": USER}, headers=user_headers).status_code == 401
     assert (
         client.post(
-            "/v1/routing/preferences/rank",
+            f"{API_ROOT}/routing/preferences/rank",
             json={"user_id": USER, "examples": [{"prompt": "x", "scores": {CHEAP: 1.0}}]},
             headers=user_headers,
         ).status_code
@@ -809,7 +809,7 @@ def test_the_preference_surfaces_require_the_master_key(client: TestClient) -> N
 def test_a_stored_learned_policy_needs_priced_candidates(client: TestClient) -> None:
     # A router scores by cost, so an unpriced candidate makes it decline forever.
     resp = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "unpriced",
             "spec": {
@@ -828,7 +828,7 @@ def test_a_stored_learned_policy_needs_priced_candidates(client: TestClient) -> 
 
 def test_a_stored_learned_policy_routes_like_a_configured_one(client: TestClient) -> None:
     saved = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={
             "name": "stored-smart",
             "spec": {
@@ -850,7 +850,7 @@ def test_a_stored_learned_policy_routes_like_a_configured_one(client: TestClient
 def test_explain_says_the_router_decides_at_request_time(client: TestClient) -> None:
     # Explain dispatches nothing, so it cannot rank. Showing the decline path plus
     # the pool beats showing a one-candidate plan that looks like a broken router.
-    resp = client.post("/v1/routing/policies/explain", json={"name": "smart"}, headers=HEADERS)
+    resp = client.post(f"{API_ROOT}/routing/policies/explain", json={"name": "smart"}, headers=HEADERS)
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -881,7 +881,7 @@ def test_a_learned_policy_is_refused_in_hybrid_mode(monkeypatch: pytest.MonkeyPa
     app = create_app(config)
     with TestClient(app) as hybrid_client:
         resp = hybrid_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "smart", "messages": [{"role": "user", "content": "hi"}]},
             headers={"Authorization": "Bearer user_token"},
         )
@@ -918,7 +918,7 @@ def test_a_static_policy_is_unaffected_by_the_router_step(client: TestClient) ->
     # The router step must cost a policy with no router nothing at all: same plan,
     # same reason, no embedding call (the fake would answer, but nothing asks).
     saved = client.post(
-        "/v1/routing/policies",
+        f"{API_ROOT}/routing/policies",
         json={"name": "plain", "spec": {"select": [{"default": STRONG}], "on_failure": [OTHER]}},
         headers=HEADERS,
     )

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
+import { API_ROOT } from "@/shared/api/client"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { AppProviders } from "@/tests/providers"
 import { identify, recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
@@ -95,7 +96,7 @@ describe("AuthProvider", () => {
     expect(window.localStorage.getItem("otari.dashboard.hasSession")).toBeNull()
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        ([url]) => url === "/v1/auth/session",
+        ([url]) => url === `${API_ROOT}/auth/session`,
       )
       expect(call?.[1]?.method).toBe("DELETE")
     })

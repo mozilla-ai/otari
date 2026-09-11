@@ -18,8 +18,27 @@ manager is **pnpm**.
 
 [web/design/DESIGN.md](../../../web/design/DESIGN.md) owns the design system: which component
 to reach for, which variant applies where, which token layer is allowed, and the three
-components that still exist but must not be used in new code. Ten short topic files; load the
+components that still exist but must not be used in new code. Eleven short topic files; load the
 one covering the work at hand.
+
+**The primitives live in `web/src/design-system/`, which may import nothing else under
+`src/`.** It is the one layer here meant to leave as a package: React, HeroUI,
+react-aria, react-icons, recharts, react-markdown and its own modules, and nothing more. Biome rejects
+the rest and `src/architecture.test.ts` proves each rejection. A component that needs the
+transport, a domain formatter or a generated API type is an *application* component and
+belongs in `src/shared/components/` composing the primitive. DESIGN.md's "The extraction
+contract" has the whole rule, including the two directories that stayed behind and the
+five plausible primitives deliberately not built.
+
+Reach for `Button` from `@/design-system/actions/Button` rather than `@heroui/react`: it is
+the same component with the variant union narrowed to the three that exist, which makes a
+retired variant a compile error instead of a silently unstyled button.
+
+Every primitive has a story beside it. `pnpm --dir web run storybook` is the catalog, and
+`.github/workflows/otari-design-system.yml` publishes it from main. A PR is gated on the
+catalog building; the sweep that renders every story in both themes runs on main and on
+demand, so run it locally (`pnpm --dir web exec node .storybook/smoke.mjs`, about ten
+seconds) before pushing a story.
 
 [web/AGENTS.md](../../../web/AGENTS.md) owns the structure and is worth reading first: the
 `features/` / `shared/` / `app/` layout it mirrors from `otari-ai/frontend`, the three
@@ -143,7 +162,7 @@ AA for the small text a pill uses. **Brand text on the brand tint does not follo
 ## Topic guides
 
 - [design-tokens.md](./design-tokens.md): the semantic tokens, the HeroUI mapping, the type scale, the chart palettes, and how to translate otari-ai's utility names.
-- [components.md](./components.md): HeroUI v3 patterns, the order to reach for when customizing (variable, shared utility, prop, then a rule into the library's DOM), internal links, the shared UI primitives in `shared/components/`.
+- [components.md](./components.md): HeroUI v3 patterns, the order to reach for when customizing (variable, shared utility, prop, then a rule into the library's DOM), internal links, the UI primitives in `design-system/`.
 - [component-architecture.md](./component-architecture.md): what a page composes, what gets its own file, route files, no duplicated markup.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, guards, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, discriminated unions, hook and effect hygiene.

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
@@ -98,7 +99,7 @@ describe("Login", () => {
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
 
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe("/v1/auth/session")
+    expect(url).toBe(`${API_ROOT}/auth/session`)
     expect(init?.method).toBe("POST")
     expect(init?.body).toBe(JSON.stringify({ master_key: "sk-correct" }))
     // The raw key must not land in any JS-readable storage.
@@ -250,7 +251,7 @@ describe("Login", () => {
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
 
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe("/v1/auth/session")
+    expect(url).toBe(`${API_ROOT}/auth/session`)
     expect(init?.body).toBe(
       JSON.stringify({
         email: "operator@example.com",
@@ -309,7 +310,7 @@ describe("Login", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }))
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/v1/auth/session")
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_ROOT}/auth/session`)
   })
 
   it("reports a malformed email locally instead of using browser validation", async () => {
@@ -443,7 +444,7 @@ describe("Login", () => {
   })
 
   it("offers no credential box when the gateway reports it cannot mint a session", async () => {
-    // `/v1/bootstrap` answers [] when it cannot reach its database. A form here
+    // /api/v1/bootstrap answers [] when it cannot reach its database. A form here
     // could only ever be refused, and on a claimed deployment the fallback form
     // would be the master-key one, whose refusal reads as "wrong key".
     render(
@@ -843,10 +844,10 @@ describe("Login with a passkey", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
         const url = String(input)
-        if (url === "/v1/auth/webauthn/authenticate/options") {
+        if (url === `${API_ROOT}/auth/webauthn/authenticate/options`) {
           return Promise.resolve(jsonResponse({ challenge: "Y2hhbGxlbmdl" }))
         }
-        if (url === "/v1/auth/webauthn/authenticate") {
+        if (url === `${API_ROOT}/auth/webauthn/authenticate`) {
           return Promise.resolve(verify())
         }
         // Anything else the shell asks for (the build poll, say) answers
@@ -890,7 +891,9 @@ describe("Login with a passkey", () => {
     await user.keyboard("{Enter}")
 
     expect(
-      fetchMock.mock.calls.some(([url]) => String(url) === "/v1/auth/session"),
+      fetchMock.mock.calls.some(
+        ([url]) => String(url) === `${API_ROOT}/auth/session`,
+      ),
     ).toBe(false)
 
     releaseCeremony(assertion())
@@ -1157,7 +1160,7 @@ describe("Login with a passkey", () => {
 
       await waitFor(() => expect(assign).toHaveBeenCalled())
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
-        "/v1/auth/oauth/google/authorize",
+        `${API_ROOT}/auth/oauth/google/authorize`,
       )
       // Stored *before* the navigation, or the callback would have nothing to
       // compare the returned state against.
@@ -1215,7 +1218,7 @@ describe("Login with a passkey", () => {
 
       expect(
         fetchMock.mock.calls.some(
-          ([url]) => String(url) === "/v1/auth/session",
+          ([url]) => String(url) === `${API_ROOT}/auth/session`,
         ),
       ).toBe(false)
       expect(assign).not.toHaveBeenCalled()

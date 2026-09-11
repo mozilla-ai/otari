@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -100,6 +101,48 @@ describe("ModelComboBox", () => {
     expect(document.getElementById(describedBy!)).toHaveTextContent(
       "Pick a model or type one.",
     )
+  })
+
+  it("says why the popover is empty when nothing was discovered", async () => {
+    // Both issues reported this state: the chevron pointed up, so the menu was
+    // open, and the box under it was empty and silent. A gateway with no
+    // provider credential is the ordinary case here, not an edge.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ providers: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    )
+    renderWithClient(
+      <ModelComboBox label="Serves" value="" onChange={() => {}} />,
+    )
+    await screen.findByRole("combobox", { name: "Serves" })
+
+    // The trigger, not the input: `menuTrigger="input"` means focus alone does
+    // not open the list.
+    await userEvent.click(screen.getByRole("button"))
+
+    // Actionable: "no models" alone leaves an operator with nowhere to go, and
+    // the sentence names the credential rather than the page that holds one,
+    // since a hosted deployment keeps those under the organization.
+    expect(
+      await screen.findByText(/Add a provider credential/),
+    ).toBeInTheDocument()
+  })
+
+  it("offers what was discovered when there is something to offer", async () => {
+    mockApi()
+    renderWithClient(
+      <ModelComboBox label="Serves" value="" onChange={() => {}} />,
+    )
+    await screen.findByRole("combobox", { name: "Serves" })
+
+    await userEvent.click(screen.getByRole("button"))
+
+    expect(
+      await screen.findByRole("option", { name: "openai:gpt-5-mini" }),
+    ).toBeInTheDocument()
   })
 
   it("puts a hint it does have on that same line", async () => {

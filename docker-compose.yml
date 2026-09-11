@@ -133,7 +133,7 @@ services:
       - SANDBOX_SESSION_IDLE_TIMEOUT=900
       - SANDBOX_SESSION_MAX_LIFETIME=7200
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v1/health"]
       interval: 10s
       timeout: 5s
       retries: 5

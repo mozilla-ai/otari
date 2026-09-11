@@ -46,9 +46,7 @@ describe("RecoverPasswordPage", () => {
     expect(
       await screen.findByText(/If that address has a password on this gateway/),
     ).toBeInTheDocument()
-    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
-      "/v1/auth/password/reset",
-    )
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe("/auth/password/reset")
   })
 
   it("clears a stale refusal as soon as the address is retyped", async () => {

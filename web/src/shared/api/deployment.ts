@@ -89,12 +89,12 @@ export function useDeploymentAdminAccess() {
   return useQuery({
     queryKey: [DEPLOYMENT_ADMIN, "access"],
     queryFn: () =>
-      apiFetch<DeploymentAdminAccess>("/v1/admin/access").then(
+      apiFetch<DeploymentAdminAccess>("/admin/access").then(
         (body) => body.granted,
       ),
     staleTime: 60_000,
     // No `enabled` parameter: the one caller sits behind a route declaring
-    // `surface: "admin"`, so a deployment that does not host `/v1/admin` never
+    // `surface: "admin"`, so a deployment that does not host `/admin` never
     // renders it and the 404 never becomes a second reading of `surfaces`.
     // Deliberately not inferred from a 404 here either, which is the scattered
     // mode check the surface axis replaced; the ordinary retry policy applies,
@@ -105,7 +105,7 @@ export function useDeploymentAdminAccess() {
 export function useDeploymentUsers(enabled = true) {
   return useQuery({
     queryKey: [DEPLOYMENT_ADMIN, "users"],
-    queryFn: () => fetchAllPaged<DeploymentUser>("/v1/admin/users"),
+    queryFn: () => fetchAllPaged<DeploymentUser>("/admin/users"),
     staleTime: 60_000,
     enabled,
   })
@@ -121,7 +121,7 @@ export function useUpdateDeploymentUser() {
       id: string
       body: UpdateDeploymentUserRequest
     }) =>
-      apiFetch<DeploymentUser>(`/v1/admin/users/${encodeURIComponent(id)}`, {
+      apiFetch<DeploymentUser>(`/admin/users/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),

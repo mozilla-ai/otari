@@ -304,7 +304,7 @@ def test_a_weighted_decision_is_not_logged_per_request() -> None:
 
 def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
     # A weighted policy names a router, but it reads no examples, so the routing
-    # memory surfaces must not claim it. `/v1/routing/status` would report it under
+    # memory surfaces must not claim it. `/api/v1/routing/status` would report it under
     # a warmth it never uses, and `rank` would let its pool decide which score keys
     # a user may teach, refusing the examples a learned policy is being prepared with.
     from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores

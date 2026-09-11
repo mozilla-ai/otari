@@ -49,7 +49,7 @@ import type { ReactNode } from "react"
  * least a state a person can act on.
  *
  * **Why a seam and not a probe in the base.** The alternative is for this
- * repository to request `/v1/entitlements` itself and fall back to the constant
+ * repository to request `/entitlements` itself and fall back to the constant
  * on 404. It is fewer moving parts, and it is wrong here for a reason stronger
  * than taste: this gateway mounts no such route (`EntitlementPort` exists, and
  * `require_capability` is its only caller), so the request 404s on every load of

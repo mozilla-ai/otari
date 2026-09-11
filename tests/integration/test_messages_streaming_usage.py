@@ -1,9 +1,9 @@
-"""Regression test for streaming /v1/messages token + cost metering.
+"""Regression test for streaming /api/v1/messages token + cost metering.
 
-Reproduces the surface of mozilla-ai/otari#256: a streaming ``/v1/messages``
+Reproduces the surface of mozilla-ai/otari#256: a streaming ``/api/v1/messages``
 request whose stream completes cleanly must record the request's tokens and
 cost in the usage log, the same as the non-streaming path and as streaming
-``/v1/chat/completions``. The undercount originated in any-llm (the messages
+``/api/v1/chat/completions``. The undercount originated in any-llm (the messages
 bridge did not request usage on streaming, so the translated Anthropic events
 carried zero), fixed upstream in any-llm 1.21.0; otari's settlement path
 (``_messages_stream_usage`` -> ``streaming_generator``) already merges the
@@ -34,6 +34,7 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import UsageLog
 
 from .conftest import MODEL_NAME
@@ -46,11 +47,11 @@ _COMPACTION_OUTPUT_TOKENS = 20
 
 
 def _seed_budgeted_user(client: TestClient, headers: dict[str, str], user_id: str) -> None:
-    budget = client.post("/v1/budgets", json={"max_budget": 100.0}, headers=headers)
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 100.0}, headers=headers)
     assert budget.status_code == 200
     budget_id = budget.json()["budget_id"]
     created = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": user_id, "budget_id": budget_id},
         headers=headers,
     )
@@ -58,7 +59,7 @@ def _seed_budgeted_user(client: TestClient, headers: dict[str, str], user_id: st
 
 
 def _configure_pricing(client: TestClient, headers: dict[str, str], model_key: str) -> None:
-    res = client.post("/v1/pricing", json={"model_key": model_key, **_PRICING}, headers=headers)
+    res = client.post(f"{API_ROOT}/pricing", json={"model_key": model_key, **_PRICING}, headers=headers)
     assert res.status_code == 200
 
 
@@ -176,7 +177,7 @@ def test_messages_streaming_records_tokens_and_cost(
 
     with patch("gateway.api.routes.messages.amessages", new=_stream_with_usage):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "hi"}],
@@ -194,7 +195,7 @@ def test_messages_streaming_records_tokens_and_cost(
     assert "message_stop" in body
 
     row = _poll_usage_row(db_session_factory, user_id)
-    assert row is not None, "streaming /v1/messages must record a usage row"
+    assert row is not None, "streaming /api/v1/messages must record a usage row"
     assert row.status == "success"
     assert row.prompt_tokens == _INPUT_TOKENS
     assert row.completion_tokens == _OUTPUT_TOKENS
@@ -212,7 +213,7 @@ def test_messages_streaming_bills_compaction_iterations(
 
     with patch("gateway.api.routes.messages.amessages", new=_stream_with_compaction_usage):
         response = client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "hi"}],
@@ -228,7 +229,7 @@ def test_messages_streaming_bills_compaction_iterations(
     assert "message_stop" in body
 
     row = _poll_usage_row(db_session_factory, user_id)
-    assert row is not None, "streaming /v1/messages must bill compaction usage"
+    assert row is not None, "streaming /api/v1/messages must bill compaction usage"
     assert row.status == "success"
     assert row.prompt_tokens == _INPUT_TOKENS + _COMPACTION_INPUT_TOKENS
     assert row.completion_tokens == _OUTPUT_TOKENS + _COMPACTION_OUTPUT_TOKENS

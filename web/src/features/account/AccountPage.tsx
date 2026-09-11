@@ -1,6 +1,6 @@
+import { PageIntro } from "@/design-system/layout/PageIntro"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { PasswordCard } from "@/features/account/PasswordCard"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**

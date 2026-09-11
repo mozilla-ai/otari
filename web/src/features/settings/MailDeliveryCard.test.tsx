@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { MailSettings, SendTestMailResponse } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
+import { API_ROOT } from "@/shared/api/client"
 
 const UNCONFIGURED: MailSettings = {
   transport: "none",
@@ -51,7 +52,8 @@ function mockApi(
           ? jsonResponse({ detail: testResult.detail }, testResult.status)
           : jsonResponse(testResult)
       }
-      if (url.includes("/v1/settings/mail")) return jsonResponse(settings)
+      if (url.includes(`${API_ROOT}/settings/mail`))
+        return jsonResponse(settings)
       return jsonResponse([])
     })
 }

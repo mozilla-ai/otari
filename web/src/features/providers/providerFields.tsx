@@ -9,11 +9,11 @@ import {
   TextField,
 } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
-
+import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
+import { Field } from "@/design-system/forms/Field"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { SecretField } from "@/design-system/forms/SecretField"
 import { useProviderCatalog } from "@/shared/api/providers"
-import { Field } from "@/shared/components/forms/Field"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
-import { SecretField } from "@/shared/components/forms/SecretField"
 
 import {
   type CredentialFieldValues,
@@ -184,6 +184,7 @@ export function ProviderComboBox({
   extra = [],
   includeCatalog = true,
   excludeIds,
+  autoFocus,
 }: {
   label: string
   value: string
@@ -199,6 +200,9 @@ export function ProviderComboBox({
   // depends on what the form collects, not on the catalog. See
   // `BYO_UNSUPPORTED_PROVIDERS`.
   excludeIds?: readonly string[]
+  // Takes focus on mount, for the instance that is a form's first field. It
+  // also selects the trigger: see `menuTrigger` below.
+  autoFocus?: boolean
 }) {
   const catalog = useProviderCatalog()
   const options = useMemo(() => {
@@ -235,10 +239,13 @@ export function ProviderComboBox({
   return (
     <ComboBox.Root
       allowsEmptyCollection
-      // Open the full list on focus/click and filter as you type: this is a
-      // pick-from-a-list control, not a free-text field, and it is not
-      // autofocused, so the list does not spring open when the form appears.
-      menuTrigger="focus"
+      // Opening on focus makes this read as a pick-from-a-list control rather
+      // than a free-text field, but an autofocused instance opens its list on
+      // mount: measured in jsdom, `autoFocus` leaves the input
+      // `aria-expanded="true"` with a listbox rendered, which puts the catalog
+      // over the form before anything has been asked. So that instance opens on
+      // typing instead, and its chevron still shows the whole catalog.
+      menuTrigger={autoFocus ? "input" : "focus"}
       inputValue={text}
       onInputChange={setText}
       onSelectionChange={(key) => {
@@ -261,6 +268,7 @@ export function ProviderComboBox({
             appending to it (otherwise "OpenAI-compatible" + typing filters to nothing). */}
         <Input
           placeholder={placeholder ?? "Search providers…"}
+          autoFocus={autoFocus}
           autoComplete="off"
           data-1p-ignore
           data-lpignore="true"
@@ -269,7 +277,28 @@ export function ProviderComboBox({
         <ComboBox.Trigger />
       </ComboBox.InputGroup>
       <ComboBox.Popover>
-        <ListBox items={visible} className="max-h-72 overflow-auto">
+        <ListBox
+          items={visible}
+          className="max-h-72 overflow-auto"
+          renderEmptyState={() => (
+            <ComboBoxEmpty
+              // A loading catalog counts as an empty source, so a query that
+              // matches none of `extra` says the catalog is still coming rather
+              // than that nothing matches. Both halves are gated on
+              // `includeCatalog`: a picker offering only the API dialects must
+              // not report a catalog it excludes.
+              isSourceEmpty={
+                options.length === 0 || (includeCatalog && catalog.isLoading)
+              }
+              emptyMessage={
+                includeCatalog && catalog.isLoading
+                  ? "Loading the provider catalog…"
+                  : "No provider to offer here."
+              }
+              noMatchesMessage="No provider matches what you typed."
+            />
+          )}
+        >
           {(option: { id: string; name: string }) => (
             <ListBoxItem id={option.id} textValue={option.name}>
               {option.name}

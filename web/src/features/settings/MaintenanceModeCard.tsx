@@ -1,12 +1,11 @@
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Toggle } from "@/design-system/forms/Toggle"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import {
   useMaintenanceMode,
   useSetMaintenanceMode,
 } from "@/shared/api/settings"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-
-import { Toggle } from "./Toggle"
 
 /**
  * The sign-in freeze: stop new dashboard sessions while the gateway redeploys.
@@ -46,10 +45,10 @@ export function MaintenanceModeCard() {
               </p>
             </div>
             <Toggle
-              checked={enabled}
+              isSelected={enabled}
               onChange={(next) => setMaintenance.mutate(next)}
               label="Freeze new dashboard sign-ins"
-              disabled={setMaintenance.isPending}
+              isDisabled={setMaintenance.isPending}
             />
           </div>
         ) : null}

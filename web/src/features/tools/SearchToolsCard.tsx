@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
 import type {
   ConfigSearchTool,
@@ -6,6 +5,14 @@ import type {
   StoredSearchTool,
   UpdateSearchToolRequest,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import {
   useCreateSearchTool,
@@ -14,16 +21,9 @@ import {
   useSearchTools,
   useUpdateSearchTool,
 } from "@/shared/api/tools"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { DisclosureRow } from "@/shared/components/navigation/DisclosureRow"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
-// Search tools are what POST /v1/search dispatches against. They used to be
+// Search tools are what POST /api/v1/search dispatches against. They used to be
 // declarable only in a config file, so a deployment configured entirely through
 // the dashboard could not use that endpoint at all. This is the route in:
 // stored tools are editable here, config-file tools are shown read-only so the
@@ -62,12 +62,12 @@ function StoredToolLine({
   const remove = useDeleteSearchTool()
   const urlSave = useAutosave()
   const keySave = useAutosave()
-  const removal = useAutosave()
   const [apiBase, setApiBase] = useState(tool.api_base ?? "")
   const [syncedBase, setSyncedBase] = useState(tool.api_base ?? "")
   // Blank means "keep the stored key". The field is write-only, so it never
   // shows what is stored, only the last four of it in its own placeholder.
   const [apiKey, setApiKey] = useState("")
+  const [isDeleteOpen, setDeleteOpen] = useState(false)
 
   const committedBase = tool.api_base ?? ""
   // Re-synced from the server's answer, in render rather than an effect, which
@@ -145,15 +145,17 @@ function StoredToolLine({
           }}
           className={`otari-machine-field w-full md:w-[10rem] ${INPUT_CLASS}`}
         />
-        <ConfirmButton
-          confirmLabel="Remove permanently"
-          isPending={busy}
-          onConfirm={() =>
-            void removal.run(() => remove.mutateAsync(tool.name))
-          }
+        <Button
+          size="sm"
+          variant="ghost"
+          // Named per row, as this row's fields are: the card is a list of
+          // tools, so a bare "Remove" is the same name on every one of them.
+          aria-label={`Remove ${tool.name}`}
+          isDisabled={busy}
+          onPress={() => setDeleteOpen(true)}
         >
           Remove
-        </ConfirmButton>
+        </Button>
       </div>
       {tool.decryptable ? null : (
         <p className="text-caption text-warning">
@@ -165,11 +167,29 @@ function StoredToolLine({
           Overrides the config-file tool of this name
         </p>
       ) : null}
-      {urlSave.error || keySave.error || removal.error ? (
+      {urlSave.error || keySave.error ? (
         <p role="alert" className="break-words text-caption text-danger">
-          {urlSave.error || keySave.error || removal.error}
+          {urlSave.error || keySave.error}
         </p>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={isDeleteOpen}
+        // Cleared on the way out: a refusal otherwise sits on the mutation
+        // and greets the next open as if it had just happened.
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open) remove.reset()
+        }}
+        heading="Remove search tool"
+        body={`${tool.name} and the key stored with it are removed. A request that still names it as a tool is refused, so update the callers that use it.`}
+        confirmLabel="Remove permanently"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          remove.mutate(tool.name, { onSuccess: () => setDeleteOpen(false) })
+        }}
+      />
     </div>
   )
 }
@@ -311,7 +331,7 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
 }
 
 /**
- * The named tools behind `POST /v1/search`, as a row that drills in.
+ * The named tools behind `POST /api/v1/search`, as a row that drills in.
  *
  * A searxng tool that declares no backend URL of its own inherits the
  * deployment's web-search URL, which is why this sits directly under the
@@ -337,7 +357,7 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
     <SettingsGroup
       bounded
       title="Search tools"
-      description="Named tools behind the direct endpoint, POST /v1/search. A searxng tool with no URL of its own reuses the backend above."
+      description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
       docsHref={docsHref}
     >
       {tools.error || providers.error ? (
@@ -355,8 +375,8 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
             : !answered
               ? "Reading the tools this deployment serves."
               : count === 0
-                ? "None configured, so POST /v1/search refuses every request."
-                : "Callers name one in search_tool_name, or in the /v1/search/{tool} path."
+                ? "None configured, so POST /api/v1/search refuses every request."
+                : "Callers name one in search_tool_name, or in the /api/v1/search/{tool} path."
         }
         isOpen={isOpen}
         onToggle={() => setIsOpen((open) => !open)}

@@ -162,6 +162,52 @@ done: `user.type` is one line and it is the library's own API. Revisit only if
 the suite gets slow enough to be worth the churn, and measure one file before
 committing to the rest.
 
+## A combo box inside a dialog: Escape is not the way to close its popover
+
+A form that lives in a `FormDialog` gives one keystroke two meanings, and the
+habit that works everywhere else is the one that breaks. `{Escape}` after
+picking an option is how a spec puts a react-aria popover away, because that
+popover `aria-hidden`s the rest of the page and hides the control the spec
+presses next. Inside a dialog the key travels on to the dialog, which either
+closes it or, where the form is dirty, swaps the footer for its unsaved-changes
+guard. The failure reads as a missing submit button, several lines below the
+line that caused it.
+
+This has cost a run on three pages: keys, routing and providers.
+
+**What to do after a pick depends on `menuTrigger`, and the default is the
+awkward one.** `ComboBoxField` defaults to `menuTrigger="focus"`, which
+`UserComboBox` and `providerFields` also set explicitly. Selecting an option
+hands focus back to the input, and a box that opens on focus reopens: the
+popover is open again, the page is `aria-hidden` again, and the dialog's submit
+is out of reach. So:
+
+- **A `menuTrigger="focus"` box needs focus moved off it**, by clicking a named
+  control inside the dialog: `await user.click(screen.getByLabelText("Name"))`
+  is what the keys dialog does. Not a bare `blur()`, which lands straight back
+  on the box because a modal contains focus, and reopens the popover for the
+  same reason.
+- **A `menuTrigger="input"` box needs nothing.** Its popover opens on typing,
+  so the pick leaves it closed and there is nothing for a keystroke to do.
+- **Where a spec has to dismiss without picking, send Escape only while the box
+  reports `aria-expanded="true"`**, and check the attribute rather than waiting
+  on it: a popover that is already closed satisfies a wait instantly, by which
+  point the keystroke has landed on the dialog.
+- **Query the submit through the dialog** (`within(dialog)` in Vitest,
+  `page.getByRole("dialog").getByRole(...)` in Playwright). The labels rule puts
+  the same words on the page trigger and on the dialog's submit, so an unscoped
+  query is ambiguous while the dialog is open, and ambiguous again on an empty
+  list where the empty state offers the same words a third time.
+- **In Vitest, use one `userEvent` instance for the whole flow.** Mixing a
+  fresh `userEvent.setup()` with the bare default drops the press: the submit
+  reports as enabled, inside the form, and nothing happens. It reads exactly
+  like a validation guard refusing, and it cost an afternoon being mistaken for
+  one.
+
+None of this applies to a combo box in a toolbar, which is what
+`e2e/helpers.ts`'s `dismissComboBox` was written for: it presses Escape and
+blurs unconditionally, and both are right outside a modal.
+
 ## Playwright: behavioral
 
 `pnpm --dir web run e2e` builds the bundle and boots a real gateway against a throwaway SQLite

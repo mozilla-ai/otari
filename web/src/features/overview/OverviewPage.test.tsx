@@ -11,6 +11,7 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
@@ -89,7 +90,7 @@ interface Bodies {
   models?: string[]
 }
 
-/** The catalog shape `/v1/models` answers, which is the setup guide's gate. */
+/** The catalog shape `${API_ROOT}/models` answers, which is the setup guide's gate. */
 function modelCatalog(ids: string[]) {
   return {
     object: "list",
@@ -113,41 +114,42 @@ function mockApi(b: Bodies) {
     // it is what tells them whether this caller reads the deployment-wide
     // routes or the organization-scoped ones (otari#837). Answered first, and
     // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-    if (url.endsWith("/v1/organizations/me")) {
+    if (url.endsWith(`${API_ROOT}/organizations/me`)) {
       return jsonResponse(organizationContext(b.context))
     }
     // The rail's roster is per workspace, so the id in the path picks the
     // answer. A `Paged` envelope and not a bare array: this one goes through
     // `fetchAllPaged`, which reads `body.data` and pages until a short one.
-    const roster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
+    const roster = url.match(/\/api\/v1\/workspaces\/([^/?]+)\/members/)
     if (roster) {
       return jsonResponse({ data: b.workspaceMembers?.[roster[1]] ?? [] })
     }
     if (url.includes("/activation")) {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
-    if (url.includes("/v1/models")) {
+    if (url.includes(`${API_ROOT}/models`)) {
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
-    if (url.includes("/v1/usage/summary")) {
+    if (url.includes(`${API_ROOT}/usage/summary`)) {
       if (url.includes("bucket=hour"))
         return jsonResponse(summary(b.today ?? {}))
       if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
       return jsonResponse(summary(b.period ?? {}, b.series))
     }
-    if (url.includes("/v1/providers/health")) {
+    if (url.includes(`${API_ROOT}/providers/health`)) {
       return jsonResponse(
         b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null },
       )
     }
-    if (url.includes("/v1/budgets")) return jsonResponse(b.budgets ?? [])
-    if (url.includes("/v1/keys")) return jsonResponse(b.keys ?? [])
-    if (url.includes("/v1/users")) return jsonResponse(b.users ?? [])
-    if (url.includes("/v1/providers"))
+    if (url.includes(`${API_ROOT}/budgets`))
+      return jsonResponse(b.budgets ?? [])
+    if (url.includes(`${API_ROOT}/keys`)) return jsonResponse(b.keys ?? [])
+    if (url.includes(`${API_ROOT}/users`)) return jsonResponse(b.users ?? [])
+    if (url.includes(`${API_ROOT}/providers`))
       return jsonResponse({
         providers: b.providers ?? [{ provider: "openai" }],
       })
-    if (url.includes("/v1/usage")) return jsonResponse(b.logs ?? [])
+    if (url.includes(`${API_ROOT}/usage`)) return jsonResponse(b.logs ?? [])
     return jsonResponse([])
   })
 }
@@ -435,10 +437,10 @@ describe("OverviewPage", () => {
       // it is what tells them whether this caller reads the deployment-wide
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes("/v1/usage/summary")) {
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         if (url.includes("bucket=hour"))
           return jsonResponse(summary({ cost: 5 }))
         if (url.includes("end_date="))
@@ -449,7 +451,7 @@ describe("OverviewPage", () => {
           series,
         })
       }
-      if (url.includes("/v1/providers/health")) {
+      if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse({
           providers: [],
           healthy: 1,
@@ -659,14 +661,14 @@ describe("OverviewPage", () => {
       // it is what tells them whether this caller reads the deployment-wide
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes("/v1/budgets"))
+      if (url.includes(`${API_ROOT}/budgets`))
         return jsonResponse({ detail: "boom" }, 500)
-      if (url.includes("/v1/usage/summary"))
+      if (url.includes(`${API_ROOT}/usage/summary`))
         return jsonResponse(summary({ cost: 200, request_count: 10 }))
-      if (url.includes("/v1/providers/health"))
+      if (url.includes(`${API_ROOT}/providers/health`))
         return jsonResponse({
           providers: [],
           healthy: 1,
@@ -755,10 +757,10 @@ describe("OverviewIndex routing", () => {
       // it is what tells them whether this caller reads the deployment-wide
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes("/v1/providers/health")) {
+      if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse({
           providers: [],
           healthy: 1,
@@ -766,8 +768,9 @@ describe("OverviewIndex routing", () => {
           checked_at: null,
         })
       }
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}))
-      if (url.includes("/v1/providers"))
+      if (url.includes(`${API_ROOT}/usage/summary`))
+        return jsonResponse(summary({}))
+      if (url.includes(`${API_ROOT}/providers`))
         return jsonResponse({ detail: "providers exploded" }, 500)
       return jsonResponse([])
     })
@@ -789,10 +792,10 @@ describe("OverviewIndex routing", () => {
       // it is what tells them whether this caller reads the deployment-wide
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes("/v1/providers/health")) {
+      if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse({
           providers: [],
           healthy: 1,
@@ -800,8 +803,9 @@ describe("OverviewIndex routing", () => {
           checked_at: null,
         })
       }
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}))
-      if (url.includes("/v1/providers")) {
+      if (url.includes(`${API_ROOT}/usage/summary`))
+        return jsonResponse(summary({}))
+      if (url.includes(`${API_ROOT}/providers`)) {
         return failProviders
           ? jsonResponse({ detail: "providers exploded" }, 500)
           : jsonResponse({ providers: [{ provider: "openai" }] })
@@ -822,10 +826,10 @@ describe("OverviewIndex routing", () => {
 
 // The wire for a caller who does not operate the deployment: the organization
 // context says so, and the usage hooks therefore read
-// `/v1/organizations/me/usage` (otari#837). Everything else is an endpoint this
+// /api/v1/organizations/me/usage (otari#837). Everything else is an endpoint this
 // caller must never be asked to read, so it refuses the way the server would; a
 // leak fails the assertions loudly instead of rendering a plausible tile. Every
-// URL is recorded so the tests can say so, `/v1/admin/access` included: this
+// URL is recorded so the tests can say so, /api/v1/admin/access included: this
 // page decides from the context alone, so asking it at all is the bug
 // otari-ai#1936 is about.
 function mockScopedApi(b: Bodies): string[] {
@@ -833,31 +837,31 @@ function mockScopedApi(b: Bodies): string[] {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     requested.push(url)
-    if (url.endsWith("/v1/organizations/me")) {
+    if (url.endsWith(`${API_ROOT}/organizations/me`)) {
       return jsonResponse(
         organizationContext({ deployment_operator: false, ...b.context }),
       )
     }
-    if (url.includes("/v1/organizations/me/usage/summary")) {
+    if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
       if (url.includes("bucket=hour"))
         return jsonResponse(summary(b.today ?? {}))
       if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
       return jsonResponse(summary(b.period ?? {}, b.series))
     }
-    if (url.includes("/v1/organizations/me/usage")) {
+    if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
       return jsonResponse(b.logs ?? [])
     }
     // The tenant surface the rest of the page reads: the organization's spend
     // ceilings behind the budget cell (owner or admin, in a `Paged` envelope),
     // its own keys, and the selected workspace's roster, which any member of
     // that workspace may read.
-    if (url.includes("/v1/organizations/me/spend-ceilings")) {
+    if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
       return jsonResponse({ data: b.ceilings ?? [] })
     }
-    if (url.includes("/v1/organizations/me/keys")) {
+    if (url.includes(`${API_ROOT}/organizations/me/keys`)) {
       return jsonResponse(b.keys ?? [])
     }
-    const scopedRoster = url.match(/\/v1\/workspaces\/([^/?]+)\/members/)
+    const scopedRoster = url.match(/\/api\/v1\/workspaces\/([^/?]+)\/members/)
     if (scopedRoster) {
       return jsonResponse({ data: b.workspaceMembers?.[scopedRoster[1]] ?? [] })
     }
@@ -869,7 +873,7 @@ function mockScopedApi(b: Bodies): string[] {
     if (url.includes("/activation")) {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
-    if (url.includes("/v1/models")) {
+    if (url.includes(`${API_ROOT}/models`)) {
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)
@@ -913,15 +917,15 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     // page made is under /v1/organizations/me. A bare /v1/usage, /v1/budgets or
     // /v1/keys read here would be a deployment-wide one the server refuses, so
     // the page must not even attempt it, and neither must it ask the gate.
-    expect(requested.some((url) => url.endsWith("/v1/admin/access"))).toBe(
-      false,
-    )
+    expect(
+      requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
+    ).toBe(false)
     const scoped = requested.filter(
-      (url) => !url.endsWith("/v1/organizations/me"),
+      (url) => !url.endsWith(`${API_ROOT}/organizations/me`),
     )
     expect(scoped.length).toBeGreaterThan(0)
     for (const url of scoped) {
-      expect(url).toContain("/v1/organizations/me/")
+      expect(url).toContain(`${API_ROOT}/organizations/me/`)
     }
   })
 
@@ -985,15 +989,15 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     // every "vs prev" chip and look like there was nothing to compare.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext({ deployment_operator: false }))
       }
-      if (url.includes("/v1/organizations/me/usage/summary")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
         if (url.includes("end_date="))
           return jsonResponse({ detail: "previous window exploded" }, 500)
         return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
-      if (url.includes("/v1/organizations/me/usage")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
         return jsonResponse([])
       }
       return jsonResponse({ detail: "forbidden" }, 403)
@@ -1010,13 +1014,13 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
   it("reports a failed scoped summary instead of a silent wall of dashes", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext({ deployment_operator: false }))
       }
-      if (url.includes("/v1/organizations/me/usage/summary")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
         return jsonResponse({ detail: "usage exploded" }, 500)
       }
-      if (url.includes("/v1/organizations/me/usage")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
         return jsonResponse([])
       }
       return jsonResponse({ detail: "forbidden" }, 403)
@@ -1068,12 +1072,14 @@ describe("the tenant Overview's budget signal", () => {
     ).toBeInTheDocument()
     expect(
       requested.some((url) =>
-        url.includes("/v1/organizations/me/spend-ceilings"),
+        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
       ),
     ).toBe(true)
-    // And never `/v1/budgets`, the operator cell's endpoint, which is
+    // And never /api/v1/budgets, the operator cell's endpoint, which is
     // deployment-wide and answers 403 to this caller.
-    expect(requested.some((url) => url.includes("/v1/budgets"))).toBe(false)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/budgets`))).toBe(
+      false,
+    )
   })
 
   it("counts a ceiling this organization cannot edit", async () => {
@@ -1113,7 +1119,7 @@ describe("the tenant Overview's budget signal", () => {
     expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
     expect(
       requested.some((url) =>
-        url.includes("/v1/organizations/me/spend-ceilings"),
+        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
       ),
     ).toBe(false)
   })
@@ -1121,15 +1127,15 @@ describe("the tenant Overview's budget signal", () => {
   it("reads a failed ceiling query as unknown, not as zero spend", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(
           organizationContext({ deployment_operator: false, role: "admin" }),
         )
       }
-      if (url.includes("/v1/organizations/me/spend-ceilings")) {
+      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
         return jsonResponse({ detail: "ceilings exploded" }, 500)
       }
-      if (url.includes("/v1/organizations/me/usage/summary")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
         return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
       return jsonResponse([])
@@ -1217,9 +1223,11 @@ describe("the tenant Overview's chart and rail", () => {
       ).toHaveTextContent("2")
     })
     // Their own key list, which is the surface otari-ai#1941 gave them, and not
-    // the deployment-wide `/v1/keys` the operator page reads.
+    // the deployment-wide /api/v1/keys the operator page reads.
     expect(
-      requested.some((url) => url.includes("/v1/organizations/me/keys")),
+      requested.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/keys`),
+      ),
     ).toBe(true)
   })
 
@@ -1270,13 +1278,13 @@ describe("OverviewIndex operator-ness", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       requested.push(url)
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes("/v1/usage/summary")) {
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
-      if (url.includes("/v1/providers/health")) {
+      if (url.includes(`${API_ROOT}/providers/health`)) {
         return jsonResponse({
           providers: [],
           healthy: 1,
@@ -1284,7 +1292,7 @@ describe("OverviewIndex operator-ness", () => {
           checked_at: null,
         })
       }
-      if (url.includes("/v1/providers")) {
+      if (url.includes(`${API_ROOT}/providers`)) {
         return jsonResponse({ providers: [{ provider: "openai" }] })
       }
       return jsonResponse([])
@@ -1296,9 +1304,9 @@ describe("OverviewIndex operator-ness", () => {
         "At-a-glance spend, traffic, and health across the gateway.",
       ),
     ).toBeInTheDocument()
-    expect(requested.some((url) => url.endsWith("/v1/admin/access"))).toBe(
-      false,
-    )
+    expect(
+      requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
+    ).toBe(false)
   })
 
   it("lands a failed context on the scoped page, where its tiles already read", async () => {
@@ -1310,15 +1318,15 @@ describe("OverviewIndex operator-ness", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       requested.push(url)
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({ detail: "context exploded" }, 500)
       }
-      if (url.includes("/v1/organizations/me/usage/summary")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
         if (url.includes("bucket=hour"))
           return jsonResponse(summary({ cost: 5 }))
         return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
-      if (url.includes("/v1/organizations/me/usage")) {
+      if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
         return jsonResponse([])
       }
       return jsonResponse({ detail: "forbidden" }, 403)
@@ -1342,22 +1350,25 @@ describe("OverviewIndex operator-ness", () => {
     // ask again without end. The tiles asserted above are what such a page never
     // reaches, and this is the request storm underneath it.
     expect(
-      requested.filter((url) => url.endsWith("/v1/organizations/me")).length,
+      requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`))
+        .length,
     ).toBeLessThan(4)
 
     // And it asked nothing the deployment-wide page would have: not the gate,
     // and no endpoint outside the surface the hooks fell back to.
     const asked = requested.filter(
-      (url) => !url.endsWith("/v1/organizations/me"),
+      (url) => !url.endsWith(`${API_ROOT}/organizations/me`),
     )
     expect(asked.length).toBeGreaterThan(0)
     for (const url of asked) {
-      expect(url).toContain("/v1/organizations/me/")
+      expect(url).toContain(`${API_ROOT}/organizations/me/`)
     }
     // The ceilings among them: an errored context names no role, and the page
     // withholds a read the server may refuse rather than painting its refusal.
     expect(
-      asked.some((url) => url.includes("/v1/organizations/me/spend-ceilings")),
+      asked.some((url) =>
+        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      ),
     ).toBe(false)
   })
 })
@@ -1388,8 +1399,12 @@ describe("the setup guide on either Overview", () => {
     ).not.toBeInTheDocument()
     // And its gate came from the catalog, which this caller may read, and not
     // from the operator-gated provider list.
-    expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
-    expect(requested.some((url) => url.endsWith("/v1/providers"))).toBe(false)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
+      true,
+    )
+    expect(requested.some((url) => url.endsWith(`${API_ROOT}/providers`))).toBe(
+      false,
+    )
   })
 
   it("still offers it to an operator", async () => {
@@ -1435,7 +1450,9 @@ describe("the setup guide on either Overview", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
     })
-    expect(requested.some((url) => url.includes("/v1/models"))).toBe(true)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/models`))).toBe(
+      true,
+    )
     expect(
       screen.queryByRole("heading", { name: "Send your first request" }),
     ).not.toBeInTheDocument()

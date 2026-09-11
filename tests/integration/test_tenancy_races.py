@@ -48,6 +48,7 @@ from gateway.services.tenancy.errors import (
     InvitationAlreadyUsedError,
     LastWorkspaceError,
     MembershipUpdateError,
+    NotAuthorizedError,
     OrganizationMemberAlreadyExistsError,
     ResetTokenInvalidError,
     VerificationTokenInvalidError,
@@ -368,7 +369,12 @@ async def test_concurrent_demotions_cannot_strip_the_last_owner(
 
     outcomes = list(await asyncio.gather(*(run_one(attempt) for attempt in attempts)))
 
-    refused = [outcome for outcome in outcomes if isinstance(outcome, MembershipUpdateError)]
+    # Which refusal the loser gets depends on where it was when the winner
+    # committed: still inside its own pre-lock reads, so its actor is an owner
+    # and the last-owner guard turns it away, or not yet started, so its actor
+    # is already a member and the management-role check turns it away first.
+    # Both are the same invariant holding, which is what the owner count asserts.
+    refused = [outcome for outcome in outcomes if isinstance(outcome, MembershipUpdateError | NotAuthorizedError)]
     assert len(refused) == 1
     assert await OrganizationMemberRepository(async_db).count_active_owners(organization.id) == 1
 

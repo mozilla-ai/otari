@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from gateway.api import deps
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
 from gateway.models.entities import RuntimeSetting
 from gateway.services import master_key_service
@@ -119,9 +119,9 @@ def test_generated_key_authenticates_management_api(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(master_key_service, "generate_master_key", lambda: fixed)
     config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'mk.db'}", require_pricing=False)
     with TestClient(create_app(config)) as client:
-        ok = client.get("/v1/provider-credentials", headers={"Otari-Key": f"Bearer {fixed}"})
+        ok = client.get(f"{API_ROOT}/provider-credentials", headers={"Otari-Key": f"Bearer {fixed}"})
         assert ok.status_code == 200
-        bad = client.get("/v1/provider-credentials", headers={"Otari-Key": "Bearer wrong"})
+        bad = client.get(f"{API_ROOT}/provider-credentials", headers={"Otari-Key": "Bearer wrong"})
         assert bad.status_code == 401
 
 
@@ -142,6 +142,6 @@ async def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
 def test_402_message_states_cause_and_both_fixes() -> None:
     msg = no_pricing_error_detail("openai:gpt-5")
     assert "openai:gpt-5" in msg
-    assert "/v1/pricing" in msg
+    assert f"{API_ROOT}/pricing" in msg
     assert "default_pricing" in msg
-    assert "/v1/settings" in msg
+    assert f"{API_ROOT}/settings" in msg

@@ -57,12 +57,12 @@ from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
 # router names its own rule, so adding a route to either one inherits a gate
 # rather than none.
 operator_router = APIRouter(
-    prefix="/v1/usage",
+    prefix="/usage",
     tags=["usage"],
     dependencies=[Depends(require_deployment_operator)],
 )
 ingest_router = APIRouter(
-    prefix="/v1/usage",
+    prefix="/usage",
     tags=["usage"],
     dependencies=[Depends(verify_api_key_or_master_key)],
 )
@@ -345,7 +345,7 @@ _COUNTS_DESC = (
 # description above: there it would promise the rows this count is what excludes.
 _COUNT_COUNTS_DESC = (
     "Filter by budget participation: true = only enforced gateway rows, false = only "
-    "imported rows, narrowed past the filter of the same name on GET /v1/usage so the "
+    "imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the "
     "total matches what bulk delete and set-price can reach"
 )
 _WORKSPACE_DESC = "Only usage recorded in this workspace."
@@ -507,7 +507,7 @@ async def list_usage(
     group (``request_group_id``, repeatable, which returns a routed request's
     whole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external
     billing/analytics consumers depend on this, so the total row count for a
-    paginated UI is served separately by ``GET /v1/usage/count`` rather than
+    paginated UI is served separately by ``GET /api/v1/usage/count`` rather than
     wrapped in an envelope here. Timestamps accept either ISO 8601 strings or
     Unix epoch seconds (numeric).
     """
@@ -605,12 +605,12 @@ async def count_usage(
     """Total number of usage logs matching the given filters.
 
     Serves the dashboard paginator's "N of M" total without changing the bare
-    array contract of ``GET /v1/usage``. Runs only when the client asks (a
+    array contract of ``GET /api/v1/usage``. Runs only when the client asks (a
     separate request), so the ``COUNT(*)`` is not paid on every page load. With
     ``counts_toward_budget=false`` it also backs the "select all N matching this
     filter" affordance for bulk delete / set-price, which touch imported rows only.
 
-    That value is the one place this count is narrower than ``GET /v1/usage``: it
+    That value is the one place this count is narrower than ``GET /api/v1/usage``: it
     also excludes rows this deployment served itself, so the number an operator
     confirms is the number the mutation can reach. The list still pages the
     budget-exempt gateway rows it omits.
@@ -854,7 +854,7 @@ class UsageSummary(BaseModel):
     # dimension that turns "spend went up" into "this task went wrong". Gateway
     # rows carry no label, so they group under a single null key.
     by_source_label: list[UsageGroupRow]
-    # API surface (/v1/chat/completions vs /v1/messages vs /v1/responses) and
+    # API surface (/api/v1/chat/completions vs /api/v1/messages vs /api/v1/responses) and
     # upstream provider: the two splits a gateway operator needs and that no
     # other endpoint reports.
     by_endpoint: list[UsageGroupRow]
@@ -944,7 +944,7 @@ def _request_count_expr(status_filter: str | None = None) -> Any:
 
     Used by every "request count" in this module (totals, dimension breakdowns, and
     the grouped series) so the number means one thing everywhere and the breakdowns
-    still sum to the total. The row-count endpoint (`/v1/usage/count`) deliberately
+    still sum to the total. The row-count endpoint (`/api/v1/usage/count`) deliberately
     does not use it: that one paginates the activity list, where an absorbed attempt
     is a row the operator can see and page through.
 
@@ -1508,7 +1508,7 @@ async def usage_summary(
 ) -> UsageSummary:
     """Aggregate spend, tokens, and request volume for the dashboard Usage page.
 
-    Range-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``
+    Range-bounded (default last 30 days, hard-capped): unlike the raw ``/api/v1/usage``
     list, every aggregate is scoped to a bounded window so it stays served by the
     timestamp index. Returns grand totals, breakdowns by model / user / API key /
     source / session (``source_label``) / endpoint / provider (top rows plus a

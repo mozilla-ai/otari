@@ -252,6 +252,75 @@
           }
         }
       }
+    },
+    {
+      // `src/design-system/` is the design system: presentational components that
+      // know nothing about this application. It is the one layer here that is a
+      // library candidate (web/design/DESIGN.md, "The extraction contract"), so
+      // its rule is the inverse of every other one in this file. The others name
+      // the few layers a layer may not reach; this one names all of them, because
+      // the question it answers is not "does this import point the wrong way" but
+      // "could this directory still compile with `src/` deleted".
+      //
+      // None of the group is a judgement about the code it points at. `@/shared`
+      // holds the transport and the domain formatters, `@/client` the types
+      // generated from openapi.json; both are this application's, and a component
+      // that needs one has stopped being a primitive. What the layer may import:
+      // React, HeroUI, react-aria-components, react-icons, recharts, react-markdown, and its own
+      // modules.
+      //
+      // `@/tests` is deliberately NOT in the group. A test reaching the shared
+      // harness does not block extraction, since a package takes its own harness
+      // with it, and closing it today would fork `src/tests/select.ts` for no
+      // gain. Source files have no reason to reach it and none do.
+      "includes": ["src/design-system/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@/app",
+                      "@/app/**",
+                      "**/../app",
+                      "**/../app/**",
+                      "@/features",
+                      "@/features/**",
+                      "**/../features",
+                      "**/../features/**",
+                      "@/routes",
+                      "@/routes/**",
+                      "**/../routes",
+                      "**/../routes/**",
+                      "@/shared",
+                      "@/shared/**",
+                      "**/../shared",
+                      "**/../shared/**",
+                      "@/client",
+                      "@/client/**",
+                      "**/../client",
+                      "**/../client/**"
+                    ],
+                    "message": "src/design-system may not import the rest of src. It is the one layer here meant to leave as a package, and that is only true while it depends on nothing but React, HeroUI, react-aria, react-icons, recharts, react-markdown and itself. A component that needs the transport, a domain formatter or a generated API type is an application component: put it in src/shared/components and compose the primitive there."
+                  },
+                  {
+                    "group": [
+                      "@/overlay",
+                      "@/overlay/**",
+                      "**/overlay",
+                      "**/overlay/**"
+                    ],
+                    "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

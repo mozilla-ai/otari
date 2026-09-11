@@ -11,7 +11,7 @@ API key that authenticated it and never from a header, exactly as every other
 request-plane row does (``services/workspace_scope``). A keyed request is confined
 to its own key's workspace on every verb; a master-key request is the operator
 acting deployment-wide and sees every workspace, narrowable on the listing with
-``workspace_id``, matching ``GET /v1/keys``.
+``workspace_id``, matching ``GET /api/v1/keys``.
 """
 
 import mimetypes
@@ -36,7 +36,7 @@ from gateway.services.file_service import fetch_file
 from gateway.services.file_store import FileStore
 from gateway.services.workspace_scope import default_workspace_id
 
-router = APIRouter(prefix="/v1", tags=["files"])
+router = APIRouter(tags=["files"])
 
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".

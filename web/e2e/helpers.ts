@@ -4,6 +4,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test"
+import { API_ROOT } from "@/shared/api/client"
 
 // Matches web/e2e/otari.yml. The login step needs a known key.
 export const MASTER_KEY = "e2e-master-key"
@@ -91,9 +92,12 @@ export const authHeaders = {
  * fine.
  */
 export async function dismissSetupGuide(page: Page): Promise<void> {
-  const listed = await page.request.get("/v1/workspaces?skip=0&limit=1000", {
-    headers: authHeaders,
-  })
+  const listed = await page.request.get(
+    `${API_ROOT}/workspaces?skip=0&limit=1000`,
+    {
+      headers: authHeaders,
+    },
+  )
   await expectOk(listed, "list workspaces")
   const { data, count } = (await listed.json()) as {
     data: { id: string }[]
@@ -109,7 +113,7 @@ export async function dismissSetupGuide(page: Page): Promise<void> {
   ).toBe(count)
   for (const workspace of data) {
     const dismissed = await page.request.post(
-      `/v1/workspaces/${workspace.id}/activation/dismiss`,
+      `${API_ROOT}/workspaces/${workspace.id}/activation/dismiss`,
       { headers: authHeaders },
     )
     await expectOk(dismissed, `dismiss the setup guide in ${workspace.id}`)
@@ -173,6 +177,26 @@ export function filterChip(page: Page, label: string, value: string): Locator {
 export async function dismissComboBox(box: Locator): Promise<void> {
   await box.press("Escape")
   await box.blur()
+  await expect(box).not.toHaveAttribute("aria-expanded", "true")
+}
+
+// The same, for a combobox inside a dialog. Two differences, and the second one
+// is why this is a separate helper rather than a flag.
+//
+// No `blur()`: a modal contains focus, so it lands straight back on the box and
+// the box re-opens on focus. Escape alone closes the popover.
+//
+// And the Escape is sent only when there is a popover to close. Otherwise it
+// reaches the dialog, and a dirty form answers that by arming its
+// unsaved-changes guard, which takes the submit out of the footer, so the next
+// lookup fails on a missing button rather than on the real cause. The wait
+// cannot prevent that: a closed popover satisfies it instantly, by which point
+// the keystroke has already landed. It is kept for what it does cover, a
+// popover that closes asynchronously.
+export async function dismissComboBoxInDialog(box: Locator): Promise<void> {
+  if ((await box.getAttribute("aria-expanded")) === "true") {
+    await box.press("Escape")
+  }
   await expect(box).not.toHaveAttribute("aria-expanded", "true")
 }
 

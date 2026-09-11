@@ -13,6 +13,7 @@ import type {
   PricingResponse,
 } from "@/client"
 import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -89,31 +90,39 @@ function mockApi(
     .mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.includes("/v1/pricing/refresh/confirm") && method === "POST") {
+      if (
+        url.includes(`${API_ROOT}/pricing/refresh/confirm`) &&
+        method === "POST"
+      ) {
         return jsonResponse({ applied: true })
       }
-      if (url.includes("/v1/pricing/refresh/reject") && method === "POST") {
+      if (
+        url.includes(`${API_ROOT}/pricing/refresh/reject`) &&
+        method === "POST"
+      ) {
         return new Response(null, { status: 204 })
       }
-      if (url.includes("/v1/pricing/refresh") && method === "POST") {
+      if (url.includes(`${API_ROOT}/pricing/refresh`) && method === "POST") {
         return jsonResponse(PRICE_REFRESH)
       }
-      if (url.includes("/v1/pricing/refresh/pending")) {
+      if (url.includes(`${API_ROOT}/pricing/refresh/pending`)) {
         return options.pending
           ? jsonResponse(options.pending)
           : jsonResponse({ detail: "No pending price refresh" }, 404)
       }
-      if (url.includes("/v1/pricing/snapshots")) return jsonResponse(snapshots)
-      if (url.includes("/v1/pricing/drift")) return jsonResponse(drift)
-      // Before the bare `/v1/pricing` arm below and before the context one: the
+      if (url.includes(`${API_ROOT}/pricing/snapshots`))
+        return jsonResponse(snapshots)
+      if (url.includes(`${API_ROOT}/pricing/drift`)) return jsonResponse(drift)
+      // Before the bare /api/v1/pricing arm below and before the context one: the
       // organization's own overrides are a different surface from the catalog,
       // and they answer the paged tenancy shape rather than a list.
-      if (url.includes("/v1/organizations/me/pricing")) {
+      if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes("/v1/settings")) return jsonResponse(settings)
-      if (url.includes("/v1/pricing")) return jsonResponse(pricing)
-      if (url.includes("/v1/organizations/me")) return jsonResponse(context)
+      if (url.includes(`${API_ROOT}/settings`)) return jsonResponse(settings)
+      if (url.includes(`${API_ROOT}/pricing`)) return jsonResponse(pricing)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(context)
       return jsonResponse([])
     })
 }
@@ -231,7 +240,7 @@ describe("ModelPricingPage", () => {
   it("reports a failed price read rather than an empty catalog", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/settings")) return jsonResponse(SETTINGS)
+      if (url.includes(`${API_ROOT}/settings`)) return jsonResponse(SETTINGS)
       return new Response(JSON.stringify({ detail: "nope" }), { status: 500 })
     })
     renderPage(<ModelPricingPage />)
@@ -276,7 +285,7 @@ describe("ModelPricingPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).endsWith("/v1/pricing/refresh/confirm") &&
+          String(url).endsWith(`${API_ROOT}/pricing/refresh/confirm`) &&
           init?.method === "POST",
       ),
     ).toBe(true)
@@ -307,7 +316,7 @@ describe("ModelPricingPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).endsWith("/v1/pricing/refresh/reject") &&
+          String(url).endsWith(`${API_ROOT}/pricing/refresh/reject`) &&
           init?.method === "POST",
       ),
     ).toBe(true)
@@ -346,7 +355,7 @@ describe("ModelPricingPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).endsWith("/v1/pricing/refresh/confirm") &&
+          String(url).endsWith(`${API_ROOT}/pricing/refresh/confirm`) &&
           init?.method === "POST",
       ),
     ).toBe(true)
@@ -459,8 +468,12 @@ describe("ModelPricingPage", () => {
     // `require_deployment_operator`, so firing them would put a 403 banner on a
     // page that is the admin's to use (the shape otari#838 removed elsewhere).
     const asked = fetchMock.mock.calls.map(([url]) => String(url))
-    expect(asked.some((url) => url.includes("/v1/settings"))).toBe(false)
-    expect(asked.some((url) => url.includes("/v1/pricing/refresh"))).toBe(false)
+    expect(asked.some((url) => url.includes(`${API_ROOT}/settings`))).toBe(
+      false,
+    )
+    expect(
+      asked.some((url) => url.includes(`${API_ROOT}/pricing/refresh`)),
+    ).toBe(false)
   })
 
   it("does not point an admin at an editor they would be refused", async () => {

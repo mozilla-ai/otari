@@ -1,4 +1,4 @@
-"""Unit tests for the ``/v1/files`` route's streaming helpers.
+"""Unit tests for the ``/api/v1/files`` route's streaming helpers.
 
 Covers ``_prime`` in isolation (no FastAPI app/DB needed): it has no
 dependency on request/db/config, so it's tested directly rather than through
@@ -13,12 +13,13 @@ import pytest
 from fastapi import FastAPI
 
 from gateway.api.routes.files import _prime, router
+from gateway.core.config import API_ROOT
 
 
 def test_download_openapi_describes_binary_content() -> None:
     app = FastAPI()
-    app.include_router(router)
-    responses = app.openapi()["paths"]["/v1/files/{file_id}/content"]["get"]["responses"]
+    app.include_router(router, prefix=API_ROOT)
+    responses = app.openapi()["paths"][f"{API_ROOT}/files/{{file_id}}/content"]["get"]["responses"]
 
     assert responses["200"]["content"] == {
         "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},

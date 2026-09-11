@@ -28,7 +28,7 @@ To run it for Google::
     #      OTARI_OAUTH_GOOGLE_CLIENT_ID=...
     #      OTARI_OAUTH_GOOGLE_CLIENT_SECRET=...
     #      OTARI_DATABASE_URL=...   (the same one this test will read)
-    # 2. Call GET /v1/auth/oauth/google/authorize with curl -c so the flow
+    # 2. Call GET /api/v1/auth/oauth/google/authorize with curl -c so the flow
     #    cookie (otari_oauth_flow) it sets is kept, open the URL it returns and
     #    complete the consent screen. The browser lands on
     #    /#/auth/google/callback?code=...&state=...; copy both out of the

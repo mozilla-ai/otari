@@ -3,7 +3,7 @@
 The date query params and selection bodies advertise ISO 8601, so a caller that
 omits the offset hands in a naive datetime. asyncpg encodes ``timestamptz`` with
 ``astimezone``, which reads a naive value as the process's local time, so the same
-bound would select a different set of rows per deployment. `/v1/usage/summary`
+bound would select a different set of rows per deployment. `/api/v1/usage/summary`
 routes through `_resolve_window` and was already pinned; the list, count, and bulk
 mutation paths do not, so they pin the bound themselves.
 

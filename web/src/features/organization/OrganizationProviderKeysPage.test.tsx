@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext, OrgProviderKey } from "@/client"
 import { OrganizationProviderKeysPage } from "@/features/organization/OrganizationProviderKeysPage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext, orgProviderKey } from "@/tests/fixtures"
 
 interface Request {
@@ -25,6 +26,8 @@ interface MockOpts {
   keys?: OrgProviderKey[]
   context?: OrganizationContext
   catalog?: { id: string; name: string }[]
+  // Refuse the create, so a test can read what a refusal leaves behind.
+  createFails?: boolean
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -43,18 +46,21 @@ function mockApi(opts: MockOpts = {}) {
       if (method === "GET") {
         return jsonResponse({ count: keys.length, data: keys })
       }
+      if (method === "POST" && opts.createFails) {
+        return jsonResponse({ detail: "Provider key already exists" }, 409)
+      }
       // Every write answers with a key-shaped body the page only re-reads
       // through the invalidated list, so one row is enough for all of them.
       return jsonResponse(keys[0] ?? orgProviderKey())
     }
-    // What the deployment actually answers this page's audience: `/v1/settings`
+    // What the deployment actually answers this page's audience: /api/v1/settings
     // is operator-only and an organization owner is not one. Mocked as the
     // refusal rather than as a body, so a page that went back to reading it
     // would fail here rather than pass on a fixture no tenant ever receives.
-    if (url.includes("/v1/settings")) {
+    if (url.includes(`${API_ROOT}/settings`)) {
       return jsonResponse({ detail: "Not authorized" }, 403)
     }
-    if (url.includes("/v1/providers/catalog")) {
+    if (url.includes(`${API_ROOT}/providers/catalog`)) {
       return jsonResponse(
         opts.catalog ?? [{ id: "anthropic", name: "Anthropic" }],
       )
@@ -76,6 +82,99 @@ afterEach(() => {
 })
 
 describe("OrganizationProviderKeysPage", () => {
+  it("keeps the page's add action visible while the dialog is open", async () => {
+    // It used to hide while the form was a band on the page. The form is over
+    // the page now, and the trigger is where focus returns when it closes.
+    mockApi({})
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    const trigger = await screen.findByRole("button", {
+      name: "Add provider key",
+    })
+    await user.click(trigger)
+    await screen.findByRole("dialog", { name: "New provider key" })
+    expect(trigger).toBeInTheDocument()
+  })
+
+  it("opens on a blank draft after a create", async () => {
+    // Nothing unmounts this form, so the remount on the way in is the only
+    // thing that clears it, and what it holds includes the plaintext secret.
+    // A surviving draft also reports itself dirty against the empty snapshot
+    // `seeded` still holds, so the guard arms before anything is typed.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.type(screen.getByLabelText("API key"), "sk-secret")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add provider key",
+      }),
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New provider key" }),
+      ).toBeNull(),
+    )
+
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+    const reopened = await screen.findByRole("dialog", {
+      name: "New provider key",
+    })
+    expect(within(reopened).getByRole("textbox", { name: /Name/ })).toHaveValue(
+      "",
+    )
+    expect(within(reopened).getByLabelText("API key")).toHaveValue("")
+    expect(
+      within(reopened).getByRole("combobox", { name: "Provider" }),
+    ).toHaveValue("")
+    // And not dirty on arrival: Escape closes it rather than arming the guard.
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New provider key" }),
+      ).toBeNull(),
+    )
+  })
+
+  it("does not carry a refused create's banner into the next open", async () => {
+    mockApi({ createFails: true })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add provider key",
+      }),
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Provider key already exists",
+    )
+
+    // Out through the guard, which is the only way out of a dirty form.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await user.click(screen.getByRole("button", { name: "Add provider key" }))
+
+    const reopened = await screen.findByRole("dialog", {
+      name: "New provider key",
+    })
+    expect(within(reopened).queryByRole("alert")).toBeNull()
+  })
+
   it("lists the organization's keys with the default marked", async () => {
     mockApi({
       keys: [
@@ -101,7 +200,7 @@ describe("OrganizationProviderKeysPage", () => {
   })
 
   it("reads the organization's own keys, not the deployment's credentials", async () => {
-    // The whole reason this page exists: `/v1/provider-credentials` is keyed on
+    // The whole reason this page exists: /api/v1/provider-credentials is keyed on
     // an instance name and belongs to the process, so a page that read it would
     // be showing every tenant the same rows.
     const requests = mockApi({ keys: [orgProviderKey()] })
@@ -110,12 +209,12 @@ describe("OrganizationProviderKeysPage", () => {
     await screen.findByText("Production")
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/organizations/me/provider-keys"),
+        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
       ),
     ).toBe(true)
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/provider-credentials"),
+        request.url.includes(`${API_ROOT}/provider-credentials`),
       ),
     ).toBe(false)
   })
@@ -141,14 +240,14 @@ describe("OrganizationProviderKeysPage", () => {
         requests.some(
           (request) =>
             request.method === "POST" &&
-            request.url.endsWith("/v1/organizations/me/provider-keys"),
+            request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
         ),
       ).toBe(true)
     })
     const post = requests.find(
       (request) =>
         request.method === "POST" &&
-        request.url.endsWith("/v1/organizations/me/provider-keys"),
+        request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
     )
     expect(post?.body).toMatchObject({
       provider: "anthropic",
@@ -430,6 +529,43 @@ describe("OrganizationProviderKeysPage", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 
+  it("deletes an archived key only through the confirm dialog", async () => {
+    // otari-ai#2110. Archive keeps its two-click row confirm, because it is the
+    // reversible step; the delete that follows it is the one behind a modal.
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          id: "88888888-8888-8888-8888-888888888888",
+          name: "Retired",
+          archived_at: "2026-08-20T00:00:00+00:00",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await user.click(await screen.findByText("Show archived (1)"))
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/Retired and its stored/)).toBeVisible()
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" &&
+            request.url.includes("88888888-8888-8888-8888-888888888888"),
+        ),
+      ).toBe(true),
+    )
+  })
+
   it("withholds the keys and their read from a member who cannot manage the organization", async () => {
     // The list read is organization owner/admin-gated on the server
     // (otari-ai#1944), so a member reaching this URL is answered 403. The read
@@ -462,7 +598,7 @@ describe("OrganizationProviderKeysPage", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
     expect(
       requests.some((request) =>
-        request.url.includes("/v1/organizations/me/provider-keys"),
+        request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
       ),
     ).toBe(false)
   })
@@ -485,7 +621,7 @@ describe("OrganizationProviderKeysPage", () => {
 
   it("keeps adding available for an owner the operator-only settings read refuses", async () => {
     // The bug this page shipped with (#839): the flag was inferred from
-    // `/v1/settings`, which 403s for every organization owner, so the banner
+    // /api/v1/settings, which 403s for every organization owner, so the banner
     // reported a missing key on a deployment where the write path works.
     const requests = mockApi()
     renderPage(<OrganizationProviderKeysPage />)
@@ -495,7 +631,7 @@ describe("OrganizationProviderKeysPage", () => {
     ).toBeEnabled()
     expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
     expect(
-      requests.some((request) => request.url.includes("/v1/settings")),
+      requests.some((request) => request.url.includes(`${API_ROOT}/settings`)),
     ).toBe(false)
   })
 

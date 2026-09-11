@@ -5,6 +5,15 @@ import { useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
 import type { CatalogModelDetail, CatalogOffering } from "@/client"
+import { CopyableValue } from "@/design-system/actions/CopyField"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Badge } from "@/design-system/indicators/Badge"
+import { Dot } from "@/design-system/indicators/Dot"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   CAPABILITY_LABELS,
   credentialLabel,
@@ -16,18 +25,6 @@ import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { useCatalog, useCatalogModel } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { CopyableValue } from "@/shared/components/actions/CopyField"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Badge } from "@/shared/components/indicators/Badge"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 import {
   formatContext,
   formatRate,

@@ -1,6 +1,6 @@
 """Discovery for the tools Otari runs itself.
 
-``GET /v1/tools`` answers "what can I put in ``tools[]`` and have the gateway
+``GET /api/v1/tools`` answers "what can I put in ``tools[]`` and have the gateway
 execute?". Without it the contract is undiscoverable: a client has to read the
 docs to learn that ``otari_web_search`` exists, and cannot tell whether this
 deployment has a backend wired up for it.
@@ -32,7 +32,6 @@ from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.web_search_backend import web_search_tool_definition
 
 router = APIRouter(
-    prefix="/v1",
     tags=["tools"],
     dependencies=[Depends(verify_catalog_reader)],
 )

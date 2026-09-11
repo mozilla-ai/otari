@@ -2,7 +2,7 @@
 
 Otari routes provider calls through
 [any-llm](https://github.com/mozilla-ai/any-llm). Provider support changes with
-that dependency, so the running gateway's `GET /v1/models` response is more
+that dependency, so the running gateway's `GET /api/v1/models` response is more
 reliable than a copied provider table.
 
 ## Model format
@@ -61,7 +61,7 @@ name. `provider_type: openai-compatible` and `openai_compatible` are accepted
 aliases for the OpenAI implementation.
 
 The optional `models` list supplies discovery for a backend that has no
-`/v1/models` endpoint. It does not restrict direct dispatch.
+model-listing endpoint. It does not restrict direct dispatch.
 
 Named instances are local configuration and do not apply in hybrid mode, where
 the control plane resolves each attempt.
@@ -83,7 +83,7 @@ because their provider exists in any-llm.
 
 ## Model discovery
 
-`GET /v1/models` combines discoverable provider models, configured prices,
+`GET /api/v1/models` combines discoverable provider models, configured prices,
 aliases, and routing-policy names. Discovery is cached and bounded; an
 unreachable provider does not block the catalog indefinitely.
 
@@ -91,7 +91,7 @@ Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
 
-Hosted mode keeps `GET /v1/models` for control-plane discovery. Hybrid mode
+Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
 does not serve the local catalog.
 
 ### Who is shown which models
@@ -153,7 +153,7 @@ point to another alias.
 
 ### Runtime aliases
 
-Standalone operators can manage aliases from Routing or `/v1/aliases` without
+Standalone operators can manage aliases from Routing or `/api/v1/aliases` without
 restarting. A stored alias belongs to a workspace and can optionally be narrowed
 to one user. Resolution prefers the most specific applicable alias.
 
@@ -177,18 +177,18 @@ models from the catalog.
 
 ## The catalog, grouped by model
 
-`GET /v1/catalog/models` reads the same merged catalog as `GET /v1/models` and
+`GET /api/v1/catalog/models` reads the same merged catalog as `GET /api/v1/models` and
 folds it by model, so `nebius:zai-org/GLM-5.3` and
 `fireworks:accounts/fireworks/models/glm-5p3` are two offerings of one entry.
 `?at_context=<tokens>` on the list takes each model's minimum from the pricing
 tier a request of that size would settle at, so tiered offerings compare at
 the size that matters rather than at their base rate.
-`GET /v1/catalog/models/{id}` lists every offering of one model the caller may
+`GET /api/v1/catalog/models/{id}` lists every offering of one model the caller may
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list
 it came from: the organization's own override, the deployment's stored rate, or
 the genai-prices default. Both routes accept the same credentials as
-`GET /v1/models`, and a model the caller may not use answers 404.
+`GET /api/v1/models`, and a model the caller may not use answers 404.
 
 Grouping keys on the models.dev display name where the dataset knows the
 model, and on the provider's id with its path prefixes, org segment and version
@@ -196,7 +196,7 @@ pins removed where it does not. A model's id is its vendor and its name,
 `z-ai/glm-5.3`, or the bare name where nobody could say the vendor. A dated build, a size or tier, and a mode a
 reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
-`GET /v1/models/metadata` stays operator-only.
+`GET /api/v1/models/metadata` stays operator-only.
 
 Each offering also carries the provider's own list price from models.dev,
 where it has one, and for a signed-in caller the organization's last thirty
@@ -216,7 +216,7 @@ and usage key on the offering reached. A key whose allow-list names some
 instances only should send one of those instances or an alias, since a bare
 model id resolves before the allow-list is consulted. The index behind this is
 rebuilt every minute from the deployment's catalog view and on
-`POST /v1/catalog/selectors/refresh`, an operator call, and each offering's
+`POST /api/v1/catalog/selectors/refresh`, an operator call, and each offering's
 `short_selector` and each model's `selector` in the catalog say what is in
 force.
 
@@ -236,7 +236,7 @@ deployment's rates and for the configured providers only.
 ## Listing available models
 
 ```bash
-curl http://localhost:8000/v1/models \
+curl http://localhost:8000/api/v1/models \
   -H "Authorization: Bearer $OTARI_API_KEY"
 ```
 

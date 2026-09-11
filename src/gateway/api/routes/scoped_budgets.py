@@ -32,7 +32,7 @@ from gateway.services.scoped_budget_service import ScopeType, period_window
 # future one that forgot the decorator would be unauthenticated with nothing
 # to notice.
 router = APIRouter(
-    prefix="/v1/scoped-budgets",
+    prefix="/scoped-budgets",
     tags=["scoped-budgets"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -83,7 +83,7 @@ class UpdateScopedBudgetRequest(BaseModel):
 class ScopedBudgetResponse(BaseModel):
     """One scoped ceiling and its live counters.
 
-    Unlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is
+    Unlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is
     enforced against ``current_spend + reserved_spend``, so there is no rollup
     over users to compute.
 
@@ -175,7 +175,7 @@ async def _require_scope_exists(db: AsyncSession, scope_type: str, scope_id: str
     the id, so a ceiling naming nothing is created, listed, and silently
     unenforced, with nothing anywhere to surface it. That is the shape a bulk
     import produces from a mis-mapped id, and it fails in the permissive
-    direction. `POST /v1/keys` already refuses an unknown workspace for the same
+    direction. `POST /api/v1/keys` already refuses an unknown workspace for the same
     reason; this matches it.
     """
     model, subject = _SCOPE_SUBJECTS[scope_type]

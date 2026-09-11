@@ -3,6 +3,7 @@ import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMembersPage } from "@/features/workspaces/WorkspaceMembersPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
   organizationContext,
@@ -37,10 +38,10 @@ function mockApi({
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     requests.push({ url, method: (init?.method ?? "GET").toUpperCase() })
-    if (url.includes("/members") && url.includes("/v1/workspaces/")) {
+    if (url.includes("/members") && url.includes(`${API_ROOT}/workspaces/`)) {
       return Response.json({ data: members, count: members.length })
     }
-    if (url.includes("/v1/organizations/me/members")) {
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       if (rosterFails) {
         return Response.json({ detail: "Roster unavailable" }, { status: 500 })
       }
@@ -161,7 +162,7 @@ describe("WorkspaceMembersPage", () => {
     // The role travels as a query parameter, which is the rehomed wire
     // contract; a body would be ignored.
     expect(post?.url).toContain(
-      `/v1/workspaces/${ALPHA}/members/77777777-7777-7777-7777-777777777777?role=admin`,
+      `${API_ROOT}/workspaces/${ALPHA}/members/77777777-7777-7777-7777-777777777777?role=admin`,
     )
   })
 

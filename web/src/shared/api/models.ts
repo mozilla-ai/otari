@@ -24,7 +24,7 @@ export function useCatalog() {
   return useQuery({
     ...NO_RETRY,
     queryKey: [CATALOG, "list"],
-    queryFn: () => apiFetch<CatalogResponse>("/v1/catalog/models"),
+    queryFn: () => apiFetch<CatalogResponse>("/catalog/models"),
     staleTime: 60_000,
   })
 }
@@ -37,7 +37,7 @@ export function useCatalogModel(modelId: string | undefined) {
       // Segment by segment: the id carries its vendor, `z-ai/glm-5.3`, and
       // the slash is the path's, not the id's to encode.
       apiFetch<CatalogModelDetail>(
-        `/v1/catalog/models/${(modelId ?? "")
+        `/catalog/models/${(modelId ?? "")
           .split("/")
           .map(encodeURIComponent)
           .join("/")}`,
@@ -55,7 +55,7 @@ export function useModels(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [MODELS],
-    queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
+    queryFn: () => apiFetch<ModelListResponse>("/models"),
     staleTime: 60_000,
     enabled,
   })
@@ -65,8 +65,7 @@ export function useDiscoverableModels(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [DISCOVERABLE],
-    queryFn: () =>
-      apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
+    queryFn: () => apiFetch<DiscoverableModelsResponse>("/models/discoverable"),
     staleTime: 5 * 60_000,
     enabled,
   })
@@ -85,7 +84,7 @@ export function useModelMetadata(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [METADATA],
-    queryFn: () => apiFetch<ModelMetadataResponse>("/v1/models/metadata"),
+    queryFn: () => apiFetch<ModelMetadataResponse>("/models/metadata"),
     staleTime: 10 * 60_000,
     enabled,
   })

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { API_ROOT } from "@/shared/api/client"
 
 // Runs in the `hybrid` project, against its own gateway (web/e2e/otari.hybrid.yml,
 // booted by web/e2e/serve-hybrid.sh), not the standalone one every other spec
@@ -30,7 +31,7 @@ test.describe("hybrid deployment", () => {
   test("the deployment bootstrap offers no surface and no session", async ({
     request,
   }) => {
-    const response = await request.get("/v1/bootstrap")
+    const response = await request.get(`${API_ROOT}/bootstrap`)
 
     expect(response.status()).toBe(200)
     // Whole-object, as the standalone assertion is: a field quietly appearing

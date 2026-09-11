@@ -3,21 +3,21 @@
 A policy that names ``router: knn`` decides nothing until someone has told the
 gateway which candidate is good enough for which kind of prompt. Two routes:
 
-* ``POST /v1/routing/preferences/rank`` records the quality each candidate earned
+* ``POST /api/v1/routing/preferences/rank`` records the quality each candidate earned
   on a prompt, writing the routing-memory records the router later votes over. It
   takes a batch, because a pool needs ``router_seed_count`` examples (20 by
   default) before it routes at all, and twenty round trips is not a workflow.
-* ``GET /v1/routing/status`` reports how warm each pool is, so an operator can see
+* ``GET /api/v1/routing/status`` reports how warm each pool is, so an operator can see
   when the router will start routing and which policies depend on it.
 
 There is deliberately no endpoint that fans a prompt out to the candidates for
-you. Seeing what each candidate answers is what ``POST /v1/chat/completions``
+you. Seeing what each candidate answers is what ``POST /api/v1/chat/completions``
 already does, one call per candidate, and going through that path means the calls
 are budget-checked and land in the usage log like all other provider spend. A
 convenience endpoint that skipped both would be the only unmetered way to spend
 money through this gateway.
 
-Operator-gated, like ``/v1/routing/policies``, with ``user_id`` naming whose
+Operator-gated, like ``/api/v1/routing/policies``, with ``user_id`` naming whose
 memory is being taught rather than taking it from the calling key: which model
 serves a caller is an operator decision, exactly as a policy's targets are.
 
@@ -60,7 +60,7 @@ from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get
 from gateway.services.routing.knn import KnnRoutingMemory
 
 router = APIRouter(
-    prefix="/v1/routing",
+    prefix="/routing",
     tags=["routing"],
     dependencies=[Depends(require_deployment_operator)],
 )

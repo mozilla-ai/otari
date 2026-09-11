@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-
+import { API_ROOT } from "@/shared/api/client"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
@@ -25,7 +25,7 @@ function shellPayload(snippet: string): string {
 describe("buildCurlSnippet", () => {
   it("posts to the completions path on the base URL it was given", () => {
     expect(buildCurlSnippet(INPUT)).toContain(
-      "https://otari.example.com/v1/chat/completions",
+      `https://otari.example.com${API_ROOT}/chat/completions`,
     )
   })
 
@@ -77,7 +77,7 @@ describe("buildCurlSnippet", () => {
     // The whole URL is one shell word, so the `;` never reaches the shell as a
     // separator: `'\''` closes the quote, emits a literal apostrophe, reopens.
     expect(snippet.split("\n")[0]).toBe(
-      `curl 'https://gw.example/a b'\\''; echo pwned; '\\''/v1/chat/completions' \\`,
+      `curl 'https://gw.example/a b'\\''; echo pwned; '\\''${API_ROOT}/chat/completions' \\`,
     )
   })
 
@@ -131,7 +131,7 @@ describe("resolveSnippetBaseUrl", () => {
 
   it("uses the browser's own origin on a standalone gateway", () => {
     // One process is both the dashboard and the data plane, so whatever address
-    // reached this page reaches /v1/chat/completions.
+    // reached this page reaches /api/v1/chat/completions.
     expect(
       resolveSnippetBaseUrl(
         { deployment_type: "standalone", data_plane_url: null },
@@ -197,7 +197,7 @@ describe("resolveSnippetBaseUrl", () => {
 
   it("answers undefined rather than an empty origin off the browser", () => {
     // The default origin is "" where there is no `window`. Answering it would
-    // let a caller build `curl /v1/chat/completions`, which reads as a snippet
+    // let a caller build `curl /api${API_ROOT}/chat/completions`, which reads as a snippet
     // and is not one; absent is the honest answer.
     expect(
       resolveSnippetBaseUrl(

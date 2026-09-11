@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.db import APIKey, User
 from gateway.main import create_app
 from gateway.services.mail import Mailer
@@ -109,9 +109,9 @@ def test_first_boot_seeds_a_fresh_database_without_sending_mail(
     config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'first-boot.db'}")
 
     with TestClient(create_app(config)) as client:
-        assert client.get("/health").status_code == 200
+        assert client.get(f"{API_ROOT}/health").status_code == 200
         # And the deployment reports the truth about itself rather than failing later.
-        assert client.get("/v1/bootstrap").json()["mail_ready"] is False
+        assert client.get(f"{API_ROOT}/bootstrap").json()["mail_ready"] is False
 
     engine = create_engine(config.database_url)
     with Session(engine) as db:

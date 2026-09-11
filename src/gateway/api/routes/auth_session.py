@@ -1,6 +1,6 @@
 """Dashboard sign-in sessions (standalone mode only).
 
-``POST /v1/auth/session`` exchanges a credential for a server-issued session
+``POST /api/v1/auth/session`` exchanges a credential for a server-issued session
 held in an HttpOnly cookie, so the dashboard never persists that credential in
 the browser and a sign-in survives tab closes and restarts. ``DELETE`` is
 sign-out. The cookie is honored by the master-key auth dependencies in
@@ -16,15 +16,15 @@ API credential. So:
   provisioning the default organization and its workspace and binding the
   session to that operator. This is first boot, and it is unchanged.
 - Once that identity has a password (an operator claimed the deployment through
-  ``PUT /v1/auth/password``), the master key is refused *for sign-in*, and email
+  ``PUT /api/v1/auth/password``), the master key is refused *for sign-in*, and email
   and password is the login. It is the operator's own password that decides
   this and no other identity's (#702): a member who signs up or resets theirs
   claims their account, not the deployment. The master key still authenticates
-  ``/v1/keys``, ``/v1/users`` and the rest of the management surface through the
+  ``/api/v1/keys``, ``/api/v1/users`` and the rest of the management surface through the
   header, which is what every self-hoster's automation and the OSS smoke gate
   use.
 
-``GET /v1/bootstrap`` publishes which of the two a deployment is currently
+``GET /api/v1/bootstrap`` publishes which of the two a deployment is currently
 accepting, so the login page asks for the credential that will work rather than
 discovering it from a 403.
 
@@ -70,7 +70,7 @@ from gateway.services.tenancy.organization_domain_service import OrganizationDom
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
 
-router = APIRouter(prefix="/v1/auth/session", tags=["auth"])
+router = APIRouter(prefix="/auth/session", tags=["auth"])
 
 MASTER_KEY_SIGN_IN_RETIRED = (
     "Master-key sign-in is retired on this deployment: it has been claimed with a password. "
@@ -120,7 +120,7 @@ class CreateSessionRequest(BaseModel):
         description=(
             "The gateway master key; verified once and never stored by the browser. Accepted only "
             "while the operator identity has no password, which is to say while nobody has claimed "
-            "this deployment (see GET /v1/bootstrap)."
+            "this deployment (see GET /api/v1/bootstrap)."
         ),
     )
     email: str | None = Field(
@@ -216,7 +216,7 @@ async def _sign_in_with_master_key(
     The refusal is a 403 and not a 401, and it comes after verification:
     the key is a valid credential, it is this *use* of it that is over, and
     saying so is what lets a stale client show the right message instead of
-    prompting for the key again. It leaks nothing that ``GET /v1/bootstrap``
+    prompting for the key again. It leaks nothing that ``GET /api/v1/bootstrap``
     does not already publish unauthenticated, by design, so that the login page
     can render the right form.
     """
@@ -288,12 +288,12 @@ async def create_session(
     refuses both. Before, because a frozen deployment should not spend a bcrypt
     verification per attempt and the refusal is not about the credential
     anyway; both, because the way back out is the master key against
-    ``PATCH /v1/settings/maintenance-mode`` through the header, which never
+    ``PATCH /api/v1/settings/maintenance-mode`` through the header, which never
     passes through this door. That is what keeps the way back out off the frozen
     path, and it is why no identity needs an exemption here; an operator who no
     longer holds the master key recovers by setting ``OTARI_MASTER_KEY`` and
     restarting, which is a restart rather than a click. It leaks nothing
-    either: ``GET /v1/bootstrap`` already publishes the same flag
+    either: ``GET /api/v1/bootstrap`` already publishes the same flag
     unauthenticated, so the sign-in screen can render the right page.
     """
     if await is_maintenance_mode(db):

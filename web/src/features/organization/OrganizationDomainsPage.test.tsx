@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -94,6 +94,33 @@ describe("OrganizationDomainsPage", () => {
     expect(
       screen.getByRole("button", { name: "Remove domain" }),
     ).toBeInTheDocument()
+  })
+
+  it("removes a claim only through the confirm dialog", async () => {
+    // otari-ai#2110. The dialog names the domain and says what survives the
+    // removal, which the two-click button had no room to.
+    const requests = mockApi({ domains: [organizationDomain()] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Remove domain" }),
+    )
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText(/acme.example stops admitting anyone/),
+    ).toBeVisible()
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove claim" }),
+    )
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "DELETE")).toBe(
+        true,
+      ),
+    )
   })
 
   it("shows a verified, enabled claim as active and pausable", async () => {
@@ -191,6 +218,81 @@ describe("OrganizationDomainsPage", () => {
       default_role: "member",
       enabled: true,
     })
+  })
+
+  it("keeps the header trigger on screen while the dialog is open", async () => {
+    // The dialog sits over the page rather than replacing the action, so the
+    // control that opened it does not vanish from under the pointer.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    const trigger = await screen.findByRole("button", { name: "Claim domain" })
+    await user.click(trigger)
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(trigger).toBeVisible()
+  })
+
+  it("opens on a blank draft after a close, not on the last one typed", async () => {
+    // Reset on the way in: clearing on the way out would blank the fields
+    // while the dialog is still animating away.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Claim domain" }),
+    )
+    await user.type(screen.getByLabelText(/Domain/), "acme.example")
+    // A draft this far along is dirty, so the way out is through the guard.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Claim domain" }))
+    expect(await screen.findByLabelText(/Domain/)).toHaveValue("")
+  })
+
+  it("guards a changed role on the way out, with nothing typed", async () => {
+    // The role is the other thing this form owns, and it is a choice the
+    // operator cannot retype: without it in `isDirty`, closing discards it
+    // silently. Dismissed through Cancel rather than Escape because in jsdom
+    // focus lands on `<body>` after picking from the Select, so a keystroke
+    // reaches nothing.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<OrganizationDomainsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Claim domain" }),
+    )
+    await user.click(screen.getByRole("button", { name: /They join as/ }))
+    await user.click(await screen.findByRole("option", { name: "Viewer" }))
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+    // Still open behind the guard, so Keep editing returns to the choice
+    // rather than to an empty form.
+    await user.click(screen.getByRole("button", { name: "Keep editing" }))
+    expect(
+      screen.getByRole("button", { name: /They join as/ }),
+    ).toHaveTextContent("Viewer")
+
+    // And the seed is per open, not per page: the ref lives below the key, so
+    // the next open starts clean. Held above it, or with the key dropped, the
+    // dialog would arrive already dirty and Escape would ask before closing an
+    // untouched form.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Claim domain" }))
+    await screen.findByRole("dialog")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("never offers a management role, because a DNS record must not mint admins", async () => {

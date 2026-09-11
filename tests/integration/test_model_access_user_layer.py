@@ -9,13 +9,15 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
+
 DENIED = "gemini:gemini-2.5-flash"
 ALLOWED = "openai:gpt-4o"
 
 
 def _make_user(client: TestClient, headers: dict[str, str], user_id: str, allowed_models: Any) -> None:
     resp = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": user_id, "allowed_models": allowed_models},
         headers=headers,
     )
@@ -26,7 +28,7 @@ def _key_for_user(
     client: TestClient, headers: dict[str, str], user_id: str, allowed_models: Any = None
 ) -> dict[str, str]:
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "k", "user_id": user_id, "allowed_models": allowed_models},
         headers=headers,
     )
@@ -36,7 +38,7 @@ def _key_for_user(
 
 def _seed_pricing(client: TestClient, headers: dict[str, str], model_key: str) -> None:
     resp = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": model_key, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
         headers=headers,
     )
@@ -50,7 +52,7 @@ def test_user_allowed_models_round_trips_and_validates(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     created = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "u-rt", "allowed_models": ["openai:*", "openai:*"]},
         headers=master_key_header,
     )
@@ -59,7 +61,7 @@ def test_user_allowed_models_round_trips_and_validates(
     assert created.json()["allowed_models"] == ["openai:*"]
 
     bad = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "u-bad", "allowed_models": ["gpt-4o"]},
         headers=master_key_header,
     )
@@ -71,16 +73,16 @@ def test_user_allowed_models_patch_tri_state(client: TestClient, master_key_head
     _make_user(client, master_key_header, "u-tri", ["openai:*"])
 
     # Absent: unchanged.
-    client.patch("/v1/users/u-tri", json={"alias": "x"}, headers=master_key_header)
-    assert client.get("/v1/users/u-tri", headers=master_key_header).json()["allowed_models"] == ["openai:*"]
+    client.patch(f"{API_ROOT}/users/u-tri", json={"alias": "x"}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/users/u-tri", headers=master_key_header).json()["allowed_models"] == ["openai:*"]
 
     # Explicit null: clear to unrestricted.
-    client.patch("/v1/users/u-tri", json={"allowed_models": None}, headers=master_key_header)
-    assert client.get("/v1/users/u-tri", headers=master_key_header).json()["allowed_models"] is None
+    client.patch(f"{API_ROOT}/users/u-tri", json={"allowed_models": None}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/users/u-tri", headers=master_key_header).json()["allowed_models"] is None
 
     # Empty list: deny all.
-    client.patch("/v1/users/u-tri", json={"allowed_models": []}, headers=master_key_header)
-    assert client.get("/v1/users/u-tri", headers=master_key_header).json()["allowed_models"] == []
+    client.patch(f"{API_ROOT}/users/u-tri", json={"allowed_models": []}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/users/u-tri", headers=master_key_header).json()["allowed_models"] == []
 
 
 # --- inheritance: user default flows to a key with no list of its own ------
@@ -93,7 +95,7 @@ def test_key_inherits_user_default_in_catalog(client: TestClient, master_key_hea
     # Key has no list of its own -> inherits the user's openai-only default.
     inheriting = _key_for_user(client, master_key_header, "u-cat", allowed_models=None)
 
-    ids = {m["id"] for m in client.get("/v1/models", headers=inheriting).json()["data"]}
+    ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=inheriting).json()["data"]}
     assert ALLOWED in ids
     assert DENIED not in ids
 
@@ -103,7 +105,7 @@ def test_key_inherits_user_default_at_inference(client: TestClient, master_key_h
     inheriting = _key_for_user(client, master_key_header, "u-inf", allowed_models=None)
 
     resp = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": DENIED, "messages": [{"role": "user", "content": "hi"}]},
         headers=inheriting,
     )
@@ -119,7 +121,7 @@ def test_unrestricted_user_leaves_inheriting_key_open(
     _make_user(client, master_key_header, "u-open", None)
     inheriting = _key_for_user(client, master_key_header, "u-open", allowed_models=None)
 
-    ids = {m["id"] for m in client.get("/v1/models", headers=inheriting).json()["data"]}
+    ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=inheriting).json()["data"]}
     assert {ALLOWED, DENIED} <= ids
 
 
@@ -131,7 +133,7 @@ def test_key_narrower_than_user_default_is_accepted(
 ) -> None:
     _make_user(client, master_key_header, "u-narrow", ["openai:*"])
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "k", "user_id": "u-narrow", "allowed_models": ["openai:gpt-4o"]},
         headers=master_key_header,
     )
@@ -144,7 +146,7 @@ def test_key_broader_than_user_default_is_rejected_on_create(
 ) -> None:
     _make_user(client, master_key_header, "u-cap", ["openai:gpt-4o"])
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "k", "user_id": "u-cap", "allowed_models": ["openai:*"]},
         headers=master_key_header,
     )
@@ -155,13 +157,13 @@ def test_key_broader_than_user_default_is_rejected_on_create(
 def test_key_broadening_rejected_on_patch(client: TestClient, master_key_header: dict[str, str]) -> None:
     _make_user(client, master_key_header, "u-patch", ["openai:gpt-4o"])
     key_id = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "k", "user_id": "u-patch", "allowed_models": ["openai:gpt-4o"]},
         headers=master_key_header,
     ).json()["id"]
 
     resp = client.patch(
-        f"/v1/keys/{key_id}",
+        f"{API_ROOT}/keys/{key_id}",
         json={"allowed_models": ["openai:*"]},
         headers=master_key_header,
     )
@@ -172,7 +174,7 @@ def test_key_broadening_rejected_on_patch(client: TestClient, master_key_header:
 def test_deny_all_user_rejects_a_granting_key(client: TestClient, master_key_header: dict[str, str]) -> None:
     _make_user(client, master_key_header, "u-deny", [])
     resp = client.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "k", "user_id": "u-deny", "allowed_models": ["openai:gpt-4o"]},
         headers=master_key_header,
     )

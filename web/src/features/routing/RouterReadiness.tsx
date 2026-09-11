@@ -1,11 +1,11 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Dot } from "@/design-system/indicators/Dot"
+import { Meter } from "@/design-system/metrics/Meter"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import { useRouterStatus } from "@/shared/api/routing"
 import { useUsers } from "@/shared/api/users"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { Meter } from "@/shared/components/metrics/Meter"
 
 /** Records against the seed count, as a bar plus the plain numbers.
  *
@@ -187,7 +187,7 @@ export function RouterReadiness({
           <span className="text-caption">Adding examples</span>
           <span className="text-caption">
             Examples are recorded over the API, with{" "}
-            <code>POST /v1/routing/preferences/rank</code>. Score a batch of
+            <code>POST /api/v1/routing/preferences/rank</code>. Score a batch of
             prompts from 0 (bad) to 1 (great) per candidate; two good answers is
             the case that lets the cheaper model win. See{" "}
             <a

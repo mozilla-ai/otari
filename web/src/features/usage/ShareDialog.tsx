@@ -1,6 +1,8 @@
 import { AlertDialog, Button } from "@heroui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import {
   canCopyImages,
   copyBlobAsImage,
@@ -8,8 +10,6 @@ import {
   rasterize,
   shareFilename,
 } from "@/features/usage/shareImage"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { CARD_SIZES, type CardRatio, ShareCard } from "./ShareCard"
 import {
   availableStats,

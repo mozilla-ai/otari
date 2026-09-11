@@ -57,7 +57,7 @@ interface NavItemBase {
    * same for everyone signed in. Resolved through
    * `shared/api/hooks.useOrganizationContext`, whose `deployment_operator` field
    * is the server reporting the caller's own standing under the same predicate
-   * `/v1/admin` enforces, rather than a second rule that could disagree with it.
+   * `/admin` enforces, rather than a second rule that could disagree with it.
    *
    * **Neither value shows a row before the answer arrives.** A rail gate grants
    * nothing, so the cost of hiding a row too long is a row that appears late,
@@ -74,7 +74,7 @@ interface NavItemBase {
    * refusal, so it has to mirror *which* refusal:
    *
    * - `"unlisted"` for a destination the server answers **404** on, meaning it
-   *   declines to admit the page exists (`/v1/admin`). With no answer the rail
+   *   declines to admit the page exists (`/admin`). With no answer the rail
    *   must not reveal it either, so a failed read leaves the row absent.
    * - `"refused"` for a destination the server answers **403** on, which is
    *   every router gated on `require_deployment_operator`. Its existence is no

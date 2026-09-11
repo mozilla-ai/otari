@@ -1,4 +1,4 @@
-"""Tests for the POST /v1/moderations endpoint."""
+"""Tests for the POST /api/v1/moderations endpoint."""
 
 import logging
 from datetime import UTC, datetime
@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.core.config import API_ROOT
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
@@ -32,9 +33,9 @@ def _mock_moderation_response() -> ModerationResponse:
 
 
 def test_moderations_requires_auth(client: TestClient) -> None:
-    """POST /v1/moderations requires authentication."""
+    """POST /api/v1/moderations requires authentication."""
     resp = client.post(
-        "/v1/moderations",
+        f"{API_ROOT}/moderations",
         json={"model": "openai:omni-moderation-latest", "input": "hello"},
     )
     assert resp.status_code == 401
@@ -44,7 +45,7 @@ def test_moderations_with_api_key(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations works with API key authentication."""
+    """POST /api/v1/moderations works with API key authentication."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -52,7 +53,7 @@ def test_moderations_with_api_key(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
@@ -67,7 +68,7 @@ def test_moderations_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations with master key requires 'user' field."""
+    """POST /api/v1/moderations with master key requires 'user' field."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -75,7 +76,7 @@ def test_moderations_master_key_requires_user(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=master_key_header,
         )
@@ -88,7 +89,7 @@ def test_moderations_master_key_with_user(
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations with master key + user field succeeds."""
+    """POST /api/v1/moderations with master key + user field succeeds."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -96,7 +97,7 @@ def test_moderations_master_key_with_user(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={
                 "model": "openai:omni-moderation-latest",
                 "input": "hello",
@@ -111,7 +112,7 @@ def test_moderations_list_input(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations accepts a list of strings as input."""
+    """POST /api/v1/moderations accepts a list of strings as input."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -119,7 +120,7 @@ def test_moderations_list_input(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={
                 "model": "openai:omni-moderation-latest",
                 "input": ["hello", "world"],
@@ -133,7 +134,7 @@ def test_moderations_multimodal_input(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations accepts multimodal content-part dicts."""
+    """POST /api/v1/moderations accepts multimodal content-part dicts."""
     mock_resp = _mock_moderation_response()
     multimodal_input = [
         {"type": "text", "text": "describe this"},
@@ -145,7 +146,7 @@ def test_moderations_multimodal_input(
         return_value=mock_resp,
     ) as mock:
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={
                 "model": "openai:omni-moderation-latest",
                 "input": multimodal_input,
@@ -160,14 +161,14 @@ def test_moderations_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations returns 502 when the provider fails."""
+    """POST /api/v1/moderations returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
@@ -186,7 +187,7 @@ def test_moderations_unsupported_provider_returns_400(
         side_effect=NotImplementedError("Provider anthropic does not support moderation"),
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "anthropic:claude-3-5-sonnet", "input": "hello"},
             headers=api_key_header,
         )
@@ -206,7 +207,7 @@ def test_moderations_generic_not_implemented_returns_502(
         side_effect=NotImplementedError("some internal implementation gap"),
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
@@ -220,7 +221,7 @@ def test_moderations_logs_usage(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations creates a usage log entry on success."""
+    """POST /api/v1/moderations creates a usage log entry on success."""
     mock_resp = _mock_moderation_response()
     user_id = api_key_obj["user_id"]
 
@@ -230,13 +231,13 @@ def test_moderations_logs_usage(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     moderation_logs = [
@@ -257,7 +258,7 @@ def test_moderations_logs_error_on_failure(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations logs an error entry when the provider fails."""
+    """POST /api/v1/moderations logs an error entry when the provider fails."""
     user_id = api_key_obj["user_id"]
 
     with patch(
@@ -266,13 +267,13 @@ def test_moderations_logs_error_on_failure(
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 502
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
     error_logs = [log for log in logs if log["endpoint"] == "/v1/moderations" and log["status"] == "error"]
@@ -284,7 +285,7 @@ def test_moderations_include_raw_opts_in(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations forwards the include_raw query param to amoderation."""
+    """POST /api/v1/moderations forwards the include_raw query param to amoderation."""
     mock_resp = _mock_moderation_response()
     with patch(
         "gateway.api.routes.moderations.amoderation",
@@ -292,7 +293,7 @@ def test_moderations_include_raw_opts_in(
         return_value=mock_resp,
     ) as mock:
         resp = client.post(
-            "/v1/moderations?include_raw=true",
+            f"{API_ROOT}/moderations?include_raw=true",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
@@ -305,7 +306,7 @@ def test_moderations_include_raw_opts_in(
         return_value=mock_resp,
     ) as mock:
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
@@ -319,9 +320,9 @@ def test_moderations_cost_tracked_with_pricing(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/moderations records a non-zero cost when pricing exists."""
+    """POST /api/v1/moderations records a non-zero cost when pricing exists."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:omni-moderation-latest",
             "input_price_per_million": 2.0,
@@ -339,13 +340,13 @@ def test_moderations_cost_tracked_with_pricing(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
-    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     logs = usage_resp.json()
     moderation_logs = [
         log for log in logs if log["endpoint"] == "/v1/moderations" and log["status"] == "success"
@@ -361,9 +362,9 @@ def test_moderations_billing_meters_tracked_with_pricing(
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations records auditable charge lines alongside cost."""
+    """POST /api/v1/moderations records auditable charge lines alongside cost."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:omni-moderation-latest",
             "input_price_per_million": 2.0,
@@ -380,14 +381,14 @@ def test_moderations_billing_meters_tracked_with_pricing(
         return_value=mock_resp,
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
     usage_resp = client.get(
-        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
     )
     logs = usage_resp.json()
     assert len(logs) >= 1
@@ -410,14 +411,14 @@ def test_moderations_unpriced_records_no_charge_lines(
         return_value=_mock_moderation_response(),
     ):
         resp = client.post(
-            "/v1/moderations",
+            f"{API_ROOT}/moderations",
             json={"model": "openai:unpriced-moderation-model", "input": "hello"},
             headers=api_key_header,
         )
     assert resp.status_code == 200
 
     usage_resp = client.get(
-        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
     assert latest["cost"] == 0.0
@@ -430,7 +431,7 @@ def test_moderations_no_warning_when_pricing_missing(
     api_key_header: dict[str, str],
     caplog: Any,
 ) -> None:
-    """POST /v1/moderations does not emit the 'No pricing configured' warning."""
+    """POST /api/v1/moderations does not emit the 'No pricing configured' warning."""
     mock_resp = _mock_moderation_response()
     with caplog.at_level(logging.WARNING, logger="gateway"):
         with patch(
@@ -439,7 +440,7 @@ def test_moderations_no_warning_when_pricing_missing(
             return_value=mock_resp,
         ):
             resp = client.post(
-                "/v1/moderations",
+                f"{API_ROOT}/moderations",
                 json={"model": "openai:omni-moderation-latest", "input": "hello"},
                 headers=api_key_header,
             )
@@ -473,7 +474,7 @@ def test_moderations_ignores_genai_prices_defaults(
         assert default_model_pricing("openai", "gpt-4o", datetime.now(UTC)) is not None
         with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=resp_obj):
             resp = client.post(
-                "/v1/moderations",
+                f"{API_ROOT}/moderations",
                 json={"model": "openai:gpt-4o", "input": "hello"},
                 headers=api_key_header,
             )
@@ -483,7 +484,7 @@ def test_moderations_ignores_genai_prices_defaults(
         reset_price_cache()
 
     usage_resp = client.get(
-        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
     assert latest["model"] == "gpt-4o"

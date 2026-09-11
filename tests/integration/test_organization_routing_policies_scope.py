@@ -1,9 +1,9 @@
 """The organization-scoped routing-policy read sees the caller's own workspaces and no more.
 
-``/v1/routing/policies`` is deployment-wide and operator-only, and stays that
+``/api/v1/routing/policies`` is deployment-wide and operator-only, and stays that
 way: its ``workspace_id`` parameter is a filter the client supplies, so nothing
 but the operator gate stands between a signed-in member and another
-organization's routing. ``/v1/organizations/me/routing-policies`` is the
+organization's routing. ``/api/v1/organizations/me/routing-policies`` is the
 tenant's View half of it (otari-ai#1942), shaped like the usage scope
 (otari#837), and this suite is that file's shape over the ``routing_policies``
 table: two organizations with policies in both, and every assertion names the
@@ -24,11 +24,12 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import DashboardSession, RoutingPolicy
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
-_SCOPED_PATH = "/v1/organizations/me/routing-policies"
+_SCOPED_PATH = f"{API_ROOT}/organizations/me/routing-policies"
 
 
 @dataclass
@@ -119,7 +120,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
     """Two tenants with stored policies in both, and the identities that read them."""
     # One master-key call provisions the tenancy root, so the organizations built
     # below sit beside a real default rather than replacing it.
-    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
 
     session = db_session_factory()
     try:
@@ -228,7 +229,7 @@ def test_a_member_of_no_workspace_reads_no_stored_rows_rather_than_a_refusal(
 
 
 def test_a_superuser_reads_their_active_organization_and_not_every_tenant(client: TestClient, world: _World) -> None:
-    """This route is scoped even for an operator; ``/v1/routing/policies`` is where they read across tenants."""
+    """This route is scoped even for an operator; ``/api/v1/routing/policies`` is where they read across tenants."""
     listed = _stored_names(client, world, "superuser")
     assert listed == set(_BETA_POLICIES)
     assert listed.isdisjoint(_ALPHA_ONE_POLICIES)
@@ -246,7 +247,7 @@ def test_the_deployment_wide_route_still_refuses_a_tenant(client: TestClient, wo
     """The control: this route exists so that gate does not have to loosen."""
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
     try:
-        refused = client.get("/v1/routing/policies")
+        refused = client.get(f"{API_ROOT}/routing/policies")
         assert refused.status_code == status.HTTP_403_FORBIDDEN, refused.text
     finally:
         client.cookies.clear()

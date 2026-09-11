@@ -5,7 +5,7 @@ what happened, what the system did about it, and the one control that fixes it.
 
 ## Which one?
 
-```
+```text
 Did a request fail?
  └── ErrorBanner            (it sanitizes the error; see below)
 Is there a standing condition the operator should know about?
@@ -25,8 +25,12 @@ Is it loading?
  └── One section    -> the section's own isLoading, which keeps the heading
 Did the page fail to render at all?
  └── PageError             (the catch boundaries' panel; see below)
-Is the action destructive and does it need more than a second click?
- └── ConfirmDialog          (otherwise ConfirmButton; see actions.md)
+Does the action delete a record?
+ └── ConfirmDialog          (always, one row or many; see actions.md)
+Is it destructive but deletes nothing (regenerate, archive, reset)?
+ └── ConfirmButton          (the two-step confirm; see actions.md)
+Is the operator creating or editing an object?
+ └── FormDialog             (every one of them; see the placement rule in actions.md)
 ```
 
 ## Signatures
@@ -41,6 +45,9 @@ PageLoading: { label = "Loading…" }
 PageError: { error: unknown, children? }
 ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
+FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
+  submitLabel, onSubmit, isPending, error?, isDirty?, isDismissable = true,
+  isSubmitDisabled?, returnFocusRef?, footerStart?, tabs?, children }
 ErrorBoundary: { children, resetKey? }
 ```
 
@@ -105,12 +112,178 @@ hidden is carrying that meaning on its own, at `opacity: 0.4`.
 
 ## ConfirmDialog
 
-For a destructive action that needs a sentence of context, or that has to report an
-error in place. `confirmVariant` defaults to `danger`. It owns `isPending` and
-`error` so the caller does not build a second error surface inside a modal.
+**Every delete of a record**, and any other destructive action that needs a
+sentence of context or has to report an error in place. `confirmVariant` defaults
+to `danger`. It owns `isPending` and `error` so the caller does not build a second
+error surface inside a modal, which is also why the page's own `ErrorBanner` stops
+carrying that mutation: reporting it in both puts the message the operator needs
+behind the backdrop they are looking at.
 
-Prefer `ConfirmButton` when the label alone is enough: a modal for a revoke that
-takes one click to undo is a wall.
+`ConfirmButton`'s two-step is what is left, for a destructive action that deletes
+nothing. See [actions.md](actions.md) for both.
+
+## FormDialog
+
+Every create and every edit opens here. Not a panel that appears under the
+table, not a section appended to the page: one surface, so an operator who has
+created a key knows what adding a provider will do.
+
+Built on HeroUI's `Modal` rather than `AlertDialog`, and that is the difference
+between the two dialogs rather than a detail of them. An alert interrupts to ask
+one question; a form is a place to work.
+
+```tsx
+// Correct: the title names the object, the submit repeats the trigger
+<FormDialog
+  isOpen={isCreating}
+  onOpenChange={setCreating}
+  title="New key"
+  description="The secret is shown once, right after you create it."
+  submitLabel="Create key"
+  onSubmit={submit}
+  isPending={create.isPending}
+  error={create.error}
+  isDirty={isDirty}
+>
+  <Field
+    label="Key name"
+    value={name}
+    onChange={setName}
+    description="Lowercase, hyphens, no spaces."
+    reserveMessage
+  />
+</FormDialog>
+
+// Incorrect: the title restates the button, and nothing says what was made
+<FormDialog title="Create key" submitLabel="Save" …>
+```
+
+**Sizes.** `sm` 440 for one or two fields, `md` 520 by default, `lg` 640 for
+tabs or six fields and up. Below a 640px viewport every size is a full-screen
+sheet. Those widths cannot be spelled as a class: `globals.css` pins
+`.modal__dialog` unlayered, which outranks `@layer utilities` and puts a 448px
+floor under it, so the component sets `--form-dialog-width` inline and the
+geometry is settled beside the rule it has to beat.
+
+**A field reserves its message line only where it has a description**, which is
+[forms.md](forms.md)'s rule and not a dialog rule: the reserved line exists so an
+error can replace a description rather than push the footer down, so a field with
+nothing to say under it holds nothing. Spell that as `reserveMessage={false}`
+rather than by leaving the prop off, which currently reserves anyway: forms.md
+says the prop defaults to off and it does not, because `FieldMessages` defaults
+its own `reserve` to true and the four controls forward an undefined prop into
+it. Measured, a bare field in a dialog is 83px against the 60px it should be.
+The first field takes `autoFocus`.
+
+**Fields fill the dialog.** `Field` and `SecretField` cap themselves at 448px,
+which is right on a page and wrong in a 640px dialog; `globals.css` lifts the cap
+for this place, so no call site sets a width.
+
+**The footer's height never changes, and the primary keeps its width.** The
+spinner replaces the label in place rather than sitting beside it. The primary
+is **not** disabled while it runs: disabled is one treatment at 0.4 opacity and
+it has to read as denied, and a submit in flight is working rather than refused,
+so it keeps its fill and blocks its own press. Cancel and the close control *are*
+disabled, because they genuinely are refused until it lands.
+
+**An empty state or first-run panel whose action opens the dialog stays mounted
+while the dialog is open; it is the node focus returns to.** Hiding it while the
+form is up was right when the form was a band on the page and takes away the
+only thing focus can go back to now that it is a dialog over one.
+
+**A page whose empty state disappears after the first create passes
+`returnFocusRef` to the control that survives.** React Aria restores focus to
+whatever opened the dialog, and that node is gone when creating the first row is
+what emptied the empty state; focus falls to `<body>` and the next Tab starts at
+the top of the document. The check runs when the frame is actually gone, not when
+it was asked to close: the overlay subtree lives through its exit animation, so a
+`requestAnimationFrame` at close time finds the dialog still holding focus.
+
+**`isDirty` arms a guard in the footer, not a second dialog.** Escape and a
+click outside swap the actions for "Unsaved changes · Keep editing · Discard".
+A dialog never opens a dialog.
+
+**A draft is fresh on every open and untouched through the exit.** Reset on the
+way in, never on the way out. The frame keeps its content while it animates out,
+so clearing state when `isOpen` goes false blanks the body for the length of the
+exit, and a success step blanks to an empty form in front of the operator.
+
+**The component that renders the `FormDialog` owns everything that resets
+between opens: the draft *and* its mutation**, meaning the hook that yields
+`isPending` and `error`. Both live below the key. The page owns only `isOpen`,
+the open counter that keys the mount, and the list the mutation refreshes.
+
+```tsx
+// Correct: the mutation is inside the component the key remounts
+function CreateKeyDialog({ isOpen, onOpenChange }: …) {
+  const create = useCreateKey()
+  const [keyName, setKeyName] = useState("")
+  …
+}
+
+// and the page holds only what does not reset
+const [isOpen, setIsOpen] = useState(false)
+const [openCount, setOpenCount] = useState(0)
+…
+<Button onPress={() => { setOpenCount((n) => n + 1); setIsOpen(true) }}>
+  Create key
+</Button>
+<CreateKeyDialog key={openCount} isOpen={isOpen} onOpenChange={setIsOpen} />
+
+// Incorrect: the mutation sits above the key, so the key cannot reset it
+const createBudget = useCreateBudget()          // page level
+…
+<BudgetForm key={openCount} error={createBudget.error} … />
+```
+
+A mutation above the key is the shape to watch for, because the draft looks
+right and the error does not: the key remounts the fields, the mutation keeps
+its state, and a failed create's banner survives into a fresh form. `close()`
+only sets `isOpen` false; a `requestAnimationFrame` does not cover the exit,
+which is an animation rather than a frame.
+
+**`isDirty` comes from `useDirtySnapshot`**: hand it every field the form owns
+and it snapshots them on mount, so dirty means "differs from what was seeded".
+
+```tsx
+// Correct: the whole draft, and the hook holds the seed
+const { isDirty } = useDirtySnapshot({
+  name,
+  target,
+  chain,
+  conditions,
+  guardrails,
+})
+…
+<FormDialog isDirty={isDirty} … />
+
+// Incorrect: a predicate of empties, which reports an edit form dirty on arrival
+const isPristine = name === "" && target === "" && chain.length === 0
+```
+
+A field whose default arrives after mount (the first budget in a list, a
+workspace roster) is part of the seed, not a change: seed the state from the
+resolved value, or call the hook's `reset` when it lands. The hook cannot tell
+that default from a keystroke, and deliberately does not try.
+
+Dirty means "differs from what was seeded", and a create form is the case where
+the seed happens to be all empties. So a hand-listed predicate of empties is the
+create-only degenerate form: it is right until the same component edits
+something, and it drifts, because a field added to the form has to be remembered
+in a second place. The hook cannot omit a field, because it is handed the draft
+rather than a list of the fields to compare.
+
+A guard that lies lets Escape discard work it cannot see. That has happened here
+in both directions: a reopened dialog dirty on arrival, and a half-filled one
+discarded without a word.
+
+The remount is also what keeps one row's draft out of the next row's dialog,
+which is the promise this component's own docstring makes; a page that holds the
+draft above the dialog defeats it.
+
+**The success step is not a prop.** When a mutation has something to hand back
+(a key's secret), the caller swaps the children and the submit label to "Done"
+and the frame stays where it was. `footerStart` is where "Create another" goes.
 
 ## Copy
 

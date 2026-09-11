@@ -4,14 +4,14 @@ import { useRef, useState } from "react"
 import { FiMinus, FiPlus } from "react-icons/fi"
 
 import type { UsageBucket } from "@/client"
-import { EmptyMessage } from "@/shared/components/feedback/EmptyMessage"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import {
   ChartLegend,
   type SeriesDef,
   type StackedPoint,
   TrendChart,
-} from "@/shared/components/metrics/charts"
-import { Tab, TabRow } from "@/shared/components/navigation/TabRow"
+} from "@/design-system/metrics/charts"
+import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import {
   bucketDurationMs,
   bucketIndexRange,

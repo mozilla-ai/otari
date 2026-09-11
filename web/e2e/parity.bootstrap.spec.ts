@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { API_ROOT } from "@/shared/api/client"
 
 // The shell reads /v1/bootstrap before it renders anything, so every other spec
 // here already depends on it answering: a failure paints an error banner in
@@ -8,7 +9,7 @@ import { expect, test } from "@playwright/test"
 test("the deployment bootstrap is served unauthenticated", async ({
   request,
 }) => {
-  const response = await request.get("/v1/bootstrap")
+  const response = await request.get(`${API_ROOT}/bootstrap`)
 
   expect(response.status()).toBe(200)
   expect(await response.json()).toEqual({

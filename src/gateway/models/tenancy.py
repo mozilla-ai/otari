@@ -686,9 +686,9 @@ class ActiveOrganizationMemberPublic(SQLModel):
     ``attribution_user_id`` is the addition the platform has no counterpart for.
     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
     not to this UUID identity, so this carries the ``user_id`` a caller passes to
-    ``POST /v1/keys`` to give this member a key. It is null when no usable row
+    when minting a key for this member. It is null when no usable row
     exists (nobody minted one, or it was soft-deleted through
-    ``DELETE /v1/users``), which is the signal not to offer this member as a key
+    soft-deleted), which is the signal not to offer this member as a key
     owner: key creation would refuse. How the two ids converge is the open
     question in otari-ai#1727; this field is the join until it is answered, and
     is what lets either answer land without the dashboard changing.
@@ -1140,7 +1140,7 @@ class AcceptInvitationResultPublic(SQLModel):
 
     No session and no token: accepting resolves the membership to ``active``
     and stops there. The identity it resolves to is password-less on the roster
-    until it is claimed, so the next step is ``POST /v1/auth/signup`` on the
+    until it is claimed, so the next step is a sign-up on the
     invited address, not a sign-in.
     """
 

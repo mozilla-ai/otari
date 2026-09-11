@@ -217,7 +217,7 @@ def test_cached_aliases_returns_one_scope_at_a_time() -> None:
 def test_overriding_a_config_alias_drops_its_target_from_that_users_map() -> None:
     """The catalog withholds alias *targets*, so an override un-hides one.
 
-    /v1/models hides every value in this map. When a user's alias replaces a
+    /api/v1/models hides every value in this map. When a user's alias replaces a
     config name, the configured target is no longer a value here, so it stops
     being withheld and reappears in that user's listing. Subtle enough to be
     worth pinning, and it inverts the usual "an alias hides its target" rule.

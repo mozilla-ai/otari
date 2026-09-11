@@ -65,8 +65,8 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // One page of usage-log rows for the Activity viewer, newest first.
 // Which of the two usage surfaces this caller may read.
 //
-// `/v1/usage` is deployment-wide and refuses anyone who does not operate the
-// deployment; `/v1/organizations/me/usage` serves the same rows narrowed to the
+// `/usage` is deployment-wide and refuses anyone who does not operate the
+// deployment; `/organizations/me/usage` serves the same rows narrowed to the
 // caller's own organization, and to the workspaces they belong to within it
 // (otari#837). Both answer identical shapes, so every hook below differs only in
 // the prefix it asks.
@@ -96,7 +96,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // `"organization"` pins the narrow surface regardless of who is asking. It
 // exists for the organization-wide Usage page (otari-ai#1963), whose question is
 // "this organization", so for an operator the caller-derived scope would answer
-// a different one: `/v1/usage` reads every tenant on the deployment, and a page
+// a different one: `/usage` reads every tenant on the deployment, and a page
 // titled with the organization would silently overstate it. A pinned base needs
 // no context answer to be known, so it is ready on first paint.
 export type UsageScope = "caller" | "organization"
@@ -110,7 +110,7 @@ export function useUsageScope(scope: UsageScope = "caller"): {
   const isDeploymentWide =
     scope === "caller" && context.data?.deployment_operator === true
   return {
-    base: isDeploymentWide ? "/v1/usage" : "/v1/organizations/me/usage",
+    base: isDeploymentWide ? "/usage" : "/organizations/me/usage",
     isReady: scope === "organization" || context.isSuccess || context.isError,
     isDeploymentWide,
   }
@@ -220,7 +220,7 @@ const IN_FLIGHT_POLL_MS = 2_000
 export function useInFlightRequests(enabled = true) {
   return useQuery({
     queryKey: [USAGE, "in-flight"],
-    queryFn: () => apiFetch<InFlightResponse>("/v1/usage/in-flight"),
+    queryFn: () => apiFetch<InFlightResponse>("/usage/in-flight"),
     enabled,
     refetchInterval: IN_FLIGHT_POLL_MS,
     staleTime: 0,
@@ -310,7 +310,7 @@ export function useDeleteUsage() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UsageMutationSelection) =>
-      apiFetch<UsageDeleteResult>("/v1/usage", {
+      apiFetch<UsageDeleteResult>("/usage", {
         method: "DELETE",
         body: JSON.stringify(body),
         signal: longRequestSignal(),
@@ -327,7 +327,7 @@ export function useSetUsagePrice() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UsageSetPriceRequest) =>
-      apiFetch<UsageSetPriceResult>("/v1/usage/set-price", {
+      apiFetch<UsageSetPriceResult>("/usage/set-price", {
         method: "POST",
         body: JSON.stringify(body),
         signal: longRequestSignal(),

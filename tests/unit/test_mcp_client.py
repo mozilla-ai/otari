@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from mcp.types import CallToolResult, TextContent
 
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_client import MCPClientPool, _ConnectedServer
@@ -51,6 +53,48 @@ async def test_aenter_connects_distinct_names(monkeypatch: pytest.MonkeyPatch) -
     async with MCPClientPool(configs) as pool:
         assert set(pool._servers) == {"a", "b"}
     assert connected == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_empty_allowed_tools_exposes_no_discovered_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit empty allowlist denies every tool; only None means unrestricted."""
+
+    @asynccontextmanager
+    async def fake_transport(*args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object, object]]:
+        yield object(), object(), object()
+
+    class FakeSession:
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> SimpleNamespace:
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(
+                        name="list_issues",
+                        description="List issues",
+                        inputSchema={"type": "object"},
+                    )
+                ]
+            )
+
+    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", fake_transport)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", lambda *args: FakeSession())
+
+    config = McpServerConfig(
+        name="tools",
+        url="https://93.184.216.34/mcp",
+        allowed_tools=[],
+    )
+    async with MCPClientPool([config]) as pool:
+        assert pool.openai_tools == []
+        assert pool.owns_tool("list_issues") is False
 
 
 @pytest.mark.asyncio
@@ -106,6 +150,29 @@ async def test_call_tool_sanitizes_transport_failure(
     assert warnings == [("MCP tool %s execution failed: %s", "lookup", "RuntimeError")]
     assert "internal.test" not in str(warnings)
     assert "secret" not in str(warnings)
+
+
+@pytest.mark.asyncio
+async def test_call_tool_result_extraction_returns_native_mcp_result() -> None:
+    result = CallToolResult(
+        content=[TextContent(type="text", text="fixture result")],
+        structuredContent={"issue": 791},
+        isError=True,
+    )
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=result))
+    pool = MCPClientPool([])
+    pool._servers["fixture"] = _ConnectedServer(
+        name="fixture",
+        session=cast(Any, session),
+    )
+    pool._tool_owner["lookup"] = "fixture"
+
+    returned = await pool._call_tool_result("lookup", {"id": 791})  # noqa: SLF001
+
+    assert returned is result
+    assert returned.structuredContent == {"issue": 791}
+    assert returned.isError is True
+    session.call_tool.assert_awaited_once_with("lookup", {"id": 791})
 
 
 # --------------------------------------------------------------------------- #

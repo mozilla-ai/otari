@@ -2,13 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-
+import { API_ROOT } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
 import { EntitlementProvider } from "@/shared/hooks/useEntitlements"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
-
 import type { NavItem } from "./types"
 import { useNavVisibility } from "./useNavVisibility"
 
@@ -227,8 +226,8 @@ describe("useNavVisibility", () => {
 
   it("asks the caller axis without a second request of its own", async () => {
     // It rides on the membership context the shell reads anyway, so there is no
-    // `/v1/admin/access` from the rail to gate on a surface: that request had to
-    // be withheld from a gateway not hosting `/v1/admin` so its 404 would not
+    // /api/v1/admin/access from the rail to gate on a surface: that request had to
+    // be withheld from a gateway not hosting /api/v1/admin so its 404 would not
     // become a second reading of `surfaces`, and this read is not that request.
     // The row's own `surface` gate is still what decides it on such a gateway.
     mockCaller(true)
@@ -240,7 +239,7 @@ describe("useNavVisibility", () => {
     ).toBe(true)
     expect(
       fetchSpy.mock.calls.some((call) =>
-        String(call[0]).includes("/v1/admin/access"),
+        String(call[0]).includes(`${API_ROOT}/admin/access`),
       ),
     ).toBe(false)
   })

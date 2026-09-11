@@ -9,6 +9,7 @@ import type {
   CatalogResponse,
 } from "@/client"
 import { PublicCatalogPage } from "@/features/models/PublicCatalogPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 
@@ -109,10 +110,10 @@ function jsonResponse(body: unknown): Response {
 function mockApi() {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
-    if (url.includes("/v1/catalog/models/z-ai/glm-5.3")) {
+    if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
       return jsonResponse(GLM_DETAIL)
     }
-    if (url.includes("/v1/catalog/models")) return jsonResponse(CATALOG)
+    if (url.includes(`${API_ROOT}/catalog/models`)) return jsonResponse(CATALOG)
     return jsonResponse({ detail: "unexpected" })
   })
 }
@@ -156,7 +157,7 @@ describe("PublicCatalogPage", () => {
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
       fetchMock.mock.calls.some(([url]) =>
-        String(url).includes("/v1/organizations/me"),
+        String(url).includes(`${API_ROOT}/organizations/me`),
       ),
     ).toBe(false)
   })

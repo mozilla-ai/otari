@@ -8,7 +8,7 @@ import pytest
 from any_llm import LLMProvider
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services.provider_kwargs import get_provider_kwargs
 
 from .conftest import build_test_client
@@ -77,7 +77,7 @@ async def test_user_model_not_overridden_by_provider_config(
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
     response = client_with_model_in_provider.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -85,7 +85,7 @@ async def test_user_model_not_overridden_by_provider_config(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client_with_model_in_provider.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -113,7 +113,7 @@ async def test_unset_optional_fields_do_not_override_provider_defaults(
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
     create_user = client_with_model_in_provider.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -121,7 +121,7 @@ async def test_unset_optional_fields_do_not_override_provider_defaults(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client_with_model_in_provider.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -176,7 +176,7 @@ async def test_completion_params_reach_provider(
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
     create_user = client_with_model_in_provider.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -184,7 +184,7 @@ async def test_completion_params_reach_provider(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client_with_model_in_provider.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -230,7 +230,7 @@ async def test_service_tier_reaches_provider(
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
     create_user = client_with_model_in_provider.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -238,7 +238,7 @@ async def test_service_tier_reaches_provider(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client_with_model_in_provider.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -273,7 +273,7 @@ async def test_unset_service_tier_does_not_reach_provider(
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
     create_user = client_with_model_in_provider.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -281,7 +281,7 @@ async def test_unset_service_tier_does_not_reach_provider(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client_with_model_in_provider.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "openai:gpt-4",
                 "messages": [{"role": "user", "content": "Hello"}],

@@ -13,13 +13,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
+from gateway.core.config import API_ROOT
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.core.usage_source import SERVED_HERE_SLUG, SERVED_HERE_SOURCES
 from gateway.models.entities import UsageLog, User
 
-DELETE_PATH = "/v1/usage"
-SET_PRICE_PATH = "/v1/usage/set-price"
-COUNT_PATH = "/v1/usage/count"
+DELETE_PATH = f"{API_ROOT}/usage"
+SET_PRICE_PATH = f"{API_ROOT}/usage/set-price"
+COUNT_PATH = f"{API_ROOT}/usage/count"
 
 _TS = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
@@ -402,7 +403,7 @@ def test_set_price_by_filter_prices_the_named_models_only(
 def test_by_filter_rejects_more_values_than_the_read_endpoints_accept(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """The destructive body stops where /v1/usage/count stops.
+    """The destructive body stops where /api/v1/usage/count stops.
 
     The count an operator confirms comes from the read endpoints, which 422 past
     MAX_FILTER_VALUES. A body that accepted more would delete over a filter set no

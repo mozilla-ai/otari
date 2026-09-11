@@ -299,7 +299,7 @@ async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_
     naming the same workspace); only a row that was actually inactive is a
     real join. Without the status gate, re-applying the assignment would
     resurrect a per-member ceiling an admin deliberately deleted through
-    `/v1/scoped-budgets`.
+    `/api/v1/scoped-budgets`.
     """
     org = await _organization(async_db, slug="acme-reapply")
     owner = await _member(async_db, org, role="owner", full_name="Owner")
@@ -481,7 +481,7 @@ async def test_materialize_batch_recovers_from_a_missed_collision(async_db: Asyn
     Reproduces the shape of the race `_insert_member_budgets` exists to
     survive: by the time the insert runs, a ceiling already exists for one of
     the ids in the batch (standing in for a concurrent direct
-    ``POST /v1/scoped-budgets`` for that member, which the batch's own
+    ``POST /api/v1/scoped-budgets`` for that member, which the batch's own
     existence check, run a moment earlier, would not yet have seen).
     Called directly rather than through `materialize_for_default`, which
     otherwise wraps the same existence check around every id and would just

@@ -1,25 +1,44 @@
 import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
-import type { OrganizationGuardrail, Workspace } from "@/client"
+import type {
+  GuardrailCatalog,
+  GuardrailParameterSpec,
+  OrganizationGuardrail,
+  Workspace,
+} from "@/client"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { Badge } from "@/design-system/indicators/Badge"
+import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManage } from "@/features/organization/roles"
+import { GuardrailParametersSection } from "@/features/tools/GuardrailParametersSection"
+import { GuardrailProfileField } from "@/features/tools/GuardrailProfileField"
+import {
+  buildValidateKwargs,
+  findProfile,
+  type ParameterErrors,
+  type ParameterValues,
+  parameterErrors,
+  parameterSpecs,
+  parseExtraJson,
+  type SeededParameters,
+  seedParameters,
+} from "@/features/tools/guardrailParameters"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateOrganizationGuardrail,
   useDeleteOrganizationGuardrail,
+  useGuardrailProfiles,
   useOrganizationGuardrails,
   useUpdateOrganizationGuardrail,
 } from "@/shared/api/tools"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import { ConfirmButton } from "@/shared/components/actions/ConfirmButton"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { errorMessage } from "@/shared/components/feedback/errorMessage"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { Checkbox } from "@/shared/components/forms/Checkbox"
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { Badge } from "@/shared/components/indicators/Badge"
-import { SettingsGroup } from "@/shared/components/layout/SettingsGroup"
-import { FilterSelect } from "@/shared/components/navigation/FilterSelect"
 
 // The layer above the deployment-wide guardrail settings this card sits under.
 // The settings above say where guardrails run; these say which ones run whether
@@ -122,12 +141,92 @@ function WorkspaceScope({
   )
 }
 
+/**
+ * The `validate_kwargs` half of one entry's form: the typed values, the raw
+ * editor beside them, and the messages a submit produced.
+ *
+ * A hook rather than five `useState` calls at each of the two call sites, which
+ * is what keeps the seeding rule in one place: the row and the add form seed
+ * from different sources but must both re-seed when the profile's schema
+ * arrives, and a catalog that loads a moment after the card does is the ordinary
+ * case rather than the edge one.
+ */
+function useParameterForm(
+  specs: GuardrailParameterSpec[],
+  stored: Record<string, unknown> | null | undefined,
+) {
+  const [state, setState] = useState<SeededParameters>(() =>
+    seedParameters(specs, stored),
+  )
+  const [issues, setIssues] = useState<ParameterErrors>({})
+  const [rawError, setRawError] = useState<string | undefined>(undefined)
+
+  // Both dependencies are serialized, for the reason the workspace scope below
+  // is: each is a fresh object on every fetch and on every catalog read, so
+  // depending on them by reference would wipe a half-typed parameter whenever
+  // any row on the card saved. Parsed back inside the effect so nothing it
+  // touches is missing from the dependency list.
+  const specsJson = JSON.stringify(specs)
+  const storedJson = JSON.stringify(stored ?? {})
+  useEffect(() => {
+    setState(
+      seedParameters(
+        JSON.parse(specsJson) as GuardrailParameterSpec[],
+        JSON.parse(storedJson) as Record<string, unknown>,
+      ),
+    )
+    setIssues({})
+    setRawError(undefined)
+  }, [specsJson, storedJson])
+
+  return {
+    values: state.values,
+    extraJson: state.extraJson,
+    issues,
+    rawError,
+    setValue: (name: string, next: ParameterValues[string]) =>
+      setState((current) => ({
+        ...current,
+        values: { ...current.values, [name]: next },
+      })),
+    setExtraJson: (next: string) =>
+      setState((current) => ({ ...current, extraJson: next })),
+    /**
+     * Validate on submit and report whether the entry may be sent. Messages
+     * appear here rather than on the first keystroke, which is what the forms
+     * guide asks for.
+     */
+    check: (): boolean => {
+      const found = parameterErrors(specs, state.values)
+      const raw = parseExtraJson(state.extraJson).error
+      setIssues(found)
+      setRawError(raw)
+      return raw === undefined && Object.keys(found).length === 0
+    },
+    build: () => buildValidateKwargs(specs, state.values, state.extraJson),
+    /**
+     * Put the form back to what a fresh profile seeds, for the caller that
+     * clears the rest of its fields itself. The effect above cannot do it: it
+     * re-seeds on the serialized specs and stored values, and a cleared profile
+     * whose predecessor also took no typed parameters leaves both unchanged, so
+     * a raw entry would survive into the next guardrail this form adds.
+     */
+    reset: () => {
+      setState(seedParameters(specs, undefined))
+      setIssues({})
+      setRawError(undefined)
+    },
+  }
+}
+
 function GuardrailRow({
   guardrail,
+  catalog,
   workspaces,
   onSaved,
 }: {
   guardrail: OrganizationGuardrail
+  catalog: GuardrailCatalog | undefined
   workspaces: readonly Workspace[]
   onSaved: (message: string) => void
 }) {
@@ -147,6 +246,10 @@ function GuardrailRow({
   // never shows what is stored, only whether something is.
   const [credential, setCredential] = useState("")
   const [error, setError] = useState("")
+  const [isDeleteOpen, setDeleteOpen] = useState(false)
+  const specs = parameterSpecs(catalog, guardrail.profile)
+  const describedProfile = findProfile(catalog, guardrail.profile) !== undefined
+  const parameters = useParameterForm(specs, guardrail.validate_kwargs)
 
   // Rehydrate from whatever the server last said, so the row never drifts from
   // the stored entry after a save.
@@ -181,6 +284,7 @@ function GuardrailRow({
 
   const save = () => {
     setError("")
+    if (!parameters.check()) return
     update.mutate(
       {
         guardrailId: guardrail.id,
@@ -201,6 +305,12 @@ function GuardrailRow({
           // Omitted entirely when blank, so saving a mode never clears the
           // credential.
           ...(credential === "" ? {} : { credential }),
+          // Sent whole every time, unlike the two fields above. Those are
+          // write-only or nullable and need their omitted/cleared/replaced
+          // states; this one is fully rendered by the form, so what the form
+          // holds *is* the stored value and sending it back is a no-op when
+          // nothing was touched. `null` is how the API clears it.
+          validate_kwargs: parameters.build(),
         },
       },
       {
@@ -287,6 +397,23 @@ function GuardrailRow({
           )
         }
       />
+      <GuardrailParametersSection
+        // Remounted when the panel's shape changes, which is what recomputes
+        // whether it starts open: the section derives that once, and a catalog
+        // that lands after the card did would otherwise leave a raw value
+        // hidden behind a collapsed panel.
+        key={`${describedProfile}:${specs.length}`}
+        specs={specs}
+        scopeName={guardrail.profile}
+        values={parameters.values}
+        errors={parameters.issues}
+        extraJson={parameters.extraJson}
+        extraJsonError={parameters.rawError}
+        described={describedProfile}
+        disabled={busy}
+        onChange={parameters.setValue}
+        onExtraJsonChange={parameters.setExtraJson}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -297,31 +424,63 @@ function GuardrailRow({
         >
           {update.isPending ? "Saving…" : "Save"}
         </Button>
-        <ConfirmButton
-          confirmLabel="Remove permanently"
-          isPending={busy}
-          onConfirm={() => {
-            setError("")
-            remove.mutate(guardrail.id, {
-              onSuccess: () => onSaved(`${guardrail.profile} removed`),
-              onError: (err) => setError(errorMessage(err)),
-            })
-          }}
+        <Button
+          size="sm"
+          variant="ghost"
+          // Named per row, as the Save beside it is: the card is a list of
+          // profiles, so a bare "Remove guardrail" is the same name N times.
+          aria-label={`Remove ${guardrail.profile}`}
+          isDisabled={busy}
+          onPress={() => setDeleteOpen(true)}
         >
           Remove guardrail
-        </ConfirmButton>
+        </Button>
       </div>
       {error ? (
         <span className="break-words text-caption text-danger">{error}</span>
       ) : null}
+
+      <ConfirmDialog
+        isOpen={isDeleteOpen}
+        // Cleared on the way out: a refusal otherwise sits on the mutation
+        // and greets the next open as if it had just happened.
+        onOpenChange={(open) => {
+          setDeleteOpen(open)
+          if (!open) remove.reset()
+        }}
+        heading="Remove guardrail"
+        // The stored mode, not the row's unsaved `mode`: this describes what is
+        // in force, and a monitoring guardrail never blocked anything.
+        body={
+          guardrail.mode === "block"
+            ? `${guardrail.profile} stops running on every request it covers, and its stored credential is removed with it. Requests it would have blocked are served.`
+            : `${guardrail.profile} stops running on every request it covers, and its stored credential is removed with it. Requests it would have recorded go unchecked.`
+        }
+        confirmLabel="Remove permanently"
+        isPending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => {
+          setError("")
+          remove.mutate(guardrail.id, {
+            onSuccess: () => {
+              setDeleteOpen(false)
+              onSaved(`${guardrail.profile} removed`)
+            },
+          })
+        }}
+      />
     </div>
   )
 }
 
 function AddGuardrailForm({
+  catalog,
+  catalogPending,
   workspaces,
   onSaved,
 }: {
+  catalog: GuardrailCatalog | undefined
+  catalogPending: boolean
   workspaces: readonly Workspace[]
   onSaved: (message: string) => void
 }) {
@@ -333,16 +492,26 @@ function AddGuardrailForm({
   const [everywhere, setEverywhere] = useState(false)
   const [scope, setScope] = useState<string[]>([])
   const [error, setError] = useState("")
+  const specs = parameterSpecs(catalog, profile)
+  // An empty picker describes nothing, but its panel should not open on that
+  // account: there is no profile yet for a raw parameter to belong to.
+  const describedProfile =
+    profile === "" || findProfile(catalog, profile) !== undefined
+  // Nothing stored yet, so the fields start blank and re-seed when the picker
+  // moves to a profile with a different schema.
+  const parameters = useParameterForm(specs, undefined)
 
   const submit = () => {
     setError("")
     const named = profile.trim()
+    if (!parameters.check()) return
     create.mutate(
       {
         profile: named,
         mode,
         url: url.trim() === "" ? null : url.trim(),
         credential: credential === "" ? null : credential,
+        validate_kwargs: parameters.build(),
         applies_to_all_workspaces: everywhere,
         workspace_ids: everywhere ? [] : scope,
       },
@@ -352,6 +521,7 @@ function AddGuardrailForm({
           setUrl("")
           setCredential("")
           setScope([])
+          parameters.reset()
           onSaved(`${named} added`)
         },
         onError: (err) => setError(errorMessage(err)),
@@ -362,16 +532,14 @@ function AddGuardrailForm({
   return (
     <div className="flex flex-col gap-2 py-4">
       <span className="text-body">Mandate a guardrail</span>
+      <GuardrailProfileField
+        catalog={catalog}
+        pending={catalogPending}
+        value={profile}
+        disabled={create.isPending}
+        onChange={setProfile}
+      />
       <div className="flex flex-wrap items-end gap-2">
-        <input
-          type="text"
-          aria-label="Guardrail profile"
-          value={profile}
-          placeholder="profile, e.g. prompt-injection"
-          disabled={create.isPending}
-          onChange={(event) => setProfile(event.target.value)}
-          className={`w-full sm:w-52 ${INPUT_CLASS}`}
-        />
         <FilterSelect
           ariaLabel="Guardrail mode"
           value={mode}
@@ -415,6 +583,22 @@ function AddGuardrailForm({
           )
         }
       />
+      <GuardrailParametersSection
+        // See the row above: the picker moving to a profile the catalog cannot
+        // describe has to open the editor that is then the only place its
+        // parameters can go.
+        key={`${describedProfile}:${specs.length}`}
+        specs={specs}
+        scopeName={profile === "" ? "the new guardrail" : profile}
+        values={parameters.values}
+        errors={parameters.issues}
+        extraJson={parameters.extraJson}
+        extraJsonError={parameters.rawError}
+        described={describedProfile}
+        disabled={create.isPending}
+        onChange={parameters.setValue}
+        onExtraJsonChange={parameters.setExtraJson}
+      />
       <div className="flex items-center gap-2">
         <Button
           size="sm"
@@ -426,11 +610,10 @@ function AddGuardrailForm({
         </Button>
       </div>
       <span className="text-caption">
-        The profile has to exist on the guardrails service. A caller can tighten
-        a mandated guardrail but never weaken it. A credential needs an https
-        endpoint of its own, since the URL above may be a plain-http sidecar,
-        and <code className="font-mono">OTARI_SECRET_KEY</code> set on the
-        gateway.
+        A caller can tighten a mandated guardrail but never weaken it. A
+        credential needs an https endpoint of its own, since the URL above may
+        be a plain-http sidecar, and{" "}
+        <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
       </span>
       {error ? (
         <span className="break-words text-caption text-danger">{error}</span>
@@ -451,6 +634,9 @@ export function OrganizationGuardrailsCard({
   // see them either, and asking would earn a 403 over a form they cannot use.
   const manages = canManage(context.data)
   const guardrails = useOrganizationGuardrails(manages)
+  // Behind the same gate for the same reason the entries are: nothing here is
+  // asked for over a form the caller cannot use.
+  const catalog = useGuardrailProfiles(manages)
   const workspaces = useWorkspaces()
   const entries = guardrails.data ?? []
   const known = workspaces.data ?? []
@@ -474,6 +660,7 @@ export function OrganizationGuardrailsCard({
             <GuardrailRow
               key={guardrail.id}
               guardrail={guardrail}
+              catalog={catalog.data}
               workspaces={known}
               onSaved={onSaved}
             />
@@ -484,7 +671,15 @@ export function OrganizationGuardrailsCard({
               for run.
             </p>
           ) : null}
-          <AddGuardrailForm workspaces={known} onSaved={onSaved} />
+          <AddGuardrailForm
+            catalog={catalog.data}
+            // `isFetched` rather than `isPending`: an errored query returns to
+            // pending when its observers remount, which would leave the picker
+            // stuck reading a service that already answered.
+            catalogPending={!catalog.isFetched}
+            workspaces={known}
+            onSaved={onSaved}
+          />
         </>
       ) : null}
     </SettingsGroup>

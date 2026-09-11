@@ -2,13 +2,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
 
 def test_create_user(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test creating a new user."""
     response = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1", "alias": "Test User"},
         headers=master_key_header,
     )
@@ -23,17 +23,17 @@ def test_create_user(client: TestClient, master_key_header: dict[str, str]) -> N
 def test_list_users(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test listing users."""
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1"},
         headers=master_key_header,
     )
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-2"},
         headers=master_key_header,
     )
 
-    response = client.get("/v1/users", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/users", headers=master_key_header)
     assert response.status_code == 200
     data = response.json()
     user_ids = {item["user_id"] for item in data}
@@ -43,12 +43,12 @@ def test_list_users(client: TestClient, master_key_header: dict[str, str]) -> No
 def test_get_user(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test getting a specific user."""
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1"},
         headers=master_key_header,
     )
 
-    response = client.get("/v1/users/test-user-1", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/users/test-user-1", headers=master_key_header)
     assert response.status_code == 200
     data = response.json()
     assert data["user_id"] == "test-user-1"
@@ -57,13 +57,13 @@ def test_get_user(client: TestClient, master_key_header: dict[str, str]) -> None
 def test_update_user(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test updating a user."""
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1"},
         headers=master_key_header,
     )
 
     response = client.patch(
-        "/v1/users/test-user-1",
+        f"{API_ROOT}/users/test-user-1",
         json={"blocked": True, "alias": "Updated User"},
         headers=master_key_header,
     )
@@ -76,22 +76,22 @@ def test_update_user(client: TestClient, master_key_header: dict[str, str]) -> N
 def test_delete_user(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test deleting a user."""
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1"},
         headers=master_key_header,
     )
 
-    response = client.delete("/v1/users/test-user-1", headers=master_key_header)
+    response = client.delete(f"{API_ROOT}/users/test-user-1", headers=master_key_header)
     assert response.status_code == 204
 
-    response = client.get("/v1/users/test-user-1", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/users/test-user-1", headers=master_key_header)
     assert response.status_code == 404
 
 
 def test_create_budget(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test creating a budget."""
     response = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 100.0},
         headers=master_key_header,
     )
@@ -103,17 +103,17 @@ def test_create_budget(client: TestClient, master_key_header: dict[str, str]) ->
 def test_list_budgets(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test listing budgets."""
     client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 100.0},
         headers=master_key_header,
     )
     client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 200.0},
         headers=master_key_header,
     )
 
-    response = client.get("/v1/budgets", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/budgets", headers=master_key_header)
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
@@ -122,7 +122,7 @@ def test_list_budgets(client: TestClient, master_key_header: dict[str, str]) -> 
 def test_set_model_pricing(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test setting model pricing."""
     response = client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -140,7 +140,7 @@ def test_set_model_pricing(client: TestClient, master_key_header: dict[str, str]
 def test_get_pricing(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test getting model pricing."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -149,7 +149,7 @@ def test_get_pricing(client: TestClient, master_key_header: dict[str, str]) -> N
         headers=master_key_header,
     )
 
-    response = client.get("/v1/pricing/openai:gpt-4o", headers=master_key_header)
+    response = client.get(f"{API_ROOT}/pricing/openai:gpt-4o", headers=master_key_header)
     assert response.status_code == 200
     data = response.json()
     assert data["model_key"] == "openai:gpt-4o"
@@ -158,7 +158,7 @@ def test_get_pricing(client: TestClient, master_key_header: dict[str, str]) -> N
 def test_get_pricing_requires_auth(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Pricing reads require API key or master key authentication."""
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -167,21 +167,21 @@ def test_get_pricing_requires_auth(client: TestClient, master_key_header: dict[s
         headers=master_key_header,
     )
 
-    response = client.get("/v1/pricing/openai:gpt-4o")
+    response = client.get(f"{API_ROOT}/pricing/openai:gpt-4o")
     assert response.status_code == 401
 
 
 def test_user_with_budget(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test creating a user with a budget."""
     budget_response = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 50.0},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
 
     response = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1", "budget_id": budget_id},
         headers=master_key_header,
     )
@@ -197,7 +197,7 @@ def test_blocked_user_cannot_make_requests(
 ) -> None:
     """Test that blocked users cannot make completion requests."""
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-1", "blocked": True},
         headers=master_key_header,
     )
@@ -205,7 +205,7 @@ def test_blocked_user_cannot_make_requests(
     # Bill the named user via the master key — a non-master key may only spend
     # against its own user (see test_api_key_cannot_bill_other_user).
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": test_messages,
@@ -224,7 +224,7 @@ def test_user_not_found_with_master_key(
 ) -> None:
     """Test that master key requests fail when user doesn't exist."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": test_messages,
@@ -250,13 +250,13 @@ def test_api_key_cannot_bill_other_user(
     # Create the would-be victim so this proves the rejection is an ownership
     # check, not merely a "user not found" path.
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "victim-user"},
         headers=master_key_header,
     )
 
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": test_messages,
@@ -276,7 +276,7 @@ def test_key_without_user_attaches_to_default(
     test_config: GatewayConfig,
 ) -> None:
     """A key created without a user_id attaches to the shared 'default' user."""
-    user_response = client.get("/v1/users/default", headers=master_key_header)
+    user_response = client.get(f"{API_ROOT}/users/default", headers=master_key_header)
     assert user_response.status_code == 200
     user = user_response.json()
     assert user["user_id"] == "default"
@@ -284,7 +284,7 @@ def test_key_without_user_attaches_to_default(
 
     api_key_header = {API_KEY_HEADER: f"Bearer {api_key_obj['key']}"}
     client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -299,7 +299,7 @@ def test_master_key_requires_user(
 ) -> None:
     """Test that master key requests require user field."""
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -317,20 +317,20 @@ def test_user_exceeded_budget_blocked_on_paid_model(
 ) -> None:
     """Test that users who exceeded budget cannot use paid models."""
     budget_response = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 0.0},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
 
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-budget", "budget_id": budget_id},
         headers=master_key_header,
     )
 
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o",
             "input_price_per_million": 2.5,
@@ -340,7 +340,7 @@ def test_user_exceeded_budget_blocked_on_paid_model(
     )
 
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": test_messages,
@@ -359,20 +359,20 @@ def test_user_exceeded_budget_allowed_on_free_model(
 ) -> None:
     """Test that users who exceeded budget can still use free models."""
     budget_response = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 0.0},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
 
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-budget", "budget_id": budget_id},
         headers=master_key_header,
     )
 
     client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:gpt-4o-mini",
             "input_price_per_million": 0.0,
@@ -382,7 +382,7 @@ def test_user_exceeded_budget_allowed_on_free_model(
     )
 
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "openai:gpt-4o-mini",
             "messages": test_messages,
@@ -400,20 +400,20 @@ def test_user_exceeded_budget_blocked_on_unknown_pricing(
 ) -> None:
     """Test that users who exceeded budget are blocked when model pricing is unknown."""
     budget_response = client.post(
-        "/v1/budgets",
+        f"{API_ROOT}/budgets",
         json={"max_budget": 0.0},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
 
     client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": "test-user-budget", "budget_id": budget_id},
         headers=master_key_header,
     )
 
     response = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={
             "model": "unknown/model",
             "messages": test_messages,

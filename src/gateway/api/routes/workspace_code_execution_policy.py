@@ -1,7 +1,7 @@
 """Per-workspace code-execution policy (standalone mode only).
 
 The deployment-wide sandbox configuration (its URL, its purpose hint) stays on
-``/v1/tool-settings``; this surface says which workspaces on that deployment may
+``/api/v1/tool-settings``; this surface says which workspaces on that deployment may
 use it and within which limits. Thin composition over
 `gateway.services.tenancy.workspace_code_execution_policy_service`, following
 `routes/workspace_member_budget_policies.py`'s shape (master key on the router,
@@ -27,7 +27,7 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
 # every handler here needs the master key, and a future one that forgot the
 # decorator would be unauthenticated with nothing to notice.
 router = APIRouter(
-    prefix="/v1/workspaces/{workspace_id}/code-execution-policy",
+    prefix="/workspaces/{workspace_id}/code-execution-policy",
     tags=["workspace-code-execution-policy"],
     dependencies=[Depends(verify_master_key)],
 )
@@ -39,7 +39,7 @@ def get_workspace_code_execution_policy_service(
 ) -> WorkspaceCodeExecutionPolicyService:
     """Build the service on the request's session.
 
-    The sandbox-presence check is the same one ``GET /v1/tools`` makes when it
+    The sandbox-presence check is the same one ``GET /api/v1/tools`` makes when it
     decides whether to advertise code execution, so the page and the discovery
     endpoint agree about whether this deployment can run any.
 

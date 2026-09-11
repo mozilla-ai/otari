@@ -55,7 +55,7 @@ describe("VerifyEmailPage", () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/ada@example.com is confirmed/)).toBeInTheDocument()
     const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
-    expect(path).toBe("/v1/auth/verify-email")
+    expect(path).toBe("/auth/verify-email")
     // In the body, not the URL: the token is a bearer credential and a URL is
     // what an access log retains.
     expect(JSON.parse(String(init?.body))).toEqual({ token: "abc123" })

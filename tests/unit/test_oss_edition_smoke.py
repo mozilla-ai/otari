@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 import yaml
 
+from gateway.core.config import API_ROOT
+
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "oss_edition_smoke.py"
 
 
@@ -50,6 +52,17 @@ def _post(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, Any]
 # --------------------------------------------------------------------------- #
 # The environment the gateway is booted in
 # --------------------------------------------------------------------------- #
+
+
+def test_the_gate_walks_the_root_the_app_actually_serves() -> None:
+    """The gate carries its own copy of the API root, and this is what keeps it honest.
+
+    It has to: importing the app would give up the standard-library-only
+    property that lets this gate catch a dev-only import reaching an OSS code
+    path. So the copy is deliberate, and a drift between the two would send
+    every request in the gate to a path the app does not serve.
+    """
+    assert smoke.API_ROOT == API_ROOT
 
 
 @pytest.mark.parametrize(

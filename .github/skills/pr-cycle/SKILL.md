@@ -43,8 +43,12 @@ artifacts.
    because the repo squash-merges and git-cliff parses that title into the changelog. Keep the
    template's `## PR Type`, `## Checklist` and `## AI Usage` sections: `pr-template-check.yml`
    fails and labels the PR `missing-template` if any of the three is absent. Fill in AI Usage
-   honestly, including the AI-agent checkbox. No labels are required here. No em dashes in the
-   description (repo prose rule). Default to opening **ready for review**; open a **draft** only
+   honestly, including the AI-agent checkbox. Two further sections are expected on every PR
+   and are gated by nobody, which makes them the ones an agent drops: `## Description` in
+   plain English for a reader with no context on the area (what changes for someone using
+   Otari, and why, no file paths), and `## How to test it locally` with the steps a reviewer
+   runs plus the automated checks that already cover it. No labels are required here. No em
+   dashes in the description (repo prose rule). Default to opening **ready for review**; open a **draft** only
    if the user asked to see it first (confirm which if unsure).
 8. **Self-review.** Invoke the [`review`](../review/SKILL.md) skill on your own PR before anyone
    else reads it. Apply what is valid and push; skip nits that fight the repo's conventions, and
@@ -84,6 +88,53 @@ The dashboard has its own, which `make lint` does not touch: `pnpm --dir web run
 `pnpm --dir web run typecheck`, `pnpm --dir web test`. Screenshot baselines are gitignored and
 that suite runs on demand, so a PR that moves a page owes no PNGs; a PR that **adds** a page owes
 a screenshot entry so the page is covered when the suite becomes a gate.
+
+## What CI runs on a PR, and the two ways it silently does not
+
+Every substantive workflow but one is declared `pull_request: branches: [ main ]`
+(`otari-dashboard.yml`, `otari-dashboard-parity.yml`, `otari-design-system.yml`,
+`otari-tests.yml`), and that filter is on the **base** branch. The exception is
+`otari-sdk-codegen-check.yml`, which declares `pull_request` with a `paths` filter and no
+`branches` key at all, so it matches any base: a stacked PR touching
+`docs/public/openapi.json` or `scripts/sdk_codegen/**` runs its four-language generate matrix
+and can go red where this section otherwise promises nothing. Two situations therefore leave a
+PR with almost no CI, and neither of them reports anything:
+
+- **A base that is not `main`.** A PR stacked on another feature branch matches no workflow, so
+  it gets only the `pull_request_target` checks. Retargeting a stacked PR onto its parent branch
+  is what usually causes this, and the trade is invisible in the direction you are looking: the
+  diff gets smaller and the check count drops from seven to one or two. Both ends of that range
+  depend on when you look, and it is worth knowing why: `otari-pr-title.yml` lists `synchronize`, so
+  `Lint PR title` re-runs on every push and is attached to the current head, while
+  `pr-template-check.yml` lists only `opened` and `edited`, so `check-template` stays attached to
+  the sha the PR was opened (or last edited) at. So the ceiling is seven on that sha and six on
+  every head after a push, and the floor is two and then one. Measured on four stacked heads: one
+  row each, `Lint PR title`, with no `check-template` on any of them. Keep a stacked PR on base `main` and
+  live with the inherited diff until its parent merges.
+- **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
+  PR has none, so nothing runs until the conflict is resolved. The tell is
+  `mergeStateStatus: DIRTY` beside a check count that has stopped growing.
+
+A child PR hits the second case as soon as its parent is squash-merged, because its own
+unsquashed commits and the squash on `main` are the same content twice.
+`git rebase --onto origin/main <the parent's old head>` drops the absorbed commits and clears it.
+
+**"Green" means the full expected set is present and none of it is pending**, which is not the
+same as nothing being pending. Both situations above produce a `gh pr checks` that lists one or
+two passing rows, and a passing row reads as a clean result to anyone who does not already know
+what the set should be. Check the names rather than only the buckets: on a dashboard change the
+substantive ones are `build`, `dashboard`, `e2e`, `catalog` and `serving`, and a run without
+them has covered nothing.
+
+A small set is not always one of the two faults above, though. Every one of these workflows also
+carries a `paths` filter, so a change that touches nothing they watch correctly runs almost
+nothing: a PR editing only `.github/skills/`, or a `docs/` file other than `dashboard.md` and
+`public/openapi.json`, gets the title and template checks and no more, and that is the right
+answer rather than a symptom. Those two `docs/` paths are the exception, watched by
+`otari-dashboard.yml`, `otari-dashboard-parity.yml`, `otari-dashboard-serving.yml` and
+`otari-docker-build.yml` because the dashboard bundles the guide and generates its client from
+the spec, so a one-line edit to either runs `dashboard`, `e2e`, `serving` and `build`. The
+question to ask is whether the set matches the change, not whether the set is large.
 
 ## Generated artifacts a PR can owe
 
@@ -160,9 +211,10 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   issues sharing a file are **sequenced**, with the later ones rebasing once the earlier lands.
 - **Order within a wave:** small and low-risk first, large refactors later, so the rebase surface
   stays small.
-- **A stacked PR loses two protections, so stack deliberately.** Basing a PR on a topic branch
-  instead of `main` buys a clean diff (only your own commits, not the parent's) and costs both of
-  the things that would otherwise catch a mistake. `protect-main` applies to the default branch
+- **A stacked PR loses three protections, so stack deliberately.** Basing a PR on a topic branch
+  instead of `main` buys a clean diff (only your own commits, not the parent's) and costs the
+  things that would otherwise catch a mistake. CI is the third and it has its own section above
+  ("What CI runs on a PR"); the other two: `protect-main` applies to the default branch
   only, so the child reports `mergeStateStatus: CLEAN` and can be merged into its base with **no
   approval and no thread resolution**, silently folding two reviews into one. And
   `.coderabbit.yaml` sets `base_branches: ["main"]`, so **CodeRabbit skips the child entirely**
@@ -216,7 +268,9 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   its branch deleted **closes child B permanently**: B's base is gone and GitHub refuses to
   reopen a PR whose base branch was deleted (`422 "state cannot be changed"`), even if you
   recreate the branch. So `gh pr edit B --base main` **while A's branch still exists**, then merge
-  A. If B already closed this way, the only recovery is a fresh PR from B's head branch, linking
+  A. Base `main` is also what gets B any CI at all (see
+  [What CI runs on a PR](#what-ci-runs-on-a-pr-and-the-two-ways-it-silently-does-not)), so it is
+  where a stacked PR should have been sitting all along. If B already closed this way, the only recovery is a fresh PR from B's head branch, linking
   the old one for its review history.
 
 ## Non-negotiables

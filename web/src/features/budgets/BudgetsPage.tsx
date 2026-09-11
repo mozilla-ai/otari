@@ -3,13 +3,37 @@
 // took chips off everything it rebuilt, so this is an inconsistency rather than
 // a decision: see the note in the PR body.
 import { Button, Chip, Spinner } from "@heroui/react"
-import { useEffect, useMemo, useState } from "react"
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type {
   Budget,
   BudgetResetLog,
   CreateBudgetRequest,
   User,
 } from "@/client"
+import { CopyableValue } from "@/design-system/actions/CopyField"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { BulkActionBar } from "@/design-system/data/BulkActionBar"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { SpendMeter, spendState } from "@/design-system/metrics/SpendMeter"
+import { Segmented } from "@/design-system/navigation/Segmented"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import {
@@ -25,24 +49,6 @@ import {
   useAllWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/workspaces"
-import { CopyableValue } from "@/shared/components/actions/CopyField"
-import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
-import { BulkActionBar } from "@/shared/components/data/BulkActionBar"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Field } from "@/shared/components/forms/Field"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
-import { SpendMeter, spendState } from "@/shared/components/metrics/SpendMeter"
-import { Segmented } from "@/shared/components/navigation/Segmented"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -222,7 +228,10 @@ function PeriodPicker({
 // ---------- create / edit forms (inline cards, matching KeysPage) ----------
 
 function BudgetForm({
+  isOpen,
+  onOpenChange,
   title,
+  description,
   submitLabel,
   initial,
   error,
@@ -232,8 +241,13 @@ function BudgetForm({
   assignUsers,
   assignedUserIds,
   assignmentNote,
+  returnFocusRef,
 }: {
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
   title: string
+  /** The object being edited, where the title alone does not name it. */
+  description?: ReactNode
   submitLabel: string
   initial: {
     name: string | null
@@ -254,6 +268,8 @@ function BudgetForm({
   // Why the multiselect is absent, where its absence is a rule rather than a
   // failed read. The failed-roster case is explained by the page's banner.
   assignmentNote?: string
+  /** Where focus goes when the opener has gone; see `FormDialog`. */
+  returnFocusRef?: RefObject<HTMLElement | null>
 }) {
   const [name, setName] = useState(initial.name ?? "")
   const [limit, setLimit] = useState(
@@ -266,7 +282,22 @@ function BudgetForm({
   const [userIds, setUserIds] = useState<string[]>(assignedUserIds ?? [])
 
   const parsed = parseLimit(limit)
-  const canSubmit = !isPending && parsed.valid && !periodInvalid
+  // Two readings of one rule, spelled once: the submit is shown disabled while
+  // the form cannot be sent, and `submit` refuses while that OR a save is in
+  // flight. Pending is not part of `blocked` because a request in flight is not
+  // a reason to paint the button as refused.
+  const blocked = !parsed.valid || periodInvalid
+  const canSubmit = !isPending && !blocked
+  // Everything the operator can change, in one snapshot. The people are sorted
+  // into it because the picker appends in click order, and a guard that read
+  // two orderings of one selection as a change would arm on the way back to
+  // where it started.
+  const { isDirty } = useDirtySnapshot({
+    name,
+    limit,
+    durationSec,
+    userIds: [...userIds].sort(),
+  })
 
   const submit = () => {
     if (!canSubmit) return
@@ -282,14 +313,22 @@ function BudgetForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (open) onOpenChange(true)
+        else onClose()
+      }}
+      title={title}
+      description={description}
+      submitLabel={submitLabel}
+      onSubmit={submit}
+      isPending={isPending}
+      isSubmitDisabled={blocked}
+      isDirty={isDirty}
+      returnFocusRef={returnFocusRef}
+      error={error}
     >
-      {/* A heading, not a styled div: this panel is a section of the page and
-          the type role is what it looks like, not what it is. */}
-      <h2 className="text-title">{title}</h2>
-      <ErrorBanner error={error} />
       <Field
         label="Name (optional)"
         value={name}
@@ -332,15 +371,7 @@ function BudgetForm({
         // without this branch it would be passed and never rendered.
         <p className="text-caption">{assignmentNote}</p>
       ) : null}
-      <div className="flex gap-2">
-        <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
-          {isPending ? "Saving…" : submitLabel}
-        </Button>
-        <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -456,47 +487,6 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
   )
 }
 
-// ---------- onboarding ----------
-
-// ---------- inline confirm (names the target, no modal) ----------
-
-function InlineDelete({
-  label,
-  isPending,
-  onConfirm,
-}: {
-  label: string
-  isPending: boolean
-  onConfirm: () => void
-}) {
-  const [armed, setArmed] = useState(false)
-
-  if (!armed) {
-    return <RowAction onPress={() => setArmed(true)}>Delete</RowAction>
-  }
-  // Armed, this one keeps its sentence: a budget's deletion has a consequence
-  // the label cannot carry, and a row action that only said "Delete permanently"
-  // would be asking for a decision without the fact behind it. The tinted box is
-  // gone with every other box on the row; the words and the danger ink are what
-  // is left, and they were doing the work anyway.
-  return (
-    <span className="flex flex-col items-end gap-1 text-right">
-      <span className="max-w-xs text-xs text-muted">
-        Delete <strong className="font-medium">{label}</strong>? Users keep
-        their spend but lose this limit. Cannot be undone.
-      </span>
-      <span className="flex items-center gap-4">
-        <RowAction isDanger isDisabled={isPending} onPress={onConfirm}>
-          Delete permanently
-        </RowAction>
-        <RowAction isDisabled={isPending} onPress={() => setArmed(false)}>
-          Cancel
-        </RowAction>
-      </span>
-    </span>
-  )
-}
-
 // ---------- page ----------
 
 // A short, stable fingerprint for a budget id (its leading segment), shown when a
@@ -513,7 +503,7 @@ function budgetLabel(budget: Budget): string {
 }
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
-// carries none. `/v1/users` refuses to cap a gateway user at a tenant's
+// carries none. `/users` refuses to cap a gateway user at a tenant's
 // (otari#881), so the page marks the row and withholds the assignment control
 // rather than offering a save the API answers 404.
 function isOrganizationOwned(budget: Budget): boolean {
@@ -523,7 +513,7 @@ function isOrganizationOwned(budget: Budget): boolean {
 /**
  * The deployment's own budgets page, which is what an operator sees.
  *
- * Deployment-wide end to end: `/v1/budgets`, the gateway's `users` table, and
+ * Deployment-wide end to end: `/budgets`, the gateway's `users` table, and
  * every workspace's member default, all behind `require_deployment_operator`.
  * Unchanged by otari-ai#1943, which added the tenant-scoped page beside it
  * rather than reshaping this one, because the two surfaces answer to different
@@ -538,14 +528,32 @@ function DeploymentBudgetsPage() {
     [workspaces.data],
   )
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
-  const createBudget = useCreateBudget()
-  const updateBudget = useUpdateBudget()
   const deleteBudget = useDeleteBudget()
   const updateUser = useUpdateUser()
 
   const [addOpen, setAddOpen] = useState(false)
+  // Where focus lands when a dialog closes and whatever opened it has gone.
+  // The empty state's CTA is the case: the first budget created retires the
+  // panel it sits in, so react-aria has nothing to restore to and focus falls
+  // to body, which restarts Tab at the top of the document.
+  const createButtonRef = useRef<HTMLButtonElement>(null)
+  // Bumped on each open, and the create dialog is keyed on it, so the draft is
+  // fresh every time and untouched through the exit: the dialog keeps its
+  // content while it animates out, so clearing on the way out would blank the
+  // body in front of the operator. See feedback.md, "A draft is fresh on every
+  // open and untouched through the exit".
+  //
+  // One function rather than the two statements at each opener: this page has
+  // two openers, and a counter is only a remount while every one of them bumps
+  // it.
+  const [addOpenCount, setAddOpenCount] = useState(0)
+  const openCreate = () => {
+    setAddOpenCount((n) => n + 1)
+    setAddOpen(true)
+  }
   const [editing, setEditing] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Budget>()
   const [assignmentError, setAssignmentError] = useState<Error | null>(null)
   const [pendingAssignments, setPendingAssignments] = useState<{
     budgetId: string
@@ -596,7 +604,11 @@ function DeploymentBudgetsPage() {
   }, [workspaces.data, workspaceDefaults.data])
   const editingBudget = rows.find((b) => b.budget_id === editing) ?? null
   const historyBudget = rows.find((b) => b.budget_id === historyOpen) ?? null
-  const showOnboarding = !loading && rows.length === 0 && !addOpen
+  // Not gated on the dialog being closed: react-aria returns focus to the
+  // element that opened the dialog, and an empty-state CTA that unmounts on
+  // open leaves it nothing to return to, so focus lands on body and Tab
+  // restarts at the top of the document.
+  const showOnboarding = !loading && rows.length === 0
   const selectableKeys = rows.map((b) => b.budget_id)
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
 
@@ -723,16 +735,12 @@ function DeploymentBudgetsPage() {
             >
               Edit
             </RowAction>
-            <InlineDelete
-              label={budgetLabel(b)}
-              isPending={deleteBudget.isPending}
-              onConfirm={() => deleteBudget.mutate(b.budget_id)}
-            />
+            <RowAction onPress={() => setPendingDelete(b)}>Delete</RowAction>
           </RowActionRow>
         ),
       },
     ],
-    [historyOpen, deleteBudget.isPending, deleteBudget.mutate, defaultFor],
+    [historyOpen, defaultFor],
   )
 
   /**
@@ -789,47 +797,25 @@ function DeploymentBudgetsPage() {
     return true
   }
 
-  // Create the budget, then (optionally) attach it to the chosen users. The
-  // per-user PATCH sets each user's reset clock. Failed assignments stay in the
-  // form so a retry never creates a duplicate budget.
-  const createAndAssign = (body: CreateBudgetRequest, userIds: string[]) => {
-    if (pendingAssignments) {
-      void assignUsers(pendingAssignments.budgetId, pendingAssignments.userIds)
-      return
-    }
-
-    setAssignmentError(null)
-    createBudget.mutate(body, {
-      onSuccess: async (budget: Budget) => {
-        if (
-          userIds.length > 0 &&
-          !(await assignUsers(budget.budget_id, userIds))
-        ) {
-          return
-        }
-        setAddOpen(false)
-      },
-    })
-  }
-
   return (
     <div className="flex flex-col">
       <PageIntro
         title="Budgets"
         action={
-          addOpen || showOnboarding ? null : (
-            <Button
-              variant="primary"
-              onPress={() => {
-                setEditing(null)
-                setAssignmentError(null)
-                setPendingAssignments(null)
-                setAddOpen(true)
-              }}
-            >
-              Create budget
-            </Button>
-          )
+          <Button
+            ref={createButtonRef}
+            // Visible while the dialog is open, and beside the empty state's
+            // own copy of it: the dialog is over the page.
+            variant="primary"
+            onPress={() => {
+              setEditing(null)
+              setAssignmentError(null)
+              setPendingAssignments(null)
+              openCreate()
+            }}
+          >
+            Create budget
+          </Button>
         }
       >
         Define spending limits and reset schedules. Assign a budget to users to
@@ -839,9 +825,6 @@ function DeploymentBudgetsPage() {
       <ErrorBanner
         error={
           budgets.error ??
-          createBudget.error ??
-          updateBudget.error ??
-          deleteBudget.error ??
           updateUser.error ??
           // Without this a failed roster silently withholds the assignment
           // control and the "Default for" column, with nothing saying why.
@@ -866,74 +849,52 @@ function DeploymentBudgetsPage() {
             setEditing(null)
             setAssignmentError(null)
             setPendingAssignments(null)
-            setAddOpen(true)
+            openCreate()
           }}
         />
       ) : null}
 
-      {addOpen ? (
-        <BudgetForm
-          title="Create budget"
-          submitLabel={
-            pendingAssignments ? "Retry assignments" : "Create budget"
-          }
-          initial={{ name: null, max_budget: null, budget_duration_sec: null }}
-          error={createBudget.error ?? assignmentError}
-          isPending={createBudget.isPending || assigningUsers}
-          assignUsers={users.data ?? []}
-          onSubmit={createAndAssign}
-          onClose={() => {
-            setAssignmentError(null)
-            setPendingAssignments(null)
-            setAddOpen(false)
-          }}
-        />
-      ) : null}
+      {/* Keyed on the open count, so each open remounts everything that should
+          start fresh: the draft, and the create mutation whose refusal would
+          otherwise greet the next open. The page keeps only what outlives an
+          open, which is whether it is open, how many times it has been, and
+          the list itself. */}
+      <CreateBudgetDialog
+        key={addOpenCount}
+        isOpen={addOpen}
+        assignmentError={assignmentError}
+        assigningUsers={assigningUsers}
+        pendingAssignments={pendingAssignments}
+        returnFocusRef={createButtonRef}
+        assignUsers={assignUsers}
+        onAssignmentReset={() => setAssignmentError(null)}
+        users={users.data ?? []}
+        onClose={() => {
+          setAssignmentError(null)
+          setPendingAssignments(null)
+          setAddOpen(false)
+        }}
+      />
       {/* Key on the row id so switching which budget is edited remounts the form,
           its fields seed from `initial` on mount only. */}
       {editingBudget ? (
-        <BudgetForm
+        <EditBudgetDialog
           key={editingBudget.budget_id}
-          title={`Edit budget ${budgetLabel(editingBudget)}`}
-          submitLabel="Save changes"
-          initial={{
-            name: editingBudget.name,
-            max_budget: editingBudget.max_budget,
-            budget_duration_sec: editingBudget.budget_duration_sec,
+          budget={editingBudget}
+          users={users.data ?? []}
+          rosterReady={rosterReady}
+          assignUsers={assignUsers}
+          onAssignmentReset={() => {
+            setAssignmentError(null)
+            setPendingAssignments(null)
           }}
-          error={updateBudget.error ?? assignmentError}
-          isPending={updateBudget.isPending || assigningUsers}
-          assignUsers={
-            rosterReady && !isOrganizationOwned(editingBudget)
-              ? (users.data ?? [])
-              : undefined
-          }
-          assignmentNote={
-            isOrganizationOwned(editingBudget)
-              ? "This budget belongs to an organization, so people here cannot be held to it. Its limit and reset are still the deployment's to change."
-              : undefined
-          }
-          assignedUserIds={(users.data ?? [])
-            .filter((u) => u.budget_id === editingBudget.budget_id)
-            .map((u) => u.user_id)}
-          onSubmit={(body, userIds) =>
-            updateBudget.mutate(
-              { id: editingBudget.budget_id, body },
-              {
-                onSuccess: async () => {
-                  const held = (users.data ?? [])
-                    .filter((u) => u.budget_id === editingBudget.budget_id)
-                    .map((u) => u.user_id)
-                  if (
-                    await assignUsers(editingBudget.budget_id, userIds, held)
-                  ) {
-                    setEditing(null)
-                  }
-                },
-              },
-            )
-          }
-          onClose={() => setEditing(null)}
+          assignmentError={assignmentError}
+          assigningUsers={assigningUsers}
+          onClose={() => {
+            setAssignmentError(null)
+            setPendingAssignments(null)
+            setEditing(null)
+          }}
         />
       ) : null}
 
@@ -994,6 +955,32 @@ function DeploymentBudgetsPage() {
       ) : null}
 
       <ConfirmDialog
+        isOpen={pendingDelete !== undefined}
+        // Cleared on the way out: a refusal otherwise sits on the mutation and
+        // greets the next row's confirm as if that row had failed.
+        onOpenChange={(open) => {
+          if (open) return
+          setPendingDelete(undefined)
+          deleteBudget.reset()
+        }}
+        heading="Delete budget"
+        body={
+          pendingDelete
+            ? `${budgetLabel(pendingDelete)} stops existing. Users on it keep the spend they have already recorded but lose this limit, so nothing caps them until another budget does.`
+            : null
+        }
+        confirmLabel="Delete permanently"
+        isPending={deleteBudget.isPending}
+        error={deleteBudget.error}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          deleteBudget.mutate(pendingDelete.budget_id, {
+            onSuccess: () => setPendingDelete(undefined),
+          })
+        }}
+      />
+
+      <ConfirmDialog
         isOpen={bulkDeleteOpen}
         onOpenChange={setBulkDeleteOpen}
         heading="Delete budgets"
@@ -1006,6 +993,176 @@ function DeploymentBudgetsPage() {
         onConfirm={onBulkDelete}
       />
     </div>
+  )
+}
+
+/**
+ * Edit one budget, and reconcile who holds it.
+ *
+ * A component of its own for the reason the create one is: the update mutation
+ * resets with the form on each open, so a refusal on one row cannot greet the
+ * next row's dialog with a message about a budget it is not editing. The page
+ * keys it on the row, which is what makes "switching which budget is open"
+ * reseed the fields.
+ */
+function EditBudgetDialog({
+  budget: row,
+  users,
+  rosterReady,
+  assignUsers,
+  onAssignmentReset,
+  assignmentError,
+  assigningUsers,
+  onClose,
+}: {
+  budget: Budget
+  users: User[]
+  rosterReady: boolean
+  assignUsers: (
+    budgetId: string,
+    userIds: string[],
+    previousUserIds?: string[],
+  ) => Promise<boolean>
+  onAssignmentReset: () => void
+  assignmentError: Error | null
+  assigningUsers: boolean
+  onClose: () => void
+}) {
+  const updateBudget = useUpdateBudget()
+  const held = users
+    .filter((user) => user.budget_id === row.budget_id)
+    .map((user) => user.user_id)
+
+  return (
+    <BudgetForm
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="Edit budget"
+      description={budgetLabel(row)}
+      submitLabel="Save"
+      initial={{
+        name: row.name,
+        max_budget: row.max_budget,
+        budget_duration_sec: row.budget_duration_sec,
+      }}
+      error={updateBudget.error ?? assignmentError}
+      isPending={updateBudget.isPending || assigningUsers}
+      assignUsers={rosterReady && !isOrganizationOwned(row) ? users : undefined}
+      assignmentNote={
+        isOrganizationOwned(row)
+          ? "This budget belongs to an organization, so people here cannot be held to it. Its limit and reset are still the deployment's to change."
+          : undefined
+      }
+      assignedUserIds={held}
+      onSubmit={(body, userIds) => {
+        onAssignmentReset()
+        updateBudget.mutate(
+          { id: row.budget_id, body },
+          {
+            onSuccess: async () => {
+              if (await assignUsers(row.budget_id, userIds, held)) onClose()
+            },
+          },
+        )
+      }}
+      onClose={onClose}
+    />
+  )
+}
+
+/**
+ * Create a budget, and attach it to the people chosen in the same form.
+ *
+ * A component of its own so the page can key it: the draft *and* the create
+ * mutation reset together on each open, which is what stops a refusal from the
+ * last attempt greeting the next one. The assignment retry state stays on the
+ * page, because a failed attach is shared with the edit form and outlives this.
+ */
+function CreateBudgetDialog({
+  isOpen,
+  onClose,
+  users,
+  assignUsers,
+  onAssignmentReset,
+  assignmentError,
+  assigningUsers,
+  pendingAssignments,
+  returnFocusRef,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  users: User[]
+  returnFocusRef: RefObject<HTMLButtonElement | null>
+  assignUsers: (
+    budgetId: string,
+    userIds: string[],
+    previousUserIds?: string[],
+  ) => Promise<boolean>
+  onAssignmentReset: () => void
+  assignmentError: Error | null
+  assigningUsers: boolean
+  pendingAssignments: { budgetId: string; userIds: string[] } | null
+}) {
+  const createBudget = useCreateBudget()
+
+  // Create the budget, then (optionally) attach it to the chosen users. The
+  // per-user PATCH sets each user's reset clock. Failed assignments stay in the
+  // form so a retry never creates a duplicate budget.
+  const createAndAssign = async (
+    body: CreateBudgetRequest,
+    userIds: string[],
+  ) => {
+    if (pendingAssignments) {
+      // Against the form as it stands, not against the set that failed. The
+      // retry is the operator's chance to fix the selection, and the fields
+      // stay editable while it is offered: replaying the original ids would
+      // drop whoever they just added. `held` is what the roster says already
+      // carries this budget, which is what makes the reconcile
+      // two-directional.
+      const held = users
+        .filter((user) => user.budget_id === pendingAssignments.budgetId)
+        .map((user) => user.user_id)
+      // Awaited, because the retry's success is what closes the form. Left
+      // open, the label reverts to "Create budget" the moment the assignments
+      // land and the next press creates a second budget.
+      if (await assignUsers(pendingAssignments.budgetId, userIds, held)) {
+        onClose()
+      }
+      return
+    }
+
+    onAssignmentReset()
+    createBudget.mutate(body, {
+      onSuccess: async (budget: Budget) => {
+        if (
+          userIds.length > 0 &&
+          !(await assignUsers(budget.budget_id, userIds))
+        ) {
+          return
+        }
+        onClose()
+      },
+    })
+  }
+
+  return (
+    <BudgetForm
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="New budget"
+      submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
+      initial={{ name: null, max_budget: null, budget_duration_sec: null }}
+      error={createBudget.error ?? assignmentError}
+      isPending={createBudget.isPending || assigningUsers}
+      returnFocusRef={returnFocusRef}
+      assignUsers={users}
+      onSubmit={createAndAssign}
+      onClose={onClose}
+    />
   )
 }
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -11,6 +11,7 @@ import type {
   User,
 } from "@/client"
 import { BudgetsPage } from "@/features/budgets/BudgetsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 
@@ -66,6 +67,10 @@ function mockApi(
     budgets?: Budget[]
     resetLogs?: BudgetResetLog[]
     users?: User[]
+    /** What a create answers with, for the case that drives a refusal. */
+    createBudget?: () => Response
+    /** The same, for an edit. */
+    updateBudget?: () => Response
     failedUserUpdates?: string[]
     updateUser?: (userId: string) => Response | Promise<Response>
     // Who is asking, which is what decides which of the two pages this route
@@ -85,7 +90,7 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
 
-      if (url.includes("/v1/users")) {
+      if (url.includes(`${API_ROOT}/users`)) {
         if (method === "PATCH") {
           const userId = decodeURIComponent(url.split("/").pop() ?? "")
           if (opts.failedUserUpdates?.includes(userId)) {
@@ -99,11 +104,12 @@ function mockApi(
         return jsonResponse(users)
       }
 
-      if (url.includes("/v1/budgets")) {
+      if (url.includes(`${API_ROOT}/budgets`)) {
         if (url.includes("/reset-logs")) {
           return jsonResponse(resetLogs)
         }
         if (method === "POST") {
+          if (opts.createBudget) return opts.createBudget()
           const body = JSON.parse(String(init?.body)) as Partial<Budget>
           const row = budget({
             budget_id: "new-budget-id-0000-0000-000000000000",
@@ -115,6 +121,7 @@ function mockApi(
           return jsonResponse(row)
         }
         if (method === "PATCH") {
+          if (opts.updateBudget) return opts.updateBudget()
           const id = decodeURIComponent(url.split("/").pop() ?? "")
           const body = JSON.parse(String(init?.body)) as Partial<Budget>
           list = list.map((b) => (b.budget_id === id ? { ...b, ...body } : b))
@@ -127,13 +134,14 @@ function mockApi(
         }
         return jsonResponse(list)
       }
-      if (url.includes("/v1/organizations/me/budgets")) {
+      if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes("/v1/organizations/me/spend-ceilings")) {
+      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes("/v1/organizations/me")) return jsonResponse(context)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(context)
       return jsonResponse([])
     })
 }
@@ -157,6 +165,32 @@ describe("BudgetsPage", () => {
     vi.restoreAllMocks()
   })
 
+  it("keeps the page's create action visible while the dialog is open", async () => {
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await screen.findByText("No budgets yet")
+    const trigger = screen.getByRole("button", { name: "Create budget" })
+    await user.click(trigger)
+    await screen.findByRole("dialog")
+    expect(trigger).toBeInTheDocument()
+  })
+
+  it("names the object in the title and the budget in the description when editing", async () => {
+    mockApi({ budgets: [budget({ name: "team-free-tier" })] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("team-free-tier")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    // A dialog title is a noun phrase, so the budget it names is in the
+    // description rather than folded into the title.
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveAccessibleName("Edit budget")
+    expect(dialog).toHaveTextContent("team-free-tier")
+  })
+
   it("shows onboarding when there are no budgets", async () => {
     mockApi({ budgets: [] })
     renderPage(<BudgetsPage />)
@@ -165,9 +199,12 @@ describe("BudgetsPage", () => {
     expect(
       screen.getByRole("button", { name: "Create your first budget" }),
     ).toBeInTheDocument()
+    // The heading keeps its action beside the empty state's, which offers the
+    // same thing in the operator's own words. A dialog is over the page, and
+    // the heading's action is where focus returns when one closes.
     expect(
-      screen.queryByRole("button", { name: "Create budget" }),
-    ).not.toBeInTheDocument()
+      screen.getByRole("button", { name: "Create budget" }),
+    ).toBeInTheDocument()
     // Only the onboarding panel shows: the table (and its own "no rows" fallback,
     // whose "cap spending" text is unique to it) is suppressed so the two empty
     // states are not stacked.
@@ -271,7 +308,8 @@ describe("BudgetsPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+        String(u).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: "team-free-tier",
@@ -297,7 +335,10 @@ describe("BudgetsPage", () => {
     )
     await user.type(screen.getByLabelText("Spending limit (USD)"), "100")
     // Pick a user from the assignment combobox, then submit.
-    await user.type(screen.getByLabelText("Add a person"), "alice")
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
@@ -306,7 +347,7 @@ describe("BudgetsPage", () => {
     const patch = await vi.waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).includes("/v1/users/alice") &&
+          String(u).includes(`${API_ROOT}/users/alice`) &&
           (init?.method ?? "") === "PATCH",
       )
       if (!call) throw new Error("no PATCH yet")
@@ -315,6 +356,213 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(patch[1]?.body))).toEqual({
       budget_id: "new-budget-id-0000-0000-000000000000",
     })
+  })
+
+  it("seeds a fresh draft from either opener, header or empty state", async () => {
+    // Keying the create dialog on an open counter is only correct while every
+    // opener bumps it, and this page has two: the heading's Create budget and
+    // the empty state's Create your first budget. A missed one opens on the
+    // last draft, which here is a duplicate budget one press away.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create your first budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "team-a")
+    // A typed draft is dirty, so leaving goes through the guard.
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+    expect(screen.getByLabelText("Name (optional)")).toHaveValue("")
+
+    // And back the other way, so neither opener is the only one asserted.
+    await user.type(screen.getByLabelText("Name (optional)"), "team-b")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(
+      screen.getByRole("button", { name: "Create your first budget" }),
+    )
+    expect(screen.getByLabelText("Name (optional)")).toHaveValue("")
+  })
+
+  it("retries the assignments the form now shows, not the set that failed", async () => {
+    // The fields stay editable while Retry is offered, so the retry is the
+    // operator's chance to fix the selection. Replaying the original ids would
+    // drop whoever they added in the meantime and close as though it worked.
+    let failFirst = true
+    const fetchMock = mockApi({
+      budgets: [],
+      users: [testUser("alice"), testUser("bob")],
+      updateUser: (userId) => {
+        if (userId === "alice" && failFirst) {
+          failFirst = false
+          return jsonResponse({ detail: "User update failed" }, 500)
+        }
+        return jsonResponse(testUser(userId))
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create budget" }),
+    )
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
+    await user.click(await screen.findByRole("option", { name: /alice/ }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create budget",
+      }),
+    )
+    expect(
+      await screen.findByText(/these people were not updated: alice/),
+    ).toBeInTheDocument()
+
+    // Add the second person, then retry.
+    await user.clear(screen.getByLabelText("Assign to people (optional)"))
+    await user.type(screen.getByLabelText("Assign to people (optional)"), "bob")
+    await user.click(await screen.findByRole("option", { name: /bob/ }))
+    await user.click(screen.getByRole("button", { name: "Retry assignments" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    const patched = fetchMock.mock.calls
+      .filter(([, init]) => (init?.method ?? "") === "PATCH")
+      .map(([url]) => String(url))
+    expect(patched.some((url) => url.includes("bob"))).toBe(true)
+    // And still one budget, which is what the retry exists to protect.
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => (init?.method ?? "") === "POST")
+        .length,
+    ).toBe(1)
+  })
+
+  it("does not carry one row's refused edit into the next row's dialog", async () => {
+    // The create dialog's twin. The update mutation lives below the edit
+    // dialog's key, so a 409 taken on budget A cannot still be on screen when
+    // budget B's Edit is pressed.
+    mockApi({
+      budgets: [
+        budget({ budget_id: "a", name: "alpha" }),
+        budget({ budget_id: "b", name: "beta" }),
+      ],
+      updateBudget: () =>
+        jsonResponse({ detail: "A budget named beta already exists" }, 409),
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const rowA = await screen.findByRole("row", { name: /alpha/ })
+    await user.click(within(rowA).getByRole("button", { name: "Edit" }))
+    await user.clear(screen.getByLabelText("Name (optional)"))
+    await user.type(screen.getByLabelText("Name (optional)"), "beta")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    )
+    expect(
+      await screen.findByText(/A budget named beta already exists/),
+    ).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    const rowB = screen.getByRole("row", { name: /beta/ })
+    await user.click(within(rowB).getByRole("button", { name: "Edit" }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(screen.queryByText(/A budget named beta already exists/)).toBeNull()
+  })
+
+  it("returns focus to the heading trigger when the empty state has gone", async () => {
+    // The first budget created retires the panel the CTA sits in, so
+    // react-aria has nothing to restore focus to and it falls to body, which
+    // restarts Tab at the top of the document. `returnFocusRef` names the
+    // heading's own trigger, which outlives the create.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create your first budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "team-a")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create budget",
+      }),
+    )
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Create budget" }),
+      ).toHaveFocus(),
+    )
+  })
+
+  it("keeps the onboarding panel mounted while its dialog is open", async () => {
+    // react-aria returns focus to whatever opened the dialog. An empty-state
+    // CTA that unmounts on open leaves it nothing to return to, so focus lands
+    // on body and Tab restarts at the top of the document.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const cta = await screen.findByRole("button", {
+      name: "Create your first budget",
+    })
+    await user.click(cta)
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(cta).toBeVisible()
+
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() => expect(cta).toHaveFocus())
+  })
+
+  it("does not greet the next open with the last one's refusal", async () => {
+    // The create mutation lives below the dialog's key, so it is remounted with
+    // the form: a 409 from one attempt cannot still be on screen when the
+    // dialog is opened again. Left above the key, the banner survives, and the
+    // second open reads as though this attempt had already failed.
+    mockApi({
+      budgets: [],
+      createBudget: () =>
+        jsonResponse({ detail: "A budget named team-a already exists" }, 409),
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create budget" }),
+    )
+    await user.type(screen.getByLabelText("Name (optional)"), "team-a")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create budget",
+      }),
+    )
+    expect(
+      await screen.findByText(/A budget named team-a already exists/),
+    ).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(
+      screen.queryByText(/A budget named team-a already exists/),
+    ).toBeNull()
   })
 
   it("keeps failed initial assignments retryable without creating another budget", async () => {
@@ -329,7 +577,10 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.type(screen.getByLabelText("Add a person"), "alice")
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
@@ -341,7 +592,7 @@ describe("BudgetsPage", () => {
     await vi.waitFor(() => {
       const patches = fetchMock.mock.calls.filter(
         ([url, init]) =>
-          String(url).includes("/v1/users/alice") &&
+          String(url).includes(`${API_ROOT}/users/alice`) &&
           (init?.method ?? "") === "PATCH",
       )
       expect(patches).toHaveLength(2)
@@ -349,7 +600,52 @@ describe("BudgetsPage", () => {
 
     const budgetPosts = fetchMock.mock.calls.filter(
       ([url, init]) =>
-        String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+        String(url).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(budgetPosts).toHaveLength(1)
+  })
+
+  it("closes the form when a retried assignment finally succeeds", async () => {
+    // The retry's answer is what decides whether the form is done, so it has to
+    // be awaited. Left open, `pendingAssignments` clears the moment the
+    // assignments land, the label reverts to "Create budget", and the next
+    // press creates a second budget for the same people.
+    let patches = 0
+    const fetchMock = mockApi({
+      budgets: [],
+      users: [testUser("alice")],
+      updateUser: () => {
+        patches += 1
+        return patches === 1
+          ? jsonResponse({ detail: "User update failed" }, 500)
+          : jsonResponse(testUser("alice"))
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create your first budget" }),
+    )
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
+    await user.click(await screen.findByRole("option", { name: /alice/ }))
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Create budget" }))
+
+    expect(
+      await screen.findByText(/these people were not updated: alice/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Retry assignments" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    const budgetPosts = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(budgetPosts).toHaveLength(1)
   })
@@ -370,7 +666,10 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.type(screen.getByLabelText("Add a person"), "alice")
+    await user.type(
+      screen.getByLabelText("Assign to people (optional)"),
+      "alice",
+    )
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
@@ -403,7 +702,7 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).includes("/v1/budgets") &&
+          String(url).includes(`${API_ROOT}/budgets`) &&
           (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
@@ -428,7 +727,8 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+          String(u).includes(`${API_ROOT}/budgets`) &&
+          (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
   })
@@ -453,7 +753,8 @@ describe("BudgetsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([u, init]) =>
-          String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+          String(u).includes(`${API_ROOT}/budgets`) &&
+          (init?.method ?? "") === "POST",
       ),
     ).toBe(false)
   })
@@ -479,7 +780,7 @@ describe("BudgetsPage", () => {
     expect(
       screen.getByText("Enter a whole number of days."),
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 
   it("creates an unlimited budget when the limit is left blank", async () => {
@@ -496,7 +797,8 @@ describe("BudgetsPage", () => {
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+        String(u).includes(`${API_ROOT}/budgets`) &&
+        (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: null,
@@ -516,13 +818,13 @@ describe("BudgetsPage", () => {
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
     expect(
-      await screen.findByRole("button", { name: "Save changes" }),
+      await screen.findByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText("Spending limit (USD)")).toHaveValue("42")
   })
 
   it("marks a budget an organization owns and withholds assignment on it", async () => {
-    // `/v1/users` refuses to cap a gateway user at a tenant's budget, so offering
+    // /api/v1/users refuses to cap a gateway user at a tenant's budget, so offering
     // the multiselect would be offering a save that answers 404.
     mockApi({
       budgets: [
@@ -540,7 +842,7 @@ describe("BudgetsPage", () => {
 
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     expect(
-      await screen.findByRole("button", { name: "Save changes" }),
+      await screen.findByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
     expect(screen.queryByText("Assign to people (optional)")).toBeNull()
     expect(screen.getByText(/belongs to an organization/)).toBeInTheDocument()
@@ -591,14 +893,16 @@ describe("BudgetsPage", () => {
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Delete" }))
-    expect(within(row).getByText(/lose this limit/)).toBeInTheDocument()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText(/lose this limit/)).toBeInTheDocument()
     await user.click(
-      within(row).getByRole("button", { name: "Delete permanently" }),
+      within(dialog).getByRole("button", { name: "Delete permanently" }),
     )
 
     const del = fetchMock.mock.calls.find(
       ([u, init]) =>
-        String(u).includes("/v1/budgets/") && (init?.method ?? "") === "DELETE",
+        String(u).includes(`${API_ROOT}/budgets/`) &&
+        (init?.method ?? "") === "DELETE",
     )
     expect(del).toBeDefined()
     expect(screen.queryByText("11111111")).not.toBeInTheDocument()
@@ -626,7 +930,7 @@ describe("BudgetsPage", () => {
     await vi.waitFor(() => {
       const del = fetchMock.mock.calls.find(
         ([u, init]) =>
-          String(u).includes("/v1/budgets/b1") &&
+          String(u).includes(`${API_ROOT}/budgets/b1`) &&
           (init?.method ?? "").toUpperCase() === "DELETE",
       )
       expect(del).toBeTruthy()
@@ -657,9 +961,11 @@ describe("BudgetsPage", () => {
 
     // Withheld at the request, not only in the markup.
     const read = requests.mock.calls.map(([url]) => String(url))
-    expect(read.some((url) => /\/v1\/budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/v1\/scoped-budgets/.test(url))).toBe(false)
-    expect(read.some((url) => /\/v1\/users/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/budgets/.test(url))).toBe(false)
+    expect(read.some((url) => /\/api\/v1\/scoped-budgets/.test(url))).toBe(
+      false,
+    )
+    expect(read.some((url) => /\/api\/v1\/users/.test(url))).toBe(false)
   })
 
   it("keeps the deployment page for an operator", async () => {

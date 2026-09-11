@@ -1,16 +1,13 @@
 import { Card } from "@heroui/react"
 
 import type { OrganizationMember } from "@/client"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { MembershipStatusChip } from "@/features/organization/MembershipStatusChip"
 import {
   memberLabel,
   memberRowKey,
   membershipLabel,
 } from "@/features/organization/roles"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
 
 // Who belongs to the caller's organization, read-only, for a caller who is not
 // offered Organization > Members & roles: the roles matrix has the members list

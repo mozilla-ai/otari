@@ -3,7 +3,7 @@
 The numbers a page leads with, and the marks that qualify them. Tables are in
 [data.md](data.md).
 
-```
+```text
 Is it a handful of headline numbers for the whole page?
  └── KpiStrip + KpiCell            (never StatCard; see DESIGN.md)
 Is it one number's change over a period?

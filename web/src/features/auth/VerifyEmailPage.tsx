@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useVerifyEmail } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"

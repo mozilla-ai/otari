@@ -27,7 +27,7 @@ _KEY_EXCEEDS_USER_DETAIL = (
 )
 
 router = APIRouter(
-    prefix="/v1/keys",
+    prefix="/keys",
     tags=["keys"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -42,7 +42,7 @@ async def _caller_organization_id(
     A key is minted, listed and revoked inside one organization, so every route
     here resolves the caller's before it touches a row. A dashboard session names
     the identity behind it and resolves that identity's active organization,
-    which is what ``POST /v1/organizations/me/switch`` moves; a header master key
+    which is what ``POST /api/v1/organizations/me/switch`` moves; a header master key
     names nobody, resolves the bootstrap operator, and therefore acts in the
     default organization. That is the same rule ``services/workspace_scope``
     already documents for a deployment-wide write, so an operator running several
@@ -122,8 +122,8 @@ class CreateKeyRequest(BaseModel):
         description="Per-key override of the deployment-wide capture_agent_telemetry setting: "
         "null (default) inherits it, true always stores this key's coding-agent telemetry, false "
         "always discards it. Covers both behavioral events (tool_result, tool_decision, "
-        "user_prompt, api_error) from POST /v1/logs and outcome-metric data points (lines of code, "
-        "commits, pull requests, active time) from POST /v1/metrics. Usage capture and billing are "
+        "user_prompt, api_error) from POST /otlp/v1/logs and outcome-metric data points (lines of code, "
+        "commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are "
         "unaffected either way.",
     )
     workspace_id: uuid.UUID | None = Field(
@@ -262,7 +262,7 @@ async def create_key(
         elif user.deleted_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User '{request.user_id}' has been deleted. Recreate via POST /v1/users first.",
+                detail=f"User '{request.user_id}' has been deleted. Recreate via POST /api/v1/users first.",
             )
         user_id = request.user_id
     else:

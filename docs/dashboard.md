@@ -13,7 +13,7 @@ server rather than duplicated in the frontend.
 - **Hybrid** shows gateway health and a link to the otari.ai control plane. It has
   no local management UI.
 
-The dashboard reads `GET /v1/bootstrap` before rendering. That response controls
+The dashboard reads `GET /api/v1/bootstrap` before rendering. That response controls
 the available sign-in methods and navigation surfaces, so a page that is not
 available in the current mode is not offered.
 

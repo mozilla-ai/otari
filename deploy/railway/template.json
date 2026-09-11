@@ -10,7 +10,7 @@
       },
       "deploy": {
         "startCommand": null,
-        "healthcheckPath": "/health"
+        "healthcheckPath": "/api/v1/health"
       },
       "networking": {
         "targetPort": 8000
@@ -24,7 +24,7 @@
         "OTARI_MASTER_KEY": {
           "defaultValue": "${{secret(48)}}",
           "isOptional": false,
-          "description": "Master key for the management endpoints (/v1/keys, /v1/users, /v1/budgets, ...). Auto-generated on deploy; read it from this service's Variables tab, or override with your own value."
+          "description": "Master key for the management endpoints (/api/v1/keys, /api/v1/users, /api/v1/budgets, ...). Auto-generated on deploy; read it from this service's Variables tab, or override with your own value."
         },
         "OTARI_REQUIRE_PRICING": {
           "defaultValue": "false",
@@ -34,7 +34,7 @@
         "OTARI_DEFAULT_PRICING": {
           "defaultValue": "true",
           "isOptional": false,
-          "description": "Fall back to community-maintained default pricing (the bundled genai-prices dataset) for models you have not priced explicitly. The image default is false; pre-set to true here so an env-only deploy meters common models out of the box. Prices you set in the dashboard or via /v1/pricing always override the fallback."
+          "description": "Fall back to community-maintained default pricing (the bundled genai-prices dataset) for models you have not priced explicitly. The image default is false; pre-set to true here so an env-only deploy meters common models out of the box. Prices you set in the dashboard or via /api/v1/pricing always override the fallback."
         },
         "OPENAI_API_KEY": {
           "defaultValue": "",

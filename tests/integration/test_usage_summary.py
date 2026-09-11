@@ -17,11 +17,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
+from gateway.core.config import API_ROOT
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import APIKey, UsageLog, User
 
-SUMMARY_PATH = "/v1/usage/summary"
-SERIES_PATH = "/v1/usage/series"
+SUMMARY_PATH = f"{API_ROOT}/usage/summary"
+SERIES_PATH = f"{API_ROOT}/usage/series"
 
 
 def _ensure_user(db: Session, user_id: str) -> None:
@@ -489,8 +490,8 @@ def test_every_read_endpoint_caps_the_number_of_filter_values(
     for path, extra in (
         (SUMMARY_PATH, {}),
         (SERIES_PATH, {"group_by": "model"}),
-        ("/v1/usage", {}),
-        ("/v1/usage/count", {}),
+        (f"{API_ROOT}/usage", {}),
+        (f"{API_ROOT}/usage/count", {}),
     ):
         over = client.get(path, headers=master_key_header, params={**extra, "model": too_many})
         assert over.status_code == 422, path
@@ -556,16 +557,16 @@ def test_usage_list_and_count_filter_by_session_and_provider(
     db_session.commit()
 
     rows = client.get(
-        "/v1/usage", headers=master_key_header, params={"user_id": "drill", "source_label": "sess-1"}
+        f"{API_ROOT}/usage", headers=master_key_header, params={"user_id": "drill", "source_label": "sess-1"}
     ).json()
     assert [row["source_label"] for row in rows] == ["sess-1"]
     count = client.get(
-        "/v1/usage/count", headers=master_key_header, params={"user_id": "drill", "source_label": "sess-1"}
+        f"{API_ROOT}/usage/count", headers=master_key_header, params={"user_id": "drill", "source_label": "sess-1"}
     ).json()
     assert count["total"] == 1
 
     openai_rows = client.get(
-        "/v1/usage", headers=master_key_header, params={"user_id": "drill", "provider": "openai"}
+        f"{API_ROOT}/usage", headers=master_key_header, params={"user_id": "drill", "provider": "openai"}
     ).json()
     assert len(openai_rows) == 1
     assert openai_rows[0]["provider"] == "openai"
@@ -584,17 +585,17 @@ def test_usage_list_and_count_filter_by_several_values(
     db_session.commit()
 
     params = {"user_id": "listmulti", "model": ["gpt-4", "claude"]}
-    rows = client.get("/v1/usage", headers=master_key_header, params=params).json()
+    rows = client.get(f"{API_ROOT}/usage", headers=master_key_header, params=params).json()
     assert sorted(row["model"] for row in rows) == ["claude", "gpt-4"]
 
-    count = client.get("/v1/usage/count", headers=master_key_header, params=params).json()
+    count = client.get(f"{API_ROOT}/usage/count", headers=master_key_header, params=params).json()
     assert count["total"] == len(rows) == 2
 
     # Two users, one model: the other dimension still narrows as usual.
     _make_log(db_session, user_id="listmulti2", timestamp=now, model="gpt-4")
     db_session.commit()
     both = client.get(
-        "/v1/usage/count",
+        f"{API_ROOT}/usage/count",
         headers=master_key_header,
         params={"user_id": ["listmulti", "listmulti2"], "model": "gpt-4"},
     ).json()
@@ -1092,7 +1093,7 @@ def test_tool_breakdown_counts_the_row_that_served_not_the_absorbed_attempt(
     db_session.commit()
 
     response = client.get(
-        "/v1/usage/summary",
+        f"{API_ROOT}/usage/summary",
         params={"dimensions": "tool", "user_id": "tools"},
         headers=master_key_header,
     )
@@ -1126,7 +1127,7 @@ def test_tool_breakdown_is_empty_when_only_absorbed_rows_match(
     db_session.commit()
 
     response = client.get(
-        "/v1/usage/summary",
+        f"{API_ROOT}/usage/summary",
         params={"dimensions": "tool", "status": "absorbed", "user_id": "absorbed-only"},
         headers=master_key_header,
     )
@@ -1135,7 +1136,7 @@ def test_tool_breakdown_is_empty_when_only_absorbed_rows_match(
 
 
 def _make_workspace(client: TestClient, headers: dict[str, str], name: str) -> str:
-    created = client.post("/v1/workspaces", json={"name": name}, headers=headers)
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": name}, headers=headers)
     assert created.status_code == 201, created.text
     return str(created.json()["id"])
 

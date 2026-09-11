@@ -4,9 +4,10 @@ The classifier maps an upstream provider exception to a client-facing
 (status, detail), and must return None for failures it cannot safely classify
 so callers keep the generic 502.
 
-Detail text splits on fault. A rejection of the caller's request (400/422/404)
-carries the provider's own message, redacted and length-capped, because only the
-provider knows what it objected to. A failure that is the gateway's own (rejected
+Detail text splits on whether the caller can act on the failure. A rejection of
+the caller's request (400/422/404) and a rate limit (429) carry the provider's
+own message, redacted and length-capped, because only the provider knows what it
+objected to or which quota ran out. A failure that is the gateway's own (rejected
 credentials, an exhausted account, a 5xx) keeps a fixed string and never echoes
 upstream text.
 """
@@ -29,8 +30,9 @@ from gateway.api.routes._pipeline import (
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
     failure_status_code,
+    provider_error_headers,
 )
-from gateway.api.routes._platform import _provider_failure_http_exc
+from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
@@ -141,27 +143,53 @@ def test_caller_fault_statuses_carry_the_upstream_message(status_code: int, expe
     assert classify_provider_error(exc) == (expected_status, "max_tokens must be less than or equal to 8192")
 
 
+def test_rate_limit_carries_the_upstream_message() -> None:
+    """A 429 is not the caller's request to fix, but it is theirs to act on, and
+    only the provider's text says which quota ran out and how long it lasts. A
+    fixed "you were rate-limited" discards the retry window for something the
+    status already said."""
+    exc = _ParamError(429, None, "Quota exceeded for generate_content_requests. Please retry in 34.6s.")
+    assert classify_provider_error(exc) == (
+        429,
+        "Quota exceeded for generate_content_requests. Please retry in 34.6s.",
+    )
+
+
+def test_rate_limit_message_is_still_redacted() -> None:
+    """Passing a 429's text through does not exempt it from redaction."""
+    exc = _ParamError(429, None, "Quota exceeded on project proj-a1b2c3d4 via https://internal.upstream/v1")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 429
+    assert "Quota exceeded" in mapping.detail
+    assert "proj-a1b2c3d4" not in mapping.detail
+    assert "internal.upstream" not in mapping.detail
+
+
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [
         (401, (502, PROVIDER_CREDENTIALS_DETAIL)),
         (403, (502, PROVIDER_CREDENTIALS_DETAIL)),
-        (429, (429, PROVIDER_RATE_LIMITED_DETAIL)),
     ],
 )
 def test_gateway_fault_statuses_keep_a_fixed_detail(status_code: int, expected: tuple[int, str]) -> None:
-    """A rejected credential or a rate limit is not the caller's request to fix,
-    so the detail stays fixed and the upstream text is never echoed."""
+    """A rejected credential is not something the caller can act on, so the
+    detail stays fixed and the upstream text is never echoed."""
     assert classify_provider_error(_StatusError(status_code)) == expected
 
 
-@pytest.mark.parametrize("status_code", [400, 404, 422])
-def test_caller_fault_falls_back_when_the_provider_said_nothing(status_code: int) -> None:
+@pytest.mark.parametrize("status_code", [400, 404, 422, 429])
+def test_caller_actionable_falls_back_when_the_provider_said_nothing(status_code: int) -> None:
     """An exception carrying no usable text still gets a usable detail rather
     than an empty string."""
     mapping = classify_provider_error(_ParamError(status_code, None, ""))
     assert mapping is not None
-    assert mapping.detail in (PROVIDER_BAD_REQUEST_DETAIL, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+    assert mapping.detail in (
+        PROVIDER_BAD_REQUEST_DETAIL,
+        PROVIDER_MODEL_NOT_FOUND_DETAIL,
+        PROVIDER_RATE_LIMITED_DETAIL,
+    )
 
 
 def test_status_read_from_attached_response() -> None:
@@ -204,6 +232,85 @@ def test_a_non_error_response_status_does_not_shadow_the_real_status() -> None:
     assert mapping is not None
     assert mapping.status_code == 429
     assert failure_status_code(exc) == 429
+    # google-genai's ``str()`` is "<code> <status>. <whole response body>", so
+    # joining it to ``message`` would hand the caller the sentence twice, the
+    # second time inside a JSON dump.
+    assert mapping.detail == "You exceeded your current quota. Please retry in 34.6s."
+
+
+# ---------------------------------------------------------------------------
+# Retry-After: the one upstream header a rate-limited caller can act on
+# ---------------------------------------------------------------------------
+
+
+def _rate_limited_with(retry_after: str) -> Exception:
+    """A 429 whose attached response carries ``retry_after``."""
+    exc = _StatusError(429)
+    exc.response = httpx.Response(429, headers={"Retry-After": retry_after})  # type: ignore[attr-defined]
+    return exc
+
+
+def test_retry_after_is_forwarded_on_a_429() -> None:
+    assert provider_error_headers(_rate_limited_with("34"), 429) == {"Retry-After": "34"}
+
+
+def test_retry_after_rounds_a_fraction_up() -> None:
+    """A client honoring the header must not retry before the window the
+    provider named, so 0.4s becomes 1s rather than 0s."""
+    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {"Retry-After": "1"}
+
+
+def test_retry_after_is_clamped() -> None:
+    """A provider does not get to tell this gateway's callers to sleep for a
+    year."""
+    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {"Retry-After": "86400"}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Wed, 21 Oct 2015 07:28:00 GMT",  # the HTTP-date form, deliberately dropped
+        "soon",
+        "-5",
+        "",
+        "12\r\nX-Injected: 1",
+        # float() accepts these and math.ceil raises OverflowError on them.
+        # This runs inside error handling, so a raise would turn the rate limit
+        # into a 500.
+        "inf",
+        "1e400",
+        "nan",
+    ],
+)
+def test_retry_after_that_is_not_a_number_is_dropped(raw: str) -> None:
+    """The value is re-serialized from a parsed number, never relayed as
+    received: a header value is not a body, and CRLF in one is not a formatting
+    problem."""
+    assert provider_error_headers(_rate_limited_with(raw), 429) is None
+
+
+def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
+    """A 401 surfaces as a fixed-detail 502. Its Retry-After would describe the
+    gateway's own upstream account, which is not the caller's to read."""
+    exc = _StatusError(401)
+    exc.response = httpx.Response(401, headers={"Retry-After": "34"})  # type: ignore[attr-defined]
+    assert provider_error_headers(exc, 502) is None
+
+
+def test_retry_after_absent_sends_no_header() -> None:
+    assert provider_error_headers(_StatusError(429), 429) is None
+
+
+def test_retry_after_read_through_the_exception_chain() -> None:
+    """Read through ``original_exception`` like the other upstream readers, so
+    it survives any-llm's unified-exception wrapping."""
+    assert upstream_retry_after(_WrappedError(429, _rate_limited_with("7"))) == "7"
+
+
+def test_platform_terminal_exc_forwards_retry_after() -> None:
+    exc = _provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
+    assert exc.status_code == 429
+    assert exc.headers == {"Retry-After": "34"}
 
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])
@@ -214,7 +321,7 @@ def test_unclassifiable_returns_none(exc: BaseException) -> None:
 def test_gateway_fault_details_never_echo_the_raw_message() -> None:
     """The statuses where the gateway's own credentials and topology concentrate
     keep a fixed detail, whatever the provider put in the body."""
-    for status_code in (401, 403, 429):
+    for status_code in (401, 403):
         mapping = classify_provider_error(_StatusError(status_code))
         assert mapping is not None
         assert "SECRET" not in mapping.detail
@@ -589,10 +696,7 @@ def test_billing_probe_is_gated_on_the_status_code() -> None:
     dead end. 500 stays unclassifiable (generic 502); 429 stays a rate limit,
     which is still an actionable signal for the caller."""
     assert classify_provider_error(_ParamError(500, None, _ANTHROPIC_BILLING_MSG)) is None
-    assert classify_provider_error(_ParamError(429, None, "insufficient_quota")) == (
-        429,
-        PROVIDER_RATE_LIMITED_DETAIL,
-    )
+    assert classify_provider_error(_ParamError(429, None, "insufficient_quota")) == (429, "insufficient_quota")
 
 
 def test_unrecognized_400_message_stays_a_caller_fault_400() -> None:

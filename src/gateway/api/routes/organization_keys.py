@@ -1,6 +1,6 @@
 """The caller's own API keys, for a tenant who does not operate the deployment.
 
-``/v1/keys`` is deployment-wide and operator-only (otari-ai#1880), which left a
+``/api/v1/keys`` is deployment-wide and operator-only (otari-ai#1880), which left a
 hosted organization member with no way to mint a key at all: they could not use
 the product without an operator handing them one out of band
 (mozilla-ai/otari-ai#1941). The answer is not a looser gate on that router,
@@ -14,7 +14,7 @@ established for usage reads (otari#837), applied to a write surface:
   guide already keys on), and every load below carries that owner predicate.
   There is no ``user_id`` parameter, so there is nothing for an escalation to
   travel on, and somebody else's key answers the 404 a nonexistent one does. An
-  owner an operator has revoked through ``DELETE /v1/users`` stays revoked: this
+  owner an operator has revoked through ``DELETE /api/v1/users`` stays revoked: this
   surface refuses rather than reviving the row, which is what would restore the
   spend that route deactivated.
 * **The workspace must be one the caller may see.** A named ``workspace_id``
@@ -70,9 +70,9 @@ from gateway.services.tenancy.errors import WorkspaceNotFoundError
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(
-    prefix="/v1/organizations/me/keys",
+    prefix="/organizations/me/keys",
     tags=["organization-keys"],
-    # Authentication only, like the rest of the ``/v1/organizations/me`` surface.
+    # Authentication only, like the rest of the ``/api/v1/organizations/me`` surface.
     # What the caller may touch is decided per request by the owner predicate and
     # the workspace resolver below, which is why the deployment operator gate
     # does not belong here.
@@ -143,7 +143,7 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     The organization is the caller's own ``active_organization_id``, resolved
     through ``get_active_organization_for_user`` so a pointer with no live
     membership behind it refuses rather than resolving; moving between
-    organizations is ``POST /v1/organizations/me/switch``. The owner id is the
+    organizations is ``POST /api/v1/organizations/me/switch``. The owner id is the
     identity's UUID rendered as a string, the attribution convention
     ``get_or_create_attribution_user`` documents.
     """
@@ -162,7 +162,7 @@ async def create_own_key(
 ) -> CreateKeyResponse:
     """Create an API key owned by the caller, in a workspace they may see.
 
-    The member-scoped counterpart of ``POST /v1/keys``: the owner is always the
+    The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
     caller's own attribution user, the key is always budget-enforced, and the
     workspace must be visible to the caller (a member of it, or an organization
     owner/admin/superuser, who see every workspace). The secret is returned once.
@@ -214,11 +214,11 @@ async def create_own_key(
     # ``get_or_create_attribution_user`` revives a soft-deleted row. That is what
     # the membership paths calling it want (re-adding a member must find their
     # existing owner, not mint a second one) and the wrong answer here.
-    # ``DELETE /v1/users`` is the operator's revocation of a spend identity: it
+    # ``DELETE /api/v1/users`` is the operator's revocation of a spend identity: it
     # soft-deletes the row and deactivates every key it holds, and the data plane
     # then refuses a request whose owner is deleted. Reviving it is therefore
     # restoring spend, which is not a member's to do for themselves, so this
-    # refuses where ``POST /v1/keys`` refuses the same owner.
+    # refuses where ``POST /api/v1/keys`` refuses the same owner.
     revoked = (
         await db.execute(select(User.deleted_at).where(User.user_id == str(identity.id)))
     ).scalar_one_or_none()

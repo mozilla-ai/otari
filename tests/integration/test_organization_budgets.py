@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.config import API_ROOT
 from gateway.models.entities import (
     APIKey,
     Budget,
@@ -64,8 +65,8 @@ from gateway.services.tenancy.organization_budget_service import (
     OrganizationScopedBudgetUpdate,
 )
 
-_BUDGETS = "/v1/organizations/me/budgets"
-_CEILINGS = "/v1/organizations/me/spend-ceilings"
+_BUDGETS = f"{API_ROOT}/organizations/me/budgets"
+_CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
 
 # `HTTP_422_UNPROCESSABLE_CONTENT`, not `..._ENTITY`, in the schema-refusal
 # assertions below. The two are both 422; `_ENTITY` is the deprecated alias and
@@ -219,7 +220,7 @@ def test_a_gateway_user_may_not_be_created_on_an_organizations_budget(
     user_id = f"holder-{uuid.uuid4().hex[:8]}"
 
     refused = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": user_id, "budget_id": tenant["budget_id"]},
         headers=master_key_header,
     )
@@ -227,7 +228,7 @@ def test_a_gateway_user_may_not_be_created_on_an_organizations_budget(
     assert refused.json()["detail"] == f"Budget with id '{tenant['budget_id']}' not found"
 
     # Refused whole, rather than the user landing uncapped.
-    assert client.get(f"/v1/users/{user_id}", headers=master_key_header).status_code == status.HTTP_404_NOT_FOUND
+    assert client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header).status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_a_gateway_user_may_not_be_moved_onto_an_organizations_budget(
@@ -235,24 +236,24 @@ def test_a_gateway_user_may_not_be_moved_onto_an_organizations_budget(
     master_key_header: dict[str, str],
 ) -> None:
     """The other assignment site, and the cap it already had survives the refusal."""
-    deployment = client.post("/v1/budgets", json={"max_budget": 10.0}, headers=master_key_header).json()
+    deployment = client.post(f"{API_ROOT}/budgets", json={"max_budget": 10.0}, headers=master_key_header).json()
     tenant = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
     user_id = f"holder-{uuid.uuid4().hex[:8]}"
     created = client.post(
-        "/v1/users",
+        f"{API_ROOT}/users",
         json={"user_id": user_id, "budget_id": deployment["budget_id"]},
         headers=master_key_header,
     )
     assert created.status_code == status.HTTP_200_OK, created.text
 
     refused = client.patch(
-        f"/v1/users/{user_id}",
+        f"{API_ROOT}/users/{user_id}",
         json={"budget_id": tenant["budget_id"]},
         headers=master_key_header,
     )
     assert refused.status_code == status.HTTP_404_NOT_FOUND, refused.text
 
-    still_capped = client.get(f"/v1/users/{user_id}", headers=master_key_header)
+    still_capped = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header)
     assert still_capped.json()["budget_id"] == deployment["budget_id"]
 
 
@@ -333,7 +334,7 @@ def test_a_ceiling_on_an_unknown_scope_is_refused(
     """Refused rather than created, because a scope naming nothing never binds.
 
     A ceiling on a typo is created, listed, and silently unenforced, with nothing
-    anywhere to surface it. Same rule ``POST /v1/scoped-budgets`` states.
+    anywhere to surface it. Same rule ``POST /api/v1/scoped-budgets`` states.
     """
     budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
 
@@ -446,23 +447,23 @@ def test_the_deployment_budget_list_is_not_this_one(
     """A budget defined here is the organization's, and one defined there is not.
 
     The two surfaces share the table, so this pins the filter rather than
-    assuming it: ``/v1/budgets`` sees everything, and this list sees only rows
+    assuming it: ``/api/v1/budgets`` sees everything, and this list sees only rows
     carrying the caller's organization.
     """
-    deployment = client.post("/v1/budgets", json={"name": "Deployment wide"}, headers=master_key_header)
+    deployment = client.post(f"{API_ROOT}/budgets", json={"name": "Deployment wide"}, headers=master_key_header)
     assert deployment.status_code == status.HTTP_200_OK, deployment.text
     tenant = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
 
     scoped = client.get(_BUDGETS, headers=master_key_header).json()
     assert [row["budget_id"] for row in scoped["data"]] == [tenant["budget_id"]]
 
-    everything = client.get("/v1/budgets", headers=master_key_header).json()
+    everything = client.get(f"{API_ROOT}/budgets", headers=master_key_header).json()
     assert {row["budget_id"] for row in everything} == {
         deployment.json()["budget_id"],
         tenant["budget_id"],
     }
     # And each row says which it is, so the operator's assignment control can
-    # withhold the one `POST /v1/users` would refuse.
+    # withhold the one `POST /api/v1/users` would refuse.
     owners = {row["budget_id"]: row["organization_id"] for row in everything}
     assert owners[deployment.json()["budget_id"]] is None
     assert owners[tenant["budget_id"]] == tenant["organization_id"]
@@ -478,7 +479,7 @@ def test_a_ceiling_may_not_name_a_deployment_budget(
     the organization's to enforce with, because editing its figure afterwards
     would move a cap the deployment set.
     """
-    deployment = client.post("/v1/budgets", json={"name": "Deployment wide"}, headers=master_key_header).json()
+    deployment = client.post(f"{API_ROOT}/budgets", json={"name": "Deployment wide"}, headers=master_key_header).json()
     tenant = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
 
     refused = client.post(
@@ -1053,7 +1054,7 @@ async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: Asyn
 async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_db: AsyncSession) -> None:
     """The hold the assignment sites no longer create, and still have to refuse.
 
-    Since otari#881 neither `/v1/users` site will point a gateway user at a
+    Since otari#881 neither `/api/v1/users` site will point a gateway user at a
     tenant's budget, so a row in this shape was assigned before that. Seeded
     directly for the same reason. `Budget.users` is a plain relationship, so an
     unchecked delete does not fail on it: the ORM nulls the column out, and an

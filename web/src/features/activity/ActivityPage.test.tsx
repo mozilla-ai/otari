@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
+import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
@@ -126,14 +127,14 @@ function mockApi(
         body: typeof init?.body === "string" ? init.body : undefined,
       })
 
-      if (url.endsWith("/v1/usage") && method === "DELETE") {
+      if (url.endsWith(`${API_ROOT}/usage`) && method === "DELETE") {
         return jsonResponse({ deleted: 1 })
       }
-      if (url.includes("/v1/usage/set-price")) {
+      if (url.includes(`${API_ROOT}/usage/set-price`)) {
         return jsonResponse({ matched: 1, updated: 1, unchanged: 0 })
       }
       // The read arms match the path's tail rather than the whole prefix, so one
-      // mock answers both `/v1/usage/*` and `/v1/organizations/me/usage/*`: which
+      // mock answers both /api/v1/usage/* and /api/v1/organizations/me/usage/*: which
       // of the two the page asked for is what the assertions read off `calls`.
       // The two write arms above stay deployment-wide, because they are.
       if (url.includes("/usage/count")) {
@@ -212,7 +213,7 @@ function mockApi(
       // `workspace_memberships` off this one response rather than listing
       // workspaces, so a test that leaves `workspace` unset renders the
       // deployment-wide view the other cases here assume.
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({
           organization_member_id: "om-1",
           role: "owner",
@@ -272,7 +273,7 @@ function listCalls(calls: FetchCall[]): string[] {
     .filter(
       (c) =>
         c.method === "GET" &&
-        c.url.includes("/v1/usage") &&
+        c.url.includes(`${API_ROOT}/usage`) &&
         !c.url.includes("/count") &&
         !c.url.includes("/summary") &&
         !c.url.includes("/in-flight") &&
@@ -283,7 +284,9 @@ function listCalls(calls: FetchCall[]): string[] {
 
 function countCalls(calls: FetchCall[]): string[] {
   return calls
-    .filter((c) => c.method === "GET" && c.url.includes("/v1/usage/count"))
+    .filter(
+      (c) => c.method === "GET" && c.url.includes(`${API_ROOT}/usage/count`),
+    )
     .map((c) => c.url)
 }
 
@@ -341,7 +344,7 @@ describe("ActivityPage", () => {
 
     await screen.findByText("gpt-4o")
     const summaryCalls = calls
-      .filter((c) => c.url.includes("/v1/usage/summary"))
+      .filter((c) => c.url.includes(`${API_ROOT}/usage/summary`))
       .map((c) => c.url)
     expect(summaryCalls.length).toBeGreaterThan(0)
     expect(summaryCalls.some((url) => url.includes("dimensions=model"))).toBe(
@@ -607,14 +610,15 @@ describe("ActivityPage", () => {
     // quiet gateway; the error banner must carry the failure.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) return operatorContext()
-      if (url.includes("/v1/usage/summary")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) return operatorContext()
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse({ detail: "summary exploded" }, 500)
       }
-      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 })
-      if (url.includes("/v1/usage/in-flight"))
+      if (url.includes(`${API_ROOT}/usage/count`))
+        return jsonResponse({ total: 1 })
+      if (url.includes(`${API_ROOT}/usage/in-flight`))
         return jsonResponse({ requests: [], total: 0 })
-      if (url.includes("/v1/usage")) return jsonResponse([entry()])
+      if (url.includes(`${API_ROOT}/usage`)) return jsonResponse([entry()])
       return jsonResponse([])
     })
     renderPage(<ActivityPage />)
@@ -788,7 +792,7 @@ describe("ActivityPage", () => {
     const before = listCalls(calls).length
     const entitySummaryBefore = calls.filter(
       (call) =>
-        call.url.includes("/v1/usage/summary") &&
+        call.url.includes(`${API_ROOT}/usage/summary`) &&
         call.url.includes("dimensions=user"),
     ).length
     const button = screen.getByRole("button", { name: "Refresh" })
@@ -801,7 +805,7 @@ describe("ActivityPage", () => {
       expect(
         calls.filter(
           (call) =>
-            call.url.includes("/v1/usage/summary") &&
+            call.url.includes(`${API_ROOT}/usage/summary`) &&
             call.url.includes("dimensions=user"),
         ).length,
       ).toBeGreaterThan(entitySummaryBefore),
@@ -859,11 +863,11 @@ describe("ActivityPage", () => {
   it("keeps Next reachable when the count request fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) return operatorContext()
-      if (url.includes("/v1/usage/count")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) return operatorContext()
+      if (url.includes(`${API_ROOT}/usage/count`)) {
         return jsonResponse({ detail: "boom" }, 500)
       }
-      if (url.includes("/v1/usage/summary")) {
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse({
           by_model: [],
           by_user: [],
@@ -871,10 +875,10 @@ describe("ActivityPage", () => {
           series: [],
         })
       }
-      if (url.includes("/v1/usage/in-flight")) {
+      if (url.includes(`${API_ROOT}/usage/in-flight`)) {
         return jsonResponse({ requests: [], total: 0 })
       }
-      if (url.includes("/v1/usage")) {
+      if (url.includes(`${API_ROOT}/usage`)) {
         return jsonResponse(
           Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })),
         )
@@ -1054,7 +1058,7 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const del = calls.find(
-        (c) => c.url.endsWith("/v1/usage") && c.method === "DELETE",
+        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
       )
       expect(del).toBeTruthy()
       expect(del!.body).toContain("imp-1")
@@ -1095,7 +1099,7 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const del = calls.find(
-        (c) => c.url.endsWith("/v1/usage") && c.method === "DELETE",
+        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
       )
       expect(del).toBeTruthy()
       const body = JSON.parse(del!.body ?? "{}")
@@ -1141,7 +1145,7 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const del = calls.find(
-        (c) => c.url.endsWith("/v1/usage") && c.method === "DELETE",
+        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
       )
       expect(del).toBeTruthy()
       const body = JSON.parse(del!.body ?? "{}")
@@ -1151,7 +1155,9 @@ describe("ActivityPage", () => {
 
     // The count the operator confirmed was taken under the same scope, which is
     // what makes "all 5 matching" mean the same set on both sides.
-    const counts = calls.filter((c) => c.url.includes("/v1/usage/count"))
+    const counts = calls.filter((c) =>
+      c.url.includes(`${API_ROOT}/usage/count`),
+    )
     expect(
       counts.some((c) => c.url.includes(`workspace_id=${workspaceId}`)),
     ).toBe(true)
@@ -1188,7 +1194,7 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const del = calls.find(
-        (c) => c.url.endsWith("/v1/usage") && c.method === "DELETE",
+        (c) => c.url.endsWith(`${API_ROOT}/usage`) && c.method === "DELETE",
       )
       expect(del).toBeTruthy()
       const body = JSON.parse(del!.body ?? "{}")
@@ -1197,7 +1203,9 @@ describe("ActivityPage", () => {
     })
 
     // The count that sized "all matching" was scoped to the same two models.
-    const counts = calls.filter((c) => c.url.includes("/v1/usage/count"))
+    const counts = calls.filter((c) =>
+      c.url.includes(`${API_ROOT}/usage/count`),
+    )
     expect(
       counts.some(
         (c) =>
@@ -1233,7 +1241,8 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const priceCall = calls.find(
-        (c) => c.url.includes("/v1/usage/set-price") && c.method === "POST",
+        (c) =>
+          c.url.includes(`${API_ROOT}/usage/set-price`) && c.method === "POST",
       )
       expect(priceCall).toBeTruthy()
       expect(priceCall!.body).toContain("imp-1")
@@ -1287,7 +1296,7 @@ describe("ActivityPage", () => {
 
     await waitFor(() => {
       const call = calls.find(
-        (c) => c.url.includes("/v1/pricing") && c.method === "POST",
+        (c) => c.url.includes(`${API_ROOT}/pricing`) && c.method === "POST",
       )
       expect(call).toBeTruthy()
       expect(JSON.parse(call!.body!)).toMatchObject({
@@ -1297,7 +1306,9 @@ describe("ActivityPage", () => {
       })
     })
     // Setting the model's price must not rewrite what logged rows were billed.
-    expect(calls.some((c) => c.url.includes("/v1/usage/set-price"))).toBe(false)
+    expect(
+      calls.some((c) => c.url.includes(`${API_ROOT}/usage/set-price`)),
+    ).toBe(false)
   })
 
   it("does not offer model pricing on a request that was costed", async () => {
@@ -1443,7 +1454,8 @@ describe("ActivityPage", () => {
     expect(
       calls.some(
         (c) =>
-          c.url.includes("/v1/usage/summary") && c.url.includes("start_date="),
+          c.url.includes(`${API_ROOT}/usage/summary`) &&
+          c.url.includes("start_date="),
       ),
     ).toBe(true)
   })
@@ -1492,7 +1504,7 @@ describe("ActivityPage", () => {
       expect(
         calls.some(
           (c) =>
-            c.url.includes("/v1/usage/summary") &&
+            c.url.includes(`${API_ROOT}/usage/summary`) &&
             c.url.includes("start_date="),
         ),
       ).toBe(true),
@@ -1514,7 +1526,7 @@ describe("ActivityPage", () => {
       expect(
         calls.some(
           (c) =>
-            c.url.includes("/v1/usage/summary") &&
+            c.url.includes(`${API_ROOT}/usage/summary`) &&
             c.url.includes("bucket=day") &&
             c.url.includes("start_date=2020-07-01") &&
             c.url.includes("end_date=2020-07-15"),
@@ -1544,7 +1556,7 @@ describe("ActivityPage", () => {
       expect(
         calls.some(
           (c) =>
-            c.url.includes("/v1/usage/summary") &&
+            c.url.includes(`${API_ROOT}/usage/summary`) &&
             c.url.includes("bucket=hour"),
         ),
       ).toBe(true),
@@ -1570,7 +1582,7 @@ describe("ActivityPage", () => {
       expect(
         calls.some(
           (c) =>
-            c.url.includes("/v1/usage/summary") &&
+            c.url.includes(`${API_ROOT}/usage/summary`) &&
             c.url.includes("bucket=hour"),
         ),
       ).toBe(true),
@@ -1987,7 +1999,11 @@ describe("ActivityPage filter serialization", () => {
 
     await screen.findByText("gpt-4o")
     const requested = calls.map((c) => c.url)
-    for (const path of ["/v1/usage?", "/v1/usage/count", "/v1/usage/summary"]) {
+    for (const path of [
+      `${API_ROOT}/usage?`,
+      `${API_ROOT}/usage/count`,
+      `${API_ROOT}/usage/summary`,
+    ]) {
       const hit = requested.find((url) => url.includes(path))
       expect(hit, `no request to ${path}`).toBeDefined()
       expect(hit, `${path} dropped the tool filter`).toContain(
@@ -2011,8 +2027,12 @@ describe("ActivityPage table-scan avoidance", () => {
 
     await screen.findByText("gpt-4o")
     const requested = calls.map((c) => c.url)
-    expect(requested.some((url) => url.includes("/v1/users"))).toBe(false)
-    expect(requested.some((url) => url.includes("/v1/keys"))).toBe(false)
+    expect(requested.some((url) => url.includes(`${API_ROOT}/users`))).toBe(
+      false,
+    )
+    expect(requested.some((url) => url.includes(`${API_ROOT}/keys`))).toBe(
+      false,
+    )
   })
 
   it("labels an API key column from the row, not a client-side lookup", async () => {
@@ -2023,7 +2043,7 @@ describe("ActivityPage table-scan avoidance", () => {
 
     expect(await screen.findByText("ci-bot")).toBeInTheDocument()
     expect(
-      calls.map((c) => c.url).some((url) => url.includes("/v1/keys")),
+      calls.map((c) => c.url).some((url) => url.includes(`${API_ROOT}/keys`)),
     ).toBe(false)
   })
 
@@ -2054,7 +2074,9 @@ describe("ActivityPage suggestion scoping", () => {
     // See the drill-down cases above: the label paints from the URL, so the wait
     // has to be on the summaries this assertion actually reads.
     const summariesSoFar = () =>
-      calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/summary"))
+      calls
+        .map((c) => c.url)
+        .filter((url) => url.includes(`${API_ROOT}/usage/summary`))
     await waitFor(() =>
       expect(
         summariesSoFar().some((url) => url.includes("dimensions=user")),
@@ -2227,14 +2249,15 @@ describe("ActivityPage live traffic", () => {
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) return operatorContext()
-      if (url.includes("/v1/usage/in-flight")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) return operatorContext()
+      if (url.includes(`${API_ROOT}/usage/in-flight`)) {
         return failing
           ? jsonResponse({ detail: "gateway restarting" }, 503)
           : jsonResponse({ requests: [inFlightRequest()], total: 1 })
       }
-      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 0 })
-      if (url.includes("/v1/usage/summary")) {
+      if (url.includes(`${API_ROOT}/usage/count`))
+        return jsonResponse({ total: 0 })
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse({
           by_model: [],
           by_user: [],
@@ -2287,10 +2310,10 @@ describe("ActivityPage live traffic", () => {
 
     const requested = calls
       .map((c) => c.url)
-      .filter((url) => url.includes("/v1/usage/in-flight"))
+      .filter((url) => url.includes(`${API_ROOT}/usage/in-flight`))
     expect(requested.length).toBeGreaterThan(0)
     for (const url of requested) {
-      expect(url).toBe("/v1/usage/in-flight")
+      expect(url).toBe(`${API_ROOT}/usage/in-flight`)
     }
   })
 
@@ -2357,7 +2380,8 @@ describe("ActivityPage live traffic", () => {
       expect(panel).not.toBeNull()
 
       const polls = () =>
-        calls.filter((c) => c.url.includes("/v1/usage/in-flight")).length
+        calls.filter((c) => c.url.includes(`${API_ROOT}/usage/in-flight`))
+          .length
       const before = polls()
       await vi.advanceTimersByTimeAsync(5_000)
       await waitFor(() => expect(polls()).toBeGreaterThan(before + 1))
@@ -2450,18 +2474,18 @@ describe("ActivityPage live traffic", () => {
     let countAsks = 0
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/organizations/me")) return operatorContext()
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) return operatorContext()
       // The pinned count and the polled one share a URL, so fail every count after
       // the first: the page keeps a total and loses any way to tell if it is current.
-      if (url.includes("/v1/usage/count")) {
+      if (url.includes(`${API_ROOT}/usage/count`)) {
         countAsks += 1
         return countAsks === 1
           ? jsonResponse({ total: 1 })
           : jsonResponse({ detail: "nope" }, 500)
       }
-      if (url.includes("/v1/usage/in-flight"))
+      if (url.includes(`${API_ROOT}/usage/in-flight`))
         return jsonResponse({ requests: [], total: 0 })
-      if (url.includes("/v1/usage/summary")) {
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse({
           by_model: [],
           by_user: [],
@@ -2573,7 +2597,7 @@ describe("ActivityPage for a tenant who does not operate the deployment", () => 
     // forgotten on the count or the summary would put another tenant's totals
     // beside this tenant's rows (otari#837).
     for (const call of reads) {
-      expect(call.url).toContain("/v1/organizations/me/usage")
+      expect(call.url).toContain(`${API_ROOT}/organizations/me/usage`)
     }
   })
 
@@ -2621,7 +2645,7 @@ describe("ActivityPage when the organization context fails", () => {
   })
 
   it("still asks for usage, and reports the refusal rather than painting an empty log", async () => {
-    // The usage hooks wait on `GET /v1/organizations/me` to learn which surface
+    // The usage hooks wait on `GET /api/v1/organizations/me` to learn which surface
     // this caller may read. An errored context must not read as "keep waiting":
     // that issues no request at all, and the page then states, with no banner,
     // that a gateway serving traffic has none (otari#837).
@@ -2629,7 +2653,7 @@ describe("ActivityPage when the organization context fails", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       calls.push(url)
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({ detail: "no active membership" }, 404)
       }
       if (url.includes("/usage/in-flight")) {
@@ -2647,10 +2671,10 @@ describe("ActivityPage when the organization context fails", () => {
     // would be a cross-tenant read.
     await waitFor(() =>
       expect(
-        calls.some((url) => url.includes("/v1/organizations/me/usage")),
+        calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
       ).toBe(true),
     )
-    expect(calls.some((url) => url.startsWith("/v1/usage"))).toBe(false)
+    expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(false)
     // And the refusal reaches the operator instead of an empty table.
     expect(await screen.findByText(/context is gone/)).toBeInTheDocument()
   })

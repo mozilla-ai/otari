@@ -1,7 +1,7 @@
 """Provider metadata and runtime provider-credential management for the dashboard.
 
-The ``/v1/providers`` endpoint reports static, network-free metadata for every
-configured provider. The ``/v1/provider-credentials`` endpoints manage the
+The ``/api/v1/providers`` endpoint reports static, network-free metadata for every
+configured provider. The ``/api/v1/provider-credentials`` endpoints manage the
 ``provider_credentials`` table: providers an operator adds at runtime through the
 dashboard, encrypted at rest and merged over config.yml providers. Every route
 here describes or changes the gateway's own configuration, so the router is
@@ -54,7 +54,6 @@ from gateway.services.secret_box import (
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 router = APIRouter(
-    prefix="/v1",
     tags=["providers"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -177,7 +176,7 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     Lightweight by design so the picker never lags: provider ids come from the
     any-llm registry and names from the bundled genai-prices dataset, so no
     provider SDK is imported. The autofill hints for a chosen provider come from
-    GET /v1/providers/catalog/{provider_id}, which imports only that one SDK.
+    GET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.
     """
     return [_to_summary_schema(summary) for summary in list_known_provider_summaries()]
 
@@ -290,7 +289,7 @@ async def provider_health(
 
 
 # --------------------------------------------------------------------------- #
-# Runtime provider-credential management (/v1/provider-credentials)
+# Runtime provider-credential management (/api/v1/provider-credentials)
 # --------------------------------------------------------------------------- #
 
 

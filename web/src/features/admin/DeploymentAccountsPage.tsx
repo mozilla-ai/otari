@@ -1,24 +1,21 @@
 import { useMemo, useState } from "react"
 
 import type { DeploymentUser } from "@/client"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   useDeploymentAdminAccess,
   useDeploymentUsers,
   useUpdateDeploymentUser,
 } from "@/shared/api/deployment"
-import { RowAction, RowActionRow } from "@/shared/components/actions/RowAction"
-import {
-  DataTable,
-  type DataTableColumn,
-} from "@/shared/components/data/DataTable"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { Dot } from "@/shared/components/indicators/Dot"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { TableScrollFrame } from "@/shared/components/layout/TableScrollFrame"
 import { formatRelative } from "@/shared/helpers/format"
 
 import {

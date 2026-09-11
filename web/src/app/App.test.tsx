@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
-import { apiFetch } from "@/shared/api/client"
+import { API_ROOT, apiFetch } from "@/shared/api/client"
 import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
@@ -36,7 +36,7 @@ describe("App", () => {
       if (path === "/dashboard-build.json") {
         return { build: "test-build" } as never
       }
-      if (path === "/v1/settings") {
+      if (path === "/settings") {
         return { default_pricing: true, require_pricing: false } as never
       }
       return [] as never
@@ -105,7 +105,7 @@ describe("App", () => {
     vi.mocked(apiFetch).mockImplementation(async (path) => {
       if (
         typeof path === "string" &&
-        path.startsWith("/v1/invitations/validate")
+        path.startsWith("/invitations/validate")
       ) {
         return {
           email: "ada@example.com",
@@ -130,7 +130,7 @@ describe("App", () => {
 
   it("renders the public catalog ahead of the sign-in screen where the deployment opens it", async () => {
     vi.mocked(apiFetch).mockImplementation(async (path) => {
-      if (String(path).startsWith("/v1/catalog/models")) {
+      if (String(path).startsWith(`${API_ROOT}/catalog/models`)) {
         return {
           default_pricing: true,
           defaults_as_of: null,
@@ -233,7 +233,7 @@ describe("App", () => {
     vi.mocked(apiFetch).mockImplementation(async (path, init) => {
       if (
         typeof path === "string" &&
-        path.startsWith("/v1/invitations/validate")
+        path.startsWith("/invitations/validate")
       ) {
         const body = init?.body ? JSON.parse(String(init.body)) : {}
         return {

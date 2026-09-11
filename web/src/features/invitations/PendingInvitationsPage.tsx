@@ -21,18 +21,18 @@ import { useState } from "react"
 import { FiMail } from "react-icons/fi"
 
 import type { PendingOrganizationInvitation } from "@/client"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
 import { membershipLabel } from "@/features/organization/roles"
 import {
   useAcceptPendingMembership,
   useDeclinePendingMembership,
   usePendingOrganizationInvitations,
 } from "@/shared/api/organizations"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { EmptyState } from "@/shared/components/feedback/EmptyState"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { PageLoading } from "@/shared/components/feedback/PageLoading"
-import { PageIntro } from "@/shared/components/layout/PageIntro"
-import { Section } from "@/shared/components/layout/Section"
 import { formatDateTime } from "@/shared/helpers/format"
 
 export function PendingInvitationsPage() {

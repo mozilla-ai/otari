@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
 from .conftest import build_test_client
 
@@ -43,7 +43,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
 
 def _chat(client: TestClient, *, model: str, user: str) -> int:
     resp = client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": model, "messages": _MESSAGES, "user": user},
         headers=_MASTER_HEADER,
     )
@@ -52,7 +52,7 @@ def _chat(client: TestClient, *, model: str, user: str) -> int:
 
 def test_unpriced_model_rejected_with_402(strict_pricing_client: TestClient) -> None:
     """An unpriced model is rejected with 402 when require_pricing is on (F3)."""
-    strict_pricing_client.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    strict_pricing_client.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="priced-user") == 402
 
 
@@ -65,10 +65,10 @@ def test_missing_pricing_rejection_is_recorded_in_the_usage_log(strict_pricing_c
     count). Cost stays null: nothing was spent.
     """
     c = strict_pricing_client
-    c.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     assert _chat(c, model="openai:gpt-4o", user="priced-user") == 402
 
-    rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    rows = c.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
     assert len(rows) == 1
     # The resolved target, not the request selector: the same form every success
     # row on this pipeline uses, so a model's failures and successes group
@@ -91,12 +91,12 @@ def test_missing_pricing_rejection_is_recorded_in_the_usage_log(strict_pricing_c
     assert rows[0]["counts_toward_budget"] is True
 
     # The dashboard's live "N failed in the last hour" signal reads this count.
-    count = c.get("/v1/usage/count", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    count = c.get(f"{API_ROOT}/usage/count", params={"status": "error"}, headers=_MASTER_HEADER).json()
     assert count["total"] == 1
     # And it reads it scoped to gateway traffic, which these rows must satisfy or
     # the alarm would undercount its own rejections.
     scoped = c.get(
-        "/v1/usage/count", params={"status": "error", "source": "gateway"}, headers=_MASTER_HEADER
+        f"{API_ROOT}/usage/count", params={"status": "error", "source": "gateway"}, headers=_MASTER_HEADER
     ).json()
     assert scoped["total"] == 1
 
@@ -105,15 +105,15 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     """The pass-through gate (embeddings, images, rerank) records its 402 as well,
     so the failure count covers every rejected request, not only chat."""
     c = strict_pricing_client
-    c.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     resp = c.post(
-        "/v1/embeddings",
+        f"{API_ROOT}/embeddings",
         json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "priced-user"},
         headers=_MASTER_HEADER,
     )
     assert resp.status_code == 402
 
-    rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    rows = c.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
     assert len(rows) == 1
     assert rows[0]["endpoint"] == "/v1/embeddings"
     assert rows[0]["cost"] is None
@@ -140,22 +140,22 @@ def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client
     negative would pass even if the gate had stopped writing rows entirely.
     """
     c = strict_pricing_client
-    c.post("/v1/users", json={"user_id": "gate-user"}, headers=_MASTER_HEADER)
+    c.post(f"{API_ROOT}/users", json={"user_id": "gate-user"}, headers=_MASTER_HEADER)
 
     def issue_key(name: str, *, exempt: bool) -> str:
         body = {"key_name": name, "user_id": "gate-user", "exclude_from_budget": exempt}
-        return str(c.post("/v1/keys", json=body, headers=_MASTER_HEADER).json()["key"])
+        return str(c.post(f"{API_ROOT}/keys", json=body, headers=_MASTER_HEADER).json()["key"])
 
     def chat(key: str) -> int:
         resp = c.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": "openai:gpt-4o", "messages": _MESSAGES},
             headers={API_KEY_HEADER: f"Bearer {key}"},
         )
         return int(resp.status_code)
 
     def pricing_rejections() -> list[dict[str, Any]]:
-        rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+        rows = c.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
         return [r for r in rows if "No pricing is configured" in (r["error_message"] or "")]
 
     # Control: an enforced key hits the gate and leaves exactly one row, carrying
@@ -172,9 +172,9 @@ def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client
 
 def test_priced_model_passes_the_gate(strict_pricing_client: TestClient) -> None:
     """A priced model clears the pricing gate (no 402); any later failure is a provider error."""
-    strict_pricing_client.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    strict_pricing_client.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     strict_pricing_client.post(
-        "/v1/pricing",
+        f"{API_ROOT}/pricing",
         json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
         headers=_MASTER_HEADER,
     )
@@ -186,14 +186,14 @@ def test_budget_exempt_key_skips_pricing_gate(strict_pricing_client: TestClient)
     allowed through (logged with cost=null), not 402, since there is no budget to
     protect. The call then fails as a provider error, never a 402."""
     c = strict_pricing_client
-    c.post("/v1/users", json={"user_id": "exempt-user"}, headers=_MASTER_HEADER)
+    c.post(f"{API_ROOT}/users", json={"user_id": "exempt-user"}, headers=_MASTER_HEADER)
     key = c.post(
-        "/v1/keys",
+        f"{API_ROOT}/keys",
         json={"key_name": "exempt", "user_id": "exempt-user", "exclude_from_budget": True},
         headers=_MASTER_HEADER,
     ).json()["key"]
     resp = c.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "openai:gpt-4o", "messages": _MESSAGES},
         headers={API_KEY_HEADER: f"Bearer {key}"},
     )
@@ -203,7 +203,7 @@ def test_budget_exempt_key_skips_pricing_gate(strict_pricing_client: TestClient)
 def test_blocked_user_takes_precedence_over_missing_pricing(strict_pricing_client: TestClient) -> None:
     """A blocked user gets 403, not 402 — budget/state is checked before pricing."""
     strict_pricing_client.post(
-        "/v1/users", json={"user_id": "blocked-user", "blocked": True}, headers=_MASTER_HEADER
+        f"{API_ROOT}/users", json={"user_id": "blocked-user", "blocked": True}, headers=_MASTER_HEADER
     )
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="blocked-user") == 403
 

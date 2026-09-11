@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PasswordCard } from "@/features/account/PasswordCard"
+import { API_ROOT } from "@/shared/api/client"
 import { useOrganizationMembers } from "@/shared/api/organizations"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
@@ -68,7 +69,7 @@ describe("PasswordCard on an unclaimed deployment", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe("/v1/auth/password")
+    expect(url).toBe(`${API_ROOT}/auth/password`)
     expect(init?.method).toBe("PUT")
     // No `current_password`: there is none to prove, and sending null would be
     // a different request from the one the claim documents.
@@ -296,7 +297,7 @@ describe("PasswordCard and the member roster", () => {
     let memberFetches = 0
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.includes("/v1/organizations/me/members")) {
+      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         memberFetches += 1
         return jsonResponse({ count: 0, data: [] })
       }

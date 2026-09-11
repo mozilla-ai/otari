@@ -12,7 +12,7 @@ export function MissingGatewayAddressNotice() {
     <p className="text-caption">
       This deployment has not published the gateway address to send requests to,
       so there is no example to show here. Ask whoever runs it for the base URL,
-      then call <code>/v1/chat/completions</code> with this key in an{" "}
+      then call <code>/api/v1/chat/completions</code> with this key in an{" "}
       <code>Otari-Key</code> header.
     </p>
   )

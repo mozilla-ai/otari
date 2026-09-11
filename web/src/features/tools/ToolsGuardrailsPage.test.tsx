@@ -11,6 +11,7 @@ import type {
   ToolsResponse,
 } from "@/client"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
+import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
 
@@ -157,10 +158,10 @@ function mockApi(opts: MockOpts = {}) {
     .mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())
       }
-      if (url.includes("/v1/tools")) {
+      if (url.includes(`${API_ROOT}/tools`)) {
         if (opts.toolsStatus && opts.toolsStatus >= 400) {
           return jsonResponse({ detail: "nope" }, opts.toolsStatus)
         }
@@ -171,7 +172,7 @@ function mockApi(opts: MockOpts = {}) {
           opts.testBody ?? { ok: true, reason: "reachable (HTTP 200)" },
         )
       }
-      if (url.includes("/v1/tool-settings")) {
+      if (url.includes(`${API_ROOT}/tool-settings`)) {
         if (method === "PATCH") {
           if (opts.patchStatus && opts.patchStatus >= 400) {
             return jsonResponse(
@@ -358,7 +359,7 @@ describe("ToolsGuardrailsPage", () => {
       ).toBeInTheDocument()
       expect(
         fetchMock.mock.calls.some(([url]) =>
-          String(url).includes("/v1/pricing"),
+          String(url).includes(`${API_ROOT}/pricing`),
         ) &&
           fetchMock.mock.calls.some(
             ([, init]) => (init?.method ?? "") === "POST",
@@ -383,7 +384,7 @@ describe("ToolsGuardrailsPage", () => {
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
         ([url, init]) =>
-          String(url).includes("/v1/pricing") &&
+          String(url).includes(`${API_ROOT}/pricing`) &&
           (init?.method ?? "") === "POST",
       )
       expect(call).toBeDefined()
@@ -413,13 +414,13 @@ describe("ToolsGuardrailsPage", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
-      if (url.endsWith("/v1/organizations/me")) {
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
       if (url.includes("/tool-settings/") && url.endsWith("/test")) {
         return jsonResponse({ ok: true, reason: "reachable (HTTP 200)" })
       }
-      if (url.includes("/v1/tool-settings")) {
+      if (url.includes(`${API_ROOT}/tool-settings`)) {
         // Saving the engines field surfaces a server-changed web_search_url, so
         // the next GET re-seeds the URL field without an operator keystroke.
         if (method === "PATCH") searxngUrl = "http://searxng:9999"
@@ -524,7 +525,7 @@ describe("ToolsGuardrailsPage", () => {
       ],
     }
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-      String(input).endsWith("/v1/organizations/me")
+      String(input).endsWith(`${API_ROOT}/organizations/me`)
         ? jsonResponse(organizationContext())
         : jsonResponse(withExtra),
     )
@@ -659,7 +660,7 @@ describe("ToolsGuardrailsPage tool status", () => {
 
     const providerFetches = () =>
       fetchMock.mock.calls.filter(([url]) =>
-        String(url).includes("/v1/search-tools/providers"),
+        String(url).includes(`${API_ROOT}/search-tools/providers`),
       ).length
     await waitFor(() => expect(providerFetches()).toBeGreaterThan(0))
     const before = providerFetches()
@@ -691,7 +692,7 @@ describe("ToolsGuardrailsPage tool status", () => {
 })
 
 // otari-ai#1930: the Tools group is member-visible, but the service settings,
-// the pricing row, and the /v1/search tools are operator-only reads, so for
+// the pricing row, and the /api/v1/search tools are operator-only reads, so for
 // everyone else the page was a 403 banner, and the empty field list also
 // dropped the member-appropriate workspace cards nested under it.
 describe("ToolsGuardrailsPage by caller role", () => {
@@ -723,7 +724,9 @@ describe("ToolsGuardrailsPage by caller role", () => {
       screen.queryByRole("heading", { name: "Search tools" }),
     ).not.toBeInTheDocument()
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
-    expect(urls.some((url) => url.includes("/v1/search-tools"))).toBe(false)
+    expect(urls.some((url) => url.includes(`${API_ROOT}/search-tools`))).toBe(
+      false,
+    )
   })
 
   it("renders a non-operator's tool settings as values rather than controls", async () => {
@@ -745,7 +748,7 @@ describe("ToolsGuardrailsPage by caller role", () => {
     // The service endpoints never arrive, so nothing renders them either.
     expect(screen.queryByText("web_search_url")).not.toBeInTheDocument()
     expect(screen.queryByText("guardrails_url")).not.toBeInTheDocument()
-    // Nor the per-call rate: `/v1/pricing` is still operator-only, so this row
+    // Nor the per-call rate: /api/v1/pricing is still operator-only, so this row
     // would show a member an editable "unpriced" field that only fails on save.
     expect(screen.queryByText("Price per call")).not.toBeInTheDocument()
   })

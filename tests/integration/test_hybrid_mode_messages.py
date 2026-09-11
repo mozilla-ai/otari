@@ -1,4 +1,4 @@
-"""Hybrid-mode integration tests for /v1/messages.
+"""Hybrid-mode integration tests for /api/v1/messages.
 
 Mirrors :mod:`tests.integration.test_hybrid_mode_chat`: exercises the
 multi-attempt platform resolve / fallback / usage-reporting flow against the
@@ -26,15 +26,16 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
-from gateway.main import create_app
+
+from .conftest import app_for
 
 
 @pytest.fixture
 def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = create_app(
+    app = app_for(
         GatewayConfig(
             mode="hybrid",
             platform={"base_url": "http://platform.test/api/v1"},
@@ -119,7 +120,7 @@ def _message_response_with_1h_cache_write() -> MessageResponse:
 
 def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -128,7 +129,7 @@ def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) 
     )
 
     assert response.status_code == 401
-    # /v1/messages errors, including auth, are delivered in the Anthropic envelope.
+    # /api/v1/messages errors, including auth, are delivered in the Anthropic envelope.
     assert response.json() == {
         "detail": {
             "type": "error",
@@ -152,7 +153,7 @@ def test_hybrid_mode_maps_resolve_unauthorized(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -210,7 +211,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -270,7 +271,7 @@ def test_hybrid_mode_reports_one_hour_cache_write_subset(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -329,7 +330,7 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -394,7 +395,7 @@ def test_hybrid_mode_falls_through_on_404_model_unavailable(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -451,7 +452,7 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -517,7 +518,7 @@ def test_hybrid_mode_falls_through_on_provider_400(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -603,7 +604,7 @@ def test_hybrid_mode_resolves_workspace_mcp_server_ids(
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
         response = platform_client.post(
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -680,7 +681,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     its successful completion.
 
     Verifies the ``[:1]`` collapse is gone for tool-loop requests on
-    ``/v1/messages`` now that ``on_first_response`` lock-in is wired into
+    ``/api/v1/messages`` now that ``on_first_response`` lock-in is wired into
     ``anthropic_tool_loop``.
     """
     usage_reports: list[dict[str, Any]] = []
@@ -710,7 +711,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop_messages.amessages", fake_loop_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -789,7 +790,7 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     monkeypatch.setattr("gateway.services.mcp_loop_messages.amessages", fake_loop_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -874,7 +875,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     ):
         with platform_client.stream(
             "POST",
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -945,7 +946,7 @@ def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
     ):
         with platform_client.stream(
             "POST",
-            "/v1/messages",
+            f"{API_ROOT}/messages",
             json={
                 "model": "claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -970,7 +971,7 @@ def test_hybrid_mode_count_tokens_requires_authorization_header(
     platform_client: TestClient,
 ) -> None:
     response = platform_client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1005,7 +1006,7 @@ def test_hybrid_mode_count_tokens_validates_token(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1046,7 +1047,7 @@ def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fail_amessages)
 
     response = platform_client.post(
-        "/v1/messages/count_tokens",
+        f"{API_ROOT}/messages/count_tokens",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1090,7 +1091,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1128,7 +1129,7 @@ def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1147,7 +1148,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Streaming MCP request on /v1/messages: the first attempt errors before
+    """Streaming MCP request on /api/v1/messages: the first attempt errors before
     yielding any event, so the gateway falls through to the second attempt and
     streams its response (same pre-lock-in semantics as chat, which this
     format previously collapsed to a single attempt)."""
@@ -1190,7 +1191,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     monkeypatch.setattr("gateway.api.routes.messages.anthropic_tool_loop_stream", fake_loop_stream)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1260,7 +1261,7 @@ def test_container_is_refused_on_a_managed_credential(
     _container_route(monkeypatch, managed=True, calls=calls)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1286,7 +1287,7 @@ def test_container_reaches_a_byo_credential(
     _container_route(monkeypatch, managed=False, calls=calls)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1323,7 +1324,7 @@ def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
@@ -1346,7 +1347,7 @@ def test_a_request_without_a_container_is_untouched_by_the_gate(
     _container_route(monkeypatch, managed=True, calls=calls)
 
     response = platform_client.post(
-        "/v1/messages",
+        f"{API_ROOT}/messages",
         json={
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],

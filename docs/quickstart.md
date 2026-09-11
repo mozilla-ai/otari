@@ -44,7 +44,7 @@ To store provider credentials through the dashboard instead, leave
 ```bash
 docker compose pull
 docker compose up -d
-curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/health
 ```
 
 The first startup on an empty database creates an API key and prints it once.
@@ -54,7 +54,7 @@ from the dashboard at `http://localhost:8000/`.
 ## Send a request
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:8000/api/v1/chat/completions \
   -H "Authorization: Bearer gw-..." \
   -H "Content-Type: application/json" \
   -d '{

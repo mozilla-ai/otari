@@ -3,6 +3,10 @@ import { useState } from "react"
 import { FiKey, FiSmartphone } from "react-icons/fi"
 
 import type { Passkey } from "@/client"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { Section } from "@/design-system/layout/Section"
 import {
   useDeletePasskey,
   usePasskeys,
@@ -10,10 +14,6 @@ import {
   useRenamePasskey,
 } from "@/shared/api/auth"
 import { RowActions } from "@/shared/components/deprecated/RowActions"
-import { ConfirmDialog } from "@/shared/components/feedback/ConfirmDialog"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { FieldMessages } from "@/shared/components/forms/FieldMessages"
-import { Section } from "@/shared/components/layout/Section"
 import { formatDateTime } from "@/shared/helpers/format"
 import {
   MAX_PASSKEY_NAME_LENGTH,

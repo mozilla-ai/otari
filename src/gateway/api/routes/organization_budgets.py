@@ -2,7 +2,7 @@
 
 Mounted by ``_register_core_routers`` for standalone **and hosted** deployments;
 only hybrid mode has no management API. Spelled out rather than the "standalone
-mode only" shorthand the neighbouring ``/v1/organizations/me`` routers use,
+mode only" shorthand the neighbouring ``/api/v1/organizations/me`` routers use,
 because on this surface the shorthand would name the wrong audience: a hosted
 organization's admin is exactly who otari-ai#1943 added it for.
 
@@ -21,7 +21,7 @@ cannot name an organization at all, because the caller's identity already points
 at one, so there is no parameter that could be confused with an authorization
 decision.
 
-These sit *beside* ``/v1/budgets`` and ``/v1/scoped-budgets``, which stay the
+These sit *beside* ``/api/v1/budgets`` and ``/api/v1/scoped-budgets``, which stay the
 deployment's own surface behind ``require_deployment_operator``. The tables are
 shared; what differs is which rows a caller may reach. A budget with no
 ``organization_id`` is the deployment's, and no route here lists, offers or
@@ -52,13 +52,13 @@ from gateway.services.tenancy.organization_budget_service import (
 # says a request is authenticated, the membership says whether that identity may
 # set what this organization's members are allowed to spend.
 budgets_router = APIRouter(
-    prefix="/v1/organizations/me/budgets",
+    prefix="/organizations/me/budgets",
     tags=["organization-budgets"],
     dependencies=[Depends(verify_master_key)],
 )
 
 ceilings_router = APIRouter(
-    prefix="/v1/organizations/me/spend-ceilings",
+    prefix="/organizations/me/spend-ceilings",
     tags=["organization-budgets"],
     dependencies=[Depends(verify_master_key)],
 )

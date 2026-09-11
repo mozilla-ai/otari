@@ -8,9 +8,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
+from gateway.core.config import API_ROOT
 from gateway.models.entities import AgentTelemetry, APIKey, User
 
-DELETE_PATH = "/v1/agent-telemetry"
+DELETE_PATH = f"{API_ROOT}/agent-telemetry"
 
 _TS = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
@@ -185,7 +186,7 @@ def test_delete_user_removes_only_that_users_agent_telemetry_rows(
     _make_row(db_session, row_id="bob-row", user_id="bob")
     db_session.commit()
 
-    resp = client.delete("/v1/users/alice", headers=master_key_header)
+    resp = client.delete(f"{API_ROOT}/users/alice", headers=master_key_header)
     assert resp.status_code == 204
 
     db_session.expire_all()
@@ -213,7 +214,7 @@ def test_purge_by_filter_removes_metric_rows_alongside_behavioral_ones(
     assert _get(db_session, "alice-metric") is None
     assert _get(db_session, "bob-behavioral") is not None
 
-    count = client.get("/v1/agent-telemetry/count", params={"user_id": "alice"}, headers=master_key_header)
+    count = client.get(f"{API_ROOT}/agent-telemetry/count", params={"user_id": "alice"}, headers=master_key_header)
     assert count.status_code == 200
     assert count.json()["total"] == 0
 
@@ -226,7 +227,7 @@ def test_delete_user_removes_that_users_metric_rows_too(
     _make_metric_row(db_session, row_id="bob-metric", user_id="bob")
     db_session.commit()
 
-    resp = client.delete("/v1/users/alice", headers=master_key_header)
+    resp = client.delete(f"{API_ROOT}/users/alice", headers=master_key_header)
     assert resp.status_code == 204
 
     db_session.expire_all()

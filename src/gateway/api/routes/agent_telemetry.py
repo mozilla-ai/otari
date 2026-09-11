@@ -61,7 +61,7 @@ from gateway.services.agent_telemetry_service import (
 )
 
 router = APIRouter(
-    prefix="/v1/agent-telemetry",
+    prefix="/agent-telemetry",
     tags=["agent-telemetry"],
     dependencies=[Depends(require_deployment_operator)],
 )
@@ -94,7 +94,7 @@ _API_KEY_DESC = (
 )
 _SESSION_DESC = (
     "Filter to a single agent session. Matches agent_telemetry.session_label and, on the usage side of "
-    "the join, the usage_logs.source_label that /v1/usage/summary filters on"
+    "the join, the usage_logs.source_label that /api/v1/usage/summary filters on"
 )
 _BUCKET_DESC = "Time-series granularity: 'hour' or 'day'"
 
@@ -268,7 +268,7 @@ def _usage_filters(
     """The same scope, expressed against usage_logs, for the cost side of the join.
 
     A session is named ``source_label`` on this side of the join, which is the
-    column `/v1/usage/summary` already filters sessions on.
+    column `/api/v1/usage/summary` already filters sessions on.
     """
     conditions: list[ColumnElement[bool]] = [UsageLog.timestamp >= start, UsageLog.timestamp < end]
     if user_id:
@@ -385,7 +385,7 @@ async def agent_telemetry_summary(
 ) -> AgentTelemetrySummary:
     """What the coding agent produced in a window, and what it cost (standalone).
 
-    Range-bounded like `/v1/usage/summary` (default last 30 days, hard-capped),
+    Range-bounded like `/api/v1/usage/summary` (default last 30 days, hard-capped),
     so the aggregates stay served by the timestamp index. Returns the outcome
     totals (commits, pull requests, lines changed, active time), the behavioral
     counts already captured from the logs signal (tool calls and their mix, tool
@@ -417,7 +417,7 @@ async def agent_telemetry_summary(
 
     outcome_totals, outcomes_by_bucket = await _metric_increments(storage, scope, bucket, start)
     behavior = _fold_behavior(await storage.behavior_counts(filters=scope))
-    # Requests, not rows, the same way /v1/usage/summary counts them: a routed
+    # Requests, not rows, the same way /api/v1/usage/summary counts them: a routed
     # request writes one row per recovered attempt, and counting those would
     # deflate the error rate against a request volume the Usage page never shows.
     usage_row = (
@@ -556,7 +556,7 @@ async def agent_telemetry_series(
 ) -> AgentTelemetryGroupedSeries:
     """Row volume over time, split by user or API key (standalone).
 
-    Mirrors `/v1/usage/series`: same window bounds and bucket-grid cap, the top
+    Mirrors `/api/v1/usage/series`: same window bounds and bucket-grid cap, the top
     groups as their own series with the remainder folded into a reconciling
     ``other``, and sparse points (populated cells only). Counts rows, not spend,
     so it charts telemetry volume rather than cost. Master-key only.

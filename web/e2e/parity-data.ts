@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test"
-
+import { API_ROOT } from "@/shared/api/client"
 import { authHeaders, expectOk } from "./helpers"
 
 // The fixture the behavioral-parity specs read.
@@ -144,7 +144,7 @@ function scratchEvents(): SeedEvent[] {
 // re-report it as a row count that is short by half, three files later.
 async function ensureUsers(page: Page): Promise<void> {
   for (const userId of Object.values(PARITY.users)) {
-    const created = await page.request.post("/v1/users", {
+    const created = await page.request.post(`${API_ROOT}/users`, {
       headers: authHeaders,
       data: { user_id: userId },
     })
@@ -164,7 +164,7 @@ const PRICE_EFFECTIVE_AT = "2020-01-01T00:00:00.000Z"
 
 // Price one of the two models.
 async function ensurePricing(page: Page): Promise<void> {
-  const priced = await page.request.post("/v1/pricing", {
+  const priced = await page.request.post(`${API_ROOT}/pricing`, {
     headers: authHeaders,
     data: {
       model_key: PRICED_MODEL_KEY,
@@ -193,7 +193,7 @@ export async function seedParityUsage(page: Page): Promise<void> {
     ...errorEvents(),
     ...scratchEvents(),
   ]
-  const seeded = await page.request.post("/v1/usage/external-events", {
+  const seeded = await page.request.post(`${API_ROOT}/usage/external-events`, {
     headers: authHeaders,
     data: { source: PARITY.source, events },
   })

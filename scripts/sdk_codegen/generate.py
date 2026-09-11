@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gateway.core.config import API_ROOT
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SPEC = REPO_ROOT / "docs" / "public" / "openapi.json"
 DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "sdk-codegen"
@@ -327,11 +329,11 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
             "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{schema_name}"}}},
         }
 
-    set_json_200("/v1/chat/completions", "ChatCompletion", "Chat completion")
-    set_json_200("/v1/messages", "MessageResponse", "Anthropic-style message")
-    set_json_200("/v1/rerank", "RerankResponse", "Rerank result")
-    set_json_200("/v1/embeddings", "CreateEmbeddingResponse", "Embeddings")
-    set_json_200("/v1/images/generations", "ImagesResponse", "Generated images")
+    set_json_200(f"{API_ROOT}/chat/completions", "ChatCompletion", "Chat completion")
+    set_json_200(f"{API_ROOT}/messages", "MessageResponse", "Anthropic-style message")
+    set_json_200(f"{API_ROOT}/rerank", "RerankResponse", "Rerank result")
+    set_json_200(f"{API_ROOT}/embeddings", "CreateEmbeddingResponse", "Embeddings")
+    set_json_200(f"{API_ROOT}/images/generations", "ImagesResponse", "Generated images")
 
     schemas["ChatCompletionRequest"]["properties"]["messages"] = {
         "type": "array",

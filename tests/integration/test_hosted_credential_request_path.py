@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.entities import User
 
@@ -110,7 +110,7 @@ def plain_client(postgres_url: str) -> Generator[TestClient]:
 
 
 def _create_user(client: TestClient, user_id: str = "u1") -> None:
-    response = client.post("/v1/users", json={"user_id": user_id, "alias": user_id}, headers=HEADERS)
+    response = client.post(f"{API_ROOT}/users", json={"user_id": user_id, "alias": user_id}, headers=HEADERS)
     assert response.status_code == 200, response.text
 
 
@@ -124,7 +124,7 @@ def _post_chat_capture(client: TestClient, model: str) -> tuple[dict[str, object
 
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=fake_acompletion)):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={"model": model, "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
             headers=HEADERS,
         )
@@ -237,11 +237,11 @@ def test_an_adapter_failure_returns_the_budget_hold(overlay_client: TestClient, 
     called; this one asserts the column it is called for.
     """
     budget = overlay_client.post(
-        "/v1/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=HEADERS
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=HEADERS
     ).json()
     assert (
         overlay_client.post(
-            "/v1/users", json={"user_id": "held", "budget_id": budget["budget_id"]}, headers=HEADERS
+            f"{API_ROOT}/users", json={"user_id": "held", "budget_id": budget["budget_id"]}, headers=HEADERS
         ).status_code
         == 200
     )
@@ -249,7 +249,7 @@ def test_an_adapter_failure_returns_the_budget_hold(overlay_client: TestClient, 
     # this the assertion below would hold whether or not anything was refunded.
     assert (
         overlay_client.post(
-            "/v1/pricing",
+            f"{API_ROOT}/pricing",
             json={
                 "model_key": "groq:llama-3.3-70b",
                 "input_price_per_million": 1000.0,
@@ -259,10 +259,10 @@ def test_an_adapter_failure_returns_the_budget_hold(overlay_client: TestClient, 
         ).status_code
         == 200
     )
-    key = overlay_client.post("/v1/keys", json={"user_id": "held"}, headers=HEADERS).json()["key"]
+    key = overlay_client.post(f"{API_ROOT}/keys", json={"user_id": "held"}, headers=HEADERS).json()["key"]
 
     response = overlay_client.post(
-        "/v1/chat/completions",
+        f"{API_ROOT}/chat/completions",
         json={"model": "groq:llama-3.3-70b", "messages": [{"role": "user", "content": "Hi" * 500}]},
         headers={API_KEY_HEADER: f"Bearer {key}"},
     )
@@ -296,7 +296,7 @@ def test_the_refusal_body_carries_no_adapter_wording(overlay_client: TestClient)
 
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_MockCompletionError)):
         response = overlay_client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             json={
                 "model": "mistral:mistral-large-latest",
                 "messages": [{"role": "user", "content": "Hi"}],

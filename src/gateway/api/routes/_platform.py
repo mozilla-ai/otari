@@ -12,6 +12,7 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
+import math
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -34,9 +35,15 @@ from gateway.core.usage import (
 )
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt
-from gateway.models.mcp import McpServerConfig
+from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.mcp_stateless import (
+    CODE_RESOLUTION_FAILED,
+    CODE_SERVER_NOT_FOUND,
+    ExecutionState,
+    McpExecutionError,
+)
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 
@@ -244,11 +251,15 @@ def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> H
     """
     # Deferred import: _pipeline imports this module, so importing it at module
     # scope would be circular.
-    from gateway.api.routes._pipeline import classify_provider_error
+    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers
 
     mapping = classify_provider_error(exc)
     if mapping is not None:
-        return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+        return HTTPException(
+            status_code=mapping.status_code,
+            detail=mapping.detail,
+            headers=provider_error_headers(exc, mapping.status_code),
+        )
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail)
 
 
@@ -545,7 +556,13 @@ async def _post_resolve(
         ) from None
 
     if response.status_code == 200:
-        return response.json()
+        try:
+            return response.json()
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Authorization service unavailable",
+            ) from None
 
     if response.status_code in {400, 401, 402, 403, 404, 429}:
         detail = _safe_detail_from_platform(response, client_error_detail)
@@ -811,6 +828,50 @@ def upstream_error_message(exc: BaseException) -> str:
     return " ".join(parts)
 
 
+# A day. A provider (or a confused proxy in front of one) does not get to tell
+# this gateway's callers to sleep for a year.
+_MAX_RETRY_AFTER_SECONDS = 86400
+
+
+def upstream_retry_after(exc: BaseException) -> str | None:
+    """The upstream ``Retry-After`` as whole seconds, or ``None``.
+
+    Read from the exception's own headers or its attached response's, whichever
+    carries them, walking the ``original_exception`` chain like the other
+    upstream readers here.
+
+    The value is re-serialized from a parsed number rather than relayed as
+    received, so nothing a provider chooses reaches a response header the
+    gateway emits: a header value is not a body, and CRLF in one is not a
+    formatting problem. Fractional seconds round up, since a client honoring
+    the header must not retry before the window the provider named. The
+    HTTP-date form is dropped rather than parsed, because no provider sends one
+    here and a value that cannot be bounded is not one to relay.
+    """
+    for current in upstream_exception_chain(exc):
+        for holder in (current, getattr(current, "response", None)):
+            # Mapping-like but not necessarily a Mapping: httpx.Headers here, a
+            # plain dict where an SDK copies them out.
+            get_header = getattr(getattr(holder, "headers", None), "get", None)
+            if not callable(get_header):
+                continue
+            raw = get_header("retry-after") or get_header("Retry-After")
+            if not isinstance(raw, str):
+                continue
+            try:
+                parsed = float(raw.strip())
+            except ValueError:
+                continue
+            # ``float`` accepts "inf" and "1e400", and ``math.ceil`` raises
+            # OverflowError on both. This runs inside error handling, so an
+            # exception here would turn a rate limit into a 500.
+            if not math.isfinite(parsed) or parsed < 0:
+                continue
+            seconds = math.ceil(parsed)
+            return str(min(seconds, _MAX_RETRY_AFTER_SECONDS))
+    return None
+
+
 def is_provider_billing_error(exc: BaseException) -> bool:
     """True when a 4xx is the provider saying "this account is out of money".
 
@@ -892,6 +953,61 @@ async def _resolve_platform_mcp_servers(
         )
         for s in payload.get("servers", [])
     ]
+
+
+async def _resolve_platform_mcp_server(
+    config: GatewayConfig,
+    user_token: str,
+    mcp_server_id: uuid.UUID,
+) -> ResolvedMcpServer:
+    """Resolve one stored MCP server for the stored-server endpoints.
+
+    The same platform resolver `_resolve_platform_mcp_servers` calls, with a
+    one-id request. A current peer may echo ``id`` and ``enabled``; an older peer
+    returns only the connection config and omits a disabled server. Exactly one
+    legacy entry is therefore bound to the only id requested and treated as
+    enabled. An explicit id must still match, and an explicit enabled value must
+    still be a strict boolean (R-RES-1).
+
+    An empty list is the legacy disabled-server answer and is indistinguishable
+    here from an inaccessible server, which is also the public 404 contract.
+    Several entries, a mismatched id, a missing ``servers`` list, or a field
+    Otari cannot read remain resolution failures.
+
+    Raises:
+        McpExecutionError: the server was inaccessible, or the answer was not a
+            matching, well-formed entry.
+        HTTPException: the platform itself refused, for the route to classify.
+    """
+    payload = await _post_resolve(
+        config,
+        user_token=user_token,
+        path="/gateway/mcp-servers/resolve",
+        body={"mcp_server_ids": [str(mcp_server_id)]},
+        client_error_detail="MCP server resolution failed",
+    )
+    servers = payload.get("servers") if isinstance(payload, dict) else None
+    if not isinstance(servers, list):
+        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
+    if not servers:
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
+    if len(servers) != 1:
+        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
+
+    entry = servers[0]
+    if isinstance(entry, dict):
+        entry = dict(entry)
+        entry.setdefault("id", mcp_server_id)
+        entry.setdefault("enabled", True)
+    try:
+        resolved = ResolvedMcpServer.model_validate(entry)
+    except ValidationError:
+        # No detail from the validator travels: it would quote the resolver's
+        # own payload, which carries the stored URL and credential.
+        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
+    if resolved.id != mcp_server_id:
+        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
+    return resolved
 
 
 async def _resolve_platform_web_search(

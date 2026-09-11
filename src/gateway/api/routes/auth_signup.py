@@ -30,7 +30,7 @@ from gateway.services.tenancy.user_service import (
     verify_email,
 )
 
-router = APIRouter(prefix="/v1/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 # A generous sanity ceiling on the submitted password, not the policy: the
 # policy (length, bcrypt's 72-byte ceiling) is enforced in the service so its

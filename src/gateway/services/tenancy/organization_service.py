@@ -1086,7 +1086,7 @@ class OrganizationService:
         Only reachable by an identity that can sign in, which an invited
         address may not be able to yet: an invitation to an address with no
         identity mints a password-less one, and claiming it is
-        ``POST /v1/auth/signup``. So this serves the case the emailed link
+        a sign-up. So this serves the case the emailed link
         serves worst, someone who already has an account and was invited to a
         second organization, rather than replacing that link.
         """

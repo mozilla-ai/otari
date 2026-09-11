@@ -1,18 +1,18 @@
 # Use with Claude Code
 
 Claude Code speaks the Anthropic Messages API. Otari serves
-`POST /v1/messages` and `POST /v1/messages/count_tokens` in standalone and
+`POST /api/v1/messages` and `POST /api/v1/messages/count_tokens` in standalone and
 hybrid modes.
 
 ## Route Claude Code through Otari
 
-Claude Code appends the Messages paths itself, so `ANTHROPIC_BASE_URL` must be
-the Otari origin without `/v1`.
+Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
+`/api`, not `/api/v1`.
 
 ### Connected to otari.ai
 
 ```bash
-export ANTHROPIC_BASE_URL="https://api.otari.ai"
+export ANTHROPIC_BASE_URL="https://api.otari.ai/api"
 export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
@@ -25,7 +25,7 @@ Otari user ID, so create or update its API key with
 `reject_user_mismatch: false`. Spend still binds to the key's user.
 
 ```bash
-curl "$OTARI_URL/v1/keys" \
+curl "$OTARI_URL/api/v1/keys" \
   -H "Authorization: Bearer $OTARI_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -38,7 +38,7 @@ curl "$OTARI_URL/v1/keys" \
 Then point Claude Code at the standalone gateway:
 
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:8000"
+export ANTHROPIC_BASE_URL="http://localhost:8000/api"
 export ANTHROPIC_AUTH_TOKEN="gw-your-otari-key"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
@@ -74,13 +74,13 @@ export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_LOGS_EXPORTER=otlp
 export OTEL_METRICS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer gw-your-import-key"
 claude
 ```
 
-The endpoint is the Otari origin; the exporter appends `/v1/logs` and
-`/v1/metrics`. Use an HTTP protocol because Otari does not accept OTLP over
+The endpoint is the Otari origin plus `/otlp`; the exporter appends `/v1/logs`
+and `/v1/metrics`. Use an HTTP protocol because Otari does not accept OTLP over
 gRPC.
 
 Imported events are priced for analytics and never count toward budgets. Do not
@@ -112,7 +112,7 @@ every import has.
 
 The master key works too, and it is the only credential that can import on behalf
 of somebody else. It requires `--user-id`, and that user must already exist
-(create one with `POST /v1/users` first):
+(create one with `POST /api/v1/users` first):
 
 ```bash
 export OTARI_MASTER_KEY="your-master-key"

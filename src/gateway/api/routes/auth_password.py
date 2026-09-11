@@ -1,6 +1,6 @@
 """Setting and changing the password a dashboard sign-in uses.
 
-One endpoint, ``PUT /v1/auth/password``, and it always acts on the caller's own
+One endpoint, ``PUT /api/v1/auth/password``, and it always acts on the caller's own
 identity. There is deliberately no way here for an admin to set somebody else's
 password: an address on the roster with no password is an identity waiting for
 the signup and reset flows in #650, not one an operator should be able to take
@@ -66,7 +66,7 @@ from gateway.services.tenancy.user_service import set_password, update_password
 _MAX_SUBMITTED_PASSWORD = 1024
 
 router = APIRouter(
-    prefix="/v1/auth/password",
+    prefix="/auth/password",
     tags=["auth"],
     dependencies=[Depends(verify_master_key)],
 )
@@ -132,7 +132,7 @@ class PasswordResponse(BaseModel):
     email: str = Field(description="The address this identity signs in with.")
     master_key_sign_in_retired: bool = Field(
         description=(
-            "Whether POST /v1/auth/session has stopped accepting the master key as a dashboard "
+            "Whether POST /api/v1/auth/session has stopped accepting the master key as a dashboard "
             "login. True once the operator identity has a password, which is what claiming the "
             "deployment means; a member setting their own password leaves an unclaimed deployment "
             "on the master key. Either way the master key stays the credential for the management API."

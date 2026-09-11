@@ -7,6 +7,9 @@ import type {
   ActivationAttempt,
   WorkspaceActivation,
 } from "@/client"
+import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
   useCreateActivationKey,
@@ -15,9 +18,6 @@ import {
 } from "@/shared/api/activation"
 import { useModels } from "@/shared/api/models"
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
-import { CopyField } from "@/shared/components/actions/CopyField"
-import { ErrorBanner } from "@/shared/components/feedback/ErrorBanner"
-import { InfoBanner } from "@/shared/components/feedback/InfoBanner"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,
@@ -61,7 +61,7 @@ export function SetupGuideCard({
   /**
    * Whether a request from this caller could succeed, which is the page's
    * answer to give rather than this card's to fetch. Each Overview reads it off
-   * what it may see: the operator's from `/v1/providers`, which refuses a
+   * what it may see: the operator's from `/providers`, which refuses a
    * tenant, and the organization's from the model catalog, which lists the
    * selectors that caller may name.
    *
@@ -249,7 +249,11 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
         Copy this key now. It is shown once, and reopening this guide issues a
         new one in its place.
       </InfoBanner>
-      <CopyField label="API key" value={issued.key} />
+      <CopyField
+        label="API key"
+        value={issued.key}
+        concealed={CONCEALED_SECRET}
+      />
       {snippetInput === undefined ? <MissingGatewayAddressNotice /> : null}
       {snippetInput !== undefined && model === undefined ? (
         <p className="text-caption">
@@ -267,14 +271,25 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
       ) : null}
       {snippetInput !== undefined ? (
         <>
+          {/* Concealed around the stand-in rather than the key: a snippet
+              printing the plaintext would hand it to anyone reading the
+              screen, directly under a concealed key field. */}
           <CopyField
             label="curl"
             value={buildCurlSnippet(snippetInput)}
+            concealed={buildCurlSnippet({
+              ...snippetInput,
+              apiKey: CONCEALED_SECRET,
+            })}
             multiline
           />
           <CopyField
             label="Python (OpenAI SDK)"
             value={buildPythonSnippet(snippetInput)}
+            concealed={buildPythonSnippet({
+              ...snippetInput,
+              apiKey: CONCEALED_SECRET,
+            })}
             multiline
           />
         </>

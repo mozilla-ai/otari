@@ -27,6 +27,7 @@ from gateway.api.routes import (
     keys,
     mail,
     maintenance_mode,
+    mcp,
     messages,
     models,
     moderations,
@@ -62,19 +63,19 @@ from gateway.api.routes import (
     workspaces,
 )
 from gateway.container import Container
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 
 
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     """Mount Otari's own routers, then whatever the bootstrap contributed.
 
-    One aggregate router carries them all, so the mount prefix has one owner.
+    One aggregate router carries the API, so its mount prefix has one owner.
     Mount order on that router matters. The hybrid and hosted stubs are
     ``{path:path}`` catch-alls and the first matching route wins, so the
     stubs go last. A stub mounted earlier would answer a path that a
     contributed router serves.
     """
-    api = APIRouter()
+    api = APIRouter(prefix=API_ROOT)
     _register_core_routers(api, config)
     _register_contributed_routers(api, app.state.container)
     if config.is_hybrid_mode:
@@ -85,6 +86,12 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
         # adds one has made a choice, and a fallback does not overrule it.
         api.include_router(hosted_mode.router)
     app.include_router(api)
+    # OTLP is a sibling namespace, not a child of the API root: OTel owns the
+    # /v1/{traces,logs,metrics} tail, so an exporter pointed at `{origin}/otlp`
+    # appends it unaided. Standalone and hosted only, like the rest of the
+    # management surface; a hybrid data plane stores no telemetry.
+    if not config.is_hybrid_mode:
+        app.include_router(otlp.router, prefix=OTLP_ROOT)
 
 
 def _register_contributed_routers(api: APIRouter, container: Container) -> None:
@@ -128,11 +135,15 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     # configured neither is not offering this surface at all.
     if config.web_search_provider_configured() and config.web_search_backend_token:
         api.include_router(web_search_backend.router)
-    # /v1/messages and /v1/responses now support hybrid mode (multi-attempt
+    # /api/v1/messages and /api/v1/responses now support hybrid mode (multi-attempt
     # fallback + usage reporting), so they're registered for hybrid too.
     if serves_data_plane:
         api.include_router(messages.router)
         api.include_router(responses.router)
+        # Stateless MCP execution is a data-plane route. In hybrid mode it
+        # authenticates through the platform's MCP resolver without opening a local
+        # database; standalone uses the ordinary API/master-key path.
+        api.include_router(mcp.router)
 
     if config.is_hybrid_mode:
         # The hybrid stub router is mounted by register_routers, after the
@@ -158,12 +169,12 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
         api.include_router(search.router)
         api.include_router(batches.router)
         api.include_router(moderations.router)
-    # The catalog reads are not operator-gated: /v1/models is discovery, not
+    # The catalog reads are not operator-gated: /api/v1/models is discovery, not
     # dispatch. A control plane needs it to tell a tenant which models their
     # gateway could route to, and "models" is one of the surfaces bootstrap
     # publishes for a hosted deployment. The operator router goes first so
-    # /v1/models/discoverable and /v1/models/metadata stay ahead of the
-    # /v1/models/{model_id:path} catch-all the catalog router ends with.
+    # /api/v1/models/discoverable and /api/v1/models/metadata stay ahead of the
+    # /api/v1/models/{model_id:path} catch-all the catalog router ends with.
     api.include_router(models.operator_router)
     api.include_router(models.catalog_router)
     # The same merged catalog, folded by model for a chooser rather than listed
@@ -178,13 +189,13 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(organization_budgets.ceilings_router)
     api.include_router(organization_pricing.router)
     api.include_router(organization_guardrails.router)
-    # The tenant-scoped read over the same rows ``/v1/usage`` serves to an
-    # operator. Mounted with the rest of the ``/v1/organizations/me`` surface
+    # The tenant-scoped read over the same rows ``/api/v1/usage`` serves to an
+    # operator. Mounted with the rest of the ``/api/v1/organizations/me`` surface
     # rather than beside the usage routers, because what it is scoped to is what
     # decides who may call it (otari#837).
     api.include_router(organization_usage.router)
-    # The tenant-scoped reads and writes over the same tables ``/v1/routing/policies``
-    # and ``/v1/aliases`` serve to an operator, mounted here for the same reason
+    # The tenant-scoped reads and writes over the same tables ``/api/v1/routing/policies``
+    # and ``/api/v1/aliases`` serve to an operator, mounted here for the same reason
     # (otari-ai#1942, otari-ai#1969).
     api.include_router(organization_routing.policies_router)
     api.include_router(organization_routing.aliases_router)
@@ -207,20 +218,19 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(aliases.router)
     api.include_router(routing.router)
     api.include_router(routing_memory.router)
-    # Both prefixed /v1/pricing, split by who may call them; operator first, so
+    # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     api.include_router(pricing.operator_router)
     api.include_router(pricing.catalog_router)
-    # Both prefixed /v1/usage. POST /external-events authenticates with an API
+    # Both prefixed /usage. POST /external-events authenticates with an API
     # key rather than operator standing, so it is mounted on its own router.
     api.include_router(usage.operator_router)
     api.include_router(usage.ingest_router)
     api.include_router(agent_telemetry.router)
-    api.include_router(otlp.router)
     api.include_router(settings.router)
     api.include_router(mail.router)
     api.include_router(maintenance_mode.router)
-    # Both prefixed /v1/tool-settings, split by who may call them: the reader is
+    # Both prefixed /tool-settings, split by who may call them: the reader is
     # the one route a tenant may reach, narrowed inside the handler
     # (otari-ai#1969). Operator first, matching the pair above, though neither
     # router here ends with a catch-all for the other to sit behind.

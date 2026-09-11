@@ -23,7 +23,7 @@ analytics would count the session twice.
 
 ## Authentication and attribution
 
-`POST /v1/usage/external-events` accepts either:
+`POST /api/v1/usage/external-events` accepts either:
 
 - A budget-exempt API key. Events bind to that key's user and workspace.
 - The master key. The batch or each event must name an existing user; the
@@ -42,7 +42,7 @@ any exporter was configured gets in. See
 ## Import normalized events
 
 ```bash
-curl "$OTARI_URL/v1/usage/external-events" \
+curl "$OTARI_URL/api/v1/usage/external-events" \
   -H "Authorization: Bearer $OTARI_IMPORT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -87,9 +87,9 @@ duplicates without creating new usage rows.
 Otari accepts OTLP over HTTP:
 
 ```text
-POST /v1/traces    GenAI spans
-POST /v1/logs      GenAI log events and recognized coding-agent events
-POST /v1/metrics   content-free coding-agent outcome metrics
+POST /otlp/v1/traces    GenAI spans
+POST /otlp/v1/logs      GenAI log events and recognized coding-agent events
+POST /otlp/v1/metrics   content-free coding-agent outcome metrics
 ```
 
 Protobuf and JSON are accepted, with optional gzip. gRPC is not. Authenticate
@@ -100,9 +100,12 @@ For a standard OTLP exporter:
 
 ```bash
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer $OTARI_IMPORT_KEY"
 ```
+
+The endpoint is the Otari origin plus `/otlp`; the exporter appends the signal
+path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
 output-token, and cache-token attributes. It ignores non-LLM spans and never

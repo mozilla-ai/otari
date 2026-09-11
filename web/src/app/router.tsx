@@ -1,7 +1,7 @@
 import { createHashHistory, createRouter } from "@tanstack/react-router"
 import { PendingPage } from "@/app/PendingPage"
+import { PageError } from "@/design-system/feedback/PageError"
 import { routeTree } from "@/routeTree.gen"
-import { PageError } from "@/shared/components/feedback/PageError"
 import { parseSearch, stringifySearch } from "@/shared/helpers/search"
 
 export const router = createRouter({

@@ -369,9 +369,9 @@ async def require_deployment_operator(
     which declare it as their authentication gate and then re-check the caller's
     role against the organization, workspace or deployment they are acting on.
     It is wrong for the deployment-wide routers, where clearing it *is* the
-    whole authorization: `/v1/keys` mints a key into any workspace,
-    `/v1/provider-credentials` holds process-global provider secrets, and
-    `POST /v1/settings/master-key/rotate` replaces the deployment credential. On
+    whole authorization: `/api/v1/keys` mints a key into any workspace,
+    `/api/v1/provider-credentials` holds process-global provider secrets, and
+    `POST /api/v1/settings/master-key/rotate` replaces the deployment credential. On
     a single-operator deployment every login is that operator and the
     distinction is invisible; once mutually-untrusting tenants sign in to one
     process, a member of one organization holding master-key authority is a
@@ -380,7 +380,7 @@ async def require_deployment_operator(
     A **header master key** is the deployment credential itself, so it passes; it
     names nobody, and ``get_current_identity`` resolves it to the bootstrap
     operator. A **session** is put to
-    ``DeploymentUserService.has_administration_access``, which `/v1/admin`
+    ``DeploymentUserService.has_administration_access``, which `/api/v1/admin`
     already treats as the answer to "may this caller act deployment-wide": a
     superuser, or the bootstrap operator whatever its flag says. Reused rather
     than re-derived so the routers guarded here and the account administration
@@ -458,8 +458,8 @@ async def verify_catalog_reader(
     """As :func:`verify_api_key_or_master_key`, and a dashboard session also reads.
 
     The narrow exception to the rule above, for the catalog reads that describe
-    the deployment rather than act on it: ``GET /v1/models``, ``GET /v1/pricing``
-    and ``GET /v1/tools`` (with their by-id variants). The dashboard's Models and
+    the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``
+    and ``GET /api/v1/tools`` (with their by-id variants). The dashboard's Models and
     Pricing pages are built on these, so a session has to reach them; they call
     no provider, write nothing, and bill nothing, so reaching them
     deployment-wide costs a signed-in caller's own organization nothing.

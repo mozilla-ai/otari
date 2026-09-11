@@ -2,7 +2,7 @@
 
 A React + [HeroUI v3](https://www.heroui.com) single-page app for Otari. It
 renders the standalone or hosted management dashboard and the hybrid gateway
-landing page from the deployment contract returned by `/v1/bootstrap`.
+landing page from the deployment contract returned by `/api/v1/bootstrap`.
 
 Local sign-in exchanges the deployment's current credential for an HttpOnly
 session cookie. The credential is not written to browser storage, and page
@@ -49,10 +49,10 @@ pnpm run typecheck
 pnpm test
 ```
 
-`pnpm run dev` serves only the SPA, so it proxies `/v1` and `/health` to a
-gateway at `http://localhost:8000` (see `vite.config.ts`). Start one first, for
-example `uv run otari serve --config config.yml`, then sign in with that
-gateway's master key. To develop against a gateway running elsewhere:
+`pnpm run dev` serves only the SPA, so it proxies `/api/v1` to a gateway at
+`http://localhost:8000` (see `vite.config.ts`). Start one first, for example
+`uv run otari serve --config config.yml`, then sign in with that gateway's
+master key. To develop against a gateway running elsewhere:
 
 ```bash
 OTARI_DEV_API=https://your-app.up.railway.app pnpm run dev
@@ -95,7 +95,7 @@ builds on every change under `web/`.
 The gateway serves `index.html` at `/` and the hashed assets under `/assets`
 (see `src/gateway/main.py` and `src/gateway/dashboard.py`). The app routes on
 hash history (`/#/models`, `/#/usage`), so no server-side catch-all route is
-needed. All three modes serve the same bundle: the page asks `GET /v1/bootstrap`
+needed. All three modes serve the same bundle: the page asks `GET /api/v1/bootstrap`
 which deployment it reached, and a hybrid gateway, having no local management
 API, boots into the data-plane landing page instead of the management shell.
 Without a built bundle the root falls back to the get-started tutorial in

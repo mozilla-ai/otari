@@ -41,7 +41,7 @@ disabled.
 
 ## Which role?
 
-```
+```text
 Is it the name of the route?
  ├── Yes -> text-display                (one per page, nothing on the page is larger)
  └── No

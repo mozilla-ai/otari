@@ -25,6 +25,7 @@ from gateway.api.routes._pipeline import (
     default_attempt_kwargs,
     log_usage,
     prepare_gateway_tools,
+    provider_error_headers,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
     resolve_dispatch_provider,
@@ -55,7 +56,11 @@ from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
-router = APIRouter(prefix="/v1/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"])
+
+# The label written to a usage-log row. An identifier, not a URL: it stays as
+# it is so new rows compare with old ones.
+USAGE_ENDPOINT = "/v1/chat/completions"
 
 __all__ = [
     "ChatCompletionRequest",
@@ -97,7 +102,7 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
     # "auto"/"standard_only" on Anthropic) and grows independently of this
     # gateway, so the provider is the right place to reject an unknown value.
-    # ``ResponsesParams`` already declares it, so /v1/responses never had the gap.
+    # ``ResponsesParams`` already declares it, so /api/v1/responses never had the gap.
     #
     # Stopgap: remove this declaration once ``CompletionParams`` models the param
     # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
@@ -151,17 +156,27 @@ class _ChatAdapter:
     """
 
     name = "chat"
-    endpoint = "/v1/chat/completions"
+    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
-    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
-        return HTTPException(status_code=status_code, detail=message)
+    def error(
+        self,
+        status_code: int,
+        message: str,
+        kind: ErrorKind = ErrorKind.API,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
+        return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
-            return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+            return HTTPException(
+                status_code=mapping.status_code,
+                detail=mapping.detail,
+                headers=provider_error_headers(exc, mapping.status_code),
+            )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,

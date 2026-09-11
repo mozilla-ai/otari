@@ -1,7 +1,7 @@
 import { useId, useState } from "react"
 
-import { INPUT_CLASS } from "@/shared/components/forms/inputClass"
-import { SettingRow } from "@/shared/components/layout/SettingRow"
+import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SettingRow } from "@/design-system/layout/SettingRow"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
 /** What a typed value has to become before it can be sent, or why it cannot. */

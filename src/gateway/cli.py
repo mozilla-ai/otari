@@ -10,7 +10,7 @@ import click
 import uvicorn
 from uvicorn.config import logger
 
-from gateway.core.config import load_config
+from gateway.core.config import API_ROOT, load_config
 from gateway.log_config import setup_logger
 from gateway.main import create_app
 
@@ -292,7 +292,7 @@ def routing_explain(
         click.echo(
             "No routing policies are configured in config.yml. Add a `routing.policies` block there, or, if "
             "your policies were created through the dashboard or the API, note that this command reads config "
-            "only: it has no database. Use `POST /v1/routing/policies/explain` against a running gateway to "
+            f"only: it has no database. Use `POST {API_ROOT}/routing/policies/explain` against a running gateway to "
             "compile a stored policy."
         )
         raise SystemExit(1)
@@ -382,8 +382,9 @@ def routing_explain(
     if spec.is_dynamic:
         click.echo(
             "  note: this policy selects per request, so it has no single target or price. It works on "
-            "/v1/chat/completions, /v1/messages and /v1/responses; on the other model-taking endpoints "
-            "(embeddings, images, moderations, rerank, batches) it is not a resolvable model name."
+            f"{API_ROOT}/chat/completions, {API_ROOT}/messages and {API_ROOT}/responses; on the other "
+            "model-taking endpoints (embeddings, images, moderations, rerank, batches) it is not a "
+            "resolvable model name."
         )
 
 
@@ -450,7 +451,7 @@ def import_claude_code(
 
     The OTLP exporter documented in docs/use-with-claude-code.md only carries
     sessions that run after it is configured. This reads the transcripts Claude
-    Code has already written and posts them to /v1/usage/external-events, which
+    Code has already written and posts them to /api/v1/usage/external-events, which
     is idempotent on (source, source_event_id): re-running imports only what is
     new and reports the rest as duplicates.
 
@@ -512,7 +513,7 @@ def import_claude_code(
             "Re-run with --dry-run to preview a scan without one."
         )
 
-    endpoint = f"{url.rstrip('/')}/v1/usage/external-events"
+    endpoint = f"{url.rstrip('/')}{API_ROOT}/usage/external-events"
     headers = {"Authorization": f"Bearer {api_key}"}
     # The first event is posted alone, so a mistake that will reject every event
     # (an unknown --user-id, a key that is not budget-exempt) costs one request and

@@ -730,6 +730,39 @@
      above are: the name is registered here and the value stays in the two theme
      blocks, so light and dark each own theirs. */
   --color-border-subtle: var(--color-border-subtle);
+  /* The third border tier, and the third time this exact bug has been fixed by
+     registering the token. `colors.md` has documented `border-border-strong`
+     as one of the family's three rungs since the rehome, the value has been in
+     both theme blocks the whole time, and the key was never registered, so the
+     class produced no rule: a component naming the structural tier got
+     `currentColor` from Tailwind's border default and rendered its edge in the
+     text ink. Found when `indicators/Kbd` and `layout/Divider` became the first
+     components to ask for it. `src/styles/foundation.test.ts` now fails on a
+     token that is declared in the theme blocks and named as a class without
+     being registered here, so there should not be a fourth. */
+  --color-border-strong: var(--color-border-strong);
+  /* The chart slots, and the fourth instance of the shape above found in one
+     pass. `colors.md` documents `bg-chart-cat-1` on a `<Dot>` as its worked
+     example, `src/styles/dotRamp.test.ts` polices which of these a status dot
+     may take, and all thirteen were declared in both theme blocks and
+     registered in neither, so every one of those classes produced no rule.
+     Charts themselves never noticed: `metrics/charts` hands recharts a
+     `var(--color-chart-*)` as a fill prop, which reads the declaration
+     directly and needs no utility. A legend or a dot beside a series is the
+     consumer that does. */
+  --color-chart-cat-1: var(--color-chart-cat-1);
+  --color-chart-cat-2: var(--color-chart-cat-2);
+  --color-chart-cat-3: var(--color-chart-cat-3);
+  --color-chart-cat-4: var(--color-chart-cat-4);
+  --color-chart-cat-5: var(--color-chart-cat-5);
+  --color-chart-cat-6: var(--color-chart-cat-6);
+  --color-chart-cat-7: var(--color-chart-cat-7);
+  --color-chart-cat-8: var(--color-chart-cat-8);
+  --color-chart-cat-other: var(--color-chart-cat-other);
+  --color-chart-ramp-1: var(--color-chart-ramp-1);
+  --color-chart-ramp-2: var(--color-chart-ramp-2);
+  --color-chart-ramp-3: var(--color-chart-ramp-3);
+  --color-chart-ramp-4: var(--color-chart-ramp-4);
   /* Registered so a status dot can be `bg-text-subtle`. Same latent shape as
      the tier above: it has been a plain `:root` variable, reachable from this
      stylesheet and from the `text-subtle` utility, and from nowhere else. A dot
@@ -1269,24 +1302,64 @@ body {
 /* 36 in a form, 32 in a dense place. `padding-block` alongside the floor is
    what actually moves them: HeroUI's own 8px padding plus its 20px line box
    make 38 regardless of a min-height under it, so setting the floor alone
-   changes nothing. Textarea keeps a floor rather than a height, since it is the
-   one field that should grow. */
+   changes nothing.
+
+   A PLACE DECLARES THE VARIABLE; IT DOES NOT RESTYLE ITS DESCENDANTS. That is
+   the one thing to keep about the shape below. It used to be spelled
+   `.otari-toolbar .input { height: 32px }`, which worked and had two costs. It
+   was invisible from the call site, since nothing on `<Toolbar>` said it
+   restyled the controls inside it. And it was unconditional: a descendant
+   selector at (0,2,0) outranks anything a nested component could say about its
+   own field, so a control that legitimately wanted the form height inside a
+   toolbar had no way to ask. A custom property inherits instead of winning, so
+   the place still sets the density for everything inside it and any subtree can
+   reset it. `Toolbar` and `TablePagination` are the two components that own a
+   place; each names its class in a comment pointing here.
+   
+   Textarea keeps the floor and no height, since it is the one field that should
+   grow. Note that `textarea.input` has no call site: HeroUI's own TextArea
+   renders `.textarea`, which this stylesheet does not touch, so the rule below
+   reaches the markdown surface's textarea alone. */
+:root {
+  --field-height: 36px;
+  --field-padding-block: 6px;
+}
 .input,
 .select__trigger {
-  min-height: 36px;
-  height: 36px;
-  padding-block: 6px;
+  min-height: var(--field-height);
+  height: var(--field-height);
+  padding-block: var(--field-padding-block);
 }
-.otari-markdown textarea,
+/* A textarea keeps the floor and takes no height, since it is the one field
+   that should grow with what somebody typed.
+   
+   Neither selector has a call site, and both are kept as the family's stated
+   rule rather than as live CSS. HeroUI's own TextArea renders `.textarea`,
+   which this stylesheet does not touch, so `forms/TextArea`'s `rows` sizes
+   itself; and nothing hand-rolls a `<textarea className={INPUT_CLASS}>`. The
+   `.otari-markdown` half is dead outright now that the guide's prose is a
+   component. Left here because the day something does render a bare textarea in
+   this family, the floor is what it should get; delete both if that day is
+   judged never to come. */
 textarea.input {
-  min-height: 36px;
-  padding-block: 6px;
+  min-height: var(--field-height);
+  padding-block: var(--field-padding-block);
 }
-.otari-toolbar .input,
-.otari-toolbar .select__trigger,
+/* The three dense places. `input[type="search"]` needs its own rule because it is
+   a native element carrying none of HeroUI's classes, and it stays scoped to
+   the toolbar: the only two in the tree are toolbar search boxes, and pulling a
+   bare search input into the family would restyle a control nothing here
+   renders. */
+.otari-toolbar,
+.otari-pagination,
+.otari-settings {
+  --field-height: 32px;
+  --field-padding-block: 4px;
+}
 .otari-toolbar input[type="search"] {
-  min-height: 32px;
-  padding-block: 4px;
+  min-height: var(--field-height);
+  height: var(--field-height);
+  padding-block: var(--field-padding-block);
 }
 
 /* =============================================================
@@ -1854,11 +1927,23 @@ main {
 }
 .select__trigger[data-open="true"],
 .select__trigger[aria-expanded="true"],
-.combo-box__trigger[data-open="true"],
 .dropdown__trigger[data-open="true"] {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+/* The combo box is deliberately not in that list, and it is the one family
+   where the trigger is not the control. HeroUI renders `.combo-box__trigger` as
+   an absolutely positioned chevron overlaying the field
+   (`absolute end-0 top-1/2 h-full -translate-y-1/2`, no border, no background),
+   so a ring at a 2px offset draws around the chevron and overhangs the field's
+   own edge on the trailing and block sides instead of following the control.
+
+   The control is the input group, and HeroUI already rings its
+   `[data-slot="input"]` on focus. That is the same moment: react-aria focuses
+   the input when the trigger is pressed and keeps the trigger out of the tab
+   order, so an open combo box always wears that ring and a keyboard user is
+   never left without one. The rule below is the other half, and the two agree:
+   the overlay chevron draws no ring of its own in either state. */
 /* 6px, not 8: the menu belongs to the control, and the gap was wide enough to
    read as two unrelated things. Measured rather than derived: the offset is
    HeroUI's and it moved when the trigger lost 2px of height in a table row, so
@@ -1879,8 +1964,11 @@ main {
    stopped being a place of its own and became an ordinary instance of the
    dense one. It keeps only its tighter inline padding, which is about a strip
    of small controls sitting shoulder to shoulder rather than about height. */
-.otari-pagination .input,
-.otari-pagination .select__trigger,
+/* The pager's fields come from the place above; `.table__cell` stays an explicit
+   selector, because a cell is HeroUI's own DOM rather than a place of ours, and
+   a select is the only control that renders in one. Making it a place would put
+   the dense height on any `.input` a future cell holds, which is a decision
+   about a control that does not exist yet. */
 .table__cell .select__trigger {
   /* `height` alongside the floor, because HeroUI's block padding and line box
      make 38 on their own and a floor alone leaves that untouched. */
@@ -1922,10 +2010,8 @@ main {
      ragged half-conversion this place exists to avoid. Safe where the arrows
      are not: a select and a number field are one control each, not a cluster
      of neighbors doing opposite things. */
-  .otari-pagination .input,
-  .otari-pagination .select__trigger {
-    height: 44px;
-    min-height: 44px;
+  .otari-pagination {
+    --field-height: 44px;
   }
   .otari-pagination__pager {
     gap: 8px;
@@ -1946,19 +2032,12 @@ main {
    It takes 16px with it, which is a separate rule from the height: iOS zooms
    the page when a field under 16px takes focus, and a full-width field is the
    one shape where that zoom has nowhere to go. */
-.otari-settings .input,
-.otari-settings .select__trigger {
-  height: 32px;
-  min-height: 32px;
-  padding-block: 4px;
-}
+/* The dense height and its phone override are declared on the place itself,
+   with the other two, further up this file. What is left here is the one part
+   that is not a height: 16px on the phone, because iOS zooms the page when a
+   field under 16px takes focus and a full-width field is the one shape where
+   that zoom has nowhere to go. */
 @media (max-width: 767px) {
-  .otari-settings .input,
-  .otari-settings .select__trigger {
-    height: 44px;
-    min-height: 44px;
-    padding-block: 6px;
-  }
   .otari-settings .input {
     font-size: var(--text-base);
   }
@@ -1993,14 +2072,6 @@ main {
   font-size: var(--text-xs);
 }
 
-/* Same for a toolbar's controls, which the min-height above cannot bring down
-   on its own for the same reason. */
-.otari-toolbar .input,
-.otari-toolbar .select__trigger,
-.otari-toolbar input[type="search"] {
-  height: 32px;
-}
-
 /* The dense height above is a desktop size, so the phone viewport takes it
    back off. The `[data-slot="button"]` floor further down cannot reach these:
    a native `input[type="search"]` and a HeroUI select trigger are not buttons,
@@ -2008,10 +2079,16 @@ main {
    handing a finger a 32px target. Same 767px boundary as that floor, so the
    toolbar's fields and its buttons come up to 44px together. */
 @media (max-width: 767px) {
-  .otari-toolbar .input,
-  .otari-toolbar .select__trigger,
-  .otari-toolbar input[type="search"] {
-    height: 44px;
+  .otari-toolbar,
+  .otari-settings {
+    --field-height: 44px;
+  }
+  /* A settings row's field also gains block padding, where a toolbar's keeps
+     the dense 4px: the row's control stops sharing the row and stacks full
+     width under its label here, so it is a form field again rather than one of
+     a strip of small ones. */
+  .otari-settings {
+    --field-padding-block: 6px;
   }
   /* A select inside a table cell is the third place the dense height outlives
      the floor. Not the same as #927: a row's Edit and Delete cannot reach 44
@@ -2066,6 +2143,123 @@ main {
 }
 .modal__body {
   overflow: visible;
+}
+
+/* FormDialog's geometry, which cannot live at its call site.
+ *
+ * The `.modal__dialog` rule above is unlayered, so it outranks
+ * `@layer utilities` and a `w-[32.5rem]` on the dialog compiles, lints, ships
+ * and loses; its `min-width` would beat that class even where the width landed,
+ * which is what makes the 440px size unreachable rather than merely fragile.
+ * Both were read out of the emitted stylesheet.
+ *
+ * `--visual-viewport-height` is HeroUI's own, already on the container, so the
+ * height budget follows a phone's keyboard rather than the layout viewport.
+ * 15rem is the 120px offset the dialog sits at, twice: the gap above and below
+ * is symmetric by design, and what is left is where the body starts scrolling
+ * while the header and footer stay put. */
+.otari-form-dialog {
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(var(--visual-viewport-height, 100dvh) - 15rem);
+}
+
+/* The three sizes, as modifiers rather than a value the component sets inline:
+ * what the unlayered rule above beats is a `width`, and nothing declares these,
+ * so a class here has nothing to lose to. The phone block below is later still,
+ * which is what lets a sheet ignore all three. */
+.otari-form-dialog--sm {
+  width: 27.5rem;
+}
+.otari-form-dialog--md {
+  width: 32.5rem;
+}
+.otari-form-dialog--lg {
+  width: 40rem;
+}
+
+/* A field fills this dialog. `Field` and `SecretField` cap themselves at
+ * `max-w-md`, which is right on a page (a 448px measure under a 620px column
+ * keeps a name field from reading as a paragraph) and wrong here: it left a
+ * 448px input in the 638px body of an `lg` dialog, with 190px of nothing beside
+ * it. The dialog is a named place the way a toolbar is, so the override belongs
+ * to the place rather than to every call site inside it, and it is keyed on
+ * HeroUI's own `data-slot` because that is the element carrying the cap. */
+.otari-form-dialog [data-slot="textfield"] {
+  max-width: none;
+}
+
+/* A full-screen sheet below 640px in EITHER dimension. The 120px gap above and
+ * below is a desktop luxury, and a viewport that cannot afford it in either axis
+ * gets the sheet rather than a third layout: at a landscape phone (844x390 is
+ * the common one) the width query alone left the dialog a 150px height budget,
+ * of which the header and footer are about 137px.
+ *
+ * The container's own `sm:` paddings still apply at that width, so they are
+ * overridden here too; without that the sheet would sit inside a 240px vertical
+ * inset and none of this would help.
+ *
+ * The footer's bottom padding is a plain 1rem and not a safe-area inset:
+ * `env(safe-area-inset-bottom)` is 0 without `viewport-fit=cover`, which
+ * `index.html` leaves off deliberately (the shell has no insets to sit out of
+ * the way), so adding it would read as clearing the home indicator while
+ * changing nothing. */
+@media (width <= 639px), (height <= 639px) {
+  .otari-form-dialog__container {
+    padding: 0;
+  }
+  .otari-form-dialog {
+    width: 100%;
+    max-width: none;
+    height: var(--visual-viewport-height, 100dvh);
+    max-height: none;
+    border: 0;
+  }
+}
+/* The footer stacks, and on the narrow axis only. Two 36px buttons and a caption
+ * sharing one row fit a desktop and not a 390px sheet: the routing dialog's
+ * caption wrapped to three lines beside them. Each control takes the sheet's
+ * full width at the 44px touch floor, in DOM order, so Cancel sits above the
+ * primary.
+ *
+ * Width alone, unlike the geometry above: `(height <= 639px)` also matches an
+ * unmaximized 1280x600 desktop window, and stacking two full-width buttons
+ * across 1280px is not a sheet, it is a broken footer. A landscape phone
+ * (844x390) keeps the sheet from the block above and gets a row footer, which
+ * its 844px affords.
+ *
+ * Nothing reorders them, and that is the point: an earlier version moved Cancel
+ * with `order`, which left the visual order and the focus order disagreeing on
+ * a phone. DOM, visual and focus order now agree at both widths. It also puts
+ * the primary lowest, which is the control nearest the thumb on a sheet. */
+@media (width <= 639px) {
+  .otari-form-dialog__footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem 1rem;
+  }
+  .otari-form-dialog__actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  /* `width`, not the footer's `align-items: stretch`: `.button` is
+   * `width: fit-content`, so its cross size is never `auto` and stretch cannot
+   * reach it. Measured, the two buttons stayed 110px and 83px in a 373px
+   * column. HeroUI's `fullWidth` prop is the other way to get here and it is a
+   * prop, so it would take the desktop with it. */
+  .otari-form-dialog__actions > button {
+    width: 100%;
+  }
+  /* Full width earns the same press suppression `.button` already gives
+   * `.w-full` and HeroUI's `fullWidth` class: the transform displaces a wide
+   * button by 7.07px, and this one spans the sheet. */
+  .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]) {
+    transform: none;
+  }
+  .otari-form-dialog__footer button {
+    min-height: 2.75rem;
+  }
 }
 
 /* Backdrop dimming — HeroUI's default backdrop variant is `opaque`, and that
@@ -2124,16 +2318,14 @@ main {
   --border: var(--color-border-strong);
 }
 
-/* The one focus ring in the emitted stylesheet that does not follow its
-   element's corner. Every other ring here is a `box-shadow` or an `outline`,
-   both of which take the element's own `border-radius`, so zeroing `--radius`
-   squared them; HeroUI's combo-box trigger sets `border-radius: .25rem` inside
-   its own focus rule, which nothing about the token can reach. Found by reading
-   the compiled CSS rather than the page: the trigger renders on Keys and
-   Budgets, not on the screens this pass was checked against. */
+/* HeroUI rings the combo box's overlay chevron here too, at `ring-offset-2`,
+   which overhangs the field for the reason the open-state rule above gives. The
+   ring goes rather than being squared to the token: a square ring around the
+   chevron is still a ring around the wrong box, and the field's own focus ring
+   is what marks the control. */
 .combo-box__trigger:focus-visible:not(:focus),
 .combo-box__trigger[data-focus-visible="true"] {
-  border-radius: 0;
+  box-shadow: none;
 }
 
 .tooltip__content {
@@ -2224,13 +2416,25 @@ main {
    HeroUI's own first/last-column radius rules (which are more specific than a
    bare `.table__column`). */
 .otari-table.table-root {
-  background-color: var(--color-surface);
+  /* Transparent, not a surface. The rule above says "a table is not a box on
+     the page; it is a region of the one surface" and this used to paint
+     `--color-surface` anyway, so all sixteen per-table classes carried a
+     `background-color: transparent` to undo it. The default is now what the
+     paragraph describes, and those sixteen copies are gone. */
+  background-color: transparent;
   border-radius: 0;
   padding: 0;
   overflow: hidden;
 }
 .otari-table .table__header {
-  background-color: var(--color-primary-subtle);
+  /* Told from the rows by a rule and by weight, not by a fill. This was
+     `--color-primary-subtle`, a teal tint, which is the accent spent as
+     decoration: colors.md gives it five jobs and a table header is none of
+     them. Every converted table already overrode it back to transparent; the
+     three cards that render a bare DataTable (OrganizationBudgetsCard,
+     SpendCeilingsCard, OrganizationRosterCard) are the ones that were still
+     showing the tint, and this is what converts them. */
+  background-color: transparent;
   border-bottom: 1px solid var(--color-border);
 }
 .otari-table .table__column,
@@ -2262,8 +2466,13 @@ main {
 .otari-table .table__column::after {
   content: none;
 }
+/* The faint tier, because rows inside one group are divided rather than fenced.
+   This said `--color-border` and all sixteen per-table classes overrode it to
+   `--color-border-subtle`, so the base was simply the wrong value: sixteen
+   consumers and no exceptions is not a default worth keeping. Moved here, and
+   the copies are gone. Must stay in step with the row rule below. */
 .otari-table .table__row .table__cell {
-  border-color: var(--color-border);
+  border-color: var(--color-border-subtle);
 }
 
 /* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
@@ -2273,7 +2482,7 @@ main {
    0.06, so the same line is drawn at two strengths. Setting the color here
    restores one. */
 .otari-table .table__row {
-  border-color: var(--color-border);
+  border-color: var(--color-border-subtle);
 }
 
 .otari-table .table__row:hover .table__cell {
@@ -2363,9 +2572,7 @@ main {
    edit from reintroducing it: there is one place to look. */
 .otari-breakdown .otari-table .table__header,
 .otari-overview-activity .otari-table .table__header {
-  background-color: transparent;
   border-top: 0;
-  border-bottom: 1px solid var(--color-border);
 }
 /* Only the breakdown tables freeze a lane, and the Overview preview is ruled
    *out* rather than pending: it is five rows of six narrow lanes and never
@@ -2418,29 +2625,8 @@ main {
 .otari-domains-table .otari-table.table-root,
 .otari-providers-table .otari-table.table-root,
 .otari-routing-table .otari-table.table-root {
-  background-color: transparent;
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
-}
-.otari-domains-table .otari-table .table__header,
-.otari-models-table .otari-table .table__header,
-.otari-offerings-table .otari-table .table__header,
-.otari-providers-table .otari-table .table__header,
-.otari-routing-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-domains-table .otari-table .table__row,
-.otari-domains-table .table__row .table__cell,
-.otari-models-table .otari-table .table__row,
-.otari-models-table .table__row .table__cell,
-.otari-offerings-table .otari-table .table__row,
-.otari-offerings-table .table__row .table__cell,
-.otari-providers-table .otari-table .table__row,
-.otari-providers-table .table__row .table__cell,
-.otari-routing-table .otari-table .table__row,
-.otari-routing-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
 }
 .otari-models-table .table__column[data-key="name"] {
   min-width: 200px;
@@ -2499,17 +2685,8 @@ main {
    Routing cell is two lines by design: it names the policy the caller asked for
    and then what actually served, and the tail is the part that matters. */
 .otari-activity-table .otari-table.table-root {
-  background-color: transparent;
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
-}
-.otari-activity-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-activity-table .otari-table .table__row,
-.otari-activity-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
 }
 .otari-activity-table .table__row .table__cell {
   min-height: 59px;
@@ -2588,20 +2765,6 @@ main {
 .otari-activity-table[data-scrolled="true"] .table__cell[data-key="model"] {
   border-right: 1px solid var(--color-control-border);
 }
-
-/* A workspace's MCP servers. Same terms as the others; the row is 52px because
-   every cell here is one line. */
-.otari-mcp-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-mcp-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-mcp-table .otari-table .table__row,
-.otari-mcp-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
 .otari-mcp-table .table__row .table__cell {
   height: 52px;
   padding-block: 0;
@@ -2617,20 +2780,6 @@ main {
 .otari-mcp-table .table__column[data-key="actions"] {
   width: 160px;
   min-width: 160px;
-}
-
-/* Budgets. Same terms as the others; the row is 58px because the usage cell is
-   two lines, a figure over its meter. */
-.otari-budgets-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-budgets-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-budgets-table .otari-table .table__row,
-.otari-budgets-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
 }
 .otari-budgets-table .table__row .table__cell {
   height: 58px;
@@ -2674,20 +2823,6 @@ main {
 .otari-budgets-table[data-scrolled="true"] .table__cell[data-key="budget"] {
   border-right: 1px solid var(--color-control-border);
 }
-
-/* The deployment's accounts. Same terms as the others, and the 58px row the
-   two-line identity cell sets. */
-.otari-accounts-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-accounts-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-accounts-table .otari-table .table__row,
-.otari-accounts-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
 .otari-accounts-table .table__row .table__cell {
   height: 58px;
   padding-block: 0;
@@ -2725,21 +2860,6 @@ main {
 .otari-accounts-table[data-scrolled="true"] .table__cell[data-key="account"] {
   border-right: 1px solid var(--color-control-border);
 }
-
-/* Workspaces. Same terms as the others, and the same 58px row the Members and
-   Keys tables take, set by the two-line identity cell: a name over the
-   description that says what the workspace is for. */
-.otari-workspaces-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-workspaces-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-workspaces-table .otari-table .table__row,
-.otari-workspaces-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
 .otari-workspaces-table .table__row .table__cell {
   height: 58px;
   padding-block: 0;
@@ -2770,30 +2890,6 @@ main {
 .otari-workspaces-table[data-scrolled="true"] .table__column[data-key="name"],
 .otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
   border-right: 1px solid var(--color-control-border);
-}
-
-/* Model pricing's two tables, on the same terms as every other: page ground, a
-   rule-bounded overline header, faint separators, and fixed numeric lanes so a
-   rate can be read down the column against its neighbors. The model key takes
-   what is left, because it is the one value here with no bound.
-
-   The rate lanes sit adjacent at 20px, tighter than the default pitch: four
-   prices for one model are a group, and the default gap read as four unrelated
-   columns that happened to be next to each other. */
-.otari-pricing-table .otari-table.table-root,
-.otari-rate-overrides-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-pricing-table .otari-table .table__header,
-.otari-rate-overrides-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-pricing-table .otari-table .table__row,
-.otari-pricing-table .table__row .table__cell,
-.otari-rate-overrides-table .otari-table .table__row,
-.otari-rate-overrides-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
 }
 .otari-pricing-table .table__row .table__cell,
 .otari-rate-overrides-table .table__row .table__cell {
@@ -2872,22 +2968,6 @@ main {
   .table__cell[data-key="model_key"] {
   border-right: 1px solid var(--color-control-border);
 }
-
-/* The organization's provider keys. Same terms as the others, and the same
-   58px row, though the identity cell here is one line: the marker sits beside
-   the name rather than under it, because a key that is the default is a fact
-   about the row's own subject and not a second one. */
-.otari-provider-keys-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-provider-keys-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-provider-keys-table .otari-table .table__row,
-.otari-provider-keys-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
 .otari-provider-keys-table .table__row .table__cell {
   height: 58px;
   padding-block: 0;
@@ -2925,28 +3005,6 @@ main {
   .table__column[data-key="name"],
 .otari-provider-keys-table[data-scrolled="true"] .table__cell[data-key="name"] {
   border-right: 1px solid var(--color-control-border);
-}
-
-/* The organization members table. Same terms as the others (page ground,
-   rule-bounded overline header, faint separators), and the same 58px row the
-   Keys table takes, set by the two-line identity cell: a name over the address
-   and the model-access ceiling.
-
-   The identity lane is held while the rest scrolls, because every other lane on
-   this page is a fact *about* a person and is unreadable once the person has
-   slid off the left edge. It is 260px of the table, well under the third-width
-   ceiling the rule sets. There is no selection box on this table, so the
-   identity is the first lane and pins at 0. */
-.otari-members-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-members-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-members-table .otari-table .table__row,
-.otari-members-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
 }
 .otari-members-table .table__row .table__cell {
   height: 58px;
@@ -2988,26 +3046,6 @@ main {
 .otari-members-table[data-scrolled="true"] .table__cell[data-key="member"] {
   border-right: 1px solid var(--color-control-border);
 }
-
-/* The API keys table. Same terms as the others (page ground, rule-bounded
-   overline header, faint separators), plus the lanes from the frozen artboard
-   and a two-line name cell that sets the 58px row.
-
-   The armed confirmation is a strip under its own row, and the pair has to read
-   as one thing: the armed row's bottom rule is suppressed so the strip is not
-   fenced off from the row it is about, and the strip carries the rules instead.
-   `.otari-detail-row` is what `DataTable` names that inserted row. */
-.otari-keys-table .otari-table.table-root {
-  background-color: transparent;
-}
-.otari-keys-table .otari-table .table__header {
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-keys-table .otari-table .table__row,
-.otari-keys-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
 .otari-keys-table .table__row .table__cell {
   height: 58px;
   padding-block: 0;
@@ -3041,18 +3079,7 @@ main {
 .otari-keys-table .otari-table .table__row:has(+ .otari-detail-row),
 .otari-keys-table .table__row:has(+ .otari-detail-row) .table__cell {
   border-bottom-color: transparent;
-}
-
-/* Usage's two breakdown tables, on the same terms as the Overview preview: on
-   the page ground rather than on a surface, a rule-bounded overline header
-   instead of a tinted band, separators on the faint tier, and fixed numeric
-   lanes so the same share reads at the same width in both tables sitting side
-   by side. The name column takes what is left, because a model id is the one
-   value here with no bound. */
-.otari-breakdown .otari-table.table-root {
-  background-color: transparent;
-}
-/* The header's background and edges are not repeated here: they live with the
+} /* The header's background and edges are not repeated here: they live with the
    `.table-root` border they have to counteract, in the divided-surface table
    block above. */
 .otari-breakdown .table__column[data-key="requests"],
@@ -3063,30 +3090,7 @@ main {
 .otari-breakdown .table__column[data-key="calls"],
 .otari-breakdown .table__column[data-key="failed"] {
   width: 100px;
-}
-.otari-breakdown .otari-table .table__row,
-.otari-breakdown .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
-
-/* The Overview's activity preview, whose lanes are fixed rather than content
-   sized: five of its six columns hold a bounded value (a relative time, a key
-   name, two numerics, a status word), so letting the widest cell in a five-row
-   sample set the column is how the same table lands at a different shape on
-   every load. Keyed on the column ids the page declares, because these reach
-   `.table__column`, which is HeroUI's DOM and not addressable from a call site.
-
-   The pitch is set on the cell rather than the row: HeroUI's row is a `<tr>`
-   whose height is whatever its cells make it. */
-/* The preview sits on the page ground rather than on a surface, and its header
-   is a rule-bounded overline rather than a tinted band. Scoped to this table
-   and not to `.otari-table`: the other screens still draw their tables as
-   panels until their own teardowns land, and changing them from here would be
-   a change nobody reviewing this page could see. */
-.otari-overview-activity .otari-table.table-root {
-  background-color: transparent;
-}
-/* Header background and edges: see the divided-surface table block above, which
+} /* Header background and edges: see the divided-surface table block above, which
    is now the only place they are declared. */
 .otari-overview-activity .table__column[data-key="time"] {
   /* Back to 120. This was widened to 130 because "6 minutes ago" did not fit,
@@ -3108,14 +3112,6 @@ main {
 .otari-overview-activity .table__column[data-key="cost"],
 .otari-overview-activity .table__column[data-key="status"] {
   width: 110px;
-}
-/* Both, and the row is the one that was showing. HeroUI draws a bottom border
-   on the row as well as on its cells, so overriding only the cell left the
-   section tier (0.06/0.08) painting the separators between rows, where the
-   design asks for the faint internal tier. */
-.otari-overview-activity .otari-table .table__row,
-.otari-overview-activity .table__row .table__cell {
-  border-color: var(--color-border-subtle);
 }
 .otari-overview-activity .table__row .table__cell {
   height: 45px;
@@ -3169,185 +3165,19 @@ main {
   }
 }
 
-/* Rendered Markdown for the bundled user guide (DocsPage). There is no Tailwind
-   typography plugin in web/, so the guide's prose is styled here, scoped to
-   `.otari-markdown`, on the same tokens as the rest of the shell. Its headings
-   pick up Mozilla Headline from the global h1–h6 rule, and its code the Fira
-   Code stack, so the guide is set in the dashboard's own faces rather than in
-   a second stack declared here. */
-/* 16/26, and the step *up* from the product's 14px is the point: everything
-   else in this dashboard is scanned and this is read. */
-.otari-markdown {
-  color: var(--color-text);
-  font-size: 16px;
-  line-height: 26px;
-}
-.otari-markdown > :first-child {
-  margin-top: 0;
-}
-/* Two steps and no more: the display face at 20px for a section, then the body
-   face at 16px on the semibold step for anything under it. A guide with four
-   heading sizes spends the whole scale on one document and leaves a reader
-   guessing which of the middle two outranks the other. */
-.otari-markdown h1,
-.otari-markdown h2 {
-  /* The announcement treatment, through the role rather than spelled again.
-     These values were identical to it and had already stopped tracking the
-     scale once: they stayed at 20px when `--text-xl` was retuned to 22, which
-     is the drift a role exists to stop. Generated markup carries no class, so
-     this reaches the role with `@apply` rather than by wearing it. */
-  @apply text-display-sub;
-  margin: 2rem 0 0.75rem;
-}
-.otari-markdown h3,
-.otari-markdown h4 {
-  color: var(--color-text);
-  font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: var(--font-weight-semibold);
-  margin: 1.75rem 0 0.5rem;
-}
-.otari-markdown p {
-  margin: 0.75rem 0;
-}
-.otari-markdown a {
-  color: var(--color-link);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.otari-markdown a:hover {
-  /* Thicken the underline rather than lightening the text: `--color-link` is
-     the role tuned to clear 4.5:1 on the card in both themes, and a hover tint
-     that lifted it would trade a contrast guarantee for a hover cue. */
-  text-decoration-thickness: 2px;
-}
-.otari-markdown ul,
-.otari-markdown ol {
-  margin: 0.75rem 0;
-  padding-left: 1.5rem;
-}
-.otari-markdown ul {
-  list-style: disc;
-}
-.otari-markdown ol {
-  list-style: decimal;
-}
-.otari-markdown li {
-  margin: 0.25rem 0;
-}
-.otari-markdown li > ul,
-.otari-markdown li > ol {
-  margin: 0.25rem 0;
-}
-/* The face is the marker, and nothing else is. This was a tinted chip, which
-   made it the last place in the product where the accent was decoration rather
-   than data ink, a graphic fill, or a status dot. Fira Code beside the body
-   face is already an unmistakable change of voice, which is exactly how an
-   identifier is marked in every table here; a fill on top of it was saying the
-   same thing twice and spending the accent to do it.
-
-   No size reduction either. `0.85em` shrank an identifier a reader has to copy
-   by eye below the prose it sits in, and the mono face already reads smaller at
-   a matched size. */
-.otari-markdown code {
-  font-family: var(--font-mono);
-  color: inherit;
-}
-/* A code block is a small object of its own on the prose ground, which is the
-   one place in this product where an edge is right: it is a verbatim thing to
-   be copied, not a division of the page. The label row above it is a cell of
-   the block rather than a control floating on it, which is what the copy family
-   does everywhere else. */
-.otari-markdown pre {
-  margin: 1.25rem 0;
-  padding: 0.85rem 1rem;
-  background-color: var(--color-code-surface);
-  border: 1px solid var(--color-code-border);
-  border-radius: 0;
-  overflow-x: auto;
-}
-.otari-markdown .otari-code-block {
-  margin: 1.25rem 0;
-}
-.otari-markdown .otari-code-block pre {
-  margin: 0;
-  border-top: 0;
-}
-/* The label row: the language on the left, the copy affordance on the right,
-   both in mono at the caption step, on the block's own surface. */
-.otari-markdown .otari-code-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.375rem 1rem;
-  background-color: var(--color-code-control);
-  border: 1px solid var(--color-code-border);
-  color: var(--color-code-foreground);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 18px;
-}
-.otari-markdown .otari-code-label button {
-  color: inherit;
-  font: inherit;
-  opacity: 0.75;
-}
-.otari-markdown .otari-code-label button:hover {
-  opacity: 1;
-}
-/* A block's code keeps its own size and its own ink: it sits on the code
-   surface rather than in the prose, so it is not inheriting the paragraph
-   around it the way an inline identifier now does. */
-.otari-markdown pre code {
-  color: var(--color-code-foreground);
-  font-size: 13px;
-  line-height: 20px;
-}
-.otari-markdown blockquote {
-  margin: 1rem 0;
-  padding: 0.25rem 0 0.25rem 1rem;
-  border-left: 3px solid var(--color-primary);
-  color: var(--color-text-muted);
-}
-.otari-markdown hr {
-  margin: 1.5rem 0;
-  border: 0;
-  border-top: 1px solid var(--color-border);
-}
-/* The horizontal scroll lives on a wrapper (see DocsPage's table override) so
-   the <table> keeps its native display and a11y semantics. */
-.otari-markdown-scroll {
-  margin: 1rem 0;
-  max-width: 100%;
-  overflow-x: auto;
-}
-/* The same table the rest of the product has: rows on the page ground divided
-   by rules, with the header told from them by a rule and by weight rather than
-   by a fill. It was a grid of boxed cells under an accent-tinted header row,
-   which was the second place the accent survived as decoration and also the one
-   table in the product that did not look like the others. */
-.otari-markdown table {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 14px;
-  line-height: 20px;
-}
-.otari-markdown th,
-/* biome-ignore lint/style/noDescendingSpecificity: the earlier, more specific td rule is scoped to .otari-table, so these two never apply to the same cell */
-.otari-markdown td {
-  border: 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-  padding: 0.5rem 0.75rem 0.5rem 0;
-  text-align: left;
-  vertical-align: top;
-}
-.otari-markdown th {
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text);
-  font-weight: var(--font-weight-semibold);
-}
-.otari-markdown tbody tr:hover td {
-  background-color: var(--color-surface-muted);
-}
+/* Rendered Markdown for the bundled user guide lives in
+   `design-system/content/Markdown`, not here.
+   
+   This was a block of about thirty descendant selectors keyed on an
+   `.otari-markdown` wrapper: `p`, `a`, `ul`, `li > ul`, `th`, `td`, and the
+   rest. Generated markup carries no class, so that was the only way to reach
+   it, and the cost was a wrapper class that restyled every element beneath it
+   wherever it appeared. react-markdown takes a `components` map, so each
+   element is now one of ours wearing its own utilities, and the styling cannot
+   reach past the element that declares it.
+   
+   Two things went with it and are worth knowing. The headings were set with
+   `@apply text-display-sub` *because* they carried no class, and the comment
+   here recorded that their values "had already stopped tracking the scale
+   once"; a heading that wears the role cannot drift from it. And `h3`/`h4`,
+   hand-spelled at 16/24 semibold, turned out to be `text-title` exactly. */

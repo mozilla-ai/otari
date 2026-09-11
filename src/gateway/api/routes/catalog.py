@@ -1,6 +1,6 @@
 """The catalog grouped by model: one entry per model, one offering per selector.
 
-``GET /v1/models`` answers an SDK, so it is flat and OpenAI-shaped: one object per
+``GET /api/v1/models`` answers an SDK, so it is flat and OpenAI-shaped: one object per
 selector, and ``nebius:zai-org/GLM-5.3`` and ``fireworks:accounts/fireworks/models/glm-5p3``
 are two unrelated rows. This router answers a person choosing a model. It reads
 the same merged catalog (``models.build_merged_catalog``, so the two cannot
@@ -16,7 +16,7 @@ negotiated override is billed at the override. Here the organization is
 resolved the way settlement resolves it (the session's active organization, or
 the API key's workspace's), never from a header.
 
-Metadata is served to every catalog reader, where ``GET /v1/models/metadata``
+Metadata is served to every catalog reader, where ``GET /api/v1/models/metadata``
 is operator-only. That gate is inherited from the deployment-wide router the
 route sits on and describes the operator's configured providers; a model's
 public description and capabilities describe the model, and a member choosing
@@ -94,14 +94,18 @@ from gateway.services.workspace_scope import organization_for_key_id
 # visitor reads too while ``public_catalog`` is on, and is answered from the
 # configured instances alone. Every other route in the process keeps its gate.
 router = APIRouter(
-    prefix="/v1/catalog",
+    prefix="/catalog",
     tags=["catalog"],
     dependencies=[Depends(verify_catalog_reader_or_public)],
 )
 # The one write on the catalog: an operator asking for the short spellings to
 # be re-indexed now rather than on the next tick, after pricing or providers
 # changed.
-operator_router = APIRouter(prefix="/v1/catalog", tags=["catalog"], dependencies=[Depends(require_deployment_operator)])
+operator_router = APIRouter(
+    prefix="/catalog",
+    tags=["catalog"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 # The anonymous caller, as the dependency hands it over; the routes below read
 # it as "nobody" rather than as a key that failed to verify.

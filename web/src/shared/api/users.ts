@@ -10,7 +10,7 @@ async function fetchAllUsers(): Promise<User[]> {
   const all: User[] = []
   for (let page = 0; page < USERS_MAX_PAGES; page += 1) {
     const rows = await apiFetch<User[]>(
-      `/v1/users?skip=${page * USERS_PAGE_SIZE}&limit=${USERS_PAGE_SIZE}`,
+      `/users?skip=${page * USERS_PAGE_SIZE}&limit=${USERS_PAGE_SIZE}`,
     )
     all.push(...rows)
     if (rows.length < USERS_PAGE_SIZE) {
@@ -43,7 +43,7 @@ export function useCreateUser() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateUserRequest) =>
-      apiFetch<User>("/v1/users", {
+      apiFetch<User>("/users", {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -55,7 +55,7 @@ export function useUpdateUser() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateUserRequest }) =>
-      apiFetch<User>(`/v1/users/${encodeURIComponent(id)}`, {
+      apiFetch<User>(`/users/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
@@ -67,7 +67,7 @@ export function useDeleteUser() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/users/${encodeURIComponent(id)}`, {
+      apiFetch<void>(`/users/${encodeURIComponent(id)}`, {
         method: "DELETE",
       }),
     onSuccess: () => {
