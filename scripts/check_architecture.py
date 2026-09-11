@@ -6,7 +6,8 @@ Enforces:
 2. API route purity: routes must not use the sync ORM layer (sqlalchemy.orm).
 3. Repository boundaries: repositories must not import services or the API layer.
 4. Naming conventions: repository modules end in _repository.py.
-5. OSS/enterprise boundary: OSS code must not import the enterprise overlay.
+5. OSS/enterprise boundary: OSS code must not import the enterprise overlay, nor a
+   bootstrap plugin shipped beside it.
 6. Port boundaries: a port may describe the domain but not import a caller or an adapter.
 7. Composition root: only gateway/container.py may name a concrete adapter.
 
@@ -60,7 +61,13 @@ RULES: dict[str, LayerRule] = {
         # (gateway/main.py, gateway/cli.py, gateway/core, gateway/auth, ...)
         # free to shortcut past the seam. COMPOSITION_ROOT and the adapters
         # package itself are the two exemptions; see check_file.
-        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters"],
+        # ``otari_alerts`` is a bootstrap plugin shipped in this repository. It
+        # imports Otari and is reached only through ``OTARI_BOOTSTRAP``, so the
+        # dependency runs one way; core importing it would make an optional
+        # feature (and its optional ``apprise`` dependency) load in every
+        # deployment. Same direction as the overlay ban above, for the same
+        # reason (ARCHITECTURE.md rule 6).
+        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters", "otari_alerts"],
         "description": "OSS base",
     },
     # The OSS test suite answers to the same boundary: a test of overlay

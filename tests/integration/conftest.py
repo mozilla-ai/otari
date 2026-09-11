@@ -29,8 +29,9 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
+import otari_alerts
 from gateway.api.deps import set_config
-from gateway.container import build_container
+from gateway.container import Container, MigrationContribution, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app
@@ -46,6 +47,32 @@ def alembic_config(database_url: str) -> Config:
     config.set_main_option("sqlalchemy.url", database_url)
     config.attributes["configure_logger"] = False
     return config
+
+
+def _contributed_alembic_config(contribution: MigrationContribution, database_url: str) -> Config:
+    """The same, for a chain a bootstrap contributes, on the channels ``init_db`` uses."""
+    config = Config()
+    config.set_main_option("script_location", contribution.script_location)
+    config.set_main_option("sqlalchemy.url", database_url)
+    config.attributes["database_url"] = database_url
+    config.attributes["version_table"] = contribution.version_table
+    config.attributes["configure_logger"] = False
+    return config
+
+
+def _contributed_chains() -> tuple[MigrationContribution, ...]:
+    """Every chain a plugin shipped in this repo contributes.
+
+    Built the way a deployment would, by asking the plugin's own ``register``
+    rather than restating its script location here, so a plugin that moves its
+    chain does not leave the suite pointed at the old path. The tables those
+    chains create are then part of the schema every test gets, which is what
+    the plugins' own integration tests need and what keeps the reset plan
+    below aware of them.
+    """
+    container = Container()
+    otari_alerts.register(container)
+    return container.migration_contributions()
 
 
 @dataclass(frozen=True)
@@ -79,7 +106,10 @@ def _reset_engine(database_url: str) -> Engine:
 def _build_reset_plan(database_url: str) -> _ResetPlan:
     """Record the schema's tables, and whatever the migrations seeded into them."""
     with _reset_engine(database_url).connect() as conn:
-        tables = [name for name in inspect(conn).get_table_names() if name != "alembic_version"]
+        # Every version table, not only core's: a contributed chain stamps one
+        # of its own, and truncating it would tell the next boot the chain had
+        # never run.
+        tables = [name for name in inspect(conn).get_table_names() if not name.endswith("alembic_version")]
         seeds = tuple(
             (table, rows)
             for table in tables
@@ -103,6 +133,11 @@ def _run_alembic_migrations(database_url: str) -> None:
     if database_url in _SCHEMA_READY:
         return
     command.upgrade(alembic_config(database_url), "head")
+    # Then the chains the repo's own plugins contribute, in the order and on
+    # the channels ``init_db`` uses at boot, so a plugin's tables are part of
+    # the schema its integration tests find.
+    for contribution in _contributed_chains():
+        command.upgrade(_contributed_alembic_config(contribution, database_url), "head")
     _SCHEMA_READY.add(database_url)
     _RESET_PLANS[database_url] = _build_reset_plan(database_url)
 
@@ -233,6 +268,29 @@ async def async_db(postgres_url: str, clean_database: None) -> AsyncGenerator[As
     try:
         async with async_session_factory() as session:
             yield session
+    finally:
+        await async_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def async_session_factory(
+    postgres_url: str, clean_database: None
+) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+    """A factory for *independent* async sessions on the test database.
+
+    For a test that needs more than one session at a time, which ``async_db``
+    cannot give it: the concurrency behavior of anything settled by a unique
+    constraint (the ``alert_deliveries`` claim, say) is invisible inside one
+    session, because two coroutines sharing it serialize on the session rather
+    than on the database.
+
+    Deliberately not ``gateway.core.database.create_session``: that resolves
+    the process-global engine, which these tests never point at the per-worker
+    test database.
+    """
+    async_engine = create_async_engine(_to_async_url(postgres_url), pool_pre_ping=True)
+    try:
+        yield async_sessionmaker(async_engine, expire_on_commit=False)
     finally:
         await async_engine.dispose()
 

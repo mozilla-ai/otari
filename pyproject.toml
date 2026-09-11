@@ -104,9 +104,24 @@ ocr = [
 s3 = [
     "boto3>=1.42.0",
 ]
+# Notification fan-out for the budget alerts plugin (`src/otari_alerts/`). One
+# library rather than an adapter per destination: a rule stores an Apprise URL,
+# so Slack, Discord, PagerDuty and a plain webhook are one column and one code
+# path. An extra rather than a core dependency, because the plugin is loaded
+# only when a deployment sets OTARI_BOOTSTRAP=otari_alerts:register, and a
+# gateway that has not is carrying a notification library it never imports. The
+# transports needing a compiled package sit behind Apprise's "all-plugins"
+# extra, not taken here.
+alerts = [
+    "apprise>=1.9.0,<2.0.0",
+]
 
 [dependency-groups]
 dev = [
+    # The [alerts] extra, so the budget alerts plugin's own tests can import it.
+    # A dev entry rather than a default extra: a deployment chooses the extra,
+    # and this suite has to be able to run the plugin either way.
+    "apprise>=1.9.0,<2.0.0",
     "boto3-stubs[s3]",
     # Validating payloads against the published code-execution contract
     # (docs/public/code-execution-openapi.yaml), in its conformance script and
@@ -166,7 +181,13 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["gateway*"]
+# `otari_alerts*` is the budget alerts plugin, a separate top-level package
+# rather than a subpackage of `gateway`: it is loaded through OTARI_BOOTSTRAP
+# and imports Otari, never the other way around, so keeping it out of the
+# gateway namespace is what makes that direction checkable. Named `otari_`
+# because the selector a deployment writes is user-facing; see its
+# `__init__.py`.
+include = ["gateway*", "otari_alerts*"]
 
 [tool.setuptools.package-data]
 # The static/dashboard/* bundle is built, not committed (see .gitignore), so run
@@ -187,6 +208,14 @@ gateway = [
     "static/dashboard/assets/*",
     "static/dashboard/pwa/*",
     "static/dashboard/fonts/*",
+]
+# The plugin's Alembic chain. `script_location` resolves from the installed
+# package, so a wheel missing these ships a bootstrap whose migration
+# contribution points at an empty directory.
+otari_alerts = [
+    "alembic/env.py",
+    "alembic/script.py.mako",
+    "alembic/versions/*.py",
 ]
 
 [tool.ruff]
@@ -231,4 +260,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # The OTLP proto messages and google.protobuf runtime helpers ship without stubs.
 module = ["google.protobuf.*", "opentelemetry.proto.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Apprise ships no stubs and no py.typed marker.
+module = ["apprise", "apprise.*"]
 ignore_missing_imports = true
