@@ -1,5 +1,5 @@
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react"
-import { FiMoon, FiPause, FiPlay, FiSun } from "react-icons/fi"
+import { type ReactNode, useLayoutEffect, useRef } from "react"
+import { FiMoon, FiSun } from "react-icons/fi"
 import { Button } from "@/design-system/actions/Button"
 import { useTheme } from "@/shared/hooks/useTheme"
 import { BAR_ROW_RATIO } from "./background/config"
@@ -10,7 +10,6 @@ import "./login.css"
 export function LoginPageShell({ children }: { children: ReactNode }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const [paused, setPaused] = useState(false)
   const { resolved, setPreference } = useTheme()
   useLayoutEffect(() => {
     const panel = panelRef.current
@@ -44,7 +43,7 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
       <LoginBackground
         panelRef={panelRef}
         config={savedBackground}
-        paused={paused}
+        paused={false}
       />
       <header className="login-header">
         <div className="flex items-center gap-3">
@@ -56,19 +55,6 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
           <span className="text-title">Otari</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            isIconOnly
-            aria-label={
-              paused
-                ? "Play background animation"
-                : "Pause background animation"
-            }
-            onPress={() => setPaused(!paused)}
-            className="motion-reduce:hidden"
-          >
-            {paused ? <FiPlay aria-hidden /> : <FiPause aria-hidden />}
-          </Button>
           <Button
             variant="ghost"
             isIconOnly

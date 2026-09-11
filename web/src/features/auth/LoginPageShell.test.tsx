@@ -17,7 +17,7 @@ afterEach(() => {
   document.documentElement.style.removeProperty("color-scheme")
 })
 
-it("offers a keyboard-accessible pause and theme switch outside the form", async () => {
+it("offers a theme switch without an animation control", async () => {
   localStorage.setItem("otari.dashboard.theme", "light")
   const user = userEvent.setup()
   render(
@@ -27,13 +27,9 @@ it("offers a keyboard-accessible pause and theme switch outside the form", async
       </LoginPageShell>
     </ThemeProvider>,
   )
-  await user.click(
-    screen.getByRole("button", { name: "Pause background animation" }),
-  )
-  expect(screen.getByText("Motion paused")).toBeInTheDocument()
-  await user.click(
-    screen.getByRole("button", { name: "Play background animation" }),
-  )
+  expect(
+    screen.queryByRole("button", { name: /background animation/ }),
+  ).not.toBeInTheDocument()
   expect(screen.getByText("Motion playing")).toBeInTheDocument()
   await user.click(screen.getByRole("button", { name: "Use dark theme" }))
   expect(document.documentElement).toHaveAttribute("data-theme", "dark")
