@@ -1,0 +1,53 @@
+name: Otari CodeQL
+
+# No path filter here, unlike the other workflows.
+# A filter would let some pull requests skip the scan entirely.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Runs at 04:17 UTC every Monday.
+    # GitHub delays runs scheduled on the hour, so this one is not at 04:00.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  # Cancel superseded PR scans, but let main and scheduled runs finish.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # javascript-typescript is one language, not two.
+        language: [ actions, javascript-typescript, python ]
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: none
+        config-file: .github/codeql/codeql-config.yml
+
+    - name: Analyze
+      uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      with:
+        category: '/language:${{ matrix.language }}'
