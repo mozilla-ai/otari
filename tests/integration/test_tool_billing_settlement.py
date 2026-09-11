@@ -26,7 +26,7 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.entities import UsageLog, User
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
@@ -41,14 +41,21 @@ _SEARCH_RATE_PER_MILLION = 10_000.0
 _SEARCH_UNIT_COST = 0.01
 
 
-def _completion(*, tool_call: bool, prompt_tokens: int = 10, completion_tokens: int = 5) -> ChatCompletion:
+def _completion(
+    *,
+    tool_call: bool,
+    tool_name: str = "web_search",
+    arguments: str = '{"query": "otari"}',
+    prompt_tokens: int = 10,
+    completion_tokens: int = 5,
+) -> ChatCompletion:
     """A provider response, optionally asking for the gateway's web_search tool."""
     tool_calls = (
         [
             ChatCompletionMessageFunctionToolCall(
                 id="call_1",
                 type="function",
-                function=Function(name="web_search", arguments='{"query": "otari"}'),
+                function=Function(name=tool_name, arguments=arguments),
             )
         ]
         if tool_call
@@ -79,6 +86,31 @@ def _completion(*, tool_call: bool, prompt_tokens: int = 10, completion_tokens: 
     )
 
 
+def _fetch_batch_completion(count: int) -> ChatCompletion:
+    calls = [
+        ChatCompletionMessageFunctionToolCall(
+            id=f"call_{index}",
+            type="function",
+            function=Function(name="web_fetch", arguments='{"url":"https://example.com"}'),
+        )
+        for index in range(count)
+    ]
+    return ChatCompletion(
+        id="chatcmpl-fetch-batch",
+        created=0,
+        model=MODEL_NAME,
+        object="chat.completion",
+        choices=[
+            Choice(
+                finish_reason="tool_calls",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content=None, tool_calls=cast(Any, calls)),
+            )
+        ],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
 @pytest.fixture
 def search_pricing(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
     """Price the gateway's own web_search tool under ``otari:web_search``."""
@@ -86,6 +118,21 @@ def search_pricing(client: TestClient, master_key_header: dict[str, str]) -> dic
         f"{API_ROOT}/pricing",
         json={
             "model_key": "otari:web_search",
+            "input_price_per_million": _SEARCH_RATE_PER_MILLION,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200
+    return dict(response.json())
+
+
+@pytest.fixture
+def fetch_pricing(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "otari:web_fetch",
             "input_price_per_million": _SEARCH_RATE_PER_MILLION,
             "output_price_per_million": 0.0,
         },
@@ -220,6 +267,123 @@ async def test_failed_search_is_counted_but_never_billed(
 
 
 @pytest.mark.asyncio
+async def test_fetch_call_is_metered_priced_and_spent(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    fetch_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    user_id = api_key_obj["user_id"]
+    before = _spend(db_session_factory, user_id)
+    responses = [
+        _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
+        _completion(tool_call=False),
+    ]
+
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
+        patch(
+            "gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool",
+            new=AsyncMock(return_value="Source: https://example.com/\nContent-Type: text/html\n\ncontent"),
+        ),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read it"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    row = _latest_row(db_session_factory, user_id)
+    tools = (row.billing_meters or {})[TOOL_METER_NAMESPACE]
+    assert tools["web_fetch"]["billed"] == 1
+    assert tools["web_fetch"]["errors"] == 0
+    line = next(entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_fetch_calls")
+    assert line["units"] == 1
+    assert line["cost"] == pytest.approx(_SEARCH_UNIT_COST)
+    after = _spend(db_session_factory, user_id)
+    assert after - before == pytest.approx(float(row.cost or 0), rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_failed_fetch_is_counted_but_not_billed(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    model_pricing: dict[str, Any],
+    fetch_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    responses = [
+        _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
+        _completion(tool_call=False),
+    ]
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
+        patch(
+            "gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool",
+            new=AsyncMock(return_value="[tool error] Web Fetch failed"),
+        ),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read it"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    row = _latest_row(db_session_factory, api_key_obj["user_id"])
+    tools = (row.billing_meters or {})[TOOL_METER_NAMESPACE]
+    assert tools["web_fetch"] == {"billed": 0, "errors": 1}
+    assert not any(entry["meter"] == "web_fetch_calls" for entry in (row.pricing_breakdown or []))
+
+
+@pytest.mark.asyncio
+async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    provider = AsyncMock(return_value=_fetch_batch_completion(11))
+    fetch = AsyncMock(return_value="bounded content")
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=provider),
+        patch("gateway.services.web_retrieval_backend.WebRetrievalBackend._fetch_tool", new=fetch),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "read these"}],
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 422, response.text
+    assert "10 calls per request" in response.json()["detail"]
+    assert fetch.await_count == 10
+
+
+@pytest.mark.asyncio
 async def test_unpriced_tool_is_refused_when_require_pricing_is_on(
     strict_pricing_client: TestClient,
 ) -> None:
@@ -259,4 +423,33 @@ async def test_unpriced_tool_is_refused_when_require_pricing_is_on(
     detail = response.json()["detail"]
     assert "otari:web_search" in detail
     assert "require_pricing" in detail
+    provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unpriced_fetch_is_refused_before_the_provider_call(
+    strict_pricing_client: TestClient,
+) -> None:
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    strict_pricing_client.post(f"{API_ROOT}/users", json={"user_id": "fetch-user"}, headers=headers)
+    strict_pricing_client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:gpt-4o", "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        headers=headers,
+    )
+
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock()) as provider:
+        response = strict_pricing_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "openai:gpt-4o",
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "fetch-user",
+                "tools": [{"type": "otari_web_fetch"}],
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 402, response.text
+    assert "otari:web_fetch" in response.json()["detail"]
     provider.assert_not_called()

@@ -39,7 +39,9 @@ from gateway.services.web_retrieval_backend import (
     DEFAULT_MAX_RESULTS,
     WEB_SEARCH_TOOL_NAME,
     WebRetrievalBackend,
+    WebRetrievalCounter,
 )
+from gateway.services.web_retrieval_policy import DomainPolicy
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -59,6 +61,7 @@ class Tool(StrEnum):
         return f"otari_{name.lower()}"
 
     CODE_EXECUTION = auto()  # -> "otari_code_execution"
+    WEB_FETCH = auto()  # -> "otari_web_fetch"
     WEB_SEARCH = auto()  # -> "otari_web_search"
 
 
@@ -126,6 +129,11 @@ def _is_code_execution_tool_type(type_value: Any) -> bool:
     if not isinstance(type_value, str):
         return False
     return type_value == Tool.CODE_EXECUTION
+
+
+def _is_web_fetch_tool_type(type_value: Any) -> bool:
+    """Recognize only the canonical gateway-managed Fetch declaration."""
+    return isinstance(type_value, str) and type_value == Tool.WEB_FETCH
 
 
 # The provider-named code-execution keywords: OpenAI's ``code_interpreter``, the
@@ -286,6 +294,13 @@ def _extract_web_search_tool(
     return _extract_first_matching_tool(tools, predicate)
 
 
+def _extract_web_fetch_tool(
+    tools: list[dict[str, Any]] | None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
+    """Pull the first canonical Fetch declaration, leaving native types alone."""
+    return _extract_first_matching_tool(tools, _is_web_fetch_tool_type)
+
+
 def _retargeted_tool_choice(tool_choice: Any, declared_name: str) -> Any:
     """Point a forced ``tool_choice`` at the gateway's canonical web-search tool.
 
@@ -382,10 +397,13 @@ def web_search_max_results_baseline(config: GatewayConfig | None) -> int:
     return DEFAULT_MAX_RESULTS
 
 
-def _build_web_search_backend(
+def _build_web_retrieval_backend(
     *,
     base_url: str | None,
-    tool_entry: dict[str, Any],
+    search_tool_entry: dict[str, Any] | None,
+    fetch_tool_entry: dict[str, Any] | None = None,
+    fetch_policy: DomainPolicy | None = None,
+    counter: WebRetrievalCounter | None = None,
     auth_token: str | None = None,
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
@@ -423,6 +441,7 @@ def _build_web_search_backend(
             kwargs["engines"] = engines
 
     kwargs["max_results"] = web_search_max_results_baseline(config)
+    tool_entry = search_tool_entry or {}
     req_max = tool_entry.get("max_results")
     if isinstance(req_max, int) and req_max > 0:
         kwargs["max_results"] = req_max
@@ -457,4 +476,27 @@ def _build_web_search_backend(
     if auth_token:
         kwargs["auth_token"] = auth_token
 
+    kwargs["enable_search"] = search_tool_entry is not None
+    kwargs["enable_fetch"] = fetch_tool_entry is not None
+    kwargs["fetch_policy"] = fetch_policy
+    kwargs["counter"] = counter
+
     return WebRetrievalBackend(**kwargs)
+
+
+def _build_web_search_backend(
+    *,
+    base_url: str | None,
+    tool_entry: dict[str, Any],
+    auth_token: str | None = None,
+    config: GatewayConfig | None = None,
+    tally: ToolUsageTally | None = None,
+) -> WebRetrievalBackend:
+    """Compatibility wrapper for Search-only callers and tests."""
+    return _build_web_retrieval_backend(
+        base_url=base_url,
+        search_tool_entry=tool_entry,
+        auth_token=auth_token,
+        config=config,
+        tally=tally,
+    )

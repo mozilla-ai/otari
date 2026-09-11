@@ -1,12 +1,14 @@
 # Built-in tools
 
-Otari can run two tools during Chat Completions, Messages, and Responses:
+Otari can run three tools during Chat Completions, Messages, and Responses:
 
 - `otari_code_execution`, a sandboxed code session
 - `otari_web_search`, a search backend
+- `otari_web_fetch`, a bounded public-web fetcher
 
-Each tool is optional and needs a separate backend. Requests cannot currently
-combine these tools with each other or with MCP servers.
+Code execution and Search need separate backends. Fetch runs in the gateway.
+Search and Fetch may be combined, but web tools cannot be combined with code
+execution or MCP servers.
 
 Inspect the tools available on a running deployment:
 
@@ -70,6 +72,7 @@ In standalone mode, gateway-run tools are priced per successful call:
 ```text
 otari:code_execution
 otari:web_search
+otari:web_fetch
 ```
 
 The dashboard accepts dollars per call. The pricing API stores the value in
@@ -136,7 +139,51 @@ Workspace-selected images must come from
 The authenticating API key determines the workspace. With no policy, deployment
 defaults apply. In hybrid mode, the control plane resolves the policy instead.
 
-## Web search
+## Web retrieval
+
+### Web fetch
+
+Fetch is disabled by default because it permits model-directed outbound requests.
+Enable it at deployment time with `web_fetch_enabled: true` in `config.yml` or
+`OTARI_WEB_FETCH_ENABLED=true` in the environment. When disabled,
+`otari_web_fetch` remains discoverable with `"available": false`, and requests
+declaring it are rejected without affecting other tools or ordinary completion
+requests.
+
+Declare Fetch on any completion API with `{"type": "otari_web_fetch"}`. The
+model-facing function accepts exactly one field:
+
+```json
+{"url": "https://example.com/article"}
+```
+
+Otari retrieves one public HTTP or HTTPS URL, validates every redirect, and
+extracts HTML, textual formats (including Markdown, JSON, XML, and JavaScript),
+or text-bearing PDF content. Private, loopback, link-local, and otherwise unsafe
+destinations are rejected. Provider-native Fetch declarations are passed
+through unchanged rather than intercepted.
+
+The tool result contains the display-safe source URL, the content type, an
+optional requested URL when redirects changed the destination, extracted
+content, and a warning that fetched content is untrusted. URL query strings and
+fragments are omitted from the displayed metadata. The complete result is
+limited to 50 KiB of valid UTF-8; the downloaded body is limited to 5 MiB and
+PDF extraction is also bounded by page, time, memory, and intermediate-output
+limits.
+
+Search and Fetch share a limit of 10 attempted calls per request across model
+turns and routing attempts. Invalid, blocked, and failed calls consume that
+allowance. Successful Fetch calls are billed under `otari:web_fetch`; failures
+return sanitized tool errors, are counted as errors, and are not billed.
+
+Declaring Fetch authorizes the model to make arbitrary public GET requests
+within the workspace domain policy. Fetched content can contain prompt
+injection. For example, a malicious page may instruct the model to encode
+conversation or tool data into a later Fetch URL on an attacker-controlled
+domain. Disable Fetch or restrict allowed domains when that residual egress risk
+is unacceptable.
+
+### Web search
 
 Otari reaches a licensed search API directly. Set `web_search_provider` to
 `tavily` or `brave` and `web_search_provider_api_key` to that provider's key;
@@ -211,19 +258,23 @@ together.
 
 A runnable example lives under `demo/web-search/`.
 
-### Per-workspace search policy
+### Per-workspace web-access policy
 
-A workspace search policy can:
+A workspace web-access policy can:
 
-- disable search
+- disable `otari_web_search`, `otari_web_fetch`, and `POST /api/v1/search`
 - lower `max_results`
-- narrow allowed domains or add blocked domains
+- narrow allowed domains or add blocked domains for Search results and Fetch
+  destinations, including redirects
 - provide a default purpose hint
 - supply provider options
 
 Manage it under `/v1/workspaces/{workspace_id}/web-search` or from Tools.
+`max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
-backend or relax an operator limit.
+backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
+remains available subject to deployment and workspace policy when no Search
+backend is configured.
 
 The policy also applies to direct search where relevant. In hybrid mode, the
 connected control plane supplies workspace search configuration.

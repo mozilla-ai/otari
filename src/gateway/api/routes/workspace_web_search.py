@@ -1,9 +1,9 @@
-"""Per-workspace web-search configuration (standalone mode only).
+"""Per-workspace web-access configuration (standalone mode only).
 
 The deployment-wide search backend (its URL, its engines, its purpose hint)
 stays on ``/api/v1/tool-settings``, and the tools ``POST /api/v1/search`` dispatches to
 stay on ``/api/v1/search-tools``; this surface says which workspaces on that
-deployment may search and how far their searches may reach. Thin composition
+deployment may search or fetch and which domains those operations may reach. Thin composition
 over `gateway.services.tenancy.workspace_web_search_service`, following
 `routes/workspace_code_execution_policy.py`'s shape (master key on the router,
 plus the caller's tenancy identity for the per-workspace role checks).
@@ -59,7 +59,7 @@ async def get_workspace_web_search_config(
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
 ) -> WorkspaceWebSearchConfigPublic:
-    """Read a workspace's web-search configuration.
+    """Read a workspace's web-access configuration.
 
     Takes the same role as setting it (an organization owner/admin, or an
     owner/admin of this workspace), because the row describes the workspace's
@@ -77,12 +77,12 @@ async def set_workspace_web_search_config(
     workspace_id: uuid.UUID,
     body: WorkspaceWebSearchConfigUpdate,
 ) -> WorkspaceWebSearchConfigPublic:
-    """Set a workspace's web-search configuration, replacing any existing one.
+    """Set a workspace's web-access configuration, replacing any existing one.
 
     An organization owner/admin, or an owner/admin of this workspace, may write
     it. The configuration can only narrow what the deployment permits: turning
-    web search off for the workspace, lowering the result ceiling, and adding to
-    the domains a search may not reach. It never turns on a backend the
+    web access off for the workspace, lowering the Search result ceiling, and
+    constraining domains for Search and Fetch. It never turns on a backend the
     deployment has not configured, and it carries no credential.
     """
     return await service.set_config(user=current_identity, workspace_id=workspace_id, request=body)

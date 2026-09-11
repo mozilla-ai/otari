@@ -4398,7 +4398,7 @@ export interface paths {
         };
         /**
          * Get Workspace Web Search Config
-         * @description Read a workspace's web-search configuration.
+         * @description Read a workspace's web-access configuration.
          *
          *     Takes the same role as setting it (an organization owner/admin, or an
          *     owner/admin of this workspace), because the row describes the workspace's
@@ -4409,12 +4409,12 @@ export interface paths {
         get: operations["workspace-web-search-get_workspace_web_search_config"];
         /**
          * Set Workspace Web Search Config
-         * @description Set a workspace's web-search configuration, replacing any existing one.
+         * @description Set a workspace's web-access configuration, replacing any existing one.
          *
          *     An organization owner/admin, or an owner/admin of this workspace, may write
          *     it. The configuration can only narrow what the deployment permits: turning
-         *     web search off for the workspace, lowering the result ceiling, and adding to
-         *     the domains a search may not reach. It never turns on a backend the
+         *     web access off for the workspace, lowering the Search result ceiling, and
+         *     constraining domains for Search and Fetch. It never turns on a backend the
          *     deployment has not configured, and it carries no credential.
          */
         put: operations["workspace-web-search-set_workspace_web_search_config"];
@@ -7031,7 +7031,7 @@ export interface components {
             accepted_types: string[];
             /**
              * Available
-             * @description Whether this deployment has a backend configured for the tool. A request declaring an unavailable tool is rejected with 400.
+             * @description Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.
              */
             available: boolean;
             /**
@@ -11214,34 +11214,34 @@ export interface components {
         WorkspaceWebSearchConfigUpdate: {
             /**
              * Allowed Domains
-             * @description Results are kept only from these domains; intersected with any list the request sends
+             * @description Filters Search results and constrains initial and redirected Fetch destinations; intersected with any list the request sends
              */
             allowed_domains?: string[] | null;
             /**
              * Blocked Domains
-             * @description Results from these domains are dropped; added to any list the request sends
+             * @description Filters Search results and blocks initial and redirected Fetch destinations; added to any list the request sends
              */
             blocked_domains?: string[] | null;
             /**
              * Enabled
-             * @description False refuses web search for this workspace, both the otari_web_search tool and the search endpoint. The fields below narrow the tool only.
+             * @description False refuses web access for this workspace through otari_web_search, otari_web_fetch, and POST /api/v1/search.
              */
             enabled: boolean;
             /**
              * Max Results
-             * @description Ceiling on results one search returns; only ever lowers the effective limit, so at most 20
+             * @description Search only: ceiling on results one search returns; only ever lowers the effective limit, so at most 20
              */
             max_results?: number | null;
             /**
              * Provider Options
-             * @description Provider-specific knobs forwarded to the search backend; a request's own keys win
+             * @description Search only: provider-specific knobs forwarded to the backend; request keys win
              */
             provider_options?: {
                 [key: string]: unknown;
             } | null;
             /**
              * Purpose Hint
-             * @description Hint used when a request declares otari_web_search without one of its own
+             * @description Search only: hint used when a request declares otari_web_search without one of its own
              */
             purpose_hint?: string | null;
         };
@@ -15373,8 +15373,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
@@ -15437,8 +15437,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
@@ -15501,8 +15501,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
@@ -15563,8 +15563,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
@@ -17110,8 +17110,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
@@ -17207,8 +17207,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows, narrowed past the filter of the same name on GET /api/v1/usage so the total matches what bulk delete and set-price can reach */
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
@@ -17324,8 +17324,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */
@@ -17419,8 +17419,8 @@ export interface operations {
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
                 priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, web_fetch, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "web_fetch" | "code_execution") | null;
                 /** @description Filter by budget participation, which is not the same question as provenance: true = only enforced gateway rows, false = every row that never touches a budget, meaning imported usage and also gateway traffic on a budget-exempt key */
                 counts_toward_budget?: boolean | null;
                 /** @description Only usage recorded in this workspace. */

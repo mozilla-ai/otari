@@ -378,9 +378,7 @@ def test_summary_dimensions_none_skips_every_breakdown(
     _make_log(db_session, user_id="bare", timestamp=datetime.now(UTC) - timedelta(hours=1), cost=0.25)
     db_session.commit()
 
-    body = client.get(
-        SUMMARY_PATH, headers=master_key_header, params={"user_id": "bare", "dimensions": "none"}
-    ).json()
+    body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "bare", "dimensions": "none"}).json()
     assert all(body[field] == [] for field in _BREAKDOWN_FIELDS)
     assert body["totals"]["cost"] == pytest.approx(0.25)
     assert body["series"]
@@ -1106,6 +1104,49 @@ def test_tool_breakdown_counts_the_row_that_served_not_the_absorbed_attempt(
     assert row["errors"] == 1
     assert row["requests"] == 1
     assert row["cost"] == pytest.approx(0.03)
+
+
+def test_web_fetch_filter_and_breakdown_cover_list_count_and_summary(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    now = datetime.now(UTC)
+    _make_log(
+        db_session,
+        user_id="fetch-tools",
+        timestamp=now,
+        cost=0.04,
+        billing_meters={
+            "total_input_tokens": 10,
+            "completion_tokens": 5,
+            "tools": {"web_fetch": {"billed": 2, "errors": 1, "unit_rate": 0.02}},
+        },
+    )
+    _make_log(db_session, user_id="fetch-tools", timestamp=now, model="without-fetch")
+    db_session.commit()
+
+    params = {"tool": "web_fetch", "user_id": "fetch-tools"}
+    rows = client.get(f"{API_ROOT}/usage", params=params, headers=master_key_header)
+    count = client.get(f"{API_ROOT}/usage/count", params=params, headers=master_key_header)
+    summary = client.get(
+        f"{API_ROOT}/usage/summary",
+        params={**params, "dimensions": "tool"},
+        headers=master_key_header,
+    )
+
+    assert rows.status_code == 200, rows.text
+    assert len(rows.json()) == 1
+    assert count.status_code == 200, count.text
+    assert count.json() == {"total": 1}
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["by_tool"] == [
+        {
+            "tool": "web_fetch",
+            "calls": 2,
+            "errors": 1,
+            "requests": 1,
+            "cost": pytest.approx(0.04),
+        }
+    ]
 
 
 def test_tool_breakdown_is_empty_when_only_absorbed_rows_match(

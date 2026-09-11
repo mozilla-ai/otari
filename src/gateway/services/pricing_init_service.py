@@ -16,7 +16,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 
 
 async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
@@ -89,13 +89,15 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
 async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
     """Warn at startup when a configured gateway-run tool has no per-request rate.
 
-    A gateway-run tool (``otari_web_search`` / ``otari_code_execution``) is priced
-    under ``otari:<tool>``. With ``require_pricing`` on, an unpriced tool is refused
+    A gateway-run tool is priced under ``otari:<tool>``. With
+    ``require_pricing`` on, an unpriced tool is refused
     at admission, so this warning is what tells the operator *before* the first 402
     rather than after. With ``require_pricing`` off the tool runs and is recorded at
     zero cost, which is worth flagging too: the work is real and the invoice is not.
     """
     configured: list[str] = []
+    if config.web_fetch_enabled:
+        configured.append(WEB_FETCH_TOOL_NAME)
     if config.web_search_configured():
         configured.append(WEB_SEARCH_TOOL_NAME)
     if config.sandbox_url or otari_env("SANDBOX_URL"):
@@ -124,7 +126,7 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     else:
         logger.warning(
             "Gateway tool(s) %s are configured but have no pricing (%s). Their calls will be "
-            "recorded at zero cost while still costing the operator money upstream. Add a "
+            "recorded at zero cost while still consuming operator resources. Add a "
             "per-request rate; the convention is USD per million requests, so 10000.0 charges "
             "$0.01 per call.",
             ", ".join(unpriced),

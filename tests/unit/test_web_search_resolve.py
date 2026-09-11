@@ -57,6 +57,28 @@ async def test_resolve_returns_policy_dict(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_resolve_sends_capability_explicit_web_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_post(**kwargs: Any) -> httpx.Response:
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            json={"enabled": True, "authorized_tools": ["web_search", "web_fetch"]},
+        )
+
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    out = await _resolve_platform_web_search(
+        _config(),
+        "tk_user",
+        requested_tools=["web_search", "web_fetch"],
+    )
+
+    assert captured["body"] == {"requested_tools": ["web_search", "web_fetch"]}
+    assert out["authorized_tools"] == ["web_search", "web_fetch"]
+
+
+@pytest.mark.asyncio
 async def test_resolve_403_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(403, json={"detail": "web search disabled"})

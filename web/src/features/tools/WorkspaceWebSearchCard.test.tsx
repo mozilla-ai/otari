@@ -14,7 +14,7 @@ import { organizationContext, workspaceWebSearchConfig } from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
-const STANCE = "Web search for this workspace"
+const STANCE = "Web access for this workspace"
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
@@ -102,7 +102,7 @@ describe("WorkspaceWebSearchCard", () => {
     await renderLoaded()
 
     expect(selectTrigger(STANCE)).toHaveTextContent(
-      "Blocked (tool and /api/v1/search)",
+      "Blocked (tools and /api/v1/search)",
     )
     expect(screen.getByLabelText("Max results")).toHaveValue("3")
     expect(screen.getByLabelText("Allowed domains")).toHaveValue(
@@ -302,7 +302,7 @@ describe("WorkspaceWebSearchCard", () => {
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
   })
 
-  it("says the in-loop tool is unavailable when the deployment has no backend, and that blocking still bites", async () => {
+  it("says Search is unavailable without a backend while Fetch remains policy-gated", async () => {
     mockApi({
       config: workspaceWebSearchConfig({
         workspace_id: ALPHA,
@@ -313,15 +313,29 @@ describe("WorkspaceWebSearchCard", () => {
     })
     renderCard()
 
-    // Both halves: the capability ceiling is about the in-loop backend only, so
-    // the banner must not claim the workspace's switch does nothing. It still
-    // gates POST /api/v1/search, which runs off the search tools and not this URL.
+    // The capability ceiling is about the in-loop backend only. The workspace
+    // policy still gates Fetch and POST /api/v1/search.
     expect(
       await screen.findByText(/no in-loop search backend configured/i),
     ).toBeInTheDocument()
     expect(
+      screen.getByText(/otari_web_fetch remains available/i),
+    ).toBeInTheDocument()
+    expect(
       screen.getByText(/still takes effect on POST \/api\/v1\/search/i),
     ).toBeInTheDocument()
+  })
+
+  it("describes the Web Access scope and Search-only settings", async () => {
+    mockApi()
+    await renderLoaded()
+
+    expect(
+      screen.getByText(/otari_web_search, otari_web_fetch/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/^Search only\. Lowers/)).toBeInTheDocument()
+    expect(screen.getByText(/^Search only\. Used/)).toBeInTheDocument()
+    expect(screen.getAllByText(/redirected Fetch destinations/)).toHaveLength(2)
   })
 
   it("does not read the row at all for a member who cannot manage the workspace", async () => {

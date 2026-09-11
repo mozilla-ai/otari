@@ -22,6 +22,7 @@ import pytest
 from gateway.api.routes._pipeline import ToolContext, _read_web_search_max_uses
 from gateway.api.routes._tools import (
     _extract_code_execution_tool,
+    _extract_web_fetch_tool,
     _extract_web_search_tool,
     _retargeted_tool_choice,
     _strip_gateway_fields,
@@ -123,6 +124,14 @@ def test_web_search_extracts_otari_web_search() -> None:
     entry, remaining = _extract_web_search_tool([{"type": "otari_web_search"}])
     assert entry == {"type": "otari_web_search"}
     assert remaining is None
+
+
+def test_web_fetch_extracts_only_the_canonical_type() -> None:
+    entry, remaining = _extract_web_fetch_tool(
+        [{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}]
+    )
+    assert entry == {"type": "otari_web_fetch"}
+    assert remaining == [{"type": "web_fetch_20250910"}]
 
 
 def test_web_search_passes_through_gateway_native_short_form() -> None:

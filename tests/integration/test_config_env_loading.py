@@ -219,6 +219,7 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
 
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:9000")
     monkeypatch.setenv("OTARI_GUARDRAILS_URL", "http://guardrails:8000")
+    monkeypatch.setenv("OTARI_WEB_FETCH_ENABLED", "true")
     monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "7")
     monkeypatch.setenv("OTARI_WEB_SEARCH_EXTRACT", "false")
     monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "false")
@@ -227,9 +228,24 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
 
     assert config.sandbox_url == "http://sandbox:9000"
     assert config.guardrails_url == "http://guardrails:8000"
+    assert config.web_fetch_enabled is True
     assert config.web_search_max_results == 7
     assert config.web_search_extract is False
     assert config.mcp_allow_loopback is False
+
+
+def test_web_fetch_is_disabled_by_default_and_yaml_can_enable_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_FETCH_ENABLED", raising=False)
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    assert load_config(str(config_file)).web_fetch_enabled is False
+
+    config_file.write_text("web_fetch_enabled: true\n", encoding="utf-8")
+
+    assert load_config(str(config_file)).web_fetch_enabled is True
 
 
 def test_load_config_service_level_fields_ignore_legacy_gateway_prefix(
