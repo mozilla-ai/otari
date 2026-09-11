@@ -105,6 +105,36 @@ make openapi-check
 make postman-check
 ```
 
+## Dependencies
+
+Most dependencies are floored (`>=`) rather than pinned, and `uv.lock` is committed
+because CI and the Docker image both install from it with `--frozen`. Two mechanisms
+keep it current, and they cover different things:
+
+- **Dependabot** (`.github/dependabot.yml`) opens weekly version-update PRs for the
+  `uv` and `github-actions` ecosystems. Security updates are separate, need no
+  config, and already cover every supported ecosystem here. The dashboard is not
+  covered by either right now; see #1001.
+- **`.github/workflows/otari-lock-refresh.yml`** re-resolves `uv.lock` weekly against
+  the newest versions the existing constraints already allow, which is the case
+  Dependabot does not open PRs for. A floored dependency can otherwise stay at
+  whatever version was current the day it was first locked.
+
+To do either by hand:
+
+```bash
+uv lock --upgrade --dry-run                    # what would move, and to where
+uv lock --upgrade-package genai-prices         # refresh one package
+uv lock --upgrade                              # refresh everything
+```
+
+A change to dependency resolution also owes the OSS-edition smoke gate, which boots
+the packaged CLI with no dev dependencies:
+
+```bash
+uv run --frozen --no-dev python scripts/oss_edition_smoke.py
+```
+
 ## Tests
 
 - New features need tests covering the happy path and error cases.
