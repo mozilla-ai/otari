@@ -18,7 +18,7 @@ function Harness() {
   return (
     <div>
       <div ref={ref}>Form</div>
-      <LoginBackground panelRef={ref} config={saved} />
+      <LoginBackground panelRef={ref} config={{ ...saved }} />
     </div>
   )
 }
@@ -80,6 +80,41 @@ describe("login background lifecycle", () => {
     mounted.unmount()
     expect(env.frames.size).toBe(0)
     expect(env.remove).toHaveBeenCalledWith("change", expect.any(Function))
+  })
+
+  it("keeps the animation throttle during scrolling and resize events", () => {
+    const env = animationEnvironment()
+    render(<Harness />)
+    for (let i = 0; i < 6; i++) {
+      act(() => {
+        document.dispatchEvent(new Event("scroll"))
+        window.dispatchEvent(new Event("resize"))
+      })
+      env.tick(1000 + i * 16)
+    }
+    expect(drawBars).toHaveBeenCalledTimes(2)
+  })
+
+  it("reduces painting frequency on large grids without enlarging bars", () => {
+    const env = animationEnvironment()
+    const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect)
+    const rect = bounds.getMockImplementation()?.call(document.body) as DOMRect
+    bounds
+      .mockReturnValueOnce({ ...rect, width: 7680, height: 4320 })
+      .mockReturnValueOnce({ ...rect, width: 448 })
+    render(<Harness />)
+    for (let i = 0; i < 120; i++) env.tick(1000 + i * (1000 / 60))
+    // About 31,700 cells per paint: a two-second window permits two full paints.
+    expect(drawBars).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(drawBars).mock.lastCall?.[3].columns).toBe(20)
+  })
+
+  it("does not rebuild the canvas effect for an equivalent config object", () => {
+    const env = animationEnvironment()
+    const mounted = render(<Harness />)
+    env.tick(1000)
+    mounted.rerender(<Harness />)
+    expect(HTMLCanvasElement.prototype.getContext).toHaveBeenCalledTimes(1)
   })
 
   it("coalesces layout events and reads colors only when the theme changes", async () => {

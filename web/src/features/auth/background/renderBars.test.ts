@@ -15,8 +15,6 @@ const geometry: BarGeometry = {
   top: 200,
   panelWidth: 400,
   panelHeight: 400,
-  visibleTop: 100,
-  visibleBottom: 700,
 }
 
 function context() {
@@ -36,15 +34,16 @@ function context() {
 }
 
 describe("bar renderer", () => {
-  it("draws only visible rows and skips cells hidden by the form", () => {
+  it("paints the full tall canvas and skips cells hidden by the form", () => {
     const { ctx, fills, canvas } = context()
     drawBars(canvas, geometry, palette, saved, 0)
     expect(fills.length).toBeGreaterThan(0)
-    expect(ctx.clearRect).toHaveBeenCalledExactlyOnceWith(0, 100, 800, 600)
-    expect(ctx.fillRect).toHaveBeenCalledWith(0, 100, 800, 600)
+    expect(ctx.clearRect).not.toHaveBeenCalled()
+    expect(ctx.fillRect).toHaveBeenCalledExactlyOnceWith(0, 0, 800, 1200)
+    expect(ctx.roundRect.mock.calls.some(([, y]) => y > 1000)).toBe(true)
     for (const [x, y, width, height] of ctx.roundRect.mock.calls) {
-      expect(y + height).toBeGreaterThan(geometry.visibleTop)
-      expect(y).toBeLessThan(geometry.visibleBottom)
+      expect(y + height).toBeGreaterThan(0)
+      expect(y).toBeLessThan(geometry.height)
       expect(x + width).toBeGreaterThan(0)
       expect(x).toBeLessThan(geometry.width)
       expect(
@@ -96,11 +95,8 @@ describe("bar renderer", () => {
     },
   )
 
-  it("does not paint a band outside the viewport or a zero-width panel", () => {
-    for (const changes of [
-      { visibleTop: 800, visibleBottom: 700 },
-      { panelWidth: 0 },
-    ]) {
+  it("does not paint empty geometry", () => {
+    for (const changes of [{ height: 0 }, { panelWidth: 0 }]) {
       const { ctx, canvas } = context()
       drawBars(canvas, { ...geometry, ...changes }, palette, saved, 0)
       expect(ctx.clearRect).not.toHaveBeenCalled()

@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useRef } from "react"
-import type { LoginBackgroundConfig } from "./config"
+import { BAR_ROW_RATIO, type LoginBackgroundConfig } from "./config"
 import { type BarGeometry, type BarPalette, drawBars } from "./renderBars"
 
 export function LoginBackground({
@@ -10,7 +10,18 @@ export function LoginBackground({
   config: LoginBackgroundConfig
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const { columns, speed, intensity, contrast, spacing, rounding, waveScale } =
+    config
   useEffect(() => {
+    const settings = {
+      columns,
+      speed,
+      intensity,
+      contrast,
+      spacing,
+      rounding,
+      waveScale,
+    }
     const canvas = canvasRef.current
     const panel = panelRef.current
     const parent = canvas?.parentElement
@@ -22,7 +33,8 @@ export function LoginBackground({
     let palette: BarPalette
     let frame = 0
     let lastFrame = 0
-    let lastPaint = 0
+    let lastPaint = -Infinity
+    let paintInterval = 1000 / 24
     let time = 0
     let geometryDirty = true
     let paletteDirty = true
@@ -30,9 +42,10 @@ export function LoginBackground({
     const canAnimate = () =>
       !document.hidden &&
       !reduced.matches &&
-      geometry.visibleBottom > geometry.visibleTop &&
-      config.speed > 0
-    const paint = () => drawBars(ctx, geometry, palette, config, time)
+      geometry.width > 0 &&
+      geometry.height > 0 &&
+      speed > 0
+    const paint = () => drawBars(ctx, geometry, palette, settings, time)
     const measure = () => {
       const bounds = parent.getBoundingClientRect()
       const anchor = panel.getBoundingClientRect()
@@ -43,9 +56,15 @@ export function LoginBackground({
         top: anchor.top - bounds.top,
         panelWidth: anchor.width,
         panelHeight: anchor.height,
-        visibleTop: Math.max(0, -bounds.top),
-        visibleBottom: Math.min(bounds.height, window.innerHeight - bounds.top),
       }
+      const pitch = anchor.width / columns
+      // Preserve studio sizing; larger grids get fewer paints, at most 24,000 cells/second.
+      const cells =
+        pitch > 0
+          ? (Math.ceil(bounds.width / pitch) + 1) *
+            (Math.ceil(bounds.height / (pitch * BAR_ROW_RATIO)) + 1)
+          : 0
+      paintInterval = Math.max(1000 / 24, (cells * 1000) / 24000)
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
       const width = Math.round(bounds.width * pixelRatio)
       const height = Math.round(bounds.height * pixelRatio)
@@ -73,10 +92,9 @@ export function LoginBackground({
       paletteDirty = false
       const moving = canAnimate()
       if (moving && lastFrame)
-        time += Math.min((now - lastFrame) / 1000, 0.1) * config.speed
+        time += Math.min((now - lastFrame) / 1000, 0.1) * speed
       lastFrame = moving ? now : 0
-      // Invalidation and animation share a frame, including the initial resize observation.
-      if (invalidated || now - lastPaint >= 1000 / 24) {
+      if ((invalidated && !moving) || now - lastPaint >= paintInterval) {
         paint()
         lastPaint = now
       }
@@ -110,10 +128,6 @@ export function LoginBackground({
     })
     reduced.addEventListener("change", update)
     document.addEventListener("visibilitychange", update)
-    document.addEventListener("scroll", invalidateGeometry, {
-      passive: true,
-      capture: true,
-    })
     window.addEventListener("resize", invalidateGeometry)
     return () => {
       cancelAnimationFrame(frame)
@@ -121,10 +135,18 @@ export function LoginBackground({
       theme.disconnect()
       reduced.removeEventListener("change", update)
       document.removeEventListener("visibilitychange", update)
-      document.removeEventListener("scroll", invalidateGeometry, true)
       window.removeEventListener("resize", invalidateGeometry)
     }
-  }, [panelRef, config])
+  }, [
+    panelRef,
+    columns,
+    speed,
+    intensity,
+    contrast,
+    spacing,
+    rounding,
+    waveScale,
+  ])
 
   return (
     <canvas

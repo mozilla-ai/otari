@@ -7,8 +7,6 @@ export interface BarGeometry {
   left: number
   top: number
   panelHeight: number
-  visibleTop: number
-  visibleBottom: number
   panelWidth: number
 }
 
@@ -24,16 +22,7 @@ export function drawBars(
   config: LoginBackgroundConfig,
   time: number,
 ) {
-  const {
-    width,
-    height,
-    left,
-    top,
-    panelWidth,
-    panelHeight,
-    visibleTop,
-    visibleBottom,
-  } = geometry
+  const { width, height, left, top, panelWidth, panelHeight } = geometry
   if (panelWidth <= 0 || width <= 0 || height <= 0) return
   const pitchX = panelWidth / config.columns
   const pitchY = pitchX * BAR_ROW_RATIO
@@ -45,14 +34,12 @@ export function drawBars(
 
   ctx.globalAlpha = 1
   ctx.fillStyle = palette.background
-  if (visibleBottom <= visibleTop) return
-  ctx.clearRect(0, visibleTop, width, visibleBottom - visibleTop)
-  ctx.fillRect(0, visibleTop, width, visibleBottom - visibleTop)
+  ctx.fillRect(0, 0, width, height)
   ctx.fillStyle = palette.accent
 
   for (
-    let row = Math.floor((visibleTop - top) / pitchY);
-    row < Math.ceil((visibleBottom - top) / pitchY);
+    let row = Math.floor(-top / pitchY);
+    row < Math.ceil((height - top) / pitchY);
     row++
   ) {
     for (

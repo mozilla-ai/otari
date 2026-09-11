@@ -46,11 +46,11 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
         >
           <span
             aria-hidden
-            className="pointer-events-none absolute -top-px -left-px size-2 border-t-2 border-l-2 border-[var(--color-primary)]"
+            className="pointer-events-none absolute -top-px -left-px size-2 border-t-2 border-l-2 border-accent"
           />
           <span
             aria-hidden
-            className="pointer-events-none absolute -right-px -bottom-px size-2 border-r-2 border-b-2 border-[var(--color-primary)]"
+            className="pointer-events-none absolute -right-px -bottom-px size-2 border-r-2 border-b-2 border-accent"
           />
           {children}
         </div>
