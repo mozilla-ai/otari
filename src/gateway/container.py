@@ -70,12 +70,20 @@ Register = Callable[["Container"], None]
 class RouterContribution:
     """One router an overlay mounts on top of Otari's own.
 
-    The additive half of the seam: nothing is swapped here, a surface is added
-    and made conditional. Every route the router exposes is served only when
-    the deployment is entitled to ``capability``, resolved through
-    ``EntitlementPort``, because hiding a link in a dashboard is not
-    authorization and a route mounted into this process has to refuse for
-    itself.
+    The additive half of the seam: nothing is swapped here, a surface is added.
+
+    ``capability`` names the licensing axis the surface sits on. Given a name,
+    every route the router exposes is served only when the deployment is
+    entitled to it, resolved through ``EntitlementPort``, because hiding a link
+    in a dashboard is not authorization and a route mounted into this process
+    has to refuse for itself. Use it for a surface an overlay licenses per
+    deployment.
+
+    ``None`` mounts the router with no entitlement dependency. That is the
+    right answer for a contribution that is simply present when the module is
+    installed, which is what a plugin is: there is no licensing decision to
+    make, and inventing a capability name solely to satisfy the gate would
+    invent one.
 
     **Entitlement is not authentication, and the mount point adds none.**
     ``capability`` answers "is this build licensed for this surface", a
@@ -90,7 +98,7 @@ class RouterContribution:
     to open in hybrid mode.
     """
 
-    capability: str
+    capability: str | None
     router: APIRouter
 
 
@@ -452,7 +460,9 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
-    contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
+    contributed = ", ".join(
+        contribution.capability or "ungated" for contribution in container.router_contributions()
+    )
     if contributed:
         container.summary += f", contributed routers for {contributed}"
     contributed_tasks = ", ".join(contribution.name for contribution in container.background_task_contributions())

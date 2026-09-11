@@ -332,7 +332,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # From the app, not a closure: app.state.config is what get_config hands
         # every request, so startup reads the same object.
         config: GatewayConfig = app.state.config
-        container: Container = app.state.container
+        # create_app always attaches a container; an app assembled by hand (as
+        # some tests do) may not have one, and then nothing is contributed.
+        container: Container | None = getattr(app.state, "container", None)
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
@@ -354,10 +356,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             log_writer = NoopLogWriter()
         else:
             # Contributed chains run after Otari's own, so a bootstrap's tables
-            # exist before the first request reaches its routers. create_app
-            # always attaches a container; an app assembled by hand (as some
-            # tests do) may not have one, and then only the core chain runs.
-            container: Container | None = getattr(app.state, "container", None)
+            # exist before the first request reaches its routers.
             init_db(config, migration_contributions=container.migration_contributions() if container else ())
             async with create_session() as session:
                 # Persisted dashboard overrides win over config/env; apply them
@@ -478,7 +477,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # a plugin may extend the data plane as much as the control plane.
             # Inside the try for the same reason as the writer: a start that
             # raises must still cancel every task created before it.
-            for contribution in container.background_task_contributions():
+            for contribution in container.background_task_contributions() if container else ():
                 task = asyncio.create_task(contribution.start(config))
                 contributed_tasks.append((task, f"contributed {contribution.name}"))
             await log_writer.start()

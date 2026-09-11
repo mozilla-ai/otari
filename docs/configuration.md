@@ -315,6 +315,23 @@ environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
 
+### Contributing a router
+
+A router contribution carries a `capability` naming the licensing axis its
+surface sits on. Given a name, Otari mounts the router behind that gate and a
+deployment not entitled to the capability gets the same 404 a path nothing
+serves gets. Use it for a surface an overlay licenses per deployment.
+
+Leaving `capability` as `None` mounts the router with no entitlement
+dependency. That is the right answer for a contribution that is simply present
+once the module is installed, which is what a plugin is: there is no licensing
+decision to make, and inventing a capability name only to satisfy the gate
+would invent one. Entitlement is not authentication either way, so each
+contributed route still declares the credential it needs, the way Otari's own
+routes do.
+
+### Contributing a background task
+
 A background task is a coroutine function that receives the gateway config.
 Otari starts it beside its own periodic refreshers, in every mode, and cancels
 it at shutdown under the same bounded wait, so a task that never yields cannot

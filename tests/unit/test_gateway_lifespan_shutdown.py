@@ -271,3 +271,21 @@ async def test_a_contributed_task_that_raises_is_logged_by_name_and_does_not_bre
 
     assert "contributed budget alerts refresher stopped with an unexpected error" in caplog.text
     assert "plugin blew up" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_app_assembled_without_a_container_still_runs_its_lifespan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``create_app`` always attaches one; an app built by hand may not.
+
+    Both contribution seams the lifespan reads (background tasks and, in
+    standalone, the migration chains handed to ``init_db``) go through the same
+    optional lookup, so a missing container contributes nothing rather than
+    raising on startup.
+    """
+    app = FastAPI()
+    app.state.config = _hybrid_config(tmp_path, monkeypatch)
+
+    async with _create_lifespan()(app):
+        assert not hasattr(app.state, "container")

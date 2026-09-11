@@ -309,6 +309,32 @@ def test_router_contributions_keep_their_order() -> None:
     assert container.router_contributions() == (first, second)
 
 
+def test_the_summary_calls_an_ungated_contribution_ungated_rather_than_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "ungated_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import Container, RouterContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_router(RouterContribution(capability=None, router=APIRouter()))
+    container.contribute_router(RouterContribution(capability="alerts", router=APIRouter()))
+""",
+    )
+
+    container = build_container("ungated_bootstrap:register")
+
+    assert container.summary == (
+        "ungated_bootstrap:register rebound no ports, contributed routers for ungated, alerts"
+    )
+
+
 async def _never_runs(_config: object) -> None:
     raise AssertionError("the container records a task; only the lifespan starts one")
 
