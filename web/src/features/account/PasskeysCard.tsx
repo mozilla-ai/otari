@@ -288,22 +288,37 @@ export function PasskeysCard() {
           is exactly when somebody has orphans to clear out. */}
         {passkeys_ready && canUsePasskeys && !passkeys.isError ? (
           <form
-            className="flex flex-col gap-3 sm:flex-row sm:items-end"
             onSubmit={(event) => {
               event.preventDefault()
               startRegistration()
             }}
           >
+            {/* The button sits beside the input rather than beside the whole
+              field, because the description below it is a paragraph whose
+              height depends on the width it is given. Aligned against the
+              field, the button would have to be pushed up by however tall
+              that paragraph happened to render, which is a number no class
+              can know. */}
             <TextField
               value={newName}
               onChange={setNewName}
-              className="flex max-w-md flex-1 flex-col gap-1"
+              className="flex max-w-xl flex-col gap-1"
             >
               <Label className="text-body">Name</Label>
-              <Input
-                placeholder="Work laptop"
-                maxLength={MAX_PASSKEY_NAME_LENGTH}
-              />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Input
+                  className="flex-1"
+                  placeholder="Work laptop"
+                  maxLength={MAX_PASSKEY_NAME_LENGTH}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  isPending={register.isPending}
+                >
+                  Add a passkey
+                </Button>
+              </div>
               <FieldMessages>
                 <Description className="text-muted">
                   Optional. It is only a label, so you can tell this passkey
@@ -311,15 +326,6 @@ export function PasskeysCard() {
                 </Description>
               </FieldMessages>
             </TextField>
-            <div className="sm:pb-6">
-              <Button
-                type="submit"
-                variant="primary"
-                isPending={register.isPending}
-              >
-                Add a passkey
-              </Button>
-            </div>
           </form>
         ) : null}
       </Section>
