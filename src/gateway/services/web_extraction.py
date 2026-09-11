@@ -182,15 +182,15 @@ class ExtractionSupervisor:
             identifier = self._next_identifier
             self._next_identifier += 1
             self._pending_count += 1
-        self._queue.put(
-            _PendingExtraction(
-                identifier=identifier,
-                kind=kind,
-                payload=payload,
-                expires_at=monotonic() + self._timeout_seconds,
-                future=future,
+            self._queue.put(
+                _PendingExtraction(
+                    identifier=identifier,
+                    kind=kind,
+                    payload=payload,
+                    expires_at=monotonic() + self._timeout_seconds,
+                    future=future,
+                )
             )
-        )
         return await asyncio.wrap_future(future)
 
     def close(self) -> None:

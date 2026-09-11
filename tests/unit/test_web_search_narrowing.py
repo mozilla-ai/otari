@@ -80,6 +80,17 @@ def test_invalid_legacy_domain_rule_fails_closed() -> None:
         _as_tuple(["https://example.com/path"], stored=True)
 
 
+@pytest.mark.parametrize("value", [{}, False, 0, "", "example.com", {"example.com": True}])
+def test_invalid_stored_domain_container_fails_closed(value: Any) -> None:
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _as_tuple(value, stored=True)
+
+
+@pytest.mark.parametrize("value", [None, []])
+def test_empty_stored_domain_list_remains_unconfigured(value: list[str] | None) -> None:
+    assert _as_tuple(value, stored=True) is None
+
+
 def test_a_row_that_narrows_nothing_leaves_the_entry_alone() -> None:
     entry = {"type": "otari_web_search", "max_results": 8}
 

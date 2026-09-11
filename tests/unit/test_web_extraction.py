@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -13,11 +15,8 @@ from time import monotonic
 import pytest
 
 from gateway.services.web_extraction import (
-    WEB_FETCH_EXTRACTION_MEMORY_BYTES,
     WEB_FETCH_EXTRACTION_TIMEOUT_SECONDS,
     WEB_FETCH_MAX_INTERMEDIATE_TEXT_BYTES,
-    WEB_FETCH_MAX_PDF_PAGES,
-    WEB_FETCH_MAX_PENDING_EXTRACTIONS,
     ExtractedText,
     ExtractionError,
     ExtractionQueueFullError,
@@ -237,8 +236,55 @@ def test_extraction_limits_are_fixed_when_environment_names_exist(monkeypatch: p
     monkeypatch.setenv("OTARI_WEB_FETCH_EXTRACTION_MEMORY_BYTES", "999999999")
     monkeypatch.setenv("OTARI_WEB_FETCH_MAX_PENDING_EXTRACTIONS", "999")
 
-    assert WEB_FETCH_EXTRACTION_TIMEOUT_SECONDS == 5.0
-    assert WEB_FETCH_MAX_PDF_PAGES == 100
-    assert WEB_FETCH_MAX_INTERMEDIATE_TEXT_BYTES == 256 * 1024
-    assert WEB_FETCH_EXTRACTION_MEMORY_BYTES == 256 * 1024 * 1024
-    assert WEB_FETCH_MAX_PENDING_EXTRACTIONS == 8
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from gateway.services import web_extraction as extraction; "
+            "assert extraction.WEB_FETCH_EXTRACTION_TIMEOUT_SECONDS == 5.0; "
+            "assert extraction.WEB_FETCH_MAX_PDF_PAGES == 100; "
+            "assert extraction.WEB_FETCH_MAX_INTERMEDIATE_TEXT_BYTES == 256 * 1024; "
+            "assert extraction.WEB_FETCH_EXTRACTION_MEMORY_BYTES == 256 * 1024 * 1024; "
+            "assert extraction.WEB_FETCH_MAX_PENDING_EXTRACTIONS == 8",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_shutdown_during_submission_finishes_the_accepted_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    supervisor = ExtractionSupervisor(timeout_seconds=0.05, worker_target=_hang_worker)
+    close_started = threading.Event()
+    close_finished = threading.Event()
+    put = supervisor._queue.put  # noqa: SLF001
+
+    def close() -> None:
+        close_started.set()
+        supervisor.close()
+        close_finished.set()
+
+    closer = threading.Thread(target=close)
+
+    def put_during_shutdown(pending: _PendingExtraction | None) -> None:
+        if pending is not None:
+            closer.start()
+            assert close_started.wait(timeout=1)
+            # Give shutdown time to drain the queue if submission does not hold the lock.
+            close_finished.wait(timeout=1)
+        put(pending)
+
+    monkeypatch.setattr(supervisor._queue, "put", put_during_shutdown)  # noqa: SLF001
+    try:
+        with pytest.raises(ExtractionError):
+            await asyncio.wait_for(supervisor.extract_html("<p>accepted job</p>"), timeout=3)
+    finally:
+        closer.join(timeout=2)
+        supervisor.close()
+
+    assert close_finished.is_set()
+    assert supervisor._pending_count == 0  # noqa: SLF001
+    assert not supervisor._thread.is_alive()  # noqa: SLF001

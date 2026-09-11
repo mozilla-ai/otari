@@ -365,6 +365,12 @@ def narrow_web_search_tool_entry(
 
 def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ...] | None:
     """Read and canonicalize a JSON domain list without silently dropping rules."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        if stored:
+            raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid")
+        return None
     if not value:
         return None
     hosts: list[str] = []
