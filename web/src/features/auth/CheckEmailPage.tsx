@@ -1,3 +1,4 @@
+import { LoginPageShell } from "./LoginPageShell"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 
 /**
@@ -18,6 +19,7 @@ export function CheckEmailPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout
+      shell={LoginPageShell}
       title="Check your email"
       description={
         type === "resend"
@@ -33,11 +35,11 @@ export function CheckEmailPage({ hash }: { hash: string }) {
         </>
       }
     >
-      <p className="text-center text-body">
+      <p className="text-body">
         Open the link in that message to confirm the address. Signing in is
         blocked until you do.
       </p>
-      <p className="text-center text-caption">
+      <p className="text-caption">
         The link expires, and a new one can be sent at any time.
       </p>
     </PublicAuthLayout>
