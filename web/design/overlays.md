@@ -13,7 +13,12 @@ Does the operator need to interact with what appears?
       └── Does it want the whole screen's attention?
            └── Yes -> FormDialog   (a place to work: creating or editing)
                 or ConfirmDialog   (one question: are you sure)
+                or Dialog          (neither: a guided step, a receipt)
 ```
+
+Three, not five: the tree names three dialogs and they are one answer between
+them. A dialog is the answer to "does it want the whole screen's attention",
+and which of the three is a second question, asked in the section below.
 
 The dialogs live in [feedback.md](feedback.md)'s directory rather than this one,
 because a dialog is nearly always feedback about an action; they are listed here
@@ -99,16 +104,24 @@ rather than leaving it to a call site.
 open, which is also the thing that trips the Playwright suite; web/AGENTS.md
 says the same about React Aria popovers under "Checks".
 
-## Dialog
+## The three dialogs
 
-Modal. Two of them, and the question sorts them:
+Modal. Three of them, and the question sorts them:
 
 - **`FormDialog`** when the operator is creating or editing an object. Every
   create flow in the product, no exceptions. See [feedback.md](feedback.md).
 - **`ConfirmDialog`** when the dialog's whole job is "are you sure", which
   includes every delete of a record.
+- **`Dialog`** when it is neither: a guided step, a receipt, a thing to read and
+  copy. It owns no submit and asks no question, which is exactly why the other
+  two would be a lie about what the frame does.
 
-There was a third, a bare `AlertDialog` shell the form pattern was built from.
+`Dialog` is the plain frame and the newest of the three, and the one thing to
+know about reaching for it is that "this is not a form" is not sufficient
+reason: a create flow whose submit you would hand-roll in the footer still wants
+`FormDialog`, which owns the submit, its pending state and its error surface.
+
+There was a fourth, a bare `AlertDialog` shell the form pattern was built from.
 It is gone: a form wants `FormDialog`, which is a `Modal`, because an alert
 interrupts to ask one question and a form is a place to work, and once nothing
 hand-rolled a form dialog the shell had no call sites left.

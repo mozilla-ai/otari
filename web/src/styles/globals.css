@@ -2145,7 +2145,13 @@ main {
   overflow: visible;
 }
 
-/* FormDialog's geometry, which cannot live at its call site.
+/* The shared dialog geometry, which cannot live at a call site.
+ *
+ * Two components wear it. `FormDialog` is the create/edit surface, and `Dialog`
+ * is the plain frame with no form in it, so the rules below name both: the
+ * sizing, the viewport budget and the phone sheet are the dialog's, not the
+ * form's, and a second copy of them under a second prefix would be one edit away
+ * from two dialogs sitting at different heights.
  *
  * The `.modal__dialog` rule above is unlayered, so it outranks
  * `@layer utilities` and a `w-[32.5rem]` on the dialog compiles, lints, ships
@@ -2158,7 +2164,8 @@ main {
  * 15rem is the 120px offset the dialog sits at, twice: the gap above and below
  * is symmetric by design, and what is left is where the body starts scrolling
  * while the header and footer stay put. */
-.otari-form-dialog {
+.otari-form-dialog,
+.otari-dialog {
   min-width: 0;
   max-width: calc(100vw - 2rem);
   max-height: calc(var(--visual-viewport-height, 100dvh) - 15rem);
@@ -2168,13 +2175,16 @@ main {
  * what the unlayered rule above beats is a `width`, and nothing declares these,
  * so a class here has nothing to lose to. The phone block below is later still,
  * which is what lets a sheet ignore all three. */
-.otari-form-dialog--sm {
+.otari-form-dialog--sm,
+.otari-dialog--sm {
   width: 27.5rem;
 }
-.otari-form-dialog--md {
+.otari-form-dialog--md,
+.otari-dialog--md {
   width: 32.5rem;
 }
-.otari-form-dialog--lg {
+.otari-form-dialog--lg,
+.otari-dialog--lg {
   width: 40rem;
 }
 
@@ -2205,10 +2215,12 @@ main {
  * the way), so adding it would read as clearing the home indicator while
  * changing nothing. */
 @media (width <= 639px), (height <= 639px) {
-  .otari-form-dialog__container {
+  .otari-form-dialog__container,
+  .otari-dialog__container {
     padding: 0;
   }
-  .otari-form-dialog {
+  .otari-form-dialog,
+  .otari-dialog {
     width: 100%;
     max-width: none;
     height: var(--visual-viewport-height, 100dvh);
@@ -2233,13 +2245,15 @@ main {
  * a phone. DOM, visual and focus order now agree at both widths. It also puts
  * the primary lowest, which is the control nearest the thumb on a sheet. */
 @media (width <= 639px) {
-  .otari-form-dialog__footer {
+  .otari-form-dialog__footer,
+  .otari-dialog__footer {
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
     padding: 0.75rem 1rem 1rem;
   }
-  .otari-form-dialog__actions {
+  .otari-form-dialog__actions,
+  .otari-dialog__actions {
     flex-direction: column;
     gap: 0.5rem;
   }
@@ -2248,16 +2262,19 @@ main {
    * reach it. Measured, the two buttons stayed 110px and 83px in a 373px
    * column. HeroUI's `fullWidth` prop is the other way to get here and it is a
    * prop, so it would take the desktop with it. */
-  .otari-form-dialog__actions > button {
+  .otari-form-dialog__actions > button,
+  .otari-dialog__actions > button {
     width: 100%;
   }
   /* Full width earns the same press suppression `.button` already gives
    * `.w-full` and HeroUI's `fullWidth` class: the transform displaces a wide
    * button by 7.07px, and this one spans the sheet. */
-  .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]) {
+  .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]),
+  .otari-dialog__actions > button:is(:active, [data-pressed="true"]) {
     transform: none;
   }
-  .otari-form-dialog__footer button {
+  .otari-form-dialog__footer button,
+  .otari-dialog__footer button {
     min-height: 2.75rem;
   }
 }
@@ -3159,12 +3176,78 @@ main {
   }
 }
 
+/* The scanning border, for a panel that is waiting on something to arrive.
+ *
+ * A conic gradient whose angle is animated, clipped to the element's own 1px
+ * edge, so a bright arc travels the perimeter over a resting hairline. The
+ * `@property` declaration is what makes that animate at all: an untyped custom
+ * property interpolates as a string, so the angle would jump between keyframes
+ * rather than sweep.
+ *
+ * Two mask layers, composited by `mask-composite`: one clipped to the content
+ * box (inset by the 1px padding) and one not, so what survives is the ring
+ * between them. That is the standard way to paint a gradient border without a
+ * second element.
+ *
+ * The element's own resting hairline is a real `border`, set by `ScanBorder`,
+ * and this pseudo-element is painted over it. So the band still reads as a
+ * bordered band when the arc is not running, and the arc is an overlay on that
+ * edge rather than a replacement for it.
+ *
+ * `--scan-ink` is the traveling arc's color and defaults to the accent; a
+ * caller overriding it is how the failed state turns the sweep red without this
+ * rule knowing what a failure is. Both variables are spelled without the
+ * `otari-` prefix the class names carry, because `foundation.test.ts` retires
+ * that namespace for custom properties and neither of these is a palette token:
+ * one is an angle and the other takes its value from `--color-*`.
+ *
+ * Not a dependency: the equivalent npm component is 156KB for a rotating
+ * conic gradient, and at radius 0 there is not even a corner to get right. */
+@property --scan-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.otari-scan-border::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--scan-angle),
+    transparent 0deg,
+    transparent 250deg,
+    var(--scan-ink, var(--color-primary)) 320deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: otari-scan 2.6s linear infinite;
+}
+@keyframes otari-scan {
+  to {
+    --scan-angle: 360deg;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .otari-detail-reveal {
     animation: none;
     grid-template-rows: 1fr;
   }
   .otari-bulk-bar {
+    animation: none;
+  }
+  /* The arc stops where it stands rather than the ring disappearing: the panel
+     still reads as the one thing on the sheet that is watching. */
+  .otari-scan-border::after {
     animation: none;
   }
 }

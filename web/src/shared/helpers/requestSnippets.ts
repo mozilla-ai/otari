@@ -102,6 +102,71 @@ export function buildPythonSnippet({
   ].join("\n")
 }
 
+/** TypeScript through the OpenAI SDK, the same call the Python snippet makes. */
+export function buildTypescriptSnippet({
+  baseUrl,
+  apiKey,
+  model = SNIPPET_MODEL_PLACEHOLDER,
+  message = DEFAULT_MESSAGE,
+}: RequestSnippetInput): string {
+  return [
+    'import OpenAI from "openai"',
+    "",
+    `const client = new OpenAI({ baseURL: ${literal(`${baseUrl}/v1`)}, apiKey: "${apiKey}" })`,
+    "const resp = await client.chat.completions.create({",
+    `  model: ${literal(model)},`,
+    `  messages: [{ role: "user", content: ${literal(message)} }],`,
+    "})",
+    "console.log(resp.choices[0].message.content)",
+  ].join("\n")
+}
+
+/**
+ * The environment variable the agent prompt points at instead of the key.
+ *
+ * The prompt tells the agent to read the key from the environment and never
+ * print or hardcode it, so pasting the live secret into the same text would
+ * contradict the instruction and put the key in the agent's transcript. The
+ * runnable snippets still inline it, because there it is the thing being run.
+ */
+export const SNIPPET_KEY_ENV_VAR = "OTARI_API_KEY"
+
+/**
+ * A prompt to paste into a coding agent, for the operator whose first request
+ * is going to be made by one.
+ *
+ * Deliberately not a snippet with the key in it. It names the variable, the
+ * base URL and the model, tells the agent where to read the secret from, and
+ * tells it to stop rather than guess if the variable is missing. The last line
+ * asks for the reply, which is what makes a failed call visible in the agent's
+ * own output rather than only here.
+ */
+export function buildAgentPrompt({
+  baseUrl,
+  model = SNIPPET_MODEL_PLACEHOLDER,
+  message = DEFAULT_MESSAGE,
+}: Omit<RequestSnippetInput, "apiKey">): string {
+  const endpoint = `${baseUrl}${API_ROOT}/chat/completions`
+  return [
+    "Call Otari once with an OpenAI-compatible chat completion.",
+    "Do not change any of my editor or IDE settings.",
+    "",
+    `base URL    ${baseUrl}${API_ROOT}`,
+    `env var     ${SNIPPET_KEY_ENV_VAR}`,
+    `model       ${model}`,
+    "",
+    `Read ${SNIPPET_KEY_ENV_VAR} from my environment. Never request, print, or hardcode it.`,
+    "If it is not set, stop and tell me how to export it.",
+    "",
+    `POST ${endpoint}`,
+    `Otari-Key: $${SNIPPET_KEY_ENV_VAR}`,
+    `Content-Type: application/json`,
+    `Body: {"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`,
+    "",
+    "Show me the assistant's reply.",
+  ].join("\n")
+}
+
 /**
  * Where a snippet should send its request, or undefined when nothing here knows.
  *

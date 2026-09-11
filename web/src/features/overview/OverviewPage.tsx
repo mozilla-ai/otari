@@ -17,7 +17,7 @@ import { KpiStrip } from "@/design-system/metrics/KpiStrip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
-import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
+import { SetupGuide } from "@/features/onboarding/SetupGuide"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import {
   budgetHealth,
@@ -470,7 +470,7 @@ function OrganizationOverview() {
 
       {/* Offered to whoever manages the workspace, which on a multi-tenant
           deployment is this caller. It decides for itself whether to render. */}
-      <SetupGuideCard canServeRequests={(models.data?.data.length ?? 0) > 0} />
+      <SetupGuide canServeRequests={(models.data?.data.length ?? 0) > 0} />
 
       <ErrorBanner error={loadError} />
 
@@ -589,7 +589,7 @@ export function OverviewPage({
    * query gives: `needsSetup` is only true once it has succeeded and found
    * none, so its negation would also cover a failed query. The setup guide
    * needs the positive form, and takes it from here rather than asking again
-   * (see `SetupGuideCard`).
+   * (see `SetupGuide`).
    */
   hasProviders?: boolean
   setupError?: unknown
@@ -692,7 +692,7 @@ export function OverviewPage({
           key and watch for the first request. It decides for itself whether to
           render, including holding back while there is no provider, which is
           when the strip above is the right guide instead. */}
-      <SetupGuideCard canServeRequests={hasProviders} />
+      <SetupGuide canServeRequests={hasProviders} />
 
       <ErrorBanner error={loadError} />
 

@@ -13,6 +13,20 @@
 `transition-*`. A vestibular disorder is not an edge case, and the guard costs one
 utility.
 
+**Two animations run indefinitely, and both are on the same surface**: the
+first-run sheet's `ScanBorder` arc and the orb inside the panel it wraps. They
+are the shape of the exception rather than licence to add more, and what makes
+them one exception rather than two is that neither outlives the wait. Both run
+only while the product is watching for a request that has not arrived, both stop
+when it does, and neither carries anything that is not also in the text beside
+it.
+
+They stop differently under `prefers-reduced-motion`, because they are different
+machinery. The arc is CSS, so it holds still on its last frame. The orb is a
+canvas the stylesheet cannot reach, so `SetupOrb` reads the preference itself
+and passes `paused`. Anything else that would animate forever is decoration. See
+[feedback.md](feedback.md).
+
 ## Press
 
 `scale(0.98)` at every size. One value, not a ladder: the ladder deepened with

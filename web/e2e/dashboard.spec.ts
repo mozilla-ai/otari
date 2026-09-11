@@ -48,34 +48,51 @@ test.describe("dashboard core flows", () => {
   // per-workspace and permanent, so every project after this one sees the
   // Overview without it (parity.setup.ts asks for the same thing again, rather
   // than depending on this spec having run).
-  test("the setup guide hands out a key, then skips for good", async ({
+  test("the first-run sheet hands out a key, then skips for good", async ({
     page,
   }) => {
     await login(page)
 
-    const guide = page.getByRole("heading", {
-      name: "Send your first request",
-    })
-    await expect(guide).toBeVisible()
+    // A sheet over the Overview, not a panel on it: a workspace with no traffic
+    // has nothing on that page worth reading yet.
+    const sheet = page.getByRole("dialog", { name: "Send your first request" })
+    await expect(sheet).toBeVisible()
 
-    await page.getByRole("button", { name: "Create a setup key" }).click()
-    // Shown once, in a labeled field an operator can select and copy, and
-    // concealed there until they ask for it (otari-ai#2111).
+    // The key is minted as the sheet opens; nothing else is asked of the
+    // operator first. Shown once, in a labeled field they can select and copy,
+    // and concealed there until they ask for it (otari-ai#2111).
     // By role, not by label: `getByLabel` matches a substring, so it also
     // picks up the field's own "Show API key" toggle.
-    const key = page.getByRole("textbox", { name: "API key" })
+    const key = sheet.getByRole("textbox", { name: "Your API key" })
     await expect(key).toBeVisible()
     await expect(key).not.toHaveValue(/^gw-/)
-    await page.getByRole("button", { name: "Show API key" }).click()
-    await expect(key).toHaveValue(/^gw-/)
 
-    await page.getByRole("button", { name: "Skip this guide" }).click()
-    await expect(guide).toBeHidden()
+    // The examples are tabs, and the agent prompt is the one offered first.
+    await expect(
+      sheet.getByRole("region", { name: "agent code" }),
+    ).toBeVisible()
+    await sheet.getByRole("button", { name: "cURL" }).click()
+    const curl = sheet.getByRole("region", { name: "curl code" })
+    await expect(curl).toBeVisible()
+    // Concealed in the example too, because it is the same secret.
+    await expect(curl).not.toContainText(/gw-/)
+
+    await sheet.getByRole("button", { name: "Show Your API key" }).click()
+    await expect(key).toHaveValue(/^gw-/)
+    await expect(curl).toContainText(/Otari-Key: gw-/)
+
+    // It is watching for the request while all of that is on screen.
+    await expect(
+      sheet.getByText("Listening for your first request"),
+    ).toBeVisible()
+
+    await sheet.getByRole("button", { name: "Skip" }).click()
+    await expect(sheet).toBeHidden()
 
     // Permanent: the offer does not come back on the next page load.
     await page.reload()
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
-    await expect(guide).toBeHidden()
+    await expect(sheet).toBeHidden()
   })
 
   test("navigate the management pages", async ({ page }) => {

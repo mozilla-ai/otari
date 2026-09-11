@@ -64,7 +64,8 @@ for a component, not for those.
 | `metrics/SeverityMark` | `SeverityMark`, and the `Severity` type |
 | `metrics/TrendChip` | `TrendChip`, `trendState`, and the `Trend*` types |
 | `metrics/charts` | `TrendChart`, `Sparkline`, `ChartLegend`, and the `SeriesDef` / `StackedPoint` types |
-| `feedback/ErrorBanner` · `/InfoBanner` · `/EmptyState` · `/EmptyMessage` · `/PageLoading` · `/PageError` · `/ConfirmDialog` · `/FormDialog` · `/Dialog` · `/ErrorBoundary` · `/Skeleton` · `/errorMessage` | one each |
+| `feedback/ErrorBanner` · `/InfoBanner` · `/EmptyState` · `/EmptyMessage` · `/PageLoading` · `/PageError` · `/ConfirmDialog` · `/FormDialog` · `/ScanBorder` · `/ErrorBoundary` · `/Skeleton` · `/errorMessage` | one each |
+| `feedback/Dialog` | `Dialog`, `DialogSection`, and the `DialogSize` type |
 | `forms/Field` · `/SecretField` · `/TextArea` · `/SearchField` · `/FieldAction` | one component each |
 | `forms/Select` | `Select`, and the `SelectOption` type |
 | `forms/ComboBoxField` | `ComboBoxField`, and the `ComboBoxOption` type |
@@ -94,6 +95,7 @@ for a component, not for those.
 | `layout/Divider` | `Divider` |
 | `layout/ListDetail` | `ListDetail`, `ListDetailRow`. See [layout.md](layout.md) |
 | `content/Markdown` | `Markdown` |
+| `content/CodeBlock` | `CodeBlock`. Two arrangements: a language row, or bare with a floating copy |
 | `ProductMark` | `ProductMark`. At the top level: it belongs to no topic |
 | `@/shared/components/access/EntitlementGate` · `/UnavailableHere` · `/MissingGatewayAddressNotice` | one each |
 | `@/shared/helpers/format` | `formatUsd`, `formatUsdHeadline`, `formatNumber`, `formatTokens`, `formatPct`, `formatDate`, `formatDateTime`, `formatRelative`, `deltaFraction` |
