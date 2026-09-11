@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
+import { Button } from "../actions/Button"
 import { Field } from "../forms/Field"
+import { INPUT_CLASS } from "../forms/inputClass"
 import { Toggle } from "../forms/Toggle"
+import { FilterSelect } from "../navigation/FilterSelect"
 import { SettingRow } from "./SettingRow"
 import { SettingsGroup } from "./SettingsGroup"
 
@@ -16,6 +19,9 @@ import { SettingsGroup } from "./SettingsGroup"
  * **The row draws no rules of its own.** `SettingsGroup` divides its children,
  * so a border here would give every seam two lines. That is why the stories
  * below put it inside a group rather than showing it bare.
+ *
+ * **The lane is one width down the page and the control fills it.** Sized per
+ * control it was not a lane at all, which `SharedLane` below is about.
  *
  * Below `md` the control stops sharing the row and stacks full width under the
  * label, which is also where the label becomes a press target worth having, and
@@ -164,6 +170,89 @@ export const Nested: Story = {
               label="Allow image output"
               isSelected={false}
               onChange={() => {}}
+            />
+          }
+        />
+      </SettingsGroup>
+    )
+  },
+}
+
+/**
+ * Four different controls, one lane.
+ *
+ * This is the story worth looking at, because it is the one that used to be
+ * wrong: a text field, a select and a two-digit number each sized themselves,
+ * so a page of rows had a different left edge on every one of them. The lane is
+ * a fixed-width slot now, the same rule `design/layout.md` states for any
+ * repeated row, and a control fills it: `w-full` on a field, `fullWidth` on a
+ * `FilterSelect`. A control that cannot fill a lane, a toggle, sits at its
+ * leading edge rather than floating to the row's end.
+ */
+export const SharedLane: Story = {
+  render: () => {
+    const [on, setOn] = useState(true)
+    const [mode, setMode] = useState("default")
+    return (
+      <SettingsGroup bounded title="Web search">
+        <SettingRow
+          label="Backend URL"
+          configKey="web_search_url"
+          help="While unset, otari_web_search requests are rejected with 400."
+          control={
+            // The shape the lane exists for: a field beside its own button. It
+            // takes `min-w-0 flex-1` rather than `w-full` so the button keeps
+            // its size and the field gives up the difference.
+            <div className="flex items-center gap-1.5">
+              <input
+                aria-label="Backend URL"
+                defaultValue="http://searxng:8080"
+                className={`otari-machine-field min-w-0 flex-1 ${INPUT_CLASS}`}
+              />
+              <Button size="sm" className="min-w-[5.5rem] shrink-0">
+                Test
+              </Button>
+            </div>
+          }
+        />
+        <SettingRow
+          label="Max results"
+          configKey="web_search_max_results"
+          help="Cap on hits per call. A per-tool max_results still overrides it."
+          control={
+            <input
+              aria-label="Max results"
+              defaultValue="10"
+              className={`otari-machine-field w-full text-right tabular-nums ${INPUT_CLASS}`}
+            />
+          }
+        />
+        <SettingRow
+          label="Extract page content"
+          configKey="web_search_extract"
+          help="On: page text is extracted in-process. Off: snippet-only results."
+          control={
+            <FilterSelect
+              fullWidth
+              ariaLabel="Extract page content"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: "default", label: "Default (on)" },
+                { value: "on", label: "On" },
+                { value: "off", label: "Off" },
+              ]}
+            />
+          }
+        />
+        <SettingRow
+          label="Require a price before routing"
+          help="A request to a model with no price is refused rather than served at an unknown cost."
+          control={
+            <Toggle
+              label="Require a price before routing"
+              isSelected={on}
+              onChange={setOn}
             />
           }
         />

@@ -185,6 +185,7 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
         }
         control={
           <FilterSelect
+            fullWidth
             ariaLabel="Web search for this workspace"
             value={stance}
             onChange={(next) => setStance(next as Stance)}

@@ -8,12 +8,14 @@ import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { useTestService } from "@/shared/api/tools"
 import { commitOnEnter, useAutosave } from "@/shared/hooks/useAutosave"
 
-// The control lane, one width for text and one for a number, and `scroll-mt-16`
-// so a jump from the tool panel lands the field in the page rather than under
-// the 56px top bar.
-const TEXT_INPUT = `w-full scroll-mt-16 md:w-[13.75rem] ${INPUT_CLASS}`
+// Every field fills `SettingRow`'s lane rather than picking a width of its own,
+// which is what keeps the column's edges straight whether a row holds a URL, a
+// select or a two-digit number. `flex-1` rather than `w-full` because a field
+// can share the lane with a trailing button, and `scroll-mt-16` so a jump from
+// the tool panel lands it in the page rather than under the 56px top bar.
+const TEXT_INPUT = `min-w-0 flex-1 scroll-mt-16 ${INPUT_CLASS}`
 const MACHINE_INPUT = `otari-machine-field ${TEXT_INPUT}`
-const NUMBER_INPUT = `otari-machine-field w-full scroll-mt-16 text-right tabular-nums md:w-[5.5rem] ${INPUT_CLASS}`
+const NUMBER_INPUT = `otari-machine-field w-full scroll-mt-16 text-right tabular-nums ${INPUT_CLASS}`
 
 /**
  * The mono caption beside a row's label, if the key is not already the label.
@@ -224,6 +226,7 @@ function BoolRow({
       errorId={errorId}
       control={
         <FilterSelect
+          fullWidth
           ariaLabel={configKey ? `${copy.label} ${configKey}` : copy.label}
           value={current}
           onChange={(next) =>
@@ -302,6 +305,11 @@ function UrlRow({
       trailing={
         <Button
           size="sm"
+          // Wide enough for "Testing…" as well as "Test", which are 53px and
+          // 84px apart: the button shares a fixed lane with the field now, so
+          // letting it size to its label would narrow the URL under the cursor
+          // for as long as a probe is in flight.
+          className="min-w-[5.5rem] shrink-0"
           aria-label={`Test ${field.service}`}
           isDisabled={trimmed === "" || test.isPending}
           onPress={() => {
@@ -439,7 +447,7 @@ export function ToolPriceRow({
       errorId={errorId}
       control={
         <div className="flex items-center gap-1.5">
-          <span className="text-mono-overline text-subtle">USD</span>
+          <span className="shrink-0 text-mono-overline text-subtle">USD</span>
           <input
             type="text"
             inputMode="decimal"
@@ -465,7 +473,7 @@ export function ToolPriceRow({
               // 70000.00000000001 in binary floating point.
               void save.run(() => commit(Math.round(parsed * PER_MILLION)))
             }}
-            className={`otari-machine-field w-full text-right tabular-nums md:w-[7rem] ${INPUT_CLASS}`}
+            className={`otari-machine-field min-w-0 flex-1 text-right tabular-nums ${INPUT_CLASS}`}
           />
         </div>
       }

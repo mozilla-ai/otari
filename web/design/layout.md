@@ -173,6 +173,15 @@ row draws no rule of its own, because the group divides its children. `nested`
 indents it to `pl-8`, which is how a row says it belongs to the one above it: a
 `DisclosureRow`'s panel is rows, not prose.
 
+**The lane is a fixed-width slot and the control fills it**, by the repeated-row
+rule further down this file. `w-full` on a field, `min-w-0 flex-1` on one sharing
+the lane with a trailing button, `fullWidth` on a `FilterSelect`; a number keeps
+`text-right tabular-nums` rather than a narrow box of its own. A control that
+cannot fill a lane, a toggle or a copyable chip, sits at its leading edge. **No
+row picks a control width**, for the reason it picks no field height: sized per
+control the lane is not a lane, and a URL field, a select and a two-digit number
+gave a column three different left edges.
+
 `bounded` frames the rows inside the page column instead of bleeding them, and
 the frame is also the dense place (`.otari-settings`), so its controls come out
 32px on a desk and 36px at 16px on a phone. **No row picks a field height or a

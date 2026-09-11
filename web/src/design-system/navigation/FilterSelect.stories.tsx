@@ -134,3 +134,34 @@ export const WithExternalLabel: Story = {
     )
   },
 }
+
+/**
+ * `fullWidth` fills whatever the trigger sits in, which is what a settings row
+ * wants: its control lane is a fixed-width slot, and a trigger sized to its own
+ * longest option gives the column a different left edge on every row. A filter
+ * bar leaves it off, because there the trigger's width naming the filter it
+ * carries is the point.
+ *
+ * A value longer than the trigger is ellipsized rather than allowed to widen
+ * it; the popover still shows each option in full.
+ */
+export const FullWidth: Story = {
+  render: () => {
+    const [value, setValue] = useState("blocked")
+    return (
+      <div className="w-[17.5rem]">
+        <FilterSelect
+          fullWidth
+          ariaLabel="Web search for this workspace"
+          value={value}
+          onChange={setValue}
+          options={[
+            { value: "default", label: "Deployment default" },
+            { value: "allowed", label: "Allowed" },
+            { value: "blocked", label: "Blocked (tool and /api/v1/search)" },
+          ]}
+        />
+      </div>
+    )
+  },
+}

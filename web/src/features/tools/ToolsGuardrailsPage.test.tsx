@@ -10,6 +10,7 @@ import type {
   ToolSettingsResponse,
   ToolsResponse,
 } from "@/client"
+import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
@@ -558,15 +559,16 @@ describe("ToolsGuardrailsPage", () => {
     await screen.findByLabelText(WEB_SEARCH_URL)
 
     for (const label of [WEB_SEARCH_URL, ENGINES, MAX_RESULTS]) {
-      expect(screen.getByLabelText(label).className).toContain("w-full")
+      const field = screen.getByLabelText(label)
+      // No field carries a width of its own: the lane owns the width, and a
+      // second one at the call site is how the column got a different left
+      // edge on every row.
+      expect(field.className).not.toMatch(/\b(md|lg):w-\[/)
+      expect(field.closest(`div[class*="${CONTROL_LANE}"]`)).not.toBeNull()
     }
-    // Only the numeric field narrows, and it does so in the same lane.
-    expect(screen.getByLabelText(MAX_RESULTS).className).toContain(
-      "md:w-[5.5rem]",
-    )
-    expect(screen.getByLabelText(ENGINES).className).toContain(
-      "md:w-[13.75rem]",
-    )
+    // The numeric field fills the lane like the rest and keeps its digits at
+    // the lane's trailing edge, which is what still reads it as a number.
+    expect(screen.getByLabelText(MAX_RESULTS).className).toContain("text-right")
   })
 })
 

@@ -12,10 +12,11 @@ export type Parse<T> = (raw: string) => { value: T; error: string }
  * policy when the field is left.
  *
  * Both policy groups are a stance select over a handful of these, and the
- * shapes they need differ only in how the value is parsed and how wide the
- * lane is. `ToolSettingRows` is the other row family and stays separate: those
- * are keyed on a backend field descriptor and carry a config key, a
- * reachability note and a Test button, none of which a policy row has.
+ * shapes they need differ only in how the value is parsed; the lane is
+ * `SettingRow`'s and every field fills it. `ToolSettingRows` is the other row
+ * family and stays separate: those are keyed on a backend field descriptor and
+ * carry a config key, a reachability note and a Test button, none of which a
+ * policy row has.
  */
 export function PolicyRow<T>({
   label,
@@ -38,7 +39,7 @@ export function PolicyRow<T>({
   disabled: boolean
   /** Mono, for a value a machine reads. Off for a sentence a model reads. */
   machine?: boolean
-  /** A short right-aligned lane, for a number rather than a list or a phrase. */
+  /** Right-aligned digits, for a number rather than a list or a phrase. */
   numeric?: boolean
 }) {
   const [draft, setDraft] = useState(committed)
@@ -83,9 +84,7 @@ export function PolicyRow<T>({
             void save.run(() => commit(parsed.value))
           }}
           className={`w-full ${machine || numeric ? "otari-machine-field" : ""} ${
-            numeric
-              ? "text-right tabular-nums md:w-[5.5rem]"
-              : "md:w-[13.75rem]"
+            numeric ? "text-right tabular-nums" : ""
           } ${INPUT_CLASS}`}
         />
       }

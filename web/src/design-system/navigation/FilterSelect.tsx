@@ -22,6 +22,7 @@ export function FilterSelect({
   onChange,
   options,
   disabled,
+  fullWidth,
 }: {
   id?: string
   label?: string
@@ -30,6 +31,12 @@ export function FilterSelect({
   onChange: (value: string) => void
   options: { value: string; label: string }[]
   disabled?: boolean
+  /**
+   * HeroUI's own prop, forwarded rather than renamed. On by a settings row,
+   * whose control lane is a fixed-width slot the control fills; off in a filter
+   * bar, where a trigger sized to the filter it carries is the point.
+   */
+  fullWidth?: boolean
 }) {
   // A value no option carries is a URL naming something the list does not hold
   // (`/activity?status=bogus`) or a drill-down into a key with no rows in the
@@ -47,6 +54,7 @@ export function FilterSelect({
     <Select.Root
       aria-label={label ? undefined : ariaLabel}
       isDisabled={disabled}
+      fullWidth={fullWidth}
       selectedKey={optionKey(value)}
       // A null key is react-aria clearing the selection, which no filter here
       // asks for: reporting it would push the strip of a non-string ("ll") into

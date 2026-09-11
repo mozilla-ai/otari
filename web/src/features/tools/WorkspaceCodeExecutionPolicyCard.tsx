@@ -209,6 +209,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         error={stanceSave.error}
         control={
           <FilterSelect
+            fullWidth
             ariaLabel="Code execution for this workspace"
             value={stance}
             onChange={(next) =>
@@ -283,6 +284,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         control={
           allowedImages.length > 0 || withdrawnImage ? (
             <FilterSelect
+              fullWidth
               ariaLabel="Sandbox image for this workspace"
               value={policy?.image ?? DEPLOYMENT_IMAGE}
               onChange={(next) =>
