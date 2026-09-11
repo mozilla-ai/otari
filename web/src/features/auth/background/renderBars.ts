@@ -35,12 +35,7 @@ export function drawBars(
     visibleBottom,
   } = geometry
   if (panelWidth <= 0 || width <= 0 || height <= 0) return
-  // Bound the visible grid to 64 columns and 32 rows, plus edge cells.
-  const pitchX = Math.max(
-    panelWidth / config.columns,
-    width / 64,
-    (visibleBottom - visibleTop) / (32 * BAR_ROW_RATIO),
-  )
+  const pitchX = panelWidth / config.columns
   const pitchY = pitchX * BAR_ROW_RATIO
   const barWidth = pitchX * (1 - config.spacing)
   const barHeight = pitchY * (1 - config.spacing * (0.134 / 0.248))
@@ -50,8 +45,8 @@ export function drawBars(
 
   ctx.globalAlpha = 1
   ctx.fillStyle = palette.background
-  ctx.clearRect(0, 0, width, height)
   if (visibleBottom <= visibleTop) return
+  ctx.clearRect(0, visibleTop, width, visibleBottom - visibleTop)
   ctx.fillRect(0, visibleTop, width, visibleBottom - visibleTop)
   ctx.fillStyle = palette.accent
 

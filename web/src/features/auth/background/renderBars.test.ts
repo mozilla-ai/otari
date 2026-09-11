@@ -40,6 +40,7 @@ describe("bar renderer", () => {
     const { ctx, fills, canvas } = context()
     drawBars(canvas, geometry, palette, saved, 0)
     expect(fills.length).toBeGreaterThan(0)
+    expect(ctx.clearRect).toHaveBeenCalledExactlyOnceWith(0, 100, 800, 600)
     expect(ctx.fillRect).toHaveBeenCalledWith(0, 100, 800, 600)
     for (const [x, y, width, height] of ctx.roundRect.mock.calls) {
       expect(y + height).toBeGreaterThan(geometry.visibleTop)
@@ -76,24 +77,24 @@ describe("bar renderer", () => {
     }
   })
 
-  it("bounds draw calls on very large viewports", () => {
-    const { ctx, canvas } = context()
-    drawBars(
-      canvas,
-      {
-        ...geometry,
-        width: 7680,
-        height: 4320,
-        visibleTop: 0,
-        visibleBottom: 4320,
-      },
-      palette,
-      saved,
-      0,
-    )
-    expect(ctx.roundRect.mock.calls.length).toBeGreaterThan(0)
-    expect(ctx.roundRect.mock.calls.length).toBeLessThanOrEqual(65 * 33)
-  })
+  it.each([390, 1440, 2560, 7680])(
+    "preserves studio bar dimensions at viewport width %i",
+    (width) => {
+      const { ctx, canvas } = context()
+      const panelWidth = Math.min(448, width - 32)
+      drawBars(canvas, { ...geometry, width, panelWidth }, palette, saved, 0)
+      const pitch = panelWidth / 20
+      expect(ctx.roundRect.mock.calls.length).toBeGreaterThan(0)
+      for (const [, , barWidth, barHeight, radius] of ctx.roundRect.mock
+        .calls) {
+        expect(barWidth).toBeCloseTo(pitch * 0.95)
+        expect(barHeight).toBeCloseTo(
+          pitch * BAR_ROW_RATIO * (1 - 0.05 * (0.134 / 0.248)),
+        )
+        expect(radius).toBeCloseTo(barWidth * 0.11)
+      }
+    },
+  )
 
   it("does not paint a band outside the viewport or a zero-width panel", () => {
     for (const changes of [
@@ -102,6 +103,7 @@ describe("bar renderer", () => {
     ]) {
       const { ctx, canvas } = context()
       drawBars(canvas, { ...geometry, ...changes }, palette, saved, 0)
+      expect(ctx.clearRect).not.toHaveBeenCalled()
       expect(ctx.fillRect).not.toHaveBeenCalled()
       expect(ctx.roundRect).not.toHaveBeenCalled()
     }
