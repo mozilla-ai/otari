@@ -21,14 +21,14 @@ import {
 } from "@/shared/telemetry/errorCode"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
+import { LoginPageShell } from "./LoginPageShell"
 import { rememberOAuthState } from "./OAuthCallbackPage"
 import {
   OAUTH_PROVIDER_ICONS,
   oauthProviderLabel,
   renderableOAuthProviders,
 } from "./oauthProviders"
-import { AuthPageShell, PublicAuthLink } from "./PublicAuthLayout"
+import { PublicAuthLink } from "./PublicAuthLayout"
 
 /** Which box an error belongs beside. */
 type CredentialField = "email" | "password" | "masterKey"
@@ -54,46 +54,8 @@ const ERROR_IDS: Record<CredentialField, string> = {
   masterKey: "login-master-key-error",
 }
 
-/**
- * The page frame: optically centered, and stable while the card grows.
- *
- * `items-center` gave the second at the cost of the first. Centering measures
- * the card, so anything that grows it moves its top edge up by half the growth,
- * and opening the first-run disclosure walked the submit button out from under
- * a pointer already resting on it. A flat top offset fixed that and left the
- * card sitting high with the page empty below it.
- *
- * So the offset is half the viewport minus a **constant** half-height, rather
- * than minus the card's real one. 17.5rem is the figure that best fits half of
- * what the card measures at rest across its branches, taken off the running
- * page rather than guessed: 537px for the master key with one footer link,
- * 581px with two, 589px for a password, 721px for a password with all four
- * links. Every one of those lands within 14px of true center, except the
- * tallest, which nearly fills a 900px window anyway. Because the figure is a
- * constant rather than the content's own height, the offset does not move when
- * the disclosure opens or a refusal wraps; the card grows downward from a
- * fixed top edge. `max()` floors it on a window shorter than
- * the card, where the page scrolls instead.
- *
- * `vh`, deliberately, not `dvh`: the dynamic unit shrinks when a phone's soft
- * keyboard opens, which would re-center the card at the exact moment someone is
- * typing into it.
- */
-
-/**
- * The same frame for the unavailable state, whose card is around 351px rather
- * than 537px. Sharing the form's figure would leave this one sitting about
- * 110px high, which is the complaint the computed offset exists to answer.
- */
-
-/** The column's own stack. The band's padding is on `AuthPageShell`. */
 const CARD = "flex flex-col gap-6"
 
-/**
- * The same, for the two states with no form in them. Left-aligned like
- * everything else in the column: centering a paragraph inside a left-pinned
- * band was the card pattern's habit, not this one's.
- */
 const CARD_FLAT = "flex flex-col gap-4"
 
 /** The screen's one page-defining line. */
@@ -130,14 +92,7 @@ function DisclosureCaret() {
   )
 }
 
-/**
- * The row above a credential box: label and required marker grouped left, the
- * field's refusal right, both on the label's existing 20px line. This is where
- * an `<ErrorBanner>` used to go, between the last field and the button, and it
- * inserted about 46px right where the pointer already was. The card's fixed
- * top edge keeps the page stable when a gateway instruction wraps below this
- * row, rather than hiding the instruction a person needs to act on.
- */
+/** Label, required marker, and inline validation for a credential field. */
 function LabelRow({
   label,
   error,
@@ -212,11 +167,8 @@ function LabelRow({
  * configured: a provider nobody set up is absent rather than rendered disabled,
  * and a deployment that configured none carries no OAuth affordance at all.
  *
- * Three decisions here are load-bearing rather than cosmetic, and each carries
- * its own note where it is made: the card is anchored instead of centered, a
- * refusal is rendered on a label row instead of in a banner, and the submit
- * button is never disabled for an empty box. All three are about the moment a
- * pointer is already resting on that button.
+ * Refusals render on the field label, and empty fields remain submittable so
+ * validation can explain what to enter.
  */
 export function Login() {
   const { login, isSigningOut } = useAuth()
@@ -536,7 +488,7 @@ export function Login() {
 
   if (signInUnavailable) {
     return (
-      <AuthPageShell>
+      <LoginPageShell>
         <div className={CARD_FLAT}>
           <h1 className={HEADING}>Otari sign-in is unavailable</h1>
           {/* Two causes, because reloading only answers one of them. An empty
@@ -557,7 +509,7 @@ export function Login() {
             the master key.
           </p>
         </div>
-      </AuthPageShell>
+      </LoginPageShell>
     )
   }
 
@@ -575,7 +527,7 @@ export function Login() {
   // actionable of the two if they ever did collide.
   if (maintenance_mode) {
     return (
-      <AuthPageShell>
+      <LoginPageShell>
         <div className={CARD_FLAT}>
           <h1 className={HEADING}>Otari is under maintenance</h1>
           <p className="text-sm text-muted">
@@ -588,16 +540,13 @@ export function Login() {
             the management API still accepts the master key.
           </p>
         </div>
-      </AuthPageShell>
+      </LoginPageShell>
     )
   }
 
   return (
-    <AuthPageShell>
+    <LoginPageShell>
       <div className={CARD}>
-        {/* The mark is on the bar now, so the title stands on its own and the
-              column starts at its left edge like every other column in the
-              product. */}
         <div className="flex flex-col gap-1.5">
           <h1 className={HEADING}>Otari Dashboard</h1>
           <p className="text-sm text-pretty text-muted">
@@ -902,6 +851,6 @@ export function Login() {
           </div>
         </div>
       </div>
-    </AuthPageShell>
+    </LoginPageShell>
   )
 }

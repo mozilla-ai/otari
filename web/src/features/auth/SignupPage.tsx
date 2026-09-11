@@ -1,5 +1,5 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useSignup } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
@@ -13,6 +13,7 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField, AuthPasswordField, AuthTextField } from "./AuthFields"
+import { LoginPageShell } from "./LoginPageShell"
 import {
   goToPublicAuthPage,
   PublicAuthLayout,
@@ -125,6 +126,7 @@ export function SignupPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout
+      shell={LoginPageShell}
       title="Claim your account"
       description="Set a password for the address an admin invited or added. You will confirm the address by email before your first sign-in."
       footer={

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SignupPage } from "@/features/auth/SignupPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
@@ -32,7 +33,9 @@ function renderPage(hash = "#/signup") {
   })
   return render(
     <QueryClientProvider client={client}>
-      <SignupPage hash={hash} />
+      <ThemeProvider>
+        <SignupPage hash={hash} />
+      </ThemeProvider>
     </QueryClientProvider>,
   )
 }

@@ -1,30 +1,7 @@
 import { Link } from "@heroui/react"
-import type { ReactNode } from "react"
+import type { ComponentType, ReactNode } from "react"
 
-/**
- * The sparse page: a 56px bar carrying the mark, a column pinned to the left
- * with a full-height rule down its right, and empty ground beyond it.
- *
- * Pinned rather than centered, and the reason is not the one first written
- * here. That reason said the column sits where the signed-in pages put theirs,
- * so nothing moves at the moment of signing in. It is false, and measurably so:
- * signed in, the content column starts at 288px, because the rail is in front
- * of it; here it starts at 24px. The column moves 264px across sign-in and
- * always will.
- *
- * The argument that survives is about this page on its own. A centered column
- * on an empty screen has nothing to align to, which is why a card here would
- * need a border: with elevation zeroed, a floating column has to manufacture
- * its own edge or have none at all. Pinning it to the
- * page's gutter with a rule down its right gives it a real one, made of the
- * page rather than drawn around the content. The ground beyond is deliberately
- * empty: there is one thing to do on this screen.
- *
- * Exported because `Login` renders the same shell and the two must not drift.
- * `Login` has three states with different bodies and so composes the shell
- * itself; every other page in front of a session goes through
- * `PublicAuthLayout` below.
- */
+/** The left-aligned frame for recovery, verification, and other public pages. */
 export function AuthPageShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
@@ -50,23 +27,16 @@ export function AuthPageShell({ children }: { children: ReactNode }) {
   )
 }
 
-/**
- * Every page in front of a session, in the shell above.
- *
- * The platform's `PreloginLayout` is the ancestor, but three of the four
- * things it does are hosted-product chrome that has no counterpart here: the
- * Mozilla.ai byline, the marketing footer, and the pin that forces the auth
- * flow to the light theme regardless of the visitor's preference. A
- * self-hosted dashboard is an operator tool whose theme is the operator's
- * choice, so what survives the port is a heading, a body, and where to go next.
- */
+/** Shared auth content, with a replaceable frame for login and signup. */
 export function PublicAuthLayout({
   title,
   description,
   children,
   footer,
+  shell: Shell = AuthPageShell,
 }: {
   title: string
+  shell?: ComponentType<{ children: ReactNode }>
   /** Optional subhead under the title. */
   description?: ReactNode
   children: ReactNode
@@ -74,9 +44,7 @@ export function PublicAuthLayout({
   footer?: ReactNode
 }) {
   return (
-    <AuthPageShell>
-      {/* The mark is on the bar, so the title stands on its own and the column
-          starts at its left edge like every other column in the product. */}
+    <Shell>
       <div className="flex flex-col gap-1.5">
         <h1 className="text-display">{title}</h1>
         {description ? (
@@ -91,7 +59,7 @@ export function PublicAuthLayout({
           {footer}
         </div>
       ) : null}
-    </AuthPageShell>
+    </Shell>
   )
 }
 
