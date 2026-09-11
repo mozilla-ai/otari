@@ -26,7 +26,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 
 _MODEL = "openai:gpt-4o-mini"
 
@@ -408,8 +408,10 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
     tool_type: str,
 ) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
 
     pool_seen: list[Any] = []

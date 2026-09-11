@@ -45,7 +45,7 @@ class ManagedTool(BaseModel):
     description: str = Field(description="What the tool does, as the model is told.")
     available: bool = Field(
         description=(
-            "Whether this deployment has a backend configured for the tool. A request "
+            "Whether this deployment has enabled and configured the tool. A request "
             "declaring an unavailable tool is rejected with 400."
         )
     )
@@ -81,7 +81,7 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
         ManagedTool(
             id=Tool.WEB_FETCH,
             description=web_fetch["description"],
-            available=True,
+            available=config.web_fetch_enabled,
             accepted_types=[str(Tool.WEB_FETCH)],
             input_schema=web_fetch["parameters"],
             example={"type": Tool.WEB_FETCH},
