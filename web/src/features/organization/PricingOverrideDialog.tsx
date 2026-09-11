@@ -39,6 +39,8 @@ interface RateFieldProps {
   onChange: (value: string) => void
   isRequired?: boolean
   description?: string
+  /** Takes focus on mount, for the instance that is the form's first field. */
+  autoFocus?: boolean
 }
 
 function RateField({
@@ -47,6 +49,7 @@ function RateField({
   onChange,
   isRequired,
   description,
+  autoFocus,
 }: RateFieldProps) {
   return (
     <TextField
@@ -56,7 +59,7 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" />
+      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
       {description ? <span className="text-caption">{description}</span> : null}
     </TextField>
   )
@@ -269,6 +272,10 @@ export function PricingOverrideDialog({
           value={input}
           onChange={setInput}
           isRequired
+          // The first field on the edit path: the model key's own `Field`, which
+          // carries `autoFocus` on the add path, is replaced by a read-only
+          // block there, and focus was landing on the frame's Close control.
+          autoFocus={editing !== undefined}
         />
         <RateField
           label="Output, per 1M tokens"

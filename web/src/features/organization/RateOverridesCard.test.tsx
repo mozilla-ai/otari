@@ -195,6 +195,25 @@ describe("RateOverridesCard", () => {
     })
   })
 
+  it("puts focus in the first rate when editing, not on the frame's Close", async () => {
+    // The add path's first field is the model key, which carries `autoFocus`.
+    // Editing replaces it with a read-only block, so without this the dialog
+    // opened with focus on Close.
+    mockApi({ overrides: [pricingOverride()] })
+    const user = userEvent.setup()
+
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }))
+
+    const dialog = await screen.findByRole("dialog")
+    await waitFor(() =>
+      expect(
+        within(dialog).getByLabelText(/input, per 1m tokens/i),
+      ).toHaveFocus(),
+    )
+  })
+
   it("does not greet the next open with the last attempt's refusal", async () => {
     // The create and replace mutations live inside the dialog, below the card's
     // key, so the remount that clears the draft clears the refusal with it.
