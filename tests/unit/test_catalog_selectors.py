@@ -76,3 +76,28 @@ def test_an_empty_index_resolves_nothing() -> None:
     selectors.reset_selector_index()
     assert selectors.resolve_catalog_selector("z-ai/glm-5.3") is None
     assert selectors.short_selector_for("nebius:zai-org/GLM-5.3") is None
+
+
+@pytest.mark.parametrize(("fetch", "expected_cached_only"), [(False, True), (True, False)])
+@pytest.mark.asyncio
+async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected_cached_only: bool) -> None:
+    """The scheduled rebuild reads the discovery cache; the requested one may dial.
+
+    The refresher runs on a timer against every configured provider, so dialing
+    there would put a fanout the operator never asked for on that timer, and
+    would dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning
+    is that the reads dial for themselves.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from gateway.api.routes import catalog
+    from gateway.api.routes.models import MergedCatalog
+
+    empty = MergedCatalog(models={}, aliases={}, dynamic_policies={}, discovered_keys=set())
+    config = GatewayConfig(master_key="k", providers={"nebius": {"api_key": "x"}})
+
+    with patch.object(catalog, "build_merged_catalog", new=AsyncMock(return_value=empty)) as build:
+        await catalog.rebuild_selector_index(AsyncMock(), config, fetch=fetch)
+
+    assert build.await_args is not None
+    assert build.await_args.kwargs["cached_only"] is expected_cached_only

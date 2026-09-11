@@ -443,9 +443,13 @@ async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fet
     ``fetch`` lets a request-time rebuild pull models.dev the way a page load
     does. The scheduled rebuild reads the cache as it stands instead: fetching
     from a background task would bind the catalog's fetch lock to that task's
-    loop, and the cache is warm within a tick of any page load anyway.
+    loop, and the cache is warm within a tick of any page load anyway. Discovery
+    is read the same way, and for a second reason: dialing here would fan out to
+    every configured provider on a timer the operator never asked for, and would
+    dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning is that
+    the reads do their own dialing.
     """
-    merged = await build_merged_catalog(db, config, auth=(None, True), session_identity=None)
+    merged = await build_merged_catalog(db, config, auth=(None, True), session_identity=None, cached_only=not fetch)
     catalog = (
         await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
         if fetch

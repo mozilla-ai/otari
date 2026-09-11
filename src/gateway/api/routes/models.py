@@ -549,11 +549,15 @@ async def build_merged_catalog(
     session_identity: TenancyUser | None,
     provider: str | None = None,
     anonymous: bool = False,
+    cached_only: bool = False,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
     ``anonymous`` is the public catalog's visitor, who is answered from the
     configured instances alone; see :func:`_catalog_scope`.
+
+    ``cached_only`` builds the view without dialing any provider, for a caller
+    that runs off the request path; see :func:`discover_all_models`.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
@@ -624,6 +628,7 @@ async def build_merged_catalog(
                 config,
                 provider_filter=provider,
                 serve_stale=background_discovery_enabled(config),
+                cached_only=cached_only,
             )
         except Exception:
             logger.exception("Model discovery failed unexpectedly")
