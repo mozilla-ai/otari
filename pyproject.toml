@@ -48,13 +48,18 @@ dependencies = [
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.7.0",
-    # IDNA2008 for the same feature (`core.email_domains`). Declared rather than
-    # leaned on as a transitive dependency, because the standard library's own
-    # "idna" codec is IDNA2003 and folds `faß.de` into `fass.de`, which would
-    # let a proof taken on one domain admit addresses at another.
-    "idna>=3.7",
     "fastapi>=0.115.0",
     "genai-prices>=0.1.0",
+    # Pinned retrieval imports transport internals, so constrain both libraries
+    # to the tested minor versions instead of relying on transitive dependencies.
+    "httpcore>=1.0.9,<1.1.0",
+    "httpx>=0.28.1,<0.29.0",
+    # IDNA2008 for email-domain ownership and one UTS #46/STD3 identity for
+    # URL policy and pinned retrieval. Declared rather than leaned on as a
+    # transitive dependency, because the standard library's own "idna" codec
+    # is IDNA2003 and folds `faß.de` into `fass.de`, which would let a proof
+    # taken on one domain admit addresses at another.
+    "idna>=3.10",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     # Pinned to one minor line, not just below the next major. The major
     # ceiling is #689: mcp 2.0 removed
