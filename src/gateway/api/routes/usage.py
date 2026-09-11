@@ -46,7 +46,7 @@ from gateway.services.usage_admin_service import (
     delete_usage,
     set_usage_price,
 )
-from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 
 # Two routers under one prefix, because the two planes that meet here
 # authenticate differently. Reading or amending every tenant's usage rows is

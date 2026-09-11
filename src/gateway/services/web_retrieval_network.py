@@ -186,6 +186,7 @@ async def validate_retrieval_target(
     policy: DomainPolicy | None = None,
     resolver: AddressResolver | None = None,
     deadline: NetworkDeadline | None = None,
+    allow_private: bool = False,
 ) -> ValidatedTarget:
     """Canonicalize, resolve, and admit a destination before connection setup.
 
@@ -220,7 +221,7 @@ async def validate_retrieval_target(
     for address in resolved:
         canonical_address = ipaddress.ip_address(str(address))
         reason = _blocked_address_reason(canonical_address)
-        if reason is not None:
+        if reason is not None and not allow_private:
             raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
         if canonical_address not in seen:
             admitted.append(canonical_address)

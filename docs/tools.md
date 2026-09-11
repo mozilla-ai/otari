@@ -163,6 +163,24 @@ provider for production. `web_search_url` points at any other backend exposing
 a SearXNG-compatible `/search?format=json` endpoint, and a configured provider
 wins over it.
 
+When content extraction is enabled, Otari retrieves each result through its
+bounded public-web client. It validates and pins the resolved address before
+connecting, validates every redirect, rejects HTTPS-to-HTTP downgrades, follows
+at most five redirects, and applies one five-second network deadline across DNS,
+connection setup, redirects, and body streaming. The decoded response body is
+limited to 5 MiB.
+
+Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
+JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
+single-worker process with fixed time, memory, queue, page, and intermediate
+output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
+unextractable results fall back to the search provider's snippet. A provider's
+own `extracted_content` still takes precedence and is not fetched locally.
+
+Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
+including any truncation notice. The existing 1,500-character per-result content
+limit still applies before this overall result limit.
+
 Where the search key must not sit on the machine serving traffic, a deployment
 can also serve the search itself at `GET /v1/web-search/search`. This is the
 hosted shape: the control plane holds the key and runs the query, and its

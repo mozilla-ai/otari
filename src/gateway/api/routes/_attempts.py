@@ -44,7 +44,7 @@ from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.web_search_backend import WebSearchNotReachableError
+from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 from gateway.types.attempt import Attempt
 
 T = TypeVar("T")

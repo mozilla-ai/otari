@@ -22,9 +22,13 @@ from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedErr
 from gateway.services.tenancy.workspace_web_search_service import (
     _MAX_DOMAINS,
     _MAX_RESULTS,
+    InvalidStoredWebSearchDomainError,
     ResolvedWebSearchConfig,
+    _as_tuple,
+    _normalize_domains,
     narrow_web_search_tool_entry,
 )
+from gateway.services.web_retrieval_policy import canonicalize_domain_rule
 
 
 def _config(**overrides: object) -> ResolvedWebSearchConfig:
@@ -55,6 +59,36 @@ def _narrow(
     # literal entry whose values are all lists infers as `dict[str, Sequence[str]]`
     # and would not be assignable to the narrower annotation.
     return narrow_web_search_tool_entry(entry, config, baseline_max_results=baseline)
+
+
+def test_new_domain_rules_are_stored_in_canonical_form() -> None:
+    assert _normalize_domains(["EXAMPLE.com.", "bücher.example", "xn--bcher-kva.example"]) == [
+        "example.com",
+        "xn--bcher-kva.example",
+    ]
+
+
+def test_valid_legacy_domain_rules_are_canonicalized_in_memory() -> None:
+    assert _as_tuple(["EXAMPLE.com.", "bücher.example"], stored=True) == (
+        "example.com",
+        "xn--bcher-kva.example",
+    )
+
+
+def test_invalid_legacy_domain_rule_fails_closed() -> None:
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _as_tuple(["https://example.com/path"], stored=True)
+
+
+@pytest.mark.parametrize("value", [{}, False, 0, "", "example.com", {"example.com": True}])
+def test_invalid_stored_domain_container_fails_closed(value: Any) -> None:
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _as_tuple(value, stored=True)
+
+
+@pytest.mark.parametrize("value", [None, []])
+def test_empty_stored_domain_list_remains_unconfigured(value: list[str] | None) -> None:
+    assert _as_tuple(value, stored=True) is None
 
 
 def test_a_row_that_narrows_nothing_leaves_the_entry_alone() -> None:
@@ -124,6 +158,25 @@ def test_an_allow_list_is_intersected_rather_than_replaced() -> None:
     assert narrowed["allowed_domains"] == ["arxiv.org"]
 
 
+def test_allow_list_intersection_canonicalizes_each_unique_rule_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def counted(value: str) -> Any:
+        calls.append(value)
+        return canonicalize_domain_rule(value)
+
+    monkeypatch.setattr(
+        "gateway.services.tenancy.workspace_web_search_service.canonicalize_domain_rule",
+        counted,
+    )
+    _narrow(
+        {"type": "otari_web_search", "allowed_domains": ["a.example", "b.example", "a.example"]},
+        _config(allowed_domains=("example", "other.example", "example")),
+    )
+
+    assert calls == ["a.example", "b.example", "example", "other.example"]
+
+
 def test_an_allow_list_applies_whole_to_a_request_that_named_none() -> None:
     narrowed = _narrow({"type": "otari_web_search"}, _config(allowed_domains=("arxiv.org",)))
 
@@ -181,6 +234,21 @@ def test_a_domain_that_merely_ends_in_another_is_not_a_subdomain_of_it() -> None
 
     with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
         _narrow(entry, _config(allowed_domains=("example.com",)))
+
+
+def test_ip_literal_allow_lists_intersect_by_exact_address_only() -> None:
+    entry: dict[str, object] = {"type": "otari_web_search", "allowed_domains": ["host.192.0.2.1"]}
+
+    with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
+        _narrow(entry, _config(allowed_domains=("192.0.2.1",)))
+
+
+def test_unicode_and_punycode_rules_intersect_as_one_identity() -> None:
+    entry: dict[str, object] = {"type": "otari_web_search", "allowed_domains": ["bücher.example"]}
+
+    narrowed = _narrow(entry, _config(allowed_domains=("xn--bcher-kva.example",)))
+
+    assert narrowed["allowed_domains"] == ["bücher.example"]
 
 
 def test_domains_are_compared_case_insensitively() -> None:

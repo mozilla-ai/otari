@@ -1,23 +1,25 @@
 """Unit tests for `WebSearchBackend`.
 
 Mocks the HTTP layer so the suite needs neither a SearXNG container nor
-network access for trafilatura's per-URL fetches.
+network access for result-page retrieval.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import patch
 
 import httpx
 import pytest
 
-from gateway.services.web_search_backend import (
+from gateway.services.web_retrieval_backend import (
+    WEB_RETRIEVAL_RESULT_MAX_BYTES,
     WEB_SEARCH_TOOL_NAME,
-    WebSearchBackend,
+    WebRetrievalBackend,
     WebSearchNotReachableError,
 )
+
+WebSearchBackend = WebRetrievalBackend
 
 
 class _MockTransport(httpx.AsyncBaseTransport):
@@ -182,24 +184,25 @@ async def test_call_tool_extracts_content_when_enabled(monkeypatch: pytest.Monke
     _patched_async_client(
         {
             ("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY),
-            ("example.com", "/post-a"): httpx.Response(200, text="<html><body><p>Article A body</p></body></html>"),
-            ("example.org", "/post-b"): httpx.Response(200, text="<html><body><p>Article B body</p></body></html>"),
+            ("example.com", "/post-a"): httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                stream=httpx.ByteStream(b"<html><body><p>Article A body</p></body></html>"),
+            ),
+            ("example.org", "/post-b"): httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                stream=httpx.ByteStream(b"<html><body><p>Article B body</p></body></html>"),
+            ),
         },
         monkeypatch,
     )
 
-    # Stub trafilatura to return deterministic markdown without invoking the
-    # heavier real extractor — keeps the unit test fast and free of HTML
-    # quirks. The contract under test is "extracted content wins over
-    # snippet", not trafilatura's specific output.
-    with patch("gateway.services.web_search_backend.trafilatura.extract") as mock_extract:
-        mock_extract.side_effect = lambda html, **_: f"extracted: {html[-30:]}"
-        async with WebSearchBackend(base_url="http://searxng:8080", extract_content=True) as backend:
-            result = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=True) as backend:
+        result = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
 
-    # Stub returns the last 30 chars of the fetched HTML — verify the extracted
-    # content (not just the snippet) reached the formatter.
-    assert "extracted:" in result
+    assert "Article A body" in result
+    assert "Article B body" in result
     # Original snippets should NOT be present since extracted content wins.
     assert "snippet about A" not in result
     assert "snippet about B" not in result
@@ -342,7 +345,7 @@ async def test_backend_unreachable_raises(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
     async with WebSearchBackend(base_url="http://searxng:8080") as backend:
-        with pytest.raises(WebSearchNotReachableError, match="web_search failed"):
+        with pytest.raises(WebSearchNotReachableError, match="could not be reached"):
             await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
 
 
@@ -351,7 +354,7 @@ async def test_empty_query_returns_error_message(monkeypatch: pytest.MonkeyPatch
     from opentelemetry import trace as otel_trace
     from opentelemetry.trace import StatusCode
 
-    import gateway.services.web_search_backend as wsb_module
+    import gateway.services.web_retrieval_backend as wsb_module
 
     exporter, provider = _make_otel_provider()
     wsb_module.tracer = provider.get_tracer(wsb_module.__name__)  # type: ignore[attr-defined]
@@ -380,9 +383,9 @@ async def test_empty_query_returns_error_message(monkeypatch: pytest.MonkeyPatch
     span = spans[0]
     assert span.name == WEB_SEARCH_TOOL_NAME
     assert span.status.status_code == StatusCode.ERROR
-    assert span.status.description == "empty query"
+    assert span.status.description == "empty_query"
     assert span.attributes is not None
-    assert span.attributes["web_search.query"] == ""
+    assert "web_search.query" not in span.attributes
 
 
 @pytest.mark.asyncio
@@ -572,51 +575,19 @@ async def test_fetch_capped_truncates_huge_response(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_fetch_capped_buffer_never_exceeds_max_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The internal buffer is capped strictly at ``_FETCH_MAX_BYTES``.
+async def test_complete_search_result_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = {
+        "results": [
+            {"url": "https://example.com/p", "title": "T" * 100_000, "content": "snippet"}
+        ]
+    }
+    _patched_async_client({("searxng", "/search"): httpx.Response(200, json=body)}, monkeypatch)
 
-    Earlier the loop appended each chunk in full before checking the cap,
-    so the buffer could overshoot by up to one chunk-size and then peak
-    at ~2x while ``b"".join(...)`` materialised the final bytestring.
-    Now the overshooting chunk is truncated to the remaining budget.
-    """
-    from gateway.services import web_search_backend as wsb_module
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        result = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
 
-    monkeypatch.setattr(wsb_module, "_FETCH_MAX_BYTES", 1024)
-    payload = b"<html>" + b"A" * 4096 + b"</html>"
-    _patched_async_client(
-        {
-            ("searxng", "/search"): httpx.Response(
-                200,
-                json={"results": [{"url": "https://example.com/p", "title": "T", "content": "snip"}]},
-            ),
-            ("example.com", "/p"): httpx.Response(200, content=payload),
-        },
-        monkeypatch,
-    )
-
-    captured_buffers: list[bytearray] = []
-    original_fetch = wsb_module.WebSearchBackend._fetch_capped
-
-    async def spy_fetch(self: wsb_module.WebSearchBackend, url: str) -> str | None:
-        out = await original_fetch(self, url)
-        # _fetch_capped returns a decoded str; we cannot inspect the bytes
-        # buffer post-decode, so assert via the str length cap (utf-8 is a
-        # superset of ASCII so 1 byte = 1 char here, giving us a precise
-        # bound).
-        if out is not None:
-            captured_buffers.append(bytearray(out, "utf-8"))
-        return out
-
-    monkeypatch.setattr(wsb_module.WebSearchBackend, "_fetch_capped", spy_fetch)
-
-    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=True) as backend:
-        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
-
-    assert captured_buffers, "fetch was not invoked"
-    assert all(len(b) <= 1024 for b in captured_buffers), (
-        f"_fetch_capped buffer exceeded cap: sizes={[len(b) for b in captured_buffers]}"
-    )
+    assert len(result.encode("utf-8")) <= WEB_RETRIEVAL_RESULT_MAX_BYTES
+    assert result.endswith("[Content truncated at the 50 KiB tool-result limit.]")
 
 
 @pytest.mark.parametrize("bad_value", [0, -1, -100])
@@ -634,7 +605,7 @@ def test_max_results_clamps_subone_to_one(bad_value: int) -> None:
 
 def test_max_results_clamps_above_cap_to_max_results_cap() -> None:
     """Values above the cap clamp down (existing behavior, regression guard)."""
-    from gateway.services.web_search_backend import MAX_RESULTS_CAP
+    from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 
     backend = WebSearchBackend(base_url="http://searxng:8080", max_results=10_000)
     assert backend._max_results == MAX_RESULTS_CAP  # noqa: SLF001
@@ -689,14 +660,12 @@ async def test_auth_token_not_leaked_to_result_page_fetches(monkeypatch: pytest.
         monkeypatch,
     )
 
-    with patch("gateway.services.web_search_backend.trafilatura.extract") as mock_extract:
-        mock_extract.side_effect = lambda html, **_: "extracted"
-        async with WebSearchBackend(
-            base_url="http://searxng:8080",
-            extract_content=True,
-            auth_token="gw-secret-token",  # noqa: S106 — test fixture, not a real secret
-        ) as backend:
-            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+    async with WebSearchBackend(
+        base_url="http://searxng:8080",
+        extract_content=True,
+        auth_token="gw-secret-token",  # noqa: S106 — test fixture, not a real secret
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
 
     search_reqs = [r for r in transport.captured if r.url.path == "/search"]
     fetch_reqs = [r for r in transport.captured if r.url.path in ("/post-a", "/post-b")]
@@ -720,12 +689,11 @@ def _make_otel_provider() -> tuple[object, object]:
 
 
 @pytest.mark.asyncio
-async def test_call_tool_emits_span_with_query_and_result_count(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful web_search call must emit a span named 'web_search' with
-    query and result_count attributes set."""
+async def test_call_tool_emits_redacted_span_with_result_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Search telemetry carries operational counts but no query or backend URL."""
     from opentelemetry import trace as otel_trace
 
-    import gateway.services.web_search_backend as wsb_module
+    import gateway.services.web_retrieval_backend as wsb_module
 
     exporter, provider = _make_otel_provider()
     original_provider = otel_trace.get_tracer_provider()
@@ -753,22 +721,18 @@ async def test_call_tool_emits_span_with_query_and_result_count(monkeypatch: pyt
     assert span.name == WEB_SEARCH_TOOL_NAME
     assert span.attributes is not None
     assert span.attributes["tool.type"] == "otari_web_search"
-    assert span.attributes["web_search.query"] == "claude code"
+    assert "web_search.query" not in span.attributes
     assert span.attributes["web_search.provider"] == "duckduckgo,mojeek,qwant,wikipedia"
-    assert span.attributes["web_search.backend_url"] == "http://searxng:8080"
+    assert "web_search.backend_url" not in span.attributes
     assert span.attributes["web_search.result_count"] == 2
 
 
 @pytest.mark.asyncio
 async def test_the_span_names_the_provider_that_served_the_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``web_search.provider`` answers what served the search, once.
-
-    It used to report the SearXNG engine list on a search that never touched
-    SearXNG, leaving a second attribute competing to answer the same question.
-    """
+    """``web_search.provider`` identifies the configured Search provider."""
     from opentelemetry import trace as otel_trace
 
-    import gateway.services.web_search_backend as wsb_module
+    import gateway.services.web_retrieval_backend as wsb_module
 
     exporter, provider = _make_otel_provider()
     original_provider = otel_trace.get_tracer_provider()
@@ -801,13 +765,12 @@ async def test_the_span_names_the_provider_that_served_the_search(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When the search backend is unreachable the span must record the exception
-    and have an ERROR status."""
+async def test_call_tool_span_redacts_error_when_backend_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Search failures carry a fixed outcome and no raw exception event."""
     from opentelemetry import trace as otel_trace
     from opentelemetry.trace import StatusCode
 
-    import gateway.services.web_search_backend as wsb_module
+    import gateway.services.web_retrieval_backend as wsb_module
 
     exporter, provider = _make_otel_provider()
     original_provider = otel_trace.get_tracer_provider()
@@ -835,11 +798,8 @@ async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch
     span = spans[0]
     assert span.name == WEB_SEARCH_TOOL_NAME
     assert span.status.status_code == StatusCode.ERROR
-    exception_events = [e for e in span.events if e.name == "exception"]
-    assert len(exception_events) == 1
-    attrs = exception_events[0].attributes
-    assert attrs is not None
-    assert attrs["exception.type"] == "httpx.ConnectError"
+    assert span.status.description == "search_backend_failed"
+    assert not [event for event in span.events if event.name == "exception"]
 
 
 # --- structured results for native citation blocks ---------------------------
@@ -904,141 +864,6 @@ async def test_take_last_results_empty_for_an_empty_query(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
-async def test_extraction_releases_free_heap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Parsing HTML strands memory in glibc's arenas; the search must hand it back."""
-    _patched_async_client(
-        {
-            ("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY),
-            ("example.com", "/post-a"): httpx.Response(200, text="<html><body><p>A</p></body></html>"),
-            ("example.org", "/post-b"): httpx.Response(200, text="<html><body><p>B</p></body></html>"),
-        },
-        monkeypatch,
-    )
-    calls = 0
-
-    def counting_release() -> None:
-        nonlocal calls
-        calls += 1
-
-    monkeypatch.setattr("gateway.services.web_search_backend.release_free_heap", counting_release)
-    with patch("gateway.services.web_search_backend.trafilatura.extract", return_value="body"):
-        async with WebSearchBackend(base_url="http://searxng:8080", extract_content=True) as backend:
-            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
-
-    assert calls == 1, "one release per search, after the whole batch of pages"
-
-
-@pytest.mark.asyncio
-async def test_free_heap_released_even_when_extraction_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The failure path allocated just the same, so it must release too."""
-    _patched_async_client(
-        {
-            ("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY),
-            ("example.com", "/post-a"): httpx.Response(200, text="<html><body><p>A</p></body></html>"),
-            ("example.org", "/post-b"): httpx.Response(200, text="<html><body><p>B</p></body></html>"),
-        },
-        monkeypatch,
-    )
-    calls = 0
-
-    def counting_release() -> None:
-        nonlocal calls
-        calls += 1
-
-    monkeypatch.setattr("gateway.services.web_search_backend.release_free_heap", counting_release)
-    # _fetch_and_extract swallows extractor errors, so raise from the gather itself.
-    monkeypatch.setattr(
-        "gateway.services.web_search_backend.validate_outbound_fetch_url",
-        _raise_cancelled,
-    )
-    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=True) as backend:
-        with pytest.raises(RuntimeError):
-            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
-
-    assert calls == 1
-
-
-async def _raise_cancelled(_url: str) -> None:
-    raise RuntimeError("guard blew up")
-
-
-def test_extraction_is_serialized_across_threads() -> None:
-    """Concurrent trafilatura.extract corrupts the heap and aborts the process.
-
-    Asserts the observable contract (never two extractions in flight at once)
-    rather than the mechanism, so a different serialization strategy still passes.
-    """
-    import asyncio as _asyncio
-    import threading as _threading
-
-    from gateway.services.web_search_backend import _extract_markdown, _get_extract_executor
-
-    in_flight = 0
-    overlaps = 0
-    guard = _threading.Lock()
-
-    def tracking_extract(_html: str, **_: Any) -> str:
-        nonlocal in_flight, overlaps
-        with guard:
-            in_flight += 1
-            if in_flight > 1:
-                overlaps += 1
-        import time
-
-        time.sleep(0.02)
-        with guard:
-            in_flight -= 1
-        return "body"
-
-    async def main() -> None:
-        loop = _asyncio.get_running_loop()
-        await _asyncio.gather(
-            *(loop.run_in_executor(_get_extract_executor(), _extract_markdown, f"<html>{i}</html>") for i in range(8))
-        )
-
-    with patch("gateway.services.web_search_backend.trafilatura.extract", tracking_extract):
-        _asyncio.run(main())
-
-    assert overlaps == 0, "two extractions ran at once; this aborts the process under real load"
-
-
-def test_extraction_does_not_occupy_the_shared_executor() -> None:
-    """Queued extractions must not stall unrelated asyncio.to_thread work.
-
-    file_extractors' upload path shares the default executor, so a blocking wait
-    held there would put uploads behind the whole search queue.
-    """
-    import asyncio as _asyncio
-    import time as _time
-
-    from gateway.services.web_search_backend import _extract_markdown, _get_extract_executor
-
-    def slow_extract(_html: str, **_: Any) -> str:
-        _time.sleep(0.05)
-        return "body"
-
-    async def main() -> float:
-        loop = _asyncio.get_running_loop()
-        queued = [
-            _asyncio.ensure_future(
-                loop.run_in_executor(_get_extract_executor(), _extract_markdown, f"<html>{i}</html>")
-            )
-            for i in range(40)
-        ]
-        await _asyncio.sleep(0.1)
-        start = _time.perf_counter()
-        await _asyncio.to_thread(lambda: None)
-        elapsed = _time.perf_counter() - start
-        await _asyncio.gather(*queued)
-        return elapsed
-
-    with patch("gateway.services.web_search_backend.trafilatura.extract", slow_extract):
-        elapsed = _asyncio.run(main())
-
-    assert elapsed < 0.5, f"unrelated to_thread work waited {elapsed:.2f}s behind the extraction queue"
-
-
-@pytest.mark.asyncio
 async def test_provider_backend_calls_the_api_directly(monkeypatch: pytest.MonkeyPatch) -> None:
     """A configured provider replaces the /search hop, adapter container and all."""
     transport = _patched_async_client(
@@ -1084,7 +909,7 @@ async def test_provider_wins_over_a_configured_backend_url(monkeypatch: pytest.M
 async def test_provider_failure_surfaces_as_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     _patched_async_client({("api.tavily.com", "/search"): httpx.Response(500, text="boom")}, monkeypatch)
     async with WebSearchBackend(provider="tavily", provider_api_key="tvly-x") as backend:
-        with pytest.raises(WebSearchNotReachableError, match="tavily"):
+        with pytest.raises(WebSearchNotReachableError, match="could not be reached"):
             await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
 
 

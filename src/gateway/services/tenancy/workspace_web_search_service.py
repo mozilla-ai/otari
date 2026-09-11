@@ -62,7 +62,13 @@ from gateway.models.tenancy import User, Workspace
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedError
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.web_search_backend import MAX_RESULTS_CAP
+from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
+from gateway.services.web_retrieval_policy import (
+    CanonicalHost,
+    DomainRuleValidationError,
+    canonicalize_domain_rule,
+    domain_rule_matches,
+)
 
 # The backend's own ceiling on returned hits. A stored value above it would read
 # as a configured limit and do nothing, since the backend clamps to this anyway,
@@ -72,7 +78,8 @@ _MAX_RESULTS = MAX_RESULTS_CAP
 # Bound the two lists and the opaque bag so one workspace's row cannot grow
 # without limit; the same numbers the hosted `WorkspaceWebSearchConfigUpdate`
 # uses, since this is the same configuration.
-_MAX_DOMAINS = 100
+MAX_WEB_SEARCH_DOMAINS = 100
+_MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
 # The longest a DNS name can be. Not a policy, just the point past which a
@@ -80,46 +87,34 @@ _MAX_PROVIDER_OPTIONS_BYTES = 4096
 _MAX_DOMAIN_LENGTH = 253
 
 
-# Characters that mean the entry is not a bare host. The backend compares each
-# entry against ``urlparse(url).hostname``, so anything carrying a scheme, a
-# port, a path, userinfo or a wildcard can never equal one or suffix-match one.
-_NOT_IN_A_HOSTNAME = ("/", ":", "@", "?", "#", "*", "\\")
+class InvalidStoredWebSearchDomainError(ValueError):
+    """A legacy workspace row contains a domain rule that cannot be enforced."""
 
 
 def _normalize_domains(value: list[str] | None) -> list[str] | None:
-    """Lower-case, strip, drop empties, de-duplicate and shape-check a domain list.
+    """Canonicalize, drop empty entries, and de-duplicate a domain list.
 
-    Ported from the hosted model's validator, with the shape check added. An
-    all-blank list normalizes to ``None`` rather than ``[]``, because an empty
-    list here would read as "an allow-list permitting nothing" to a reader and
-    as "no allow-list" to :func:`narrow_web_search_tool_entry`, and only one of
-    those is what a cleared form means.
-
-    The check is the point rather than tidiness. ``WebSearchBackend`` matches an
-    entry against ``urlparse(url).hostname``, so ``https://evil.example`` and
-    ``evil.example/path`` match nothing at all: stored on ``blocked_domains``
-    they read as configured on the dashboard and in the ``GET`` while blocking
-    nothing, which is the silent-fail-open shape this whole surface exists to
-    avoid. Refused at the write, where the person who typed it is still looking.
-
-    A leading dot is stripped rather than refused: ``.example.com`` has exactly
-    one reading, and an entry here already covers its subdomains, so it is the
-    same rule written in cookie syntax.
+    An all-blank list becomes ``None``. A leading dot is accepted as cookie-style
+    notation for the same DNS suffix rule.
     """
     if value is None:
         return None
     seen: dict[str, None] = {}
     for raw in value:
-        host = raw.strip().lower().lstrip(".")
-        if not host:
+        candidate = raw.strip()
+        if not candidate:
             continue
+        if candidate.startswith("."):
+            candidate = candidate[1:]
+        try:
+            host = canonicalize_domain_rule(candidate).value
+        except DomainRuleValidationError as exc:
+            raise ValueError(
+                f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
+                "with no scheme, port or path"
+            ) from exc
         if len(host) > _MAX_DOMAIN_LENGTH:
             raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
-        if any(char in host for char in _NOT_IN_A_HOSTNAME) or any(char.isspace() for char in host):
-            raise ValueError(
-                f"{raw.strip()!r} is not a bare hostname; give a domain such as 'example.com', "
-                "with no scheme, port or path, or it would match nothing"
-            )
         seen.setdefault(host, None)
     cleaned = list(seen)
     if len(cleaned) > _MAX_DOMAINS:
@@ -290,8 +285,8 @@ async def resolve_workspace_web_search_config(
         enabled=config.enabled,
         max_results=config.max_results,
         purpose_hint=config.purpose_hint,
-        allowed_domains=_as_tuple(config.allowed_domains),
-        blocked_domains=_as_tuple(config.blocked_domains),
+        allowed_domains=_as_tuple(config.allowed_domains, stored=True),
+        blocked_domains=_as_tuple(config.blocked_domains, stored=True),
         provider_options=config.provider_options,
     )
 
@@ -368,17 +363,34 @@ def narrow_web_search_tool_entry(
     return narrowed
 
 
-def _as_tuple(value: list[str] | None) -> tuple[str, ...] | None:
-    """Read a stored JSON list back as a tuple of hosts, or ``None`` if it holds none.
-
-    Defensive about the element type because the column is JSON: a row written
-    by something other than this service could hold anything, and a non-string
-    would otherwise reach the backend's domain comparison.
-    """
+def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ...] | None:
+    """Read and canonicalize a JSON domain list without silently dropping rules."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        if stored:
+            raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid")
+        return None
     if not value:
         return None
-    hosts = tuple(str(host).strip().lower() for host in value if str(host).strip())
-    return hosts or None
+    hosts: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str) or not raw.strip():
+            if stored:
+                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid")
+            continue
+        candidate = raw.strip()
+        if candidate.startswith("."):
+            candidate = candidate[1:]
+        try:
+            host = canonicalize_domain_rule(candidate).value
+        except DomainRuleValidationError as exc:
+            if stored:
+                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid") from exc
+            continue
+        if host not in hosts:
+            hosts.append(host)
+    return tuple(hosts) or None
 
 
 def _entry_domains(value: Any) -> list[str] | None:
@@ -401,6 +413,16 @@ def _union(requested: list[str] | None, workspace: tuple[str, ...]) -> list[str]
     return list(merged)
 
 
+def _canonical_rules(values: list[str] | tuple[str, ...]) -> list[tuple[str, CanonicalHost]]:
+    rules: list[tuple[str, CanonicalHost]] = []
+    for value in dict.fromkeys(values):
+        try:
+            rules.append((value, canonicalize_domain_rule(value)))
+        except DomainRuleValidationError:
+            continue
+    return rules
+
+
 def _intersect(requested: list[str], workspace: tuple[str, ...]) -> list[str]:
     """The domains both sides permit, in the request's order.
 
@@ -413,19 +435,16 @@ def _intersect(requested: list[str], workspace: tuple[str, ...]) -> list[str]:
     overlapping pair is the one that survives; genuinely disjoint lists still
     intersect to nothing, which is what the caller refuses.
     """
+    requested_rules = _canonical_rules(requested)
+    workspace_rules = _canonical_rules(workspace)
     kept: dict[str, None] = {}
-    for host in dict.fromkeys(requested):
-        for allowed in workspace:
-            if _covers(allowed, host):
+    for host, candidate in requested_rules:
+        for allowed, rule in workspace_rules:
+            if domain_rule_matches(rule, candidate):
                 kept.setdefault(host, None)
-            elif _covers(host, allowed):
+            elif domain_rule_matches(candidate, rule):
                 kept.setdefault(allowed, None)
     return list(kept)
-
-
-def _covers(suffix: str, host: str) -> bool:
-    """Whether a domain-list entry admits a host, the way the search backend decides it."""
-    return host == suffix or host.endswith(f".{suffix}")
 
 
 class WorkspaceWebSearchService:
