@@ -1208,7 +1208,7 @@ async def test_fetch_only_admission_needs_no_search_backend(monkeypatch: pytest.
     monkeypatch.setattr(pipeline, "resolve_workspace_web_search_config", AsyncMock(return_value=None))
     db = AsyncMock()
     ctx = _ctx(
-        GatewayConfig(require_pricing=False),
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True),
         db=cast(Any, db),
         workspace_id=uuid.uuid4(),
     )
@@ -1218,6 +1218,30 @@ async def test_fetch_only_admission_needs_no_search_backend(monkeypatch: pytest.
     assert tool_ctx.use_web_fetch is True
     assert tool_ctx.use_web_search is False
     assert tool_ctx.remaining_user_tools is None
+
+
+@pytest.mark.asyncio
+async def test_disabled_fetch_releases_reservation_before_workspace_policy_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    resolve = AsyncMock(return_value=None)
+    monkeypatch.setattr(pipeline, "resolve_workspace_web_search_config", resolve)
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False),
+        db=cast(Any, AsyncMock()),
+        reservation=_reservation(),
+        workspace_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}])
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == pipeline.WEB_FETCH_NOT_ENABLED_DETAIL
+    assert settlement.refunded == 1
+    resolve.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1249,7 +1273,7 @@ async def test_invalid_managed_web_declarations_release_reservation(
     settlement = _Settlement()
     settlement.install(monkeypatch)
     ctx = _ctx(
-        GatewayConfig(require_pricing=False),
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True),
         db=cast(Any, AsyncMock()),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
@@ -1298,7 +1322,7 @@ async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch:
     monkeypatch.setattr(pipeline, "_resolve_organization_guardrails", organization_resolve)
     monkeypatch.setattr(pipeline, "_resolve_mcp_server_ids", mcp_resolve)
     ctx = _ctx(
-        GatewayConfig(require_pricing=False),
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True),
         db=cast(Any, AsyncMock()),
         workspace_id=uuid.uuid4(),
     )
@@ -1325,7 +1349,11 @@ async def test_combined_standalone_request_domains_narrow_fetch_without_workspac
         AsyncMock(return_value=None),
     )
     ctx = _ctx(
-        GatewayConfig(require_pricing=False, web_search_url="https://search.example"),
+        GatewayConfig(
+            require_pricing=False,
+            web_fetch_enabled=True,
+            web_search_url="https://search.example",
+        ),
         db=cast(Any, AsyncMock()),
         workspace_id=uuid.uuid4(),
     )
@@ -1362,7 +1390,11 @@ async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pyt
         AsyncMock(return_value=workspace),
     )
     ctx = _ctx(
-        GatewayConfig(require_pricing=False, web_search_url="https://search.example"),
+        GatewayConfig(
+            require_pricing=False,
+            web_fetch_enabled=True,
+            web_search_url="https://search.example",
+        ),
         db=cast(Any, AsyncMock()),
         workspace_id=uuid.uuid4(),
     )
@@ -1387,6 +1419,7 @@ async def test_hybrid_fetch_requires_explicit_authorization(monkeypatch: pytest.
         GatewayConfig(
             mode="hybrid",
             require_pricing=False,
+            web_fetch_enabled=True,
             platform={"base_url": "https://platform.example"},
         ),
         hybrid_mode=True,
@@ -1415,6 +1448,7 @@ async def test_hybrid_fetch_only_needs_no_search_backend(monkeypatch: pytest.Mon
         GatewayConfig(
             mode="hybrid",
             require_pricing=False,
+            web_fetch_enabled=True,
             platform={"base_url": "https://platform.example"},
         ),
         hybrid_mode=True,
@@ -1448,6 +1482,7 @@ async def test_hybrid_fetch_fails_closed_on_malformed_policy(
         GatewayConfig(
             mode="hybrid",
             require_pricing=False,
+            web_fetch_enabled=True,
             platform={"base_url": "https://platform.example"},
         ),
         hybrid_mode=True,

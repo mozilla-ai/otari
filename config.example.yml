@@ -91,6 +91,10 @@ providers:
 #     supports_image: true
 #     supports_pdf: false
 
+# Managed Web Fetch permits model-directed outbound requests to public web
+# destinations. It is disabled by default. See docs/tools.md.
+# web_fetch_enabled: true
+
 # Direct search tools. Model-initiated web search uses web_search_url instead.
 # See docs/tools.md.
 # search_tools:

@@ -111,9 +111,26 @@ async def test_gateway_tool_warning_includes_fetch_without_a_search_backend(
 ) -> None:
     _capture_gateway_logs(caplog)
     try:
-        await warn_if_gateway_tools_lack_pricing(GatewayConfig(require_pricing=False), async_db)
+        await warn_if_gateway_tools_lack_pricing(
+            GatewayConfig(require_pricing=False, web_fetch_enabled=True),
+            async_db,
+        )
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
     assert "web_fetch" in caplog.text
     assert "otari:web_fetch" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_gateway_tool_warning_omits_disabled_fetch(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    _capture_gateway_logs(caplog)
+    try:
+        await warn_if_gateway_tools_lack_pricing(GatewayConfig(require_pricing=False), async_db)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert "web_fetch" not in caplog.text
+    assert "otari:web_fetch" not in caplog.text

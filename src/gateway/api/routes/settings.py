@@ -123,6 +123,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "sandbox_purpose_hint",
             "sandbox_session_image",
             "sandbox_allowed_session_images",
+            "web_fetch_enabled",
             "web_search_url",
             "web_search_provider",
             "web_search_purpose_hint",

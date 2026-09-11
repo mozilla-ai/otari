@@ -143,6 +143,13 @@ defaults apply. In hybrid mode, the control plane resolves the policy instead.
 
 ### Web fetch
 
+Fetch is disabled by default because it permits model-directed outbound requests.
+Enable it at deployment time with `web_fetch_enabled: true` in `config.yml` or
+`OTARI_WEB_FETCH_ENABLED=true` in the environment. When disabled,
+`otari_web_fetch` remains discoverable with `"available": false`, and requests
+declaring it are rejected without affecting other tools or ordinary completion
+requests.
+
 Declare Fetch on any completion API with `{"type": "otari_web_fetch"}`. The
 model-facing function accepts exactly one field:
 
@@ -265,8 +272,9 @@ A workspace web-access policy can:
 Manage it under `/v1/workspaces/{workspace_id}/web-search` or from Tools.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
-backend or relax an operator limit. Fetch remains available subject to policy
-when no Search backend is configured.
+backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
+remains available subject to deployment and workspace policy when no Search
+backend is configured.
 
 The policy also applies to direct search where relevant. In hybrid mode, the
 connected control plane supplies workspace search configuration.

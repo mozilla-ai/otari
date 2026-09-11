@@ -26,7 +26,7 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.entities import UsageLog, User
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
@@ -274,7 +274,10 @@ async def test_fetch_call_is_metered_priced_and_spent(
     model_pricing: dict[str, Any],
     fetch_pricing: dict[str, Any],
     db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
 ) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     user_id = api_key_obj["user_id"]
     before = _spend(db_session_factory, user_id)
     responses = [
@@ -319,7 +322,10 @@ async def test_failed_fetch_is_counted_but_not_billed(
     model_pricing: dict[str, Any],
     fetch_pricing: dict[str, Any],
     db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
 ) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     responses = [
         _completion(tool_call=True, tool_name="web_fetch", arguments='{"url":"https://example.com"}'),
         _completion(tool_call=False),
@@ -352,7 +358,10 @@ async def test_failed_fetch_is_counted_but_not_billed(
 async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
     client: TestClient,
     api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
 ) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     provider = AsyncMock(return_value=_fetch_batch_completion(11))
     fetch = AsyncMock(return_value="bounded content")
     with (

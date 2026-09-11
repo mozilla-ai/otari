@@ -1091,6 +1091,13 @@ class GatewayConfig(BaseSettings):
             "workspace may not pin an image at all."
         ),
     )
+    web_fetch_enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether Otari may execute the managed otari_web_fetch tool. Off by default because "
+            "enabling it permits model-directed outbound requests to public web destinations."
+        ),
+    )
     web_search_url: str | None = Field(
         default=None,
         description=(

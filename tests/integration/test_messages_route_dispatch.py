@@ -35,7 +35,7 @@ from any_llm.types.messages import (
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 
@@ -694,9 +694,11 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
     tool_type: str,
 ) -> None:
     """Managed web declarations route through the shared backend."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
 
     pool_seen: list[Any] = []

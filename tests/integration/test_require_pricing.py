@@ -37,6 +37,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         auto_migrate=False,
         require_pricing=True,
         default_pricing=False,
+        web_fetch_enabled=True,
     )
     yield from build_test_client(config)
 

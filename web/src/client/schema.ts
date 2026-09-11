@@ -7031,7 +7031,7 @@ export interface components {
             accepted_types: string[];
             /**
              * Available
-             * @description Whether this deployment has a backend configured for the tool. A request declaring an unavailable tool is rejected with 400.
+             * @description Whether this deployment has enabled and configured the tool. A request declaring an unavailable tool is rejected with 400.
              */
             available: boolean;
             /**

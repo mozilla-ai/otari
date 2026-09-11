@@ -28,6 +28,9 @@ services:
       # back to a Python/pandas/numpy-flavoured default if unset. Per-request
       # tools[i].purpose_hint still wins over this.
       - OTARI_SANDBOX_PURPOSE_HINT=${OTARI_SANDBOX_PURPOSE_HINT:-}
+      # Managed Web Fetch is opt-in because it permits model-directed outbound
+      # requests to public web destinations.
+      - OTARI_WEB_FETCH_ENABLED=${OTARI_WEB_FETCH_ENABLED:-false}
       # In-network URL of the web-search backend — any HTTP service exposing
       # a SearXNG-compatible /search?format=json endpoint. The bundled
       # `searxng` profile container is the default; swap by changing this URL

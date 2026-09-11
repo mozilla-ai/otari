@@ -96,7 +96,8 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     zero cost, which is worth flagging too: the work is real and the invoice is not.
     """
     configured: list[str] = []
-    configured.append(WEB_FETCH_TOOL_NAME)
+    if config.web_fetch_enabled:
+        configured.append(WEB_FETCH_TOOL_NAME)
     if config.web_search_configured():
         configured.append(WEB_SEARCH_TOOL_NAME)
     if config.sandbox_url or otari_env("SANDBOX_URL"):

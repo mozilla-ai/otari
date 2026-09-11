@@ -28,6 +28,7 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     app = app_for(
         GatewayConfig(
             mode="hybrid",
+            web_fetch_enabled=True,
             platform={"base_url": "http://platform.test/api/v1"},
         )
     )

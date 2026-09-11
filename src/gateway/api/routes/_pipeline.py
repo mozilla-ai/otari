@@ -296,6 +296,10 @@ WEB_ACCESS_NOT_ENABLED_DETAIL = "web access is not enabled for this workspace"
 MALFORMED_WEB_ACCESS_POLICY_DETAIL = "Authorization service returned a malformed web-access policy"
 WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL = "A requested managed web tool is not authorized for this workspace"
 WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL = "The request and workspace web-access domain policies do not overlap"
+WEB_FETCH_NOT_ENABLED_DETAIL = (
+    "otari_web_fetch tool requested but web fetch is disabled on this gateway. "
+    "Set OTARI_WEB_FETCH_ENABLED=true on the gateway, or remove otari_web_fetch from `tools`."
+)
 WEB_FETCH_DECLARATION_INVALID_DETAIL = "otari_web_fetch declarations may contain only the type field"
 WEB_SEARCH_DECLARATION_INVALID_DETAIL = "otari_web_search declarations contain an unsupported field"
 WEB_TOOL_DUPLICATE_DETAIL = "A managed web tool may be declared at most once"
@@ -2785,6 +2789,8 @@ async def prepare_gateway_tools(
         except ValueError as exc:
             raise adapter.error(400, WEB_SEARCH_MAX_USES_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from exc
         web_fetch_tool_entry, remaining_user_tools = _extract_web_fetch_tool(tools_after_search)
+        if web_fetch_tool_entry is not None and not ctx.config.web_fetch_enabled:
+            raise adapter.error(400, WEB_FETCH_NOT_ENABLED_DETAIL, ErrorKind.INVALID_REQUEST)
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
         # hybrid mode, where the backend may be the platform-hosted web-search
         # endpoint that authenticates the gateway. Standalone backends (SearXNG /
