@@ -217,14 +217,17 @@ async def validate_outbound_fetch_url(url: str) -> None:
     if _allow_web_search_private_hosts():
         return
 
-    await _reject_internal_host(host, host_label="fetch", override_var="OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS")
+    await reject_internal_host(host, host_label="fetch", override_var="OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS")
 
 
-async def _reject_internal_host(host: str, *, host_label: str, override_var: str) -> None:
+async def reject_internal_host(host: str, *, host_label: str, override_var: str) -> None:
     """Reject a host that is (or resolves to) a private/link-local/reserved address.
 
     The shared literal-or-resolve + :func:`_blocked_reason` loop behind the
-    web-search and provider-``api_base`` gates. Callers do their own scheme/host
+    web-search and provider-``api_base`` gates. Public rather than private
+    because a bootstrap-loaded module with an outbound destination of its own
+    needs the same walk, and a copy of it would be a second place to fix a
+    CIDR. Callers do their own scheme/host
     validation and allow-flag short-circuit first, then hand the bare hostname
     here. An unresolvable host is rejected (DNS-rebinding TOCTOU). ``host_label``
     names the host in error messages; ``override_var`` is the OTARI_ env var
@@ -299,4 +302,4 @@ async def validate_provider_api_base(url: str) -> None:
     if not host:
         raise UnsafeURLError("provider api_base must include a hostname")
 
-    await _reject_internal_host(host, host_label="provider api_base", override_var="OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS")
+    await reject_internal_host(host, host_label="provider api_base", override_var="OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS")
