@@ -315,6 +315,33 @@ environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
 
+### Budget alerts, the plugin this repository ships
+
+`otari_alerts` is a worked example of all three contributions below, and a
+feature in its own right: it tells an organization that one of its budget
+ceilings is running out, before the ceiling starts refusing requests. A rule is
+an [Apprise](https://github.com/caronc/apprise) URL (so Slack, Discord,
+PagerDuty, mail and a plain webhook are one field) plus the thresholds that
+reach it.
+
+```bash
+pip install 'gateway[alerts]'
+export OTARI_BOOTSTRAP=otari_alerts:register
+```
+
+That is the whole of the setup. The rules are managed at
+`/api/v1/organizations/me/alert-rules`, by an organization's owners and admins.
+Two environment variables of its own:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `OTARI_ALERT_EVALUATION_INTERVAL_SEC` | `60` | How often the ceilings are checked. `0` keeps the rules and sends nothing. |
+| `OTARI_ALERT_ALLOW_PRIVATE_HOSTS` | `false` | Allow a destination that resolves to a private, loopback or reserved address. Turn it on to alert an internal chat server or webhook receiver. |
+
+Apprise is an extra rather than a core dependency, so a gateway that does not
+run the plugin does not carry it. There is no dashboard page yet: the surface
+is the API.
+
 ### Contributing a router
 
 A router contribution carries a `capability` naming the licensing axis its
