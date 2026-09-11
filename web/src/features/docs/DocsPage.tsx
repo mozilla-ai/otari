@@ -1,6 +1,7 @@
 import type { ComponentPropsWithoutRef, ReactElement, ReactNode } from "react"
-import { Children, isValidElement, useEffect, useRef, useState } from "react"
+import { Children, isValidElement } from "react"
 import type { Components, ExtraProps } from "react-markdown"
+import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -116,27 +117,18 @@ export const markdownComponents: Components = {
   ),
   // Code blocks scroll horizontally on overflow; make them focusable too so the
   // clipped content is keyboard-reachable (axe scrollable-region-focusable).
-  pre: (props: MdProps<"pre">) => <CodeBlock {...props} />,
+  pre: (props: MdProps<"pre">) => <MarkdownCodeBlock {...props} />,
 }
 
 /**
- * A code block with a label row above it: the language on the left, a copy
- * affordance on the right.
+ * The bundled guide's fenced blocks, rendered through the shared `CodeBlock`.
  *
- * The row is a cell of the block rather than a button floating on it, which is
- * how the copy family works everywhere else in this product and is also what
- * keeps the control out of the text it would otherwise sit over. The language
- * comes from the `language-*` class remark puts on the inner `<code>`, and the
- * row is dropped entirely when there is neither a language nor anything to
- * copy, rather than rendering an empty bar.
+ * The language comes from the `language-*` class remark puts on the inner
+ * `<code>`, and the text a copy yields is that child's own string rather than
+ * the rendered nodes, which is why the block takes both: `children` is what
+ * react-markdown produced, `value` is what goes on the clipboard.
  */
-function CodeBlock({ node: _node, children, ...props }: MdProps<"pre">) {
-  const [copied, setCopied] = useState(false)
-  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  )
-  useEffect(() => () => clearTimeout(resetTimer.current), [])
-
+function MarkdownCodeBlock({ node: _node, children }: MdProps<"pre">) {
   const child = Children.toArray(children).find(isValidElement) as
     | ReactElement<{ className?: string; children?: ReactNode }>
     | undefined
@@ -145,56 +137,14 @@ function CodeBlock({ node: _node, children, ...props }: MdProps<"pre">) {
   const text =
     typeof child?.props.children === "string" ? child.props.children : ""
 
-  const copy = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
-        setCopied(true)
-        clearTimeout(resetTimer.current)
-        resetTimer.current = setTimeout(() => setCopied(false), 2_000)
-      }
-    } catch {
-      // No Clipboard API, or it refused. The block is selectable either way, so
-      // there is nothing to fall back to and nothing to claim.
-    }
-  }
-
   return (
-    <div className="my-5">
-      {/* The label row: the language on the left, the copy affordance on the
-          right, both in mono at the caption step on the block's own surface.
-          The row is a cell of the block rather than a button floating on it,
-          which is how the copy family works everywhere else here. */}
-      <div className="flex items-center justify-between gap-3 border border-code-border bg-code-control px-4 py-1.5 text-mono-micro text-code-foreground">
-        <span>{language || "code"}</span>
-        {text ? (
-          <button
-            type="button"
-            onClick={copy}
-            className="opacity-75 hover:opacity-100"
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-        ) : null}
-      </div>
-      {/* biome-ignore-start lint/a11y/noNoninteractiveTabindex: same as the table above; the block scrolls, so it has to be reachable */}
-      {/* biome-ignore-start lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT */}
-      {/* A code block is a small object of its own on the prose ground, which
-          is the one place in this product where an edge is right: it is a
-          verbatim thing to be copied, not a division of the page. `border-t-0`
-          because the label row above already drew that edge. */}
-      <pre
-        tabIndex={0}
-        role="region"
-        aria-label={language ? `${language} code` : "Code"}
-        className="overflow-x-auto border border-code-border border-t-0 bg-code-surface px-4 py-3.5 text-mono-caption leading-5 text-code-foreground"
-        {...props}
-      >
-        {children}
-      </pre>
-      {/* biome-ignore-end lint/a11y/noNoninteractiveTabindex: see above */}
-      {/* biome-ignore-end lint/a11y/useSemanticElements: see above */}
-    </div>
+    <CodeBlock
+      label={language || undefined}
+      value={text || undefined}
+      className="my-5"
+    >
+      {children}
+    </CodeBlock>
   )
 }
 

@@ -31,6 +31,10 @@ Is it destructive but deletes nothing (regenerate, archive, reset)?
  └── ConfirmButton          (the two-step confirm; see actions.md)
 Is the operator creating or editing an object?
  └── FormDialog             (every one of them; see the placement rule in actions.md)
+Is it a frame that is neither a form nor a question?
+ └── Dialog                 (a guided step, a receipt, a thing to read and copy)
+Is the product waiting on something to arrive?
+ └── ScanBorder             (around the panel that is doing the waiting)
 ```
 
 ## Signatures
@@ -48,6 +52,10 @@ ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
 FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
   submitLabel, onSubmit, isPending, error?, isDirty?, isDismissable = true,
   isSubmitDisabled?, returnFocusRef?, footerStart?, tabs?, children }
+Dialog: { isOpen, onOpenChange, title, description?, size = "md",
+  align = "start", mark?, isAnnouncement?, isDismissable = true,
+  status?, footerStart?, actions?, children }
+ScanBorder: { isActive, tone = "accent" | "danger", className?, children }
 ErrorBoundary: { children, resetKey? }
 ```
 
@@ -109,6 +117,82 @@ line is enough and it never gets its own illustration.
 A disabled action in an empty state must carry its reason (Providers' "Add your
 first provider" with no server secret key). A control shown disabled instead of
 hidden is carrying that meaning on its own, at `opacity: 0.4`.
+
+## Dialog
+
+The third dialog, and the one to reach for when the other two would be a lie
+about what the frame does. `FormDialog` is a place to work and owns a submit;
+`ConfirmDialog` is an `AlertDialog` that interrupts to ask one question. This is
+neither: a header, a scrolling body, an optional footer, and a body that is
+whatever is being presented.
+
+It shares `FormDialog`'s geometry class family in `globals.css`, so both sit at
+the same height, cap at the same viewport budget and become the same full-screen
+sheet below 640px in either dimension. It adds a fourth width step, `xl` at
+720px, for a frame carrying a key, a tab row and a code block at once.
+
+`status` is the one slot outside the scrolling body: a readout pinned above the
+footer, for the thing the frame is actually about rather than more of what it is
+presenting. A frame with a long body and a live status would otherwise push that
+status below the fold at the moment it starts changing, which is what happened
+to the first-run sheet's listening panel.
+
+Two props exist for the first-run sheet and nothing else should reach for them
+casually. `align="center"` with a `mark` is the payoff shape: a glyph, a heading
+and a receipt stacked down the middle, which is what a screen announcing that
+something worked looks like and what a screen asking for work never should.
+`isAnnouncement` takes `text-display-sub` instead of the section head, which the
+type scale reserves for one thing per page, "a get-started strip, a first-run
+panel".
+
+```tsx
+// Correct: a frame presenting something, with one way out
+<Dialog
+  isOpen={isOpen}
+  onOpenChange={setIsOpen}
+  size="xl"
+  title="Send your first request"
+  description="It lands in Default workspace."
+  status={<ListeningPanel />}
+  footerStart={<p className="text-caption">Skipping keeps the key.</p>}
+  actions={<Button variant="ghost" onPress={skip}>Skip this guide</Button>}
+>
+  <CopyField label="API key" value={key} concealed={CONCEALED_SECRET} />
+</Dialog>
+
+// Incorrect: a form belongs in FormDialog, which owns the submit and its
+// pending state rather than leaving both to the caller
+<Dialog title="New key" actions={<Button onPress={create}>Create</Button>}>
+  <Field label="Key name" value={name} onChange={setName} />
+</Dialog>
+```
+
+## ScanBorder
+
+The one piece of decorative motion in this system, and it earns its place by
+being literally true: an arc travels the band's edge **only while the product is
+watching for something that has not arrived**, and stops when it has. Anywhere
+else, motion on an edge is noise.
+
+It is a masked conic gradient on an `::after`, with the angle animated through
+an `@property`, so there is no dependency behind it and at radius 0 there is no
+corner to get wrong. `tone` picks the arc's ink through a variable, which is how
+a failure turns the sweep red without the stylesheet knowing what a failure is.
+
+Under `prefers-reduced-motion` the arc holds still rather than disappearing: the
+band should still read as the thing on the page that is waiting.
+
+```tsx
+// Correct: the wait is real, and the tone reports the last attempt
+<ScanBorder isActive={!checkFailed} tone={failure ? "danger" : "accent"}>
+  <ListeningRow />
+</ScanBorder>
+
+// Incorrect: nothing is being awaited, so the motion says nothing
+<ScanBorder isActive>
+  <KpiStrip />
+</ScanBorder>
+```
 
 ## ConfirmDialog
 

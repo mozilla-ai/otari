@@ -28,6 +28,7 @@
     "@heroui/styles": "3.2.4",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-router": "^1.170.31",
+    "canvas-confetti": "^1.9.4",
     "clsx": "2.1.1",
     "react": "^19.2.8",
     "react-aria-components": "1.20.0",
@@ -35,7 +36,8 @@
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.10.1",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "thinking-orbs": "^0.3.1"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
@@ -50,6 +52,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.5",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

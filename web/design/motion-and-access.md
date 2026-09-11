@@ -13,6 +13,13 @@
 `transition-*`. A vestibular disorder is not an edge case, and the guard costs one
 utility.
 
+**One animation runs indefinitely**, and it is the shape of the exception rather
+than licence to add more: `ScanBorder`'s arc, which travels a band's edge only
+while the product is waiting for something that has not arrived. It stops when
+it arrives, it carries nothing that is not also in the text beside it, and under
+`prefers-reduced-motion` it holds still rather than disappearing. Anything else
+that would animate forever is decoration. See [feedback.md](feedback.md).
+
 ## Press
 
 `scale(0.98)` at every size. One value, not a ladder: the ladder deepened with

@@ -1,6 +1,6 @@
 # Overlays
 
-Three components put something on top of the page, and picking the wrong one is
+Four components put something on top of the page, and picking the wrong one is
 the most common mistake here, so start with the question rather than the list.
 
 ```text
@@ -13,6 +13,7 @@ Does the operator need to interact with what appears?
       └── Does it want the whole screen's attention?
            └── Yes -> FormDialog   (a place to work: creating or editing)
                 or ConfirmDialog   (one question: are you sure)
+                or Dialog          (neither: a guided step, a receipt)
 ```
 
 The dialogs live in [feedback.md](feedback.md)'s directory rather than this one,
