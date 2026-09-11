@@ -46,6 +46,29 @@ export function parameterSpecs(
   return findProfile(catalog, profile)?.parameters ?? []
 }
 
+/** Stands in for every profile name the catalog does not describe. */
+const UNDESCRIBED_PROFILE = "\u0000undescribed"
+
+/**
+ * What a parameter form re-seeds on, beside the schema and the stored values.
+ *
+ * Two profiles of one guardrail class differing only in the model they pin
+ * declare the same parameters, so a schema cannot tell them apart and a form
+ * keyed on it alone carries one profile's values onto the other. A name can.
+ *
+ * Every name the catalog does not describe shares one identity, because such a
+ * name is typed a character at a time: keying on it would reset the form on
+ * every keystroke, and there is no schema behind it to re-seed from anyway.
+ */
+export function profileIdentity(
+  catalog: GuardrailCatalog | undefined,
+  profile: string,
+): string {
+  return findProfile(catalog, profile) === undefined
+    ? UNDESCRIBED_PROFILE
+    : profile
+}
+
 function isBlank(value: ParameterValue | undefined): boolean {
   return (
     value === undefined || (typeof value === "string" && value.trim() === "")

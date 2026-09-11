@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import type { GuardrailParameterSpec } from "@/client"
+import type { GuardrailCatalog, GuardrailParameterSpec } from "@/client"
 import {
   buildValidateKwargs,
   parameterErrors,
   parameterLabel,
   parseExtraJson,
+  profileIdentity,
   seedParameters,
 } from "@/features/tools/guardrailParameters"
 
@@ -184,6 +185,53 @@ describe("buildValidateKwargs", () => {
 
   it("reports an entry that configures nothing as null, not an empty object", () => {
     expect(buildValidateKwargs([], {}, "")).toBeNull()
+  })
+})
+
+describe("profileIdentity", () => {
+  // A pair differing only in the model they pin, which is how an operator's
+  // guardrails configuration is ordinarily written.
+  const catalog: GuardrailCatalog = {
+    available: true,
+    reason: null,
+    profiles: [
+      {
+        profile: "house-policy-fast",
+        guardrail: "any_llm",
+        model_id: "openai/gpt-4o-mini",
+        parameters_known: true,
+        parameters: [spec({ name: "policy", type: "string", required: true })],
+      },
+      {
+        profile: "house-policy-strict",
+        guardrail: "any_llm",
+        model_id: "openai/gpt-4o",
+        parameters_known: true,
+        parameters: [spec({ name: "policy", type: "string", required: true })],
+      },
+    ],
+  }
+
+  it("separates two profiles the catalog describes identically", () => {
+    expect(profileIdentity(catalog, "house-policy-fast")).not.toBe(
+      profileIdentity(catalog, "house-policy-strict"),
+    )
+  })
+
+  it("gives every name the catalog does not describe the same identity", () => {
+    // Including the prefixes of one being typed, which is what keeps the form
+    // from resetting under the operator.
+    expect(profileIdentity(catalog, "p")).toBe(profileIdentity(catalog, "pii"))
+    expect(profileIdentity(catalog, "")).toBe(profileIdentity(catalog, "pii"))
+    expect(profileIdentity(undefined, "house-policy-fast")).toBe(
+      profileIdentity(catalog, "pii"),
+    )
+  })
+
+  it("never gives a described profile an undescribed one's identity", () => {
+    expect(profileIdentity(catalog, "house-policy-fast")).not.toBe(
+      profileIdentity(catalog, "pii"),
+    )
   })
 })
 

@@ -31,6 +31,7 @@ import {
   parameterErrors,
   parameterSpecs,
   parseExtraJson,
+  profileIdentity,
   type SeededParameters,
   seedParameters,
 } from "@/features/tools/guardrailParameters"
@@ -177,6 +178,8 @@ function WorkspaceScope({
 function useParameterForm(
   specs: GuardrailParameterSpec[],
   stored: Record<string, unknown> | null | undefined,
+  /** From `profileIdentity`, which says what counts as a different profile. */
+  identity: string,
 ) {
   const [state, setState] = useState<SeededParameters>(() =>
     seedParameters(specs, stored),
@@ -184,13 +187,19 @@ function useParameterForm(
   const [issues, setIssues] = useState<ParameterErrors>({})
   const [rawError, setRawError] = useState<string | undefined>(undefined)
 
-  // Both dependencies are serialized, for the reason the workspace scope below
-  // is: each is a fresh object on every fetch and on every catalog read, so
-  // depending on them by reference would wipe a half-typed parameter whenever
-  // any row on the card saved. Parsed back inside the effect so nothing it
-  // touches is missing from the dependency list.
+  // Two of the three dependencies are serialized, for the reason the workspace
+  // scope below is: each is a fresh object on every fetch and on every catalog
+  // read, so depending on them by reference would wipe a half-typed parameter
+  // whenever any row on the card saved. Parsed back inside the effect so
+  // nothing it touches is missing from the dependency list.
+  //
+  // The identity is the third, because the two above cannot separate two
+  // profiles that declare the same parameters, which is the ordinary shape of a
+  // pair differing only in the model it pins. Nothing inside the effect reads
+  // it.
   const specsJson = JSON.stringify(specs)
   const storedJson = JSON.stringify(stored ?? {})
+  // biome-ignore lint/correctness/useExhaustiveDependencies: identity is a re-seed trigger, not an input
   useEffect(() => {
     setState(
       seedParameters(
@@ -200,7 +209,7 @@ function useParameterForm(
     )
     setIssues({})
     setRawError(undefined)
-  }, [specsJson, storedJson])
+  }, [identity, specsJson, storedJson])
 
   return {
     values: state.values,
@@ -260,7 +269,11 @@ function GuardrailRow({
   const [isDeleteOpen, setDeleteOpen] = useState(false)
   const specs = parameterSpecs(catalog, guardrail.profile)
   const describedProfile = findProfile(catalog, guardrail.profile) !== undefined
-  const parameters = useParameterForm(specs, guardrail.validate_kwargs)
+  const parameters = useParameterForm(
+    specs,
+    guardrail.validate_kwargs,
+    profileIdentity(catalog, guardrail.profile),
+  )
 
   // Rehydrate from whatever the server last said, so the row never drifts from
   // the stored entry after a save.
@@ -511,9 +524,14 @@ function AddGuardrailDialog({
   // account: there is no profile yet for a raw parameter to belong to.
   const describedProfile =
     profile === "" || findProfile(catalog, profile) !== undefined
-  // Nothing stored yet, so the fields start blank and re-seed when the picker
-  // moves to a profile with a different schema.
-  const parameters = useParameterForm(specs, undefined)
+  // Nothing stored yet, so the fields start blank and re-seed whenever the
+  // picker moves to another profile the catalog describes, whether or not that
+  // profile's schema differs from the one left behind.
+  const parameters = useParameterForm(
+    specs,
+    undefined,
+    profileIdentity(catalog, profile),
+  )
 
   // Everything the operator can change, in one snapshot: a field added to this
   // form would otherwise have to be remembered in a second place, and the
