@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react"
+import { FiCheck, FiCopy } from "react-icons/fi"
 
 import { copyToClipboard } from "../helpers/clipboard"
 
@@ -23,6 +24,12 @@ import { copyToClipboard } from "../helpers/clipboard"
  * With no `label`, the row reads "code" and the block is named "Code": an
  * unlabeled row would be a bar with a control and no subject, and "code" is the
  * honest name for a block whose author did not say what it is.
+ *
+ * `arrangement` picks between the two shapes. `labeled` is the prose default
+ * above. `bare` drops the row entirely and floats the copy control on the code
+ * itself, for a block whose subject is already named beside it: the setup
+ * sheet's tab row says which language this is, so a label row under it would
+ * say it twice and cost a band of the frame to do it.
  */
 export function CodeBlock({
   label,
@@ -30,6 +37,7 @@ export function CodeBlock({
   children,
   className,
   isBounded = false,
+  arrangement = "labeled",
 }: {
   /** The left of the label row. A language, usually. */
   label?: string
@@ -49,6 +57,8 @@ export function CodeBlock({
    * about.
    */
   isBounded?: boolean
+  /** `labeled` draws the language row; `bare` floats the copy on the code. */
+  arrangement?: "labeled" | "bare"
 }) {
   const [copied, setCopied] = useState(false)
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -67,6 +77,52 @@ export function CodeBlock({
     resetTimer.current = setTimeout(() => setCopied(false), 2_000)
   }
 
+  const canCopy = value !== undefined
+  const copyLabel = copied ? "Copied" : `Copy ${label ?? "code"}`
+  const block = (
+    // biome-ignore-start lint/a11y/noNoninteractiveTabindex: the block scrolls, so it has to be reachable by keyboard
+    // biome-ignore-start lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT
+    <pre
+      tabIndex={0}
+      role="region"
+      aria-label={label ? `${label} code` : "Code"}
+      className={`border-code-border bg-code-surface text-mono-micro text-code-foreground overflow-x-auto border px-4 py-3.5 leading-[1.0625rem] whitespace-pre-wrap ${
+        arrangement === "labeled" ? "border-t-0" : ""
+      } ${isBounded ? "h-56 overflow-y-auto" : ""} ${
+        arrangement === "bare" && canCopy ? "pr-14" : ""
+      }`}
+    >
+      {children ?? value}
+    </pre>
+    // biome-ignore-end lint/a11y/noNoninteractiveTabindex: see above
+    // biome-ignore-end lint/a11y/useSemanticElements: see above
+  )
+
+  if (arrangement === "bare") {
+    return (
+      <div className={`relative ${className ?? ""}`}>
+        {block}
+        {canCopy ? (
+          // On the code's own control fill rather than the page's, because it
+          // sits on the dark surface. 32px square, which is under the touch
+          // floor, so the target is bled outward with a pseudo-element.
+          <button
+            type="button"
+            onClick={copy}
+            aria-label={copyLabel}
+            className="bg-code-control text-code-foreground absolute top-2 right-2 flex size-8 items-center justify-center before:absolute before:-inset-1.5 before:content-['']"
+          >
+            {copied ? (
+              <FiCheck aria-hidden className="size-3.5" />
+            ) : (
+              <FiCopy aria-hidden className="size-3.5" />
+            )}
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <div className={className}>
       <div className="border-code-border bg-code-control text-mono-micro text-code-foreground flex items-center justify-between gap-3 border px-4 py-1.5">
@@ -83,28 +139,15 @@ export function CodeBlock({
             // one beside the key field's own. "Copy" twenty times over is a
             // list a screen reader cannot choose from. The visible word stays
             // inside the name, which is what keeps voice control working.
-            aria-label={copied ? undefined : `Copy ${label ?? "code"}`}
+            aria-label={copied ? undefined : copyLabel}
             className="relative opacity-75 before:absolute before:-inset-x-2 before:-inset-y-[0.6875rem] before:content-[''] hover:opacity-100"
           >
             {copied ? "Copied" : "Copy"}
           </button>
         ) : null}
       </div>
-      {/* biome-ignore-start lint/a11y/noNoninteractiveTabindex: the block scrolls, so it has to be reachable by keyboard */}
-      {/* biome-ignore-start lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT */}
-      <pre
-        tabIndex={0}
-        role="region"
-        aria-label={label ? `${label} code` : "Code"}
-        // `border-t-0` because the label row above already drew that edge.
-        className={`border-code-border bg-code-surface text-mono-caption text-code-foreground overflow-x-auto border border-t-0 px-4 py-3.5 leading-5 ${
-          isBounded ? "max-h-56 overflow-y-auto" : ""
-        }`}
-      >
-        {children ?? value}
-      </pre>
-      {/* biome-ignore-end lint/a11y/noNoninteractiveTabindex: see above */}
-      {/* biome-ignore-end lint/a11y/useSemanticElements: see above */}
+      {/* `border-t-0` on the block, because the label row already drew that edge. */}
+      {block}
     </div>
   )
 }

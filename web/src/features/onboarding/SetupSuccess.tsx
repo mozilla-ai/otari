@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { FiCheck } from "react-icons/fi"
+
 import type { ActivationAttempt } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { Dialog } from "@/design-system/feedback/Dialog"
@@ -10,13 +11,61 @@ import {
 import { formatCost } from "@/shared/helpers/format"
 
 /**
+ * The receipt: what the request that landed was, in three cells divided by
+ * rules.
+ *
+ * A strip rather than one mono line, because the three are different kinds of
+ * fact and an operator reads down to the one they want. Deliberately not
+ * `KpiStrip`: that is a page band at 30px with a subgrid and five tracks, and
+ * this is three small values inside a dialog. One consumer, so it lives here.
+ *
+ * A cell whose value the gateway did not report is dropped rather than shown
+ * empty, and the model cell takes the slack because a model id is the long one.
+ */
+function Receipt({ attempt }: { attempt: ActivationAttempt }) {
+  const cells = [
+    { label: "Model", value: attempt.model, isWide: true },
+    {
+      label: "Latency",
+      value:
+        attempt.latency_ms != null
+          ? `${Math.round(attempt.latency_ms)} ms`
+          : null,
+    },
+    {
+      label: "Cost",
+      value: attempt.cost_usd != null ? formatCost(attempt.cost_usd) : null,
+    },
+  ].filter((cell) => cell.value)
+
+  if (cells.length === 0) return null
+
+  return (
+    <div className="border-border flex border-t">
+      {cells.map((cell, index) => (
+        <div
+          key={cell.label}
+          className={`flex min-w-0 flex-col gap-1 py-3 ${
+            cell.isWide ? "flex-1 px-6" : "shrink-0 px-4 last:pr-6"
+          } ${index > 0 ? "border-border border-l" : ""}`}
+        >
+          <span className="text-mono-overline">{cell.label}</span>
+          <span className="text-mono-caption text-foreground truncate">
+            {cell.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
  * The payoff, in place of the guide: the workspace's first request landed.
  *
- * Deliberately the quietest screen in the flow. One mark, one line, the receipt
- * in mono, two actions. The receipt is a single line rather than a row of stat
- * tiles, because at this moment the numbers are proof that the call was
- * observed rather than something to analyze, and the pages that do analyze them
- * are one press away.
+ * Deliberately the quietest screen in the flow. One mark beside the heading,
+ * the receipt, one action. The numbers are proof that the call was observed
+ * rather than something to analyze, and the pages that do analyze them are one
+ * press away.
  */
 export function SetupSuccess({
   attempt,
@@ -37,48 +86,31 @@ export function SetupSuccess({
     if (mark) void fireSetupConfetti(confettiOriginOf(mark))
   }, [])
 
-  const receipt = [
-    attempt?.model,
-    attempt?.latency_ms != null ? `${Math.round(attempt.latency_ms)} ms` : null,
-    attempt?.cost_usd != null ? formatCost(attempt.cost_usd) : null,
-  ].filter(Boolean)
-
   return (
     <Dialog
       isOpen
       onOpenChange={(open) => {
         if (!open) onDismiss()
       }}
-      size="sm"
-      align="center"
+      size="md"
       isAnnouncement
-      title="Your first request went through"
-      description="This workspace is serving traffic. Usage, spend and the activity log fill in from here."
+      title="Your first call went through"
+      description="Otari observed the request and finished setup for this workspace."
       mark={
-        <span
-          ref={markRef}
-          className="bg-success-subtle flex size-12 items-center justify-center"
-        >
+        <span ref={markRef} className="mt-0.5 flex shrink-0">
           <FiCheck aria-hidden className="text-success size-6" />
         </span>
       }
       actions={
-        <>
-          <Button onPress={onDismiss}>Dismiss</Button>
-          {/* Scoped to gateway traffic: imported usage is somebody else's
-              requests, and the one that just landed is the newest row of what
-              is left. */}
-          <Button variant="primary" onPress={onOpenActivity}>
-            Open the activity log
-          </Button>
-        </>
+        // Scoped to gateway traffic: imported usage is somebody else's
+        // requests, and the one that just landed is the newest row of what is
+        // left.
+        <Button variant="primary" onPress={onOpenActivity}>
+          Continue to the activity log
+        </Button>
       }
     >
-      {receipt.length > 0 ? (
-        <p className="text-caption text-center font-mono break-all">
-          {receipt.join(" · ")}
-        </p>
-      ) : null}
+      {attempt ? <Receipt attempt={attempt} /> : null}
     </Dialog>
   )
 }

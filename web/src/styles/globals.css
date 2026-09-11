@@ -2187,13 +2187,6 @@ main {
 .otari-dialog--lg {
   width: 40rem;
 }
-/* A fourth step, `Dialog` only: the first-run setup sheet carries a key, a tab
- * row, a code block and a status panel at once, and at 40rem the snippets wrap
- * where an operator is meant to read them as one command. No form is 45rem
- * wide, so `FormDialog` does not get it. */
-.otari-dialog--xl {
-  width: 45rem;
-}
 
 /* A field fills this dialog. `Field` and `SecretField` cap themselves at
  * `max-w-md`, which is right on a page (a 448px measure under a 620px column

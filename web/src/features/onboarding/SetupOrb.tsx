@@ -64,11 +64,17 @@ export function SetupOrb({ phase }: { phase: SetupOrbPhase }) {
   const { state, speed } = ORB_BY_PHASE[phase]
 
   return (
-    <Suspense fallback={<span aria-hidden className="size-16 shrink-0" />}>
+    <Suspense fallback={<span aria-hidden className="size-10 shrink-0" />}>
       <span
         aria-hidden
-        className="flex size-16 shrink-0 items-center justify-center"
+        className="flex size-10 shrink-0 items-center justify-center"
       >
+        {/* Rendered at the library's 64px preset and scaled into a 40px box,
+            which is the size the band affords. The two shipped sizes are 64 and
+            20, tuned separately rather than as a scale factor, and 20 is an
+            inline-text mark rather than the subject of a status row. So the
+            larger one is scaled: a dot rasterized slightly soft reads better
+            here than a mark half the size the design draws. */}
         <ThinkingOrb
           aria-hidden="true"
           size={64}
@@ -76,6 +82,7 @@ export function SetupOrb({ phase }: { phase: SetupOrbPhase }) {
           state={state}
           paused={prefersReducedMotion}
           theme="auto"
+          style={{ transform: "scale(0.625)" }}
         />
       </span>
     </Suspense>

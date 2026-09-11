@@ -3,9 +3,12 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { Button } from "../actions/Button"
-import { Dialog } from "./Dialog"
+import { Dialog, DialogSection } from "./Dialog"
 
-function open(props: Partial<React.ComponentProps<typeof Dialog>> = {}) {
+function open({
+  children,
+  ...props
+}: Partial<React.ComponentProps<typeof Dialog>> = {}) {
   const onOpenChange = vi.fn()
   render(
     <Dialog
@@ -14,7 +17,13 @@ function open(props: Partial<React.ComponentProps<typeof Dialog>> = {}) {
       title="Send your first request"
       {...props}
     >
-      <p>the body</p>
+      {/* Destructured rather than spread: JSX children win over a `children`
+          in the spread, so an override passed by a test would never land. */}
+      {children ?? (
+        <DialogSection>
+          <p>the body</p>
+        </DialogSection>
+      )}
     </Dialog>,
   )
   return onOpenChange
@@ -72,18 +81,47 @@ describe("Dialog", () => {
     expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument()
   })
 
-  it("drops the close control in the centered shape, and shows the mark", async () => {
-    // A close control in the corner of a celebration is the only asymmetry on
-    // the screen, and the footer already carries the way out.
+  it("puts the mark at the head of the title row", async () => {
+    // Beside the heading rather than centered above it: a frame reporting that
+    // something worked is still a frame, and centering one screen of a flow
+    // that is otherwise left-aligned reads as a different product.
+    open({ mark: <span data-testid="mark" /> })
+
+    const dialog = await screen.findByRole("dialog")
+    const mark = screen.getByTestId("mark")
+    const heading = screen.getByRole("heading", {
+      name: "Send your first request",
+    })
+    expect(dialog).toContainElement(mark)
+    // Before the heading in document order, which is what puts it at the head
+    // of the row for a screen reader as well as for the eye.
+    expect(
+      mark.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it("divides its bands rather than padding one column", async () => {
+    // The body owns no padding: each section carries its own and the rule
+    // above it, so the divisions reach both edges of the frame.
     open({
-      align: "center",
-      mark: <span data-testid="mark" />,
-      actions: <Button>Dismiss</Button>,
+      children: (
+        <>
+          <DialogSection>
+            <p>first</p>
+          </DialogSection>
+          <DialogSection>
+            <p>second</p>
+          </DialogSection>
+        </>
+      ),
     })
 
     await screen.findByRole("dialog")
-    expect(screen.getByTestId("mark")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Close" })).toBeNull()
+    for (const text of ["first", "second"]) {
+      const section = screen.getByText(text).parentElement
+      expect(section).toHaveClass("border-t")
+      expect(section).toHaveClass("px-6")
+    }
   })
 
   it("wears the announcement type role only when asked", async () => {

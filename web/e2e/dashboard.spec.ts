@@ -63,7 +63,7 @@ test.describe("dashboard core flows", () => {
     // and concealed there until they ask for it (otari-ai#2111).
     // By role, not by label: `getByLabel` matches a substring, so it also
     // picks up the field's own "Show API key" toggle.
-    const key = sheet.getByRole("textbox", { name: "API key" })
+    const key = sheet.getByRole("textbox", { name: "Your API key" })
     await expect(key).toBeVisible()
     await expect(key).not.toHaveValue(/^gw-/)
 
@@ -77,7 +77,7 @@ test.describe("dashboard core flows", () => {
     // Concealed in the example too, because it is the same secret.
     await expect(curl).not.toContainText(/gw-/)
 
-    await sheet.getByRole("button", { name: "Show API key" }).click()
+    await sheet.getByRole("button", { name: "Show Your API key" }).click()
     await expect(key).toHaveValue(/^gw-/)
     await expect(curl).toContainText(/Otari-Key: gw-/)
 
@@ -86,7 +86,7 @@ test.describe("dashboard core flows", () => {
       sheet.getByText("Listening for your first request"),
     ).toBeVisible()
 
-    await sheet.getByRole("button", { name: "Skip this guide" }).click()
+    await sheet.getByRole("button", { name: "Skip" }).click()
     await expect(sheet).toBeHidden()
 
     // Permanent: the offer does not come back on the next page load.

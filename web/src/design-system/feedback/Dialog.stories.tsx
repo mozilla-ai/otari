@@ -3,7 +3,7 @@ import { FiCheck } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
 import { CodeBlock } from "../content/CodeBlock"
-import { Dialog } from "./Dialog"
+import { Dialog, DialogSection } from "./Dialog"
 import { InfoBanner } from "./InfoBanner"
 
 const meta = {
@@ -22,17 +22,40 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The plain frame: a header, a body to read, and one way out. */
+/** The plain frame: a header, one band to read, and one way out. */
 export const Default: Story = {
   args: {
     description: "It lands in Default workspace.",
     children: (
-      <p className="text-body">
-        Whatever the frame is presenting. A guided step, a receipt, a thing to
-        read and copy.
-      </p>
+      <DialogSection>
+        <p className="text-body">
+          Whatever the frame is presenting. A guided step, a receipt, a thing to
+          read and copy.
+        </p>
+      </DialogSection>
     ),
     actions: <Button variant="primary">Done</Button>,
+  },
+}
+
+/** Several bands, divided edge to edge rather than stacked with gaps. */
+export const Divided: Story = {
+  args: {
+    ...Default.args,
+    children: (
+      <>
+        <DialogSection>
+          <p className="text-emphasis">The first thing</p>
+          <p className="text-caption text-subtle">
+            Each band carries its own padding and the rule above it.
+          </p>
+        </DialogSection>
+        <DialogSection>
+          <p className="text-emphasis">The second thing</p>
+          <CodeBlock label="curl" value="curl https://example.com" />
+        </DialogSection>
+      </>
+    ),
   },
 }
 
@@ -53,21 +76,26 @@ export const WithFooterCaption: Story = {
 }
 
 /** The widest step, for a frame carrying a key and a runnable example. */
-export const ExtraLarge: Story = {
+export const Large: Story = {
   args: {
-    size: "xl",
+    size: "lg",
     isAnnouncement: true,
     description:
       "Usage, spend and the activity log stay empty until one does, so this guide watches for it and finishes here.",
     children: (
       <>
-        <InfoBanner tone="warning">
-          Copy this key now. It is shown once.
-        </InfoBanner>
-        <CodeBlock
-          label="curl"
-          value={`curl 'https://gateway.example.com/api/v1/chat/completions' \\\n  -H "Otari-Key: gw-..."`}
-        />
+        <DialogSection>
+          <InfoBanner tone="warning">
+            Copy this key now. It is shown once.
+          </InfoBanner>
+        </DialogSection>
+        <DialogSection>
+          <CodeBlock
+            label="curl"
+            arrangement="bare"
+            value={`curl 'https://gateway.example.com/api/v1/chat/completions' \\\n  -H "Otari-Key: gw-..."`}
+          />
+        </DialogSection>
       </>
     ),
     status: (
@@ -83,31 +111,34 @@ export const ExtraLarge: Story = {
   },
 }
 
-/** The payoff shape: a mark, a heading and a receipt down the middle. */
-export const Centered: Story = {
+/** The payoff shape: a mark beside the heading, and a receipt band under it. */
+export const WithMark: Story = {
   args: {
-    size: "sm",
-    align: "center",
+    size: "md",
     isAnnouncement: true,
-    title: "Your first request went through",
+    title: "Your first call went through",
     description:
-      "This workspace is serving traffic. Usage, spend and the activity log fill in from here.",
+      "Otari observed the request and finished setup for this workspace.",
     mark: (
-      <span className="bg-success-subtle flex size-12 items-center justify-center">
+      <span className="mt-0.5 flex shrink-0">
         <FiCheck aria-hidden className="text-success size-6" />
       </span>
     ),
     children: (
-      <p className="text-caption text-center font-mono">
-        openai:gpt-4o-mini · 412 ms · $0.000123
-      </p>
+      <div className="border-border flex border-t">
+        <div className="flex min-w-0 flex-1 flex-col gap-1 px-6 py-3">
+          <span className="text-mono-overline">Model</span>
+          <span className="text-mono-caption text-foreground truncate">
+            openai:gpt-4o-mini
+          </span>
+        </div>
+        <div className="border-border flex shrink-0 flex-col gap-1 border-l px-4 py-3 pr-6">
+          <span className="text-mono-overline">Latency</span>
+          <span className="text-mono-caption text-foreground">412 ms</span>
+        </div>
+      </div>
     ),
-    actions: (
-      <>
-        <Button>Dismiss</Button>
-        <Button variant="primary">Open the activity log</Button>
-      </>
-    ),
+    actions: <Button variant="primary">Continue to the activity log</Button>,
   },
 }
 
@@ -123,7 +154,6 @@ export const Undismissable: Story = {
   },
 }
 
-/** The three narrower steps, for reference. */
+/** The two narrower steps, for reference. */
 export const Small: Story = { args: { ...Default.args, size: "sm" } }
 export const Medium: Story = { args: { ...Default.args, size: "md" } }
-export const Large: Story = { args: { ...Default.args, size: "lg" } }

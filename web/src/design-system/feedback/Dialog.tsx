@@ -1,11 +1,38 @@
 import { Modal } from "@heroui/react"
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useState } from "react"
 import { FiX } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
 
-/** `sm` 440px, `md` 520px (the default), `lg` 640px, `xl` 720px. */
-export type DialogSize = "sm" | "md" | "lg" | "xl"
+/** `sm` 440px, `md` 520px (the default), `lg` 640px. */
+export type DialogSize = "sm" | "md" | "lg"
+
+/**
+ * One band of a dialog's body, divided from the one above it by a hairline that
+ * runs the full width of the frame.
+ *
+ * This is the whole of the dialog's internal layout, and it is a rule rather
+ * than a choice: a frame presenting several things divides them the way a page
+ * does, edge to edge, instead of floating a card per thing inside a padded
+ * column. The padding lives here rather than on the body so the rule can reach
+ * both edges.
+ */
+export function DialogSection({
+  className,
+  children,
+}: {
+  /** Layout only. The padding and the rule are the section's own. */
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`border-border flex flex-col gap-2 border-t px-6 pt-4 pb-5 ${className ?? ""}`}
+    >
+      {children}
+    </div>
+  )
+}
 
 export interface DialogProps {
   isOpen: boolean
@@ -16,17 +43,12 @@ export interface DialogProps {
   description?: ReactNode
   size?: DialogSize
   /**
-   * Where the header block sits.
+   * A glyph at the head of the title row, on the title's own line.
    *
-   * `start` is the ordinary frame. `center` is the payoff shape: a mark, a
-   * heading and a receipt stacked down the middle, which is what a screen
-   * announcing that something worked looks like and what a screen asking for
-   * work never should.
-   */
-  align?: "start" | "center"
-  /**
-   * A glyph above the title, `center` only. The success mark is the case this
-   * exists for; a frame that is asking for something does not get one.
+   * The success mark is the case this exists for. Beside the heading rather
+   * than centered above it, because a frame reporting that something worked is
+   * still a frame, and centering one screen of a flow that is otherwise
+   * left-aligned makes the payoff read as a different product.
    */
   mark?: ReactNode
   /**
@@ -39,12 +61,15 @@ export interface DialogProps {
   /** Whether Escape, a backdrop press and the close control dismiss it. */
   isDismissable?: boolean
   /**
-   * A readout pinned between the scrolling body and the footer.
+   * A readout pinned between the scrolling body and the footer, on its own
+   * tinted band.
    *
    * For the one thing in a frame that must stay on screen while the body
    * scrolls: a status the frame is actually about, rather than more of what it
    * is presenting. A frame with a long body and a live status would otherwise
    * push that status below the fold at exactly the moment it starts changing.
+   * The tint is what separates it from the sections above without a second
+   * border, and it is the only fill in the frame.
    */
   status?: ReactNode
   /** The footer's left slot: a caption saying what happens next. */
@@ -55,6 +80,7 @@ export interface DialogProps {
    * widths and the control nearest the thumb is the last one written.
    */
   actions?: ReactNode
+  /** `DialogSection`s. Each draws the rule above itself. */
   children: ReactNode
 }
 
@@ -64,9 +90,12 @@ export interface DialogProps {
  * The third of the three, and the one to reach for when the other two would be
  * a lie about what the frame does. `FormDialog` is a place to work and owns a
  * submit; `ConfirmDialog` is an `AlertDialog` that interrupts to ask one
- * question. This is a `Modal` with a header, a scrolling body and an optional
- * footer, and the body is whatever the caller is presenting: a guided step, a
- * receipt, a thing to read and copy.
+ * question. This is a `Modal` divided into bands, and the bands are whatever
+ * the caller is presenting: a guided step, a receipt, a thing to read and copy.
+ *
+ * **The body has no padding of its own.** Every band is a `DialogSection`,
+ * which carries the padding and the hairline above it, so the divisions run
+ * edge to edge the way a page's do.
  *
  * Controlled only, like every dialog here, and it mounts its body only while
  * open so one opening's state cannot survive into the next.
@@ -82,7 +111,6 @@ export function Dialog({
   title,
   description,
   size = "md",
-  align = "start",
   mark,
   isAnnouncement = false,
   isDismissable = true,
@@ -92,15 +120,14 @@ export function Dialog({
   children,
 }: DialogProps) {
   const descriptionId = useId()
-  // Whether the body has been scrolled away from its top, which is what puts a
-  // rule between the pinned header and the content passing under it.
+  // Whether the body has been scrolled away from its top. The header's rule is
+  // conditional where every other rule here is not: it is the only one that
+  // would otherwise sit under nothing.
   const [isScrolled, setIsScrolled] = useState(false)
-  const bodyRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!isOpen) setIsScrolled(false)
   }, [isOpen])
 
-  const isCentered = align === "center"
   const hasFooter = footerStart !== undefined || actions !== undefined
 
   return (
@@ -127,34 +154,30 @@ export function Dialog({
             className={`otari-dialog otari-dialog--${size} flex flex-col p-0`}
           >
             <header
-              className={`flex shrink-0 gap-4 px-6 pt-5 pb-4 ${
-                isCentered
-                  ? "flex-col items-center text-center"
-                  : "items-start justify-between"
-              } ${isScrolled ? "border-border border-b" : ""}`}
+              className={`flex shrink-0 items-start justify-between gap-4 px-6 pt-5 pb-4 ${
+                isScrolled ? "border-border border-b" : ""
+              }`}
             >
-              {isCentered && mark ? mark : null}
-              <div
-                className={`flex flex-col gap-1 ${isCentered ? "items-center" : ""}`}
-              >
-                <Modal.Heading
-                  className={
-                    isAnnouncement ? "text-display-sub" : "text-heading"
-                  }
-                >
-                  {title}
-                </Modal.Heading>
-                {description ? (
-                  <p id={descriptionId} className="text-body text-muted">
-                    {description}
-                  </p>
-                ) : null}
+              <div className="flex min-w-0 items-start gap-3">
+                {mark}
+                <div className="flex min-w-0 flex-col gap-1">
+                  <Modal.Heading
+                    className={
+                      isAnnouncement ? "text-display-sub" : "text-heading"
+                    }
+                  >
+                    {title}
+                  </Modal.Heading>
+                  {description ? (
+                    <p id={descriptionId} className="text-body text-muted">
+                      {description}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-              {/* Absent rather than dead when the frame cannot be dismissed,
-                  and absent when the header is centered: a close control in the
-                  corner of a celebration is the only asymmetry on the screen.
-                  The footer's action is the way out in both cases. */}
-              {isDismissable && !isCentered ? (
+              {/* Absent rather than dead when the frame cannot be dismissed: the
+                  footer's action is the way out in that case. */}
+              {isDismissable ? (
                 <Button
                   aria-label="Close"
                   isIconOnly
@@ -162,29 +185,31 @@ export function Dialog({
                   className="relative -top-1 shrink-0 before:absolute before:-inset-1.5 before:content-['']"
                   onPress={() => onOpenChange(false)}
                 >
-                  <FiX aria-hidden className="text-muted size-3.5" />
+                  <FiX aria-hidden className="text-muted size-4" />
                 </Button>
               ) : null}
             </header>
             {/* `min-h-0` is what lets this scroll rather than push the footer
                 off the viewport: a flex child's default `min-height: auto`
-                refuses to shrink below its content. */}
+                refuses to shrink below its content. No padding: the sections
+                own it, so their rules reach both edges. */}
             <div
-              ref={bodyRef}
               onScroll={(event) =>
                 setIsScrolled(event.currentTarget.scrollTop > 0)
               }
-              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-1 pb-6"
+              className="flex min-h-0 flex-1 flex-col overflow-y-auto"
             >
               {children}
             </div>
             {status !== undefined ? (
               // Outside the scrolling body and above the footer, so it holds
               // its place while the body moves under it.
-              <div className="shrink-0 px-6 pb-4">{status}</div>
+              <div className="border-border bg-surface-alt flex min-h-18 shrink-0 items-center border-t px-6 py-3.5">
+                {status}
+              </div>
             ) : null}
             {hasFooter ? (
-              <footer className="otari-dialog__footer border-border flex shrink-0 items-center justify-between gap-2 border-t px-6 py-3">
+              <footer className="otari-dialog__footer border-border flex shrink-0 items-center justify-between gap-4 border-t px-6 py-3">
                 <div className="min-w-0">{footerStart}</div>
                 <div className="otari-dialog__actions flex shrink-0 items-center gap-2">
                   {actions}

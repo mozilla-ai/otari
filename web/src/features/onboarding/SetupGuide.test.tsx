@@ -203,7 +203,7 @@ describe("SetupGuide", () => {
 
     await screen.findByRole("heading", { name: "Send your first request" })
     await waitFor(() => {
-      expect(screen.getByLabelText("API key")).toBeInTheDocument()
+      expect(screen.getByLabelText("Your API key")).toBeInTheDocument()
     })
     await waitFor(() => {
       const mints = fetchMock.mock.calls.filter(([input]) =>
@@ -229,10 +229,10 @@ describe("SetupGuide", () => {
     await renderGuide()
 
     expect(await screen.findByText("Creating your API key…")).toBeVisible()
-    expect(screen.queryByLabelText("API key")).toBeNull()
+    expect(screen.queryByLabelText("Your API key")).toBeNull()
 
     release?.()
-    expect(await screen.findByLabelText("API key")).toBeInTheDocument()
+    expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
   })
 
   it("does not tell an operator to copy a key that failed to mint", async () => {
@@ -262,11 +262,11 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    expect(await screen.findByLabelText("API key")).not.toHaveValue(KEY)
+    expect(await screen.findByLabelText("Your API key")).not.toHaveValue(KEY)
     await user.click(await screen.findByRole("button", { name: "cURL" }))
     expect(snippet("curl")).not.toHaveTextContent(KEY)
 
-    await user.click(screen.getByRole("button", { name: "Show API key" }))
+    await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
     expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
   })
@@ -290,7 +290,7 @@ describe("SetupGuide", () => {
       await user.click(screen.getByRole("button", { name: label }))
       expect(snippet(region)).toBeInTheDocument()
     }
-    await user.click(screen.getByRole("button", { name: "Show API key" }))
+    await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     // The model comes from the catalog, so the example runs as pasted.
     expect(snippet("typescript")).toHaveTextContent("openai:gpt-4o-mini")
   })
@@ -328,7 +328,7 @@ describe("SetupGuide", () => {
       bootstrap({ deployment_type: "hosted", data_plane_url: null }),
     )
 
-    expect(await screen.findByLabelText("API key")).toBeInTheDocument()
+    expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
     expect(screen.queryByRole("region", { name: /code$/ })).toBeNull()
     expect(
       screen.getByText(/has not published the gateway address/),
@@ -421,7 +421,7 @@ describe("SetupGuide", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Your first request went through",
+        name: "Your first call went through",
       }),
     ).toBeInTheDocument()
     expect(screen.getByText(/412 ms/)).toBeInTheDocument()
@@ -440,7 +440,7 @@ describe("SetupGuide", () => {
     await waitFor(() => {
       expect(
         screen.queryByRole("heading", {
-          name: "Your first request went through",
+          name: "Your first call went through",
         }),
       ).not.toBeInTheDocument()
     })
@@ -457,7 +457,7 @@ describe("SetupGuide", () => {
     await renderGuide()
 
     await user.click(
-      await screen.findByRole("button", { name: "Show API key" }),
+      await screen.findByRole("button", { name: "Show Your API key" }),
     )
     expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
 
@@ -469,7 +469,7 @@ describe("SetupGuide", () => {
     // The other workspace's sheet, with the other workspace's key: concealed
     // again, because the reveal belonged to the key that is gone.
     await user.click(
-      await screen.findByRole("button", { name: "Show API key" }),
+      await screen.findByRole("button", { name: "Show Your API key" }),
     )
     expect(await screen.findByDisplayValue(OTHER_KEY)).toBeInTheDocument()
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
@@ -480,9 +480,7 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Skip this guide" }),
-    )
+    await user.click(await screen.findByRole("button", { name: "Skip" }))
 
     await waitFor(() => {
       expect(

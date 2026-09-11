@@ -53,8 +53,9 @@ FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
   submitLabel, onSubmit, isPending, error?, isDirty?, isDismissable = true,
   isSubmitDisabled?, returnFocusRef?, footerStart?, tabs?, children }
 Dialog: { isOpen, onOpenChange, title, description?, size = "md",
-  align = "start", mark?, isAnnouncement?, isDismissable = true,
-  status?, footerStart?, actions?, children }
+  mark?, isAnnouncement?, isDismissable = true, status?, footerStart?,
+  actions?, children }
+DialogSection: { className?, children }
 ScanBorder: { isActive, tone = "accent" | "danger", className?, children }
 ErrorBoundary: { children, resetKey? }
 ```
@@ -128,40 +129,52 @@ whatever is being presented.
 
 It shares `FormDialog`'s geometry class family in `globals.css`, so both sit at
 the same height, cap at the same viewport budget and become the same full-screen
-sheet below 640px in either dimension. It adds a fourth width step, `xl` at
-720px, for a frame carrying a key, a tab row and a code block at once.
+sheet below 640px in either dimension, and it takes the same three widths.
+
+**Its body has no padding, and that is the component's one structural rule.**
+Every band is a `DialogSection`, which carries its own padding and the hairline
+above it, so the divisions run edge to edge the way a page's do. A frame
+presenting three things divides them; it does not float three cards in a padded
+column, which is the thing this system does not do anywhere.
 
 `status` is the one slot outside the scrolling body: a readout pinned above the
-footer, for the thing the frame is actually about rather than more of what it is
-presenting. A frame with a long body and a live status would otherwise push that
-status below the fold at the moment it starts changing, which is what happened
-to the first-run sheet's listening panel.
+footer on its own tinted band, for the thing the frame is actually about rather
+than more of what it is presenting. A frame with a long body and a live status
+would otherwise push that status below the fold at the moment it starts
+changing, which is what happened to the first-run sheet's listening panel. The
+tint is what separates it without a second border, and it is the only fill in
+the frame, so what goes in it draws no surface of its own.
 
-Two props exist for the first-run sheet and nothing else should reach for them
-casually. `align="center"` with a `mark` is the payoff shape: a glyph, a heading
-and a receipt stacked down the middle, which is what a screen announcing that
-something worked looks like and what a screen asking for work never should.
-`isAnnouncement` takes `text-display-sub` instead of the section head, which the
-type scale reserves for one thing per page, "a get-started strip, a first-run
-panel".
+`mark` is a glyph at the head of the title row, beside the heading rather than
+centered above it: a frame reporting that something worked is still a frame, and
+centering one screen of a flow that is otherwise left-aligned reads as a
+different product. `isAnnouncement` takes `text-display-sub` instead of the
+section head, which the type scale reserves for one thing per page, "a
+get-started strip, a first-run panel".
 
 ```tsx
 // Correct: a frame presenting something, with one way out
 <Dialog
   isOpen={isOpen}
   onOpenChange={setIsOpen}
-  size="xl"
+  size="lg"
   title="Send your first request"
   description="It lands in Default workspace."
   status={<ListeningPanel />}
-  footerStart={<p className="text-caption">Skipping keeps the key.</p>}
-  actions={<Button variant="ghost" onPress={skip}>Skip this guide</Button>}
+  footerStart={<p className="text-caption">Usage stays empty until one lands.</p>}
+  actions={<Button onPress={skip}>Skip</Button>}
 >
-  <CopyField label="API key" value={key} concealed={CONCEALED_SECRET} />
+  <DialogSection>
+    <CopyField label="Your API key" value={key} concealed={CONCEALED_SECRET} />
+  </DialogSection>
+  <DialogSection>
+    <CodeBlock label="curl" value={snippet} arrangement="bare" isBounded />
+  </DialogSection>
 </Dialog>
 
 // Incorrect: a form belongs in FormDialog, which owns the submit and its
-// pending state rather than leaving both to the caller
+// pending state rather than leaving both to the caller. A bare child is also a
+// band with no padding and no rule: every child is a DialogSection.
 <Dialog title="New key" actions={<Button onPress={create}>Create</Button>}>
   <Field label="Key name" value={name} onChange={setName} />
 </Dialog>
