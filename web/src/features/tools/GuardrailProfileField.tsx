@@ -3,8 +3,7 @@ import { useState } from "react"
 
 import type { GuardrailCatalog } from "@/client"
 import { Field } from "@/design-system/forms/Field"
-import { FieldMessages } from "@/design-system/forms/FieldMessages"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 import { findProfile } from "@/features/tools/guardrailParameters"
 
 // Which profile a new entry mandates.
@@ -33,7 +32,7 @@ export function GuardrailProfileField({
    */
   pending: boolean
   value: string
-  disabled: boolean
+  disabled?: boolean
   onChange: (next: string) => void
 }) {
   const profiles = catalog?.profiles ?? []
@@ -43,21 +42,19 @@ export function GuardrailProfileField({
 
   if (pending) {
     return (
-      <div className="flex flex-col gap-1">
-        <FilterSelect
-          label="Guardrail profile"
-          value=""
-          disabled
-          onChange={onChange}
-          options={[{ value: "", label: "Reading the guardrails service…" }]}
-        />
-        <FieldMessages reserve>
-          <span className="text-caption">
-            Built by this deployment's guardrails service from the operator's
-            own configuration.
-          </span>
-        </FieldMessages>
-      </div>
+      <Select
+        label="Guardrail profile"
+        value=""
+        isDisabled
+        isRequired
+        onChange={onChange}
+        options={[]}
+        // The waiting sentence is the description rather than the placeholder:
+        // HeroUI's trigger renders the selected option's text and treats an
+        // empty value as a selection of "", so a placeholder never reaches the
+        // trigger here. The description is rendered and announced either way.
+        description="Reading the guardrails service…"
+      />
     )
   }
 
@@ -68,6 +65,7 @@ export function GuardrailProfileField({
           label="Guardrail profile"
           value={value}
           onChange={onChange}
+          isRequired
           isDisabled={disabled}
           placeholder="prompt-injection"
           description={
@@ -97,26 +95,23 @@ export function GuardrailProfileField({
 
   return (
     <div className="flex flex-col gap-1">
-      <FilterSelect
+      <Select
         label="Guardrail profile"
         value={chosen ? value : ""}
-        disabled={disabled}
+        isDisabled={disabled}
+        isRequired
         onChange={onChange}
-        options={[
-          { value: "", label: "Choose a profile" },
-          ...profiles.map((profile) => ({
-            value: profile.profile,
-            label: profile.profile,
-          })),
-        ]}
-      />
-      <FieldMessages reserve>
-        <span className="text-caption">
-          {chosen
+        placeholder="Choose a profile"
+        options={profiles.map((profile) => ({
+          value: profile.profile,
+          label: profile.profile,
+        }))}
+        description={
+          chosen
             ? `Runs ${chosen.guardrail}${chosen.model_id ? ` on ${chosen.model_id}` : ""} on the guardrails service.`
-            : "Built by this deployment's guardrails service from the operator's own configuration."}
-        </span>
-      </FieldMessages>
+            : "Built by this deployment's guardrails service from the operator's own configuration."
+        }
+      />
       <Button
         size="sm"
         variant="ghost"

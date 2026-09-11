@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import type {
   ConfigSearchTool,
   SearchProviderInfo,
@@ -13,6 +13,7 @@ import { Field } from "@/design-system/forms/Field"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
@@ -148,7 +149,6 @@ function StoredToolLine({
           className={`otari-machine-field w-full md:w-[10rem] ${INPUT_CLASS}`}
         />
         <Button
-          size="sm"
           variant="ghost"
           // Named per row, as this row's fields are: the card is a list of
           // tools, so a bare "Remove" is the same name on every one of them.
@@ -222,10 +222,18 @@ function ConfigToolLine({ tool }: { tool: ConfigSearchTool }) {
 function AddToolDialog({
   isOpen,
   onClose,
+  onCreated,
   providers,
 }: {
   isOpen: boolean
   onClose: () => void
+  /**
+   * A tool landed. Separate from `onClose` because the created row is inside a
+   * drill-in that is collapsed by default: closing on a cancel should leave it
+   * as it was, and closing on a create should open it, or the only thing that
+   * changes on screen is the trailing count.
+   */
+  onCreated: () => void
   providers: SearchProviderInfo[]
 }) {
   const create = useCreateSearchTool()
@@ -245,8 +253,7 @@ function AddToolDialog({
   // One snapshot rather than a hand-listed predicate: the provider is a field
   // like the others, and a guard that forgot it discarded a changed provider
   // with no question asked.
-  const draft = JSON.stringify({ name, provider, apiBase, apiKey })
-  const seed = useRef(draft)
+  const { isDirty } = useDirtySnapshot({ name, provider, apiBase, apiKey })
 
   const ready =
     name.trim() !== "" &&
@@ -261,7 +268,7 @@ function AddToolDialog({
         api_base: apiBase.trim() === "" ? null : apiBase.trim(),
         api_key: apiKey === "" ? null : apiKey,
       },
-      { onSuccess: onClose },
+      { onSuccess: onCreated },
     )
   }
 
@@ -271,13 +278,12 @@ function AddToolDialog({
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      size="sm"
       title="New search tool"
       submitLabel="Add search tool"
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!ready}
-      isDirty={draft !== seed.current}
+      isDirty={isDirty}
       error={create.error}
     >
       <Field
@@ -317,6 +323,7 @@ function AddToolDialog({
         label="API key"
         value={apiKey}
         onChange={setApiKey}
+        isRequired={keyRequired}
         description={
           keyRequired
             ? "This provider needs one. Storing it needs OTARI_SECRET_KEY set on the gateway."
@@ -353,25 +360,10 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
   const answered = !tools.isLoading && !failed
 
   return (
-    <SettingsGroup
-      bounded
-      title="Search tools"
-      description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
-      docsHref={docsHref}
-      action={
-        known.length > 0 ? (
-          <Button
-            variant="primary"
-            onPress={() => {
-              setOpenCount((count) => count + 1)
-              setAdding(true)
-            }}
-          >
-            Add search tool
-          </Button>
-        ) : null
-      }
-    >
+    <>
+      {/* Outside the group, not inside it: `FormDialog` renders its trigger
+          slot as a real element, and a group's rows are a `divide-y` container
+          where one more child changes which row is last. */}
       {/* Keyed on the open count, so each open remounts a blank form. Clearing
           the draft on close instead would blank the fields while the dialog is
           still animating away. */}
@@ -379,43 +371,69 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
         key={openCount}
         isOpen={adding}
         onClose={() => setAdding(false)}
+        onCreated={() => {
+          setAdding(false)
+          // The new row lives in the drill-in, which is collapsed by default,
+          // so without this the only thing that changes on screen is the count.
+          setIsOpen(true)
+        }}
         providers={known}
       />
-      {tools.error || providers.error ? (
-        // Outside the disclosure: a read that failed is the thing the operator
-        // most needs to see, and the row is collapsed by default.
-        <div className="px-4 py-3">
-          <ErrorBanner error={tools.error ?? providers.error} />
-        </div>
-      ) : null}
-      <DisclosureRow
-        label="Configure search tools"
-        help={
-          failed
-            ? "Could not read the tools this deployment serves."
-            : !answered
-              ? "Reading the tools this deployment serves."
-              : count === 0
-                ? "None configured, so POST /api/v1/search refuses every request."
-                : "Callers name one in search_tool_name, or in the /api/v1/search/{tool} path."
-        }
-        isOpen={isOpen}
-        onToggle={() => setIsOpen((open) => !open)}
-        trailing={
-          <span className="text-caption text-subtle tabular-nums">
-            {answered ? toolCount(count) : ""}
-          </span>
+      <SettingsGroup
+        bounded
+        title="Search tools"
+        description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
+        docsHref={docsHref}
+        action={
+          known.length > 0 ? (
+            <Button
+              variant="primary"
+              onPress={() => {
+                setOpenCount((count) => count + 1)
+                setAdding(true)
+              }}
+            >
+              Add search tool
+            </Button>
+          ) : null
         }
       >
-        <div className="flex flex-col divide-y divide-border-subtle">
-          {stored.map((tool) => (
-            <StoredToolLine key={tool.name} tool={tool} providers={known} />
-          ))}
-          {fromConfig.map((tool) => (
-            <ConfigToolLine key={tool.name} tool={tool} />
-          ))}
-        </div>
-      </DisclosureRow>
-    </SettingsGroup>
+        {tools.error || providers.error ? (
+          // Outside the disclosure: a read that failed is the thing the operator
+          // most needs to see, and the row is collapsed by default.
+          <div className="px-4 py-3">
+            <ErrorBanner error={tools.error ?? providers.error} />
+          </div>
+        ) : null}
+        <DisclosureRow
+          label="Configure search tools"
+          help={
+            failed
+              ? "Could not read the tools this deployment serves."
+              : !answered
+                ? "Reading the tools this deployment serves."
+                : count === 0
+                  ? "None configured, so POST /api/v1/search refuses every request."
+                  : "Callers name one in search_tool_name, or in the /api/v1/search/{tool} path."
+          }
+          isOpen={isOpen}
+          onToggle={() => setIsOpen((open) => !open)}
+          trailing={
+            <span className="text-caption text-subtle tabular-nums">
+              {answered ? toolCount(count) : ""}
+            </span>
+          }
+        >
+          <div className="flex flex-col divide-y divide-border-subtle">
+            {stored.map((tool) => (
+              <StoredToolLine key={tool.name} tool={tool} providers={known} />
+            ))}
+            {fromConfig.map((tool) => (
+              <ConfigToolLine key={tool.name} tool={tool} />
+            ))}
+          </div>
+        </DisclosureRow>
+      </SettingsGroup>
+    </>
   )
 }

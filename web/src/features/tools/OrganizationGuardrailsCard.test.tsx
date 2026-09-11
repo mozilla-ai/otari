@@ -125,7 +125,10 @@ function inDialog() {
 
 async function settledPicker() {
   await openDialog()
-  return await screen.findByRole("button", { name: /Choose a profile/ })
+  // The profile control is a `forms/Select` now: react-aria names its trigger
+  // with the label and the current value, so it is found by label rather than
+  // by the placeholder it happens to be showing.
+  return await waitFor(() => selectTrigger("Guardrail profile"))
 }
 
 function renderCard() {
@@ -451,17 +454,27 @@ describe("OrganizationGuardrailsCard", () => {
     // The control does not start as a free-text box and turn into a picker
     // under the operator's cursor: it is the picker throughout, and says so
     // while it waits.
-    expect(
-      await screen.findByRole("button", {
-        name: /Reading the guardrails service/,
-      }),
-    ).toBeDisabled()
+    // Named by its label now, and reading its waiting placeholder: the control
+    // is the picker throughout rather than a box that becomes one.
+    const waiting = await waitFor(() => selectTrigger("Guardrail profile"))
+    expect(waiting).toBeDisabled()
+    // The waiting sentence is the control's description, which is where it is
+    // both rendered and announced; the trigger's own text is the selected
+    // option's, and there is nothing to select yet.
+    expect(waiting).toHaveAccessibleDescription(
+      /Reading the guardrails service/,
+    )
     expect(
       screen.queryByRole("button", { name: "Name a profile by hand" }),
     ).toBeNull()
 
     answer()
-    expect(await settledPicker()).toBeEnabled()
+    // Waited on the state rather than on the element: the trigger is named by
+    // its label throughout, so it exists before and after the catalog answers
+    // and only its disabled state says which.
+    await waitFor(() =>
+      expect(selectTrigger("Guardrail profile")).toBeEnabled(),
+    )
   })
 
   it("picks a profile from what the guardrails service has built", async () => {
@@ -511,32 +524,23 @@ describe("OrganizationGuardrailsCard", () => {
   })
 
   it("refuses to add an entry whose guardrail needs a parameter it has not got", async () => {
-    // Inside a `FormDialog` the submit is a real form submission, so a
-    // parameter the profile declares required and the operator left blank is
-    // stopped by the browser's own constraint validation before
-    // `parameters.check()` runs. That is a change from the always-open form,
-    // where the Add button called the check directly and the field's own
-    // message spoke; asserted here as what the operator now meets, which is a
-    // required field, a refusal, and a dialog still open on their work.
+    // One validation path, and it is the app's own: `parameters.check()` names
+    // the field and says what it needs. The native `required` attribute would
+    // refuse the submit first and silently, so inside a dialog that message
+    // would never be reached.
     const calls = mockApi()
     const user = userEvent.setup()
     renderCard()
 
     await settledPicker()
     await pickOption(user, "Guardrail profile", "house-policy")
-    const required = inDialog()
-      .getAllByRole("textbox")
-      .filter((box) => box.hasAttribute("required"))
-    expect(required.length).toBeGreaterThan(0)
-    expect(
-      required.every((box) => (box as HTMLInputElement).value === ""),
-    ).toBe(true)
-
     await user.click(
       inDialog().getByRole("button", { name: "Mandate a guardrail" }),
     )
 
-    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(
+      await screen.findByText("This guardrail needs a value here."),
+    ).toBeInTheDocument()
     expect(calls.some((call) => call.method === "POST")).toBe(false)
   })
 

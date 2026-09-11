@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import type {
   GuardrailCatalog,
   GuardrailParameterSpec,
@@ -16,6 +16,7 @@ import { Field } from "@/design-system/forms/Field"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
@@ -92,6 +93,7 @@ function WorkspaceScope({
   selected,
   workspaces,
   disabled,
+  variant = "filter",
   onEverywhere,
   onToggle,
 }: {
@@ -100,22 +102,40 @@ function WorkspaceScope({
   everywhere: boolean
   selected: readonly string[]
   workspaces: readonly Workspace[]
-  disabled: boolean
+  disabled?: boolean
+  /**
+   * Which half of the pair the picker is. A row on this card is a dense line
+   * of toolbar controls; the dialog is a form, where a caption label beside
+   * the control would be the one thing on it reading differently.
+   */
+  variant?: "filter" | "form"
   onEverywhere: (value: boolean) => void
   onToggle: (workspaceId: string) => void
 }) {
+  const scopeOptions = [
+    { value: "all", label: "Every workspace" },
+    { value: "chosen", label: "Chosen workspaces" },
+  ]
   return (
     <div className="flex flex-col gap-2">
-      <FilterSelect
-        label="Runs in"
-        value={everywhere ? "all" : "chosen"}
-        onChange={(next) => onEverywhere(next === "all")}
-        options={[
-          { value: "all", label: "Every workspace" },
-          { value: "chosen", label: "Chosen workspaces" },
-        ]}
-        disabled={disabled}
-      />
+      {variant === "form" ? (
+        <Select
+          label="Runs in"
+          value={everywhere ? "all" : "chosen"}
+          onChange={(next) => onEverywhere(next === "all")}
+          options={scopeOptions}
+          isDisabled={disabled}
+          reserveMessage={false}
+        />
+      ) : (
+        <FilterSelect
+          label="Runs in"
+          value={everywhere ? "all" : "chosen"}
+          onChange={(next) => onEverywhere(next === "all")}
+          options={scopeOptions}
+          disabled={disabled}
+        />
+      )}
       {everywhere ? null : (
         // A named group rather than a per-box aria-label. Each box is labelled
         // by the workspace name a reader can see, and the group says which
@@ -495,10 +515,10 @@ function AddGuardrailDialog({
   // moves to a profile with a different schema.
   const parameters = useParameterForm(specs, undefined)
 
-  // One snapshot rather than a hand-listed predicate: a field added to this
+  // Everything the operator can change, in one snapshot: a field added to this
   // form would otherwise have to be remembered in a second place, and the
   // parameters are the half most easily forgotten.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     profile,
     mode,
     url,
@@ -508,7 +528,6 @@ function AddGuardrailDialog({
     values: parameters.values,
     extraJson: parameters.extraJson,
   })
-  const seed = useRef(draft)
 
   const submit = () => {
     const named = profile.trim()
@@ -547,14 +566,13 @@ function AddGuardrailDialog({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={profile.trim() === ""}
-      isDirty={draft !== seed.current}
+      isDirty={isDirty}
       error={create.error}
     >
       <GuardrailProfileField
         catalog={catalog}
         pending={catalogPending}
         value={profile}
-        disabled={create.isPending}
         onChange={setProfile}
       />
       <Select
@@ -568,7 +586,6 @@ function AddGuardrailDialog({
         label="Endpoint"
         value={url}
         onChange={setUrl}
-        isDisabled={create.isPending}
         placeholder="blank uses the guardrails URL above"
         reserveMessage={false}
       />
@@ -580,10 +597,10 @@ function AddGuardrailDialog({
       />
       <WorkspaceScope
         scopeName={profile || "New guardrail"}
+        variant="form"
         everywhere={everywhere}
         selected={scope}
         workspaces={workspaces}
-        disabled={create.isPending}
         onEverywhere={setEverywhere}
         onToggle={(workspaceId) =>
           setScope((current) =>
@@ -605,7 +622,6 @@ function AddGuardrailDialog({
         extraJson={parameters.extraJson}
         extraJsonError={parameters.rawError}
         described={describedProfile}
-        disabled={create.isPending}
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
       />
@@ -641,65 +657,65 @@ export function OrganizationGuardrailsCard({
   const known = workspaces.data ?? []
 
   return (
-    <SettingsGroup
-      bounded
-      title="Organization guardrails"
-      description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
-      action={
-        manages ? (
-          <Button variant="primary" onPress={openAdd}>
-            Mandate a guardrail
-          </Button>
-        ) : null
-      }
-    >
-      {manages ? null : (
-        <InfoBanner>
-          Organization guardrails are set by an owner or admin of the
-          organization.
-        </InfoBanner>
-      )}
-      {manages ? (
-        <>
-          <ErrorBanner error={guardrails.error ?? workspaces.error} />
-          {/* Ahead of the rows, not after them. `FormDialog` renders its
-              trigger slot in place as a real element, so a dialog mounted last
-              inside a `divide-y` container takes `:last-child` off the final
-              row and draws a divider right above the container's own bottom
-              edge. `display: none` does not exempt an element from that.
+    <>
+      {/* Outside the group, not inside it: `FormDialog` renders its trigger
+          slot as a real element, and a group's rows are a `divide-y` container
+          where one more child changes which row is last.
 
-              Keyed on the open count, so each open remounts a blank form:
-              clearing the draft on close would blank the fields while the
-              dialog is still animating away. */}
-          <AddGuardrailDialog
-            key={openCount}
-            isOpen={adding}
-            onClose={() => setAdding(false)}
-            catalog={catalog.data}
-            // `isFetched` rather than `isPending`: an errored query returns to
-            // pending when its observers remount, which would leave the picker
-            // stuck reading a service that already answered.
-            catalogPending={!catalog.isFetched}
-            workspaces={known}
-            onSaved={onSaved}
-          />
-          {entries.map((guardrail) => (
-            <GuardrailRow
-              key={guardrail.id}
-              guardrail={guardrail}
-              catalog={catalog.data}
-              workspaces={known}
-              onSaved={onSaved}
-            />
-          ))}
-          {entries.length === 0 && !guardrails.isLoading ? (
-            <p className="py-4 text-sm text-muted">
-              No organization guardrails, so only the guardrails a caller asks
-              for run.
-            </p>
-          ) : null}
-        </>
+          Keyed on the open count, so each open remounts a blank form. */}
+      {manages ? (
+        <AddGuardrailDialog
+          key={openCount}
+          isOpen={adding}
+          onClose={() => setAdding(false)}
+          catalog={catalog.data}
+          // `isFetched` rather than `isPending`: an errored query returns to
+          // pending when its observers remount, which would leave the picker
+          // stuck reading a service that already answered.
+          catalogPending={!catalog.isFetched}
+          workspaces={known}
+          onSaved={onSaved}
+        />
       ) : null}
-    </SettingsGroup>
+      <SettingsGroup
+        bounded
+        title="Organization guardrails"
+        description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
+        action={
+          manages ? (
+            <Button variant="primary" onPress={openAdd}>
+              Mandate a guardrail
+            </Button>
+          ) : null
+        }
+      >
+        {manages ? null : (
+          <InfoBanner>
+            Organization guardrails are set by an owner or admin of the
+            organization.
+          </InfoBanner>
+        )}
+        {manages ? (
+          <>
+            <ErrorBanner error={guardrails.error ?? workspaces.error} />
+            {entries.map((guardrail) => (
+              <GuardrailRow
+                key={guardrail.id}
+                guardrail={guardrail}
+                catalog={catalog.data}
+                workspaces={known}
+                onSaved={onSaved}
+              />
+            ))}
+            {entries.length === 0 && !guardrails.isLoading ? (
+              <p className="py-4 text-sm text-muted">
+                No organization guardrails, so only the guardrails a caller asks
+                for run.
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </SettingsGroup>
+    </>
   )
 }

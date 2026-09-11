@@ -162,6 +162,34 @@ describe("SearchToolsCard", () => {
     expect(screen.queryByText("0 tools")).toBeNull()
   })
 
+  it("opens the drill-in when a tool is created, so the new row is on screen", async () => {
+    // The row lands inside a disclosure that is collapsed by default, and the
+    // trigger is on the group heading outside it, so without this the dialog
+    // closes and the only thing that changes is the trailing count.
+    mockApi()
+    const user = userEvent.setup()
+    renderWithClient(<SearchToolsCard docsHref="https://docs.example/tools" />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add search tool" }),
+    )
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.type(dialog.getByLabelText(/^Name/), "second")
+    await pickOption(user, "Provider", "searxng")
+    await user.type(dialog.getByLabelText(/^Backend URL/), "http://other:8080")
+    await user.click(dialog.getByRole("button", { name: "Add search tool" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    // The drill-in itself reports open, which is what puts the new row in
+    // front of the operator; asserting a row's text would pass on a closed
+    // disclosure whose content is still in the DOM.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Configure search tools/ }),
+      ).toHaveAttribute("aria-expanded", "true"),
+    )
+  })
+
   it("keeps the heading trigger on screen and opens on a blank draft", async () => {
     mockApi()
     const user = userEvent.setup()

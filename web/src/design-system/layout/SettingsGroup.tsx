@@ -81,7 +81,7 @@ export function SettingsGroup({
   // on a phone where there is no room for two columns. Rendered here rather
   // than at each call site so a group's action lands in one place.
   const headingRow =
-    heading === null && blurb === null && action === undefined ? null : (
+    heading === null && blurb === null && !action ? null : (
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
           {heading}

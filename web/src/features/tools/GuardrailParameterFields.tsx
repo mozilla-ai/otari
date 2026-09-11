@@ -75,7 +75,6 @@ function ParameterControl({
         placeholder="value"
         description={description}
         isDisabled={disabled}
-        isRequired={spec.required}
         isInvalid={Boolean(error)}
         errorMessage={error}
         reserveMessage
@@ -143,7 +142,6 @@ function ParameterControl({
       value={String(value ?? "")}
       onChange={onChange}
       isDisabled={disabled}
-      isRequired={spec.required}
       isInvalid={Boolean(error)}
       errorMessage={error}
       placeholder={placeholderFor(spec)}
@@ -153,6 +151,12 @@ function ParameterControl({
   )
 }
 
+// No `isRequired` on these, deliberately. A required parameter is checked by
+// `parameterErrors`, which names the field and says what it needs; the native
+// attribute would refuse the submit first and silently, so inside a dialog the
+// form would never reach that message. One path, and it is the one that speaks.
+// The cost is the `required` marker these inputs no longer carry; the refusal
+// still arrives on the field, announced, through `isInvalid` and `errorMessage`.
 export function GuardrailParameterFields({
   specs,
   scopeName,
