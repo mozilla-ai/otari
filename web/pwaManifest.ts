@@ -34,7 +34,7 @@ export function buildManifest(base: string) {
   })
   return {
     id: prefix,
-    name: "Otari Dashboard",
+    name: "Otari",
     short_name: "Otari",
     description:
       "Otari admin dashboard: browse and price models, manage aliases, and toggle runtime settings.",

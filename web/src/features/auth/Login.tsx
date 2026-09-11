@@ -599,7 +599,7 @@ export function Login() {
               column starts at its left edge like every other column in the
               product. */}
         <div className="flex flex-col gap-1.5">
-          <h1 className={HEADING}>Otari Dashboard</h1>
+          <h1 className={HEADING}>Otari</h1>
           <p className="text-sm text-pretty text-muted">
             {usesPassword
               ? "Sign in to browse models, set pricing, and manage settings."
