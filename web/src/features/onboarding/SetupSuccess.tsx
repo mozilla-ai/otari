@@ -23,18 +23,23 @@ import { formatCost } from "@/shared/helpers/format"
  * empty, and the model cell takes the slack because a model id is the long one.
  */
 function Receipt({ attempt }: { attempt: ActivationAttempt }) {
+  // Fixed widths on the two figures, and the model takes the slack. Sized to
+  // content they clipped instead: a cost is six decimal places wide and the
+  // cell was as narrow as the word above it.
   const cells = [
-    { label: "Model", value: attempt.model, isWide: true },
+    { label: "Model", value: attempt.model, width: "min-w-0 flex-1 px-6" },
     {
       label: "Latency",
       value:
         attempt.latency_ms != null
           ? `${Math.round(attempt.latency_ms)} ms`
           : null,
+      width: "w-28 shrink-0 px-4",
     },
     {
       label: "Cost",
       value: attempt.cost_usd != null ? formatCost(attempt.cost_usd) : null,
+      width: "w-32 shrink-0 pr-6 pl-4",
     },
   ].filter((cell) => cell.value)
 
@@ -45,12 +50,18 @@ function Receipt({ attempt }: { attempt: ActivationAttempt }) {
       {cells.map((cell, index) => (
         <div
           key={cell.label}
-          className={`flex min-w-0 flex-col gap-1 py-3 ${
-            cell.isWide ? "flex-1 px-6" : "shrink-0 px-4 last:pr-6"
-          } ${index > 0 ? "border-border border-l" : ""}`}
+          className={`flex flex-col gap-1 py-3 ${cell.width} ${
+            index > 0 ? "border-border border-l" : ""
+          }`}
         >
           <span className="text-mono-overline">{cell.label}</span>
-          <span className="text-mono-caption text-foreground truncate">
+          {/* Only the model truncates. A figure that did would be a wrong
+              number rather than a shortened one. */}
+          <span
+            className={`text-mono-caption text-foreground ${
+              cell.label === "Model" ? "truncate" : ""
+            }`}
+          >
             {cell.value}
           </span>
         </div>
