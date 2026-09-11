@@ -117,8 +117,18 @@ export function ListeningPanel({
           )}
         </div>
       </div>
-      <Button size="sm" isPending={isChecking} onPress={onCheckNow}>
-        Check now
+      {/* Shortened on a phone, where "Check now" pushed the copy beside it to a
+          third line and made the band a third taller. The accessible name stays
+          "Check now" at both widths, so it does not change under a screen
+          reader and it still contains the visible word for voice control. */}
+      <Button
+        size="sm"
+        aria-label="Check now"
+        isPending={isChecking}
+        onPress={onCheckNow}
+      >
+        <span className="sm:hidden">Check</span>
+        <span className="hidden sm:inline">Check now</span>
       </Button>
     </div>
   )
