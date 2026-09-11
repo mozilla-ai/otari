@@ -8,6 +8,7 @@ import { drawBars } from "./renderBars"
 vi.mock("./renderBars", () => ({ drawBars: vi.fn() }))
 
 afterEach(() => {
+  vi.clearAllMocks()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -79,6 +80,38 @@ describe("login background lifecycle", () => {
     mounted.unmount()
     expect(env.frames.size).toBe(0)
     expect(env.remove).toHaveBeenCalledWith("change", expect.any(Function))
+  })
+
+  it("coalesces layout events and reads colors only when the theme changes", async () => {
+    const env = animationEnvironment(true)
+    const style = vi.spyOn(window, "getComputedStyle")
+    const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect)
+    render(<Harness />)
+    expect(drawBars).not.toHaveBeenCalled()
+    env.tick(1000)
+    expect(drawBars).toHaveBeenCalledTimes(1)
+    expect(style).toHaveBeenCalledTimes(1)
+    bounds.mockClear()
+    act(() => {
+      window.dispatchEvent(new Event("resize"))
+      document.dispatchEvent(new Event("scroll"))
+      window.dispatchEvent(new Event("resize"))
+    })
+    expect(bounds).not.toHaveBeenCalled()
+    env.tick(1016)
+    expect(bounds).toHaveBeenCalledTimes(2)
+    expect(drawBars).toHaveBeenCalledTimes(2)
+    expect(style).toHaveBeenCalledTimes(1)
+    bounds.mockClear()
+    await act(async () => {
+      document.documentElement.setAttribute("data-theme", "dark")
+    })
+    env.tick(1032)
+    expect(bounds).not.toHaveBeenCalled()
+    expect(style).toHaveBeenCalledTimes(2)
+    expect(drawBars).toHaveBeenCalledTimes(3)
+    expect(env.frames.size).toBe(0)
+    document.documentElement.removeAttribute("data-theme")
   })
 
   it("paints a static frame for reduced motion", () => {
