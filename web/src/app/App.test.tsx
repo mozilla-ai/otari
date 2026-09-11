@@ -46,15 +46,15 @@ describe("App", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading page…")
     expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
+    expect(document.title).toBe("Overview · Otari")
   })
 
   it("asks a local-operator deployment to sign in", () => {
     // No stored session marker, so the shell is not reachable yet.
     renderApp(bootstrap())
+    expect(document.title).toBe("Sign in · Otari")
 
-    expect(
-      screen.getByRole("heading", { name: "Otari Dashboard" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
   })
 
   it("renders the data-plane landing page for a hybrid gateway", () => {
@@ -84,6 +84,7 @@ describe("App", () => {
     expect(
       screen.getByRole("link", { name: "Manage this gateway on otari.ai" }),
     ).toHaveAttribute("href", "https://otari.ai")
+    expect(document.title).toBe("Gateway · Otari")
     // The management shell is not merely hidden behind a sign-in here.
     expect(screen.queryByRole("navigation")).toBeNull()
   })
@@ -96,9 +97,7 @@ describe("App", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /does not know what it is connected to/,
     )
-    expect(
-      screen.queryByRole("heading", { name: "Otari Dashboard" }),
-    ).toBeNull()
+    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
   })
 
   it("renders the accept-invitation page ahead of the sign-in screen", async () => {
@@ -123,9 +122,8 @@ describe("App", () => {
     // Not the sign-in screen, even though no session marker is stored: the
     // token in the link is this visitor's whole credential, not a session.
     expect(await screen.findByText("Acme")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("heading", { name: "Otari Dashboard" }),
-    ).toBeNull()
+    expect(document.title).toBe("Accept invitation · Otari")
+    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
   })
 
   it("renders a public auth page ahead of the sign-in screen", async () => {
@@ -139,9 +137,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Email verified" }),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole("heading", { name: "Otari Dashboard" }),
-    ).toBeNull()
+    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
   })
 
   it("sends a completed OAuth sign-in on to the dashboard rather than leaving it on the callback page", async () => {
@@ -248,9 +244,7 @@ describe("a bootstrap from an older gateway", () => {
   it("still renders the sign-in screen without oauth_providers", () => {
     const { container } = renderApp(older("oauth_providers"))
 
-    expect(
-      screen.getByRole("heading", { name: "Otari Dashboard" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
     expect(container).not.toBeEmptyDOMElement()
   })
 

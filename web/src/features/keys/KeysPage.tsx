@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { FiEdit2, FiPause, FiPlay, FiRefreshCw, FiTrash2 } from "react-icons/fi"
 import type {
   ApiKey,
   CreateKeyRequest,
@@ -1165,30 +1166,34 @@ export function KeysPage() {
         cell: (k) => (
           <RowActionRow>
             <RowAction
+              icon={k.is_active ? FiPause : FiPlay}
+              label={k.is_active ? "Disable" : "Enable"}
               isDisabled={updateKey.isPending}
               onPress={() => setActive(k, !k.is_active)}
-            >
-              {k.is_active ? "Disable" : "Enable"}
-            </RowAction>
+            />
             <RowAction
+              icon={FiEdit2}
+              label="Edit"
               onPress={() => {
                 setAddOpen(false)
                 setEditing(k.id)
               }}
-            >
-              Edit
-            </RowAction>
+            />
             <RowAction
               ref={lastArmed === k.id ? triggerRef : undefined}
+              icon={FiRefreshCw}
+              label="Regenerate"
               isDanger={armed === k.id}
               onPress={() => arm(k.id)}
-            >
-              Regenerate
-            </RowAction>
+            />
             {/* Permanent delete is only offered once a key is disabled, so a live
               caller can't be broken (and its audit trail erased) in one click. */}
             {k.is_active ? null : (
-              <RowAction onPress={() => setPendingDelete(k)}>Delete</RowAction>
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(k)}
+              />
             )}
           </RowActionRow>
         ),

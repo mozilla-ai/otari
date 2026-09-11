@@ -223,6 +223,9 @@ _DELIBERATELY_OMITTED: tuple[str, ...] = (
     "files_s3_region",
     "oauth_github_client_id",
     "oauth_google_client_id",
+    # Already published to the dashboard unauthenticated, by GET /api/v1/bootstrap,
+    # because the signup page has to read it before anyone can sign in.
+    "open_signup",
     "router_alpha",
     "router_confidence_floor",
     "router_embedding_model",

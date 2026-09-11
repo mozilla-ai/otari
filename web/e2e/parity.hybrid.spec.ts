@@ -66,6 +66,8 @@ test.describe("hybrid deployment", () => {
       oauth_providers: [],
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
+      // And holds the identities, so there is nothing here to sign up to.
+      open_signup: false,
     })
   })
 

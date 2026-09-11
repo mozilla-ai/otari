@@ -1,13 +1,17 @@
 import { RouterProvider } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { HybridLanding } from "@/app/HybridLanding"
+import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
 import { PageError } from "@/design-system/feedback/PageError"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
-import { publicAuthPath } from "@/features/auth/publicAuthPaths"
+import {
+  type PublicAuthPath,
+  publicAuthPath,
+} from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
@@ -93,7 +97,11 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // is a link this deployment cannot honor, and the landing page's own
   // explanation is more useful here than a page that would just 404.
   if (deployment_type === "hybrid") {
-    return <HybridLanding />
+    return (
+      <PublicPageTitle page="Gateway">
+        <HybridLanding />
+      </PublicPageTitle>
+    )
   }
 
   // The one URL every visitor may reach without a session or the master key:
@@ -111,7 +119,11 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // tear down and remount on any hash change under this prefix, which is what
   // makes "once" mean once per link rather than once per tab.
   if (hash.startsWith("#/accept-invitation")) {
-    return <AcceptInvitationPage key={hash} />
+    return (
+      <PublicPageTitle page="Accept invitation">
+        <AcceptInvitationPage key={hash} />
+      </PublicPageTitle>
+    )
   }
 
   // The rest of the auth surface a visitor may reach without a session
@@ -124,7 +136,11 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // previous link's result.
   const publicAuth = publicAuthPath(hash)
   if (publicAuth) {
-    return <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
+    return (
+      <PublicPageTitle page={PUBLIC_AUTH_TITLES[publicAuth]}>
+        <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
+      </PublicPageTitle>
+    )
   }
 
   // Any deployment that issues a session needs one before the shell renders.
@@ -134,7 +150,11 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // "issues this one" is what makes that bug a wrong screen instead of an
   // unauthenticated shell whose every query 401s in a loop.
   if (session_type !== "none" && !isAuthenticated) {
-    return <Login />
+    return (
+      <PublicPageTitle page="Sign in">
+        <Login />
+      </PublicPageTitle>
+    )
   }
 
   // Auth gates the router rather than living inside it: signing in is the one
@@ -150,4 +170,15 @@ function DeploymentRoot({ hash }: { hash: string }) {
       <RouterProvider router={router} />
     </SelectedWorkspaceProvider>
   )
+}
+
+const PUBLIC_AUTH_TITLES: Record<PublicAuthPath, string> = {
+  "/signup": "Create account",
+  "/check-email": "Check your email",
+  "/resend-verification": "Resend verification",
+  "/recover-password": "Recover password",
+  "/verify-email": "Verify email",
+  "/reset-password": "Reset password",
+  "/auth/google/callback": "Sign in",
+  "/auth/github/callback": "Sign in",
 }

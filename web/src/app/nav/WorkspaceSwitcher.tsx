@@ -169,10 +169,13 @@ export function WorkspaceSwitcher({
         >
           {/* The mark is the switcher's hero, as in the prototype: the product
             name is not repeated in the header, so this is where it lives. */}
-          {/* A 28px square on the active-control fill, which is what the
-              artboard draws: the mark sits in a tile the way a nav row's icon
-              sits in its lane, rather than floating at its own size. */}
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-surface-subtle">
+          {/* A 28px lane, so the mark sits where a nav row's icon sits rather
+              than floating at its own size. No fill: the lane used to paint
+              `bg-surface-subtle`, which is the fill a SELECTED nav row wears,
+              so the product mark read both as a logo on a gray box and as the
+              one row in the rail that was chosen. The alignment was the half
+              worth keeping (otari-ai#2123). */}
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center">
             {/* Width only: the mark is 273 by 250, so a height of its own would
                 stretch it. It fills the tile's width and centers on the short
                 axis, which is why the tile is a flex box rather than a square

@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react"
+import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -786,34 +787,32 @@ export function WorkspacesPage() {
         cell: (workspace) => (
           <RowActionRow>
             <RowAction
+              icon={FiEdit2}
+              label="Edit"
               isDisabled={!manages}
               onPress={() => {
                 setCreating(false)
                 setEditing(workspace.id)
               }}
-            >
-              Edit
-            </RowAction>
+            />
             {/* The server keeps every organization on at least one workspace
                 (`LastWorkspaceError`), and first boot is the one-workspace
                 state, so the ordinary case would be a button that always
                 refuses. Say why instead of offering the refusal. The reason
                 goes in the name, following the membership controls: a disabled
-                control takes no focus, so a tooltip would reach a pointer and
-                nothing else. */}
-            <span title={isOnlyWorkspace ? LAST_WORKSPACE_REASON : undefined}>
-              <RowAction
-                ariaLabel={
-                  isOnlyWorkspace
-                    ? `Delete ${workspace.name} (${LAST_WORKSPACE_REASON})`
-                    : undefined
-                }
-                isDisabled={!manages || isOnlyWorkspace}
-                onPress={() => setDeleting(workspace)}
-              >
-                Delete
-              </RowAction>
-            </span>
+                control takes no focus, so the name is what reaches assistive
+                tech, and `RowAction` repeats it on a `title` for the pointer. */}
+            <RowAction
+              icon={FiTrash2}
+              label="Delete"
+              ariaLabel={
+                isOnlyWorkspace
+                  ? `Delete ${workspace.name} (${LAST_WORKSPACE_REASON})`
+                  : undefined
+              }
+              isDisabled={!manages || isOnlyWorkspace}
+              onPress={() => setDeleting(workspace)}
+            />
           </RowActionRow>
         ),
       },

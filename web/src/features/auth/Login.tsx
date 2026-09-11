@@ -140,11 +140,21 @@ function LabelRow({
  * The sign-in screen, rendering whichever credential this deployment accepts.
  *
  * A standalone gateway takes the master key until an operator claims it by
- * setting a password, and email and password from then on
- * (mozilla-ai/otari-ai#1716). The gateway publishes which applies in the
- * bootstrap's `sign_in_methods`, so the form is chosen from that rather than
- * from a refusal: presenting the master-key box to a claimed deployment would
- * ask for the one credential its sign-in endpoint no longer takes.
+ * setting a password (mozilla-ai/otari-ai#1716), and takes a password from
+ * whichever identity holds one, whenever one does. The gateway publishes both
+ * facts in the bootstrap's `sign_in_methods`, so the form is chosen from that
+ * rather than from a refusal: presenting the master-key box to a claimed
+ * deployment would ask for the one credential its sign-in endpoint no longer
+ * takes.
+ *
+ * The two are not alternatives to each other, which is what otari-ai#2100 was
+ * about. A deployment publishes both whenever a member holds a password on one
+ * its operator never claimed, and this screen used to show the master-key box
+ * alone, so the member whose password would have worked had no form to put it
+ * in. With both published the password form is what renders, and the
+ * master-key box is one press away under the rule below it: somebody holding a
+ * key knows they hold one, and everybody else would be reading a box about a
+ * credential they have never seen.
  *
  * Below the form sit the ways in that are not a credential: claiming a rostered
  * identity, recovering a forgotten password, and asking for a fresh
@@ -152,13 +162,11 @@ function LabelRow({
  * start by sending a message, so all three are hidden on a deployment whose
  * bootstrap reports `mail_ready: false` rather than offered and then refused
  * with a 503, the way otari#648 already settled it for the invitation form.
- * Recovery is hidden on an unclaimed deployment as well: `master_key` is
- * published exactly while the operator identity holds no password (otari#702),
- * so there is nothing yet for the operator to reset, and the way back in is the
- * master key against `PUT /v1/auth/password` (see docs/access-control.md). A
- * member who signed up on a deployment its operator never claimed is the one
- * case this screen does not serve: it offers the master-key box, and they sign
- * in by calling `POST /v1/auth/session` until the operator claims it.
+ * The two recovery links need one thing more: `password` in that same list,
+ * which is the gateway saying some identity holds one. Nothing has a reset link
+ * to reset before then, and an operator who has not claimed the deployment
+ * recovers through the master key against `PUT /v1/auth/password` instead (see
+ * docs/access-control.md) rather than through a mailed link.
  *
  * A passkey signs in beside the form rather than instead of it (otari#652),
  * offered only when the gateway publishes `passkey` *and* this browser can run
@@ -173,9 +181,25 @@ function LabelRow({
 export function Login() {
   const { login, isSigningOut } = useAuth()
   const { recordEvent } = useTelemetry()
-  const { sign_in_methods, mail_ready, maintenance_mode, oauth_providers } =
-    useDeployment()
-  const usesPassword = sign_in_methods.includes("password")
+  const {
+    sign_in_methods,
+    mail_ready,
+    maintenance_mode,
+    oauth_providers,
+    open_signup,
+  } = useDeployment()
+  const offersPasswordForm = sign_in_methods.includes("password")
+  const offersMasterKeyForm = sign_in_methods.includes("master_key")
+  // Both are published whenever a member holds a password on a deployment its
+  // operator never claimed, so which box is on screen is a choice rather than a
+  // reading of the bootstrap. The password form is the default wherever it is
+  // offered, because a deployment has one master key and as many passwords as
+  // it has people.
+  const [typedCredential, setTypedCredential] = useState<
+    "password" | "masterKey"
+  >(offersPasswordForm ? "password" : "masterKey")
+  const usesPassword = typedCredential === "password"
+  const offersCredentialSwitch = offersPasswordForm && offersMasterKeyForm
   // An empty list is the gateway saying it cannot mint a session at all right
   // now. Two ways to get there: `/bootstrap` answers [] when it cannot reach
   // its database, and `normalizeBootstrap` fills the same [] in for a gateway
@@ -192,7 +216,11 @@ export function Login() {
   // signup already flips the deployment to `password`, so this is not the
   // caller who needs a resend being left without one.
   const offersSignup = mail_ready
-  const offersRecovery = mail_ready && usesPassword
+  // Off the bootstrap rather than off `usesPassword`, which now says which box
+  // is showing: whether a password can be reset is a fact about the deployment,
+  // and it does not stop being true while somebody is looking at the master-key
+  // box.
+  const offersRecovery = mail_ready && offersPasswordForm
   // Two independent conditions, and both have to hold. The gateway publishes
   // `passkey` only while some credential could actually answer, and a browser
   // that cannot run the ceremony would turn the button into a dead end.
@@ -548,7 +576,7 @@ export function Login() {
     <LoginPageShell>
       <div className={CARD}>
         <div className="flex flex-col gap-1.5">
-          <h1 className={HEADING}>Otari Dashboard</h1>
+          <h1 className={HEADING}>Otari</h1>
           <p className="text-sm text-pretty text-muted">
             {usesPassword
               ? "Sign in to browse models, set pricing, and manage settings."
@@ -716,7 +744,9 @@ export function Login() {
           </Button>
         </form>
 
-        {offersPasskey || oauthProviders.length > 0 ? (
+        {offersCredentialSwitch ||
+        offersPasskey ||
+        oauthProviders.length > 0 ? (
           <div className="flex flex-col gap-3">
             {/* A rule with the word on it, rather than a bare divider: these
                   are alternatives to the form above, not a second step of it,
@@ -731,6 +761,38 @@ export function Login() {
               or
               <span className="h-px flex-1 bg-border" />
             </div>
+            {/* The other typed credential, under the same rule as the passkey
+                and the provider buttons because it is the same kind of thing:
+                another way to prove who you are, not a second step of the form
+                above. Swapping the box clears whatever was typed into the one
+                being put away, so a refusal from the credential nobody is
+                looking at any more cannot stay on screen. */}
+            {offersCredentialSwitch ? (
+              <Button
+                type="button"
+                variant="ghost"
+                fullWidth
+                isDisabled={
+                  isSubmitting ||
+                  isSigningOut ||
+                  isPasskeyPending ||
+                  pendingProvider !== null
+                }
+                onPress={() => {
+                  setTypedCredential(usesPassword ? "masterKey" : "password")
+                  setEmail("")
+                  setPassword("")
+                  setMasterKey("")
+                  setError(null)
+                  setErrorField(null)
+                }}
+                className="h-11"
+              >
+                {usesPassword
+                  ? "Use your master key"
+                  : "Use your email and password"}
+              </Button>
+            ) : null}
             {offersPasskey ? (
               <Button
                 type="button"
@@ -819,9 +881,16 @@ export function Login() {
             {/* Deployment-neutral wording (otari#835): "this gateway" read as
                   a self-hosted process on a hosted control plane, where the same
                   screen is the sign-in for an invited tenant. */}
+            {/* One link, two sentences, because the page behind it does two
+                different things (`open_signup` in the bootstrap) and the wrong
+                sentence strands whoever reads it: a stranger invited to create
+                an account on a closed deployment gets nothing, and a member of
+                an open one is left waiting for an admin who is not coming. */}
             {offersSignup ? (
               <PublicAuthLink to="#/signup">
-                Invited or added by an admin? Set your password
+                {open_signup
+                  ? "New to this deployment? Create an account"
+                  : "Invited or added by an admin? Set your password"}
               </PublicAuthLink>
             ) : null}
             {offersRecovery ? (

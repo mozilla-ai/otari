@@ -16,6 +16,8 @@ const WEB = process.cwd()
 describe("the generated web app manifest", () => {
   it("says at the origin root exactly what the static file used to", () => {
     const manifest = buildManifest("/")
+    expect(manifest.name).toBe("Otari")
+    expect(manifest.short_name).toBe("Otari")
     expect(manifest.id).toBe("/")
     expect(manifest.start_url).toBe("/")
     expect(manifest.scope).toBe("/")

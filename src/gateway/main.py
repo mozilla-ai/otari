@@ -715,9 +715,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
         # the PNG icons it points at (index.html links them from /pwa/). Only the
         # standalone dashboard is an app worth installing: a hybrid gateway's root
         # is a status page for a control plane that lives elsewhere, and an
-        # installed icon named "Otari Dashboard" would promise the wrong thing. The
-        # index still links the manifest there, which 404s and simply means no
-        # browser offers the install.
+        # installed icon named "Otari" would promise the wrong thing. The index still
+        # links the manifest there, which 404s and means no browser offers the install.
         pwa_dir = dashboard_dir / "pwa"
         if pwa_dir.is_dir() and not config.is_hybrid_mode:
             app.mount("/pwa", StaticFiles(directory=pwa_dir), name="dashboard-pwa")

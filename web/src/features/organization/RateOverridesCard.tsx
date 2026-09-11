@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
+import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { OrganizationPricingOverride } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -165,15 +166,18 @@ export function RateOverridesCard() {
         // Both controls stay mounted and disabled for a reader rather than
         // vanishing, so the page does not reflow between roles.
         <RowActionRow>
-          <RowAction isDisabled={!canEdit} onPress={() => openEdit(row)}>
-            Edit
-          </RowAction>
           <RowAction
+            icon={FiEdit2}
+            label="Edit"
+            isDisabled={!canEdit}
+            onPress={() => openEdit(row)}
+          />
+          <RowAction
+            icon={FiTrash2}
+            label="Delete"
             isDisabled={!canEdit}
             onPress={() => setPendingDelete(row)}
-          >
-            Delete
-          </RowAction>
+          />
         </RowActionRow>
       ),
     },

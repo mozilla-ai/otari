@@ -61,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.entities import OrganizationGuardrail, OrganizationGuardrailWorkspace
 from gateway.models.guardrails import GuardrailConfig
+from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.secret_box import (
@@ -243,7 +244,14 @@ class OrganizationGuardrailUpdate(BaseModel):
     credential: str | None = Field(default=None, max_length=8192)
     mode: Literal["block", "monitor"] | SkipJsonSchema[None] = None
     on_unavailable: Literal["block", "monitor"] | SkipJsonSchema[None] = None
-    validate_kwargs: dict[str, Any] | None = None
+    validate_kwargs: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Replaces the stored kwargs whole. A parameter sent as *** keeps the value stored "
+            "under that name, which is how a credential-shaped one survives an edit of the rest "
+            "of the entry"
+        ),
+    )
     enabled: bool | SkipJsonSchema[None] = None
     applies_to_all_workspaces: bool | SkipJsonSchema[None] = None
     workspace_ids: list[uuid.UUID] | None = Field(default=None, max_length=MAX_SCOPED_WORKSPACES)
@@ -268,7 +276,16 @@ class OrganizationGuardrailUpdate(BaseModel):
 
 
 class OrganizationGuardrailPublic(BaseModel):
-    """The API-facing shape. Never carries the credential, only whether one is set."""
+    """The API-facing shape. Never carries the credential, nor a credential-shaped parameter.
+
+    ``validate_kwargs`` is the second place a credential lives on this row, and
+    the one with no column of its own: a guardrail class can take a vendor key
+    as a parameter, so the form offers a box for it and whatever is typed there
+    is stored as plain JSON. It is masked the way
+    ``org_provider_keys.client_args`` is, by the *name* of the entry rather than
+    by what the guardrail catalog says about it, so the mask still applies when
+    the guardrails service is down and no catalog can be read.
+    """
 
     id: uuid.UUID
     organization_id: uuid.UUID
@@ -277,7 +294,13 @@ class OrganizationGuardrailPublic(BaseModel):
     has_credential: bool
     mode: str
     on_unavailable: str
-    validate_kwargs: dict[str, Any] | None
+    validate_kwargs: dict[str, Any] | None = Field(
+        description=(
+            "Extra kwargs forwarded to the guardrails service /validate call. A parameter whose "
+            "name looks credential-shaped comes back as *** rather than its stored value; sending "
+            "that *** back keeps what is stored"
+        ),
+    )
     enabled: bool
     applies_to_all_workspaces: bool
     # Empty for an entry that applies to every workspace, where the scope rows
@@ -299,7 +322,7 @@ class OrganizationGuardrailPublic(BaseModel):
             has_credential=guardrail.encrypted_credential is not None,
             mode=guardrail.mode,
             on_unavailable=guardrail.on_unavailable,
-            validate_kwargs=guardrail.validate_kwargs,
+            validate_kwargs=redact_secret_like_values(guardrail.validate_kwargs),
             enabled=guardrail.enabled,
             applies_to_all_workspaces=guardrail.applies_to_all_workspaces,
             workspace_ids=[] if guardrail.applies_to_all_workspaces else workspace_ids,
@@ -609,7 +632,11 @@ class OrganizationGuardrailService:
             encrypted_credential=_encrypted(credential) if credential else None,
             mode=request.mode,
             on_unavailable=request.on_unavailable,
-            validate_kwargs=request.validate_kwargs or None,
+            # Nothing stored to restore from, so this keeps whatever was sent:
+            # a ``***`` on a create is a literal the caller typed. Written as
+            # the restore anyway, so the column's rule is visible at both writes
+            # rather than only at the one where it has an effect.
+            validate_kwargs=restore_redacted_values(request.validate_kwargs, None) or None,
             enabled=request.enabled,
             applies_to_all_workspaces=request.applies_to_all_workspaces,
         )
@@ -683,7 +710,11 @@ class OrganizationGuardrailService:
         if request.on_unavailable is not None:
             guardrail.on_unavailable = request.on_unavailable
         if "validate_kwargs" in fields:
-            guardrail.validate_kwargs = request.validate_kwargs or None
+            # ``from_model`` masks a credential-shaped entry, so an editor
+            # resubmitting the whole set sends ``***`` for the ones it was never
+            # shown; those keep their stored value.
+            restored = restore_redacted_values(request.validate_kwargs, guardrail.validate_kwargs)
+            guardrail.validate_kwargs = restored or None
         if request.enabled is not None:
             guardrail.enabled = request.enabled
         if request.applies_to_all_workspaces is not None:

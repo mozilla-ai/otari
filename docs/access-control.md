@@ -129,6 +129,11 @@ opaque, HttpOnly session cookie. After the operator sets an email and password,
 the dashboard uses that identity for sign-in; the master key remains an API
 credential and recovery path.
 
+Email and password sign-in is offered whenever any active identity holds a
+password, not only once the operator has claimed the deployment. A member added
+to the roster and signed up before that point signs in on the same screen, which
+offers the master-key box beside the form while both credentials still work.
+
 Sessions are revocable and expire after `dashboard_session_ttl_hours`. Password
 changes, master-key rotation, sign-out, and identity deactivation revoke relevant
 sessions.
@@ -153,6 +158,32 @@ secret. Register this redirect URI with the provider:
 
 OAuth signs in an existing Otari identity whose email the provider verifies. It
 does not provision arbitrary provider accounts.
+
+### Signup
+
+Signup sets a password for an address and sends a verification link. What an
+unknown address does depends on `open_signup`:
+
+- `false` (default): signup only completes an identity an owner or admin already
+  added or invited by address. An address nobody has added gets no account. This
+  is the posture a single-tenant deployment wants, since anyone who can reach the
+  dashboard can reach the form.
+- `true`: an unknown address is registered, with an organization and workspace of
+  its own. Use it where the deployment serves many tenants.
+
+Either way the response says the same thing whether the address was unknown,
+already claimed, or genuinely just claimed, so its body discloses nothing about
+the address. Response *timing* still does, because the eligible path sends mail
+before it answers; that is [otari#720](https://github.com/mozilla-ai/otari/issues/720)
+and it applies to both postures.
+
+Signup needs mail configured, because an account that cannot verify its address
+cannot sign in.
+
+Open signup puts tenant creation on an unauthenticated route. The per-IP
+throttle on the public auth routes is the only bound on it today, and nothing
+expires the organization an unverified signup leaves behind, so run it behind
+whatever edge controls the deployment has.
 
 ## Invitations
 

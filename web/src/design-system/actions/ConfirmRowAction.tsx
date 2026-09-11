@@ -1,6 +1,26 @@
 import { type ReactNode, useState } from "react"
+import type { IconType } from "react-icons"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
 import { RowAction } from "./RowAction"
+
+export type ConfirmRowActionProps = {
+  confirmLabel: string
+  onConfirm: () => void
+  isPending?: boolean
+} & (
+  | {
+      /** The glyph the resting trigger wears. See `RowAction`. */
+      icon: IconType
+      /** What that glyph means: the trigger's accessible name and tooltip. */
+      label: string
+      children?: never
+    }
+  | {
+      icon?: never
+      label?: never
+      children: ReactNode
+    }
+)
 
 /**
  * A destructive row action that asks twice, in text rather than in buttons.
@@ -9,6 +29,10 @@ import { RowAction } from "./RowAction"
  * beside it. It replaces `ConfirmButton` on a table row for the same reason the
  * other actions lost their boxes; `ConfirmButton` stays for the forms and cards
  * where a destructive control is the only control and a button is right.
+ *
+ * The trigger takes a glyph like any other row action, so a lane does not go
+ * half words and half icons; the armed half stays text, because naming the
+ * consequence is the whole reason the second step exists and no glyph names it.
  *
  * Neither is for a delete: a record's deletion goes through `ConfirmDialog`,
  * because a confirmation armed inside the row reads as part of the table rather
@@ -19,13 +43,10 @@ export function ConfirmRowAction({
   confirmLabel,
   onConfirm,
   isPending,
+  icon,
+  label,
   children,
-}: {
-  confirmLabel: string
-  onConfirm: () => void
-  isPending?: boolean
-  children: ReactNode
-}) {
+}: ConfirmRowActionProps) {
   const [armed, setArmed] = useState(false)
   // Cancelling unmounts the focused Cancel button, which has no counterpart at
   // rest, and focus lands on `<body>`: the way out of a destructive action
@@ -48,6 +69,16 @@ export function ConfirmRowAction({
           Cancel
         </RowAction>
       </>
+    )
+  }
+  if (icon) {
+    return (
+      <RowAction
+        ref={triggerRef}
+        icon={icon}
+        label={label}
+        onPress={() => setArmed(true)}
+      />
     )
   }
   return (

@@ -148,6 +148,35 @@ async function openMenu() {
   return { user, menu: await screen.findByRole("dialog") }
 }
 
+describe("the product mark in the scope switcher", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("sits in its lane with nothing painted behind it", async () => {
+    // The lane used to carry `bg-surface-subtle`, which is the fill a SELECTED
+    // nav row wears, so the mark read as a logo on a gray box and as the one
+    // row in the rail that was chosen (otari-ai#2123). The 28px lane stays,
+    // because that is what keeps the mark where a nav row's icon sits.
+    mockApi()
+    await renderSwitcher()
+
+    const trigger = await screen.findByRole("button", {
+      name: /^Switch workspace/,
+    })
+    const lane = trigger.querySelector("svg")?.parentElement as HTMLElement
+    expect(lane).toBeTruthy()
+    expect([...lane.classList]).toContain("h-7")
+    expect(lane.className).not.toContain("bg-")
+  })
+})
+
 describe("the organization half of the scope switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks()

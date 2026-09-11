@@ -2,7 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { GuardrailCatalog, OrganizationGuardrail } from "@/client"
+import type {
+  GuardrailCatalog,
+  GuardrailParameterSpec,
+  OrganizationGuardrail,
+} from "@/client"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext, organizationGuardrail } from "@/tests/fixtures"
@@ -54,6 +58,40 @@ const CATALOG: GuardrailCatalog = {
       model_id: "leolee99/InjecGuard",
       parameters_known: true,
       parameters: [],
+    },
+  ],
+}
+
+// Two profiles of one guardrail class differing only in the model they pin,
+// which is how an operator's guardrails configuration is ordinarily written.
+// They declare the same parameters, so nothing but the name separates them.
+const TWIN_PARAMETERS: GuardrailParameterSpec[] = [
+  {
+    name: "policy",
+    type: "string",
+    required: true,
+    secret: false,
+    description: "Natural-language policy to validate against.",
+  },
+]
+
+const TWIN_CATALOG: GuardrailCatalog = {
+  available: true,
+  reason: null,
+  profiles: [
+    {
+      profile: "house-policy-fast",
+      guardrail: "any_llm",
+      model_id: "openai/gpt-4o-mini",
+      parameters_known: true,
+      parameters: TWIN_PARAMETERS,
+    },
+    {
+      profile: "house-policy-strict",
+      guardrail: "any_llm",
+      model_id: "openai/gpt-4o",
+      parameters_known: true,
+      parameters: TWIN_PARAMETERS,
     },
   ],
 }
@@ -659,6 +697,53 @@ describe("OrganizationGuardrailsCard", () => {
     expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
       profile: "pii",
     })
+  })
+
+  it("clears a typed parameter when the picker moves to a profile with the same schema", async () => {
+    // otari-ai#2119. The two profiles declare identical parameters, so a form
+    // that re-seeds on the schema alone keeps what was typed for the first and
+    // sends it under the second one's name.
+    mockApi({ catalog: TWIN_CATALOG })
+    renderCard()
+    const user = userEvent.setup()
+
+    await settledPicker()
+    await pickOption(user, "Guardrail profile", "house-policy-fast")
+    await user.type(await screen.findByLabelText("Policy"), "No personal data.")
+    await pickOption(user, "Guardrail profile", "house-policy-strict")
+
+    await waitFor(() => expect(screen.getByLabelText("Policy")).toHaveValue(""))
+  })
+
+  it("keeps what is filled in while a profile the catalog does not describe is typed", async () => {
+    // The other half of otari-ai#2119: a name typed by hand reaches the form one
+    // character at a time, and none of those characters spell a profile the
+    // catalog describes, so they have to share one identity or the form resets
+    // on every keystroke.
+    mockApi()
+    renderCard()
+    const user = userEvent.setup()
+
+    await openDialog()
+    await user.click(
+      await screen.findByRole("button", { name: "Name a profile by hand" }),
+    )
+    // The raw editor is the only place a parameter can go for a profile with no
+    // schema behind it.
+    await user.click(
+      inDialog().getByRole("button", {
+        name: /Other parameters for the new guardrail/,
+      }),
+    )
+    await user.type(
+      screen.getByLabelText("Parameters (JSON)"),
+      '{{"threshold": 0.8}',
+    )
+    await user.type(screen.getByLabelText("Guardrail profile"), "pii")
+
+    expect(screen.getByLabelText("Parameters (JSON)")).toHaveValue(
+      '{"threshold": 0.8}',
+    )
   })
 
   it("asks for no catalog from a member who cannot manage the organization", async () => {

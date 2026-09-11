@@ -68,7 +68,7 @@ def test_dashboard_is_served_at_root(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert '<div id="root">' in response.text
-    assert "Otari Dashboard" in response.text
+    assert "<title>Otari</title>" in response.text
 
 
 @requires_dashboard_bundle
@@ -105,7 +105,7 @@ def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
     assert '<link rel="manifest" href="/pwa/manifest.webmanifest" />' in index
     assert '<link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />' in index
 
-    assert payload["name"] == "Otari Dashboard"
+    assert payload["name"] == "Otari"
     assert payload["short_name"] == "Otari"
     assert payload["display"] == "standalone"
     # Android offers an install only with both a 192 and a 512 icon; the maskable
@@ -231,7 +231,7 @@ def _fake_bundle(tmp_path: Path) -> Path:
     bundle = tmp_path / "dashboard"
     (bundle / "assets").mkdir(parents=True)
     (bundle / "pwa").mkdir()
-    (bundle / "pwa" / "manifest.webmanifest").write_text('{"name": "Otari Dashboard"}')
+    (bundle / "pwa" / "manifest.webmanifest").write_text('{"name": "Otari"}')
     (bundle / "index.html").write_text('<html><body><div id="root"></div></body></html>')
     return bundle
 
@@ -267,8 +267,8 @@ def test_hybrid_mode_serves_no_install_manifest(tmp_path: Path, monkeypatch: pyt
     """Only the standalone dashboard is an app worth installing.
 
     A hybrid gateway's root is a status page for a control plane that lives
-    elsewhere, so an installed icon named "Otari Dashboard" would promise
-    management this deployment does not have. The index still links the manifest,
+    elsewhere, so an installed icon named "Otari" would promise management this
+    deployment does not have. The index still links the manifest,
     so what stops the install offer is this 404, which must not be cached: /pwa/
     carries a day of caching for the icons it usually serves, and a day-long 404
     would outlive a switch to standalone and keep the prompt away from a

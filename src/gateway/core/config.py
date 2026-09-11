@@ -643,6 +643,21 @@ class GatewayConfig(BaseSettings):
         ge=1,
         description="How long an organization invitation stays acceptable, in hours (default 7 days).",
     )
+    open_signup: bool = Field(
+        default=False,
+        description=(
+            "Whether POST /api/v1/auth/signup may create an identity from nothing, each with an "
+            "organization and workspace of its own. False (the default) keeps signup to claiming "
+            "an address an admin already put on the roster, which is what a single-tenant "
+            "deployment wants: anyone who could reach the dashboard could otherwise register on "
+            "it. True is the multi-tenant posture a control plane runs, and it needs mail "
+            "configured, since a self-serve account is unusable until its address is verified. "
+            "Turning it on puts tenant creation on an unauthenticated route: the per-IP throttle "
+            "that guards the public auth routes is the only bound on it, and nothing yet expires "
+            "the organization an unverified signup leaves behind, so run it behind whatever edge "
+            "controls the deployment has."
+        ),
+    )
     email_verification_expiry_hours: int = Field(
         default=48,
         ge=1,

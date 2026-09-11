@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useCallback, useMemo, useRef, useState } from "react"
+import { FiEdit2, FiList, FiTrash2 } from "react-icons/fi"
 
 import type { AliasResponse, PolicySpec, RoutingPolicyResponse } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
@@ -399,14 +400,14 @@ export function RoutingPage() {
           <span className="text-muted">—</span>
         ) : (
           <RowAction
+            icon={FiList}
+            label={expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
             onPress={() =>
               setExpanded((current) =>
                 current === rowKeyOf(policy) ? null : rowKeyOf(policy),
               )
             }
-          >
-            {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-          </RowAction>
+          />
         )
         return policy.source === "config" ? (
           <RowActionRow>
@@ -418,6 +419,8 @@ export function RoutingPage() {
             {readiness}
             {isEditableInForm(policy.spec) ? (
               <RowAction
+                icon={FiEdit2}
+                label="Edit"
                 onPress={() => {
                   // `setAdding(false)` cannot fire while the create dialog is
                   // open (its backdrop covers the table and `ariaHideOutside`
@@ -427,18 +430,18 @@ export function RoutingPage() {
                   setAdding(false)
                   setEditing(policy)
                 }}
-              >
-                Edit
-              </RowAction>
+              />
             ) : (
               <span className="max-w-xs text-xs text-muted">
                 Uses options this form cannot show yet. Edit it through the API
                 so nothing is lost.
               </span>
             )}
-            <RowAction onPress={() => setPendingDelete(policy)}>
-              Delete
-            </RowAction>
+            <RowAction
+              icon={FiTrash2}
+              label="Delete"
+              onPress={() => setPendingDelete(policy)}
+            />
           </RowActionRow>
         )
       },

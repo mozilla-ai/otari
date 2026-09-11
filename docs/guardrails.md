@@ -79,7 +79,7 @@ organization owner or admin), and each one carries:
 | `mode`, `on_unavailable` | The same two settings a request-body entry has, with the same meanings. |
 | `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
 | `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
-| `validate_kwargs` | Forwarded to the guardrails service `/validate` call. |
+| `validate_kwargs` | Forwarded to the guardrails service `/validate` call. A parameter whose name looks credential-shaped (it contains `key`, `secret`, `token`, `password`, `authorization` or `credential`) is read back as `***` rather than its stored value. Sending `***` back keeps what is stored, so editing the rest of an entry does not overwrite the parameter you were never shown. |
 | `enabled` | `false` stops the guardrail everywhere without discarding the entry. |
 | `applies_to_all_workspaces` | `true` runs it in every workspace, including any created later. |
 | `workspace_ids` | The workspaces it runs in, when it does not apply to all of them. |
