@@ -27,7 +27,7 @@ describe("CodeBlock", () => {
     // nothing about why it did.
     render(<CodeBlock label="text">a rendered form only</CodeBlock>)
 
-    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Copy / })).toBeNull()
   })
 
   it("copies the value rather than what is rendered, and says so", async () => {
@@ -44,7 +44,7 @@ describe("CodeBlock", () => {
       </CodeBlock>,
     )
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy curl" }))
 
     expect(writeText).toHaveBeenCalledWith("curl --header 'Otari-Key: gw-real'")
     expect(
@@ -61,9 +61,11 @@ describe("CodeBlock", () => {
     )
     render(<CodeBlock label="curl" value="curl https://example.com" />)
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy curl" }))
 
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Copy curl" }),
+    ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull()
   })
 })

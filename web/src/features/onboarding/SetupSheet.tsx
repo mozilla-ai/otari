@@ -74,19 +74,26 @@ export function SetupSheet({
   const [isRevealed, setIsRevealed] = useState(false)
 
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
-  const snippets =
-    baseUrl !== undefined && apiKey !== undefined
-      ? {
-          shown: buildSetupSnippets({
-            baseUrl,
-            apiKey: isRevealed ? apiKey : CONCEALED_SECRET,
-            model,
-          }),
-          // What a copy yields, always the real key: an operator who copies
-          // without revealing still gets something that runs.
-          copied: buildSetupSnippets({ baseUrl, apiKey, model }),
-        }
-      : undefined
+  // Built from the stand-in whenever the key is not on screen, which includes
+  // the moment before it exists: what is rendered needs no key, so the examples
+  // are here from the first frame rather than appearing under the operator once
+  // the mint lands. Only the copy waits for the real thing.
+  const shown =
+    baseUrl === undefined
+      ? undefined
+      : buildSetupSnippets({
+          baseUrl,
+          apiKey:
+            isRevealed && apiKey !== undefined ? apiKey : CONCEALED_SECRET,
+          model,
+        })
+  // What a copy yields, always the real key: an operator who copies without
+  // revealing still gets something that runs. Undefined until there is a key,
+  // and `CodeBlock` then offers no copy control rather than a dead one.
+  const copied =
+    baseUrl === undefined || apiKey === undefined
+      ? undefined
+      : buildSetupSnippets({ baseUrl, apiKey, model })
 
   return (
     <Dialog
@@ -162,7 +169,7 @@ export function SetupSheet({
 
       {baseUrl === undefined ? <MissingGatewayAddressNotice /> : null}
 
-      {snippets !== undefined ? (
+      {shown !== undefined ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-emphasis">{instruction}</p>
@@ -174,8 +181,8 @@ export function SetupSheet({
               ))}
             </TabRow>
           </div>
-          <CodeBlock label={tab} value={snippets.copied[tab]} isBounded>
-            {snippets.shown[tab]}
+          <CodeBlock label={tab} value={copied?.[tab]} isBounded>
+            {shown[tab]}
           </CodeBlock>
           <p className="text-caption">
             {tab === "agent"

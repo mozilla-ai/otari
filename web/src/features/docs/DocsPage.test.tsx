@@ -119,7 +119,10 @@ describe("DocsPage code blocks", () => {
   it("labels a fence with its language and offers a copy control", () => {
     renderFence("```bash\nuv run otari serve\n```\n")
     expect(screen.getByText("bash")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument()
+    // Named for its block, because the guide puts one of these on every fence.
+    expect(
+      screen.getByRole("button", { name: "Copy bash" }),
+    ).toBeInTheDocument()
     // The block is the scrollable region, named for AT by its language.
     expect(
       screen.getByRole("region", { name: "bash code" }),
@@ -144,7 +147,7 @@ describe("DocsPage code blocks", () => {
       .mockResolvedValue(undefined)
     renderFence("```text\nYour master key: otari-mk-…\n```\n")
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy text" }))
 
     expect(writeText).toHaveBeenCalledWith("Your master key: otari-mk-…\n")
     expect(
@@ -166,7 +169,7 @@ describe("DocsPage code blocks", () => {
     // class was never what this test was about.
     const { container } = renderFence("```bash\necho hello\n```\n")
     const pre = container.querySelector("pre")
-    const copy = screen.getByRole("button", { name: "Copy" })
+    const copy = screen.getByRole("button", { name: "Copy bash" })
     const label = copy.parentElement
     expect(pre).not.toBeNull()
     expect(label?.parentElement).toBe(pre?.parentElement)
@@ -177,7 +180,7 @@ describe("DocsPage code blocks", () => {
     // An empty fence still produces a block; a control that would put an empty
     // string on the clipboard is worse than no control.
     renderFence("```js\n```\n")
-    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Copy / })).toBeNull()
   })
 
   it("renders the guide's one fence with the block treatment", () => {
@@ -189,7 +192,7 @@ describe("DocsPage code blocks", () => {
     const blocks = container.querySelectorAll("pre")
     expect(blocks).toHaveLength(1)
     // The label row, named by the control it carries rather than by a class.
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(1)
     expect(container.querySelectorAll("code").length).toBeGreaterThan(0)
   })
 })

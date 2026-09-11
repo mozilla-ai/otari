@@ -78,6 +78,12 @@ export function CodeBlock({
           <button
             type="button"
             onClick={copy}
+            // Named for the block it copies, because these come in runs: the
+            // bundled guide puts twenty on one page and the setup sheet puts
+            // one beside the key field's own. "Copy" twenty times over is a
+            // list a screen reader cannot choose from. The visible word stays
+            // inside the name, which is what keeps voice control working.
+            aria-label={copied ? undefined : `Copy ${label ?? "code"}`}
             className="relative opacity-75 before:absolute before:-inset-x-2 before:-inset-y-[0.6875rem] before:content-[''] hover:opacity-100"
           >
             {copied ? "Copied" : "Copy"}
