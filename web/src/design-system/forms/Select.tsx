@@ -39,6 +39,7 @@ export function Select({
   options,
   description,
   placeholder = "Select an option",
+  autoFocus,
   isRequired,
   isDisabled,
   isInvalid,
@@ -54,6 +55,8 @@ export function Select({
   description?: ReactNode
   /** Shown while nothing is selected. An example, never the label. */
   placeholder?: string
+  /** A form's first field takes this; see feedback.md. Same as `ComboBoxField`'s. */
+  autoFocus?: boolean
   isRequired?: boolean
   isDisabled?: boolean
   isInvalid?: boolean
@@ -97,7 +100,10 @@ export function Select({
       {/* No manual "*": HeroUI marks a required field's label through CSS, so
           adding one renders two. */}
       <Label className="text-body">{label}</Label>
-      <HeroSelect.Trigger>
+      <HeroSelect.Trigger
+        // biome-ignore lint/a11y/noAutofocus: a form's first field takes it; see feedback.md
+        autoFocus={autoFocus}
+      >
         <HeroSelect.Value>
           {({ selectedText }) => selectedText ?? placeholder}
         </HeroSelect.Value>

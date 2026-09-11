@@ -1,7 +1,7 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { WorkspaceMcpServer } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"

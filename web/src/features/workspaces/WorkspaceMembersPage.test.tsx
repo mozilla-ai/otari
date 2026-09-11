@@ -146,6 +146,32 @@ describe("WorkspaceMembersPage", () => {
     expect(screen.queryByText(/already in this workspace/)).toBeNull()
   })
 
+  it("puts focus on the dialog's first field when it opens", async () => {
+    // A form's first control takes the caret, which for this one is the picker
+    // rather than a text field; `Select` carries `autoFocus` for it the way
+    // `ComboBoxField` already did.
+    mockApi({
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({
+          organization_member_id: "second",
+          user_id: SECOND_USER,
+          full_name: "Blake Brook",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await waitFor(() =>
+      expect(
+        dialog.getByRole("button", { name: /Organization member/ }),
+      ).toHaveFocus(),
+    )
+  })
+
   it("treats a role picked on its own as unsaved work", async () => {
     // The guard watches every field, not the one that gates the submit: a role
     // chosen without a person yet is still work, and a dirty check that only

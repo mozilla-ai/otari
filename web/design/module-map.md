@@ -229,7 +229,7 @@ directory makes it mechanical: one `noRestrictedImports` pattern for
 `@/shared/components/deprecated/**` scoped to everything outside it, or a
 `foundation.test.ts` assertion that the import count per module never rises.
 
-Four members, two of which this spec is the first to name:
+Three members, two of which this spec is the first to name:
 
 | Component | Call sites | Replacement | Why |
 | --- | --- | --- | --- |

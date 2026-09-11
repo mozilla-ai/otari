@@ -1,7 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 
 import {
-  dismissComboBox,
   dismissComboBoxInDialog,
   gotoRoute,
   login,
@@ -50,12 +49,17 @@ function row(page: Page, ariaLabel: string, name: string | RegExp): Locator {
 // than chosen. Their popover has to be put away afterwards or it aria-hides the
 // controls below it, including the form's own submit.
 //
-// The page-level dismissal, deliberately, even though this form is a dialog now.
-// The model box does not reopen on focus, so the `blur()` puts it away and the
-// wait passes. The people picker is the one that does: it is `menuTrigger="focus"`,
-// so blurring it inside a modal hands focus back and the popover returns, which
-// is what `dismissComboBoxInDialog` exists for. Move this to that helper if the
-// model box ever opens on focus too.
+// The in-dialog dismissal, because the Escape is the half that bites. The blur
+// really is safe here, as the note this replaces said: the model box does not
+// open on focus, so focus returning to it inside the modal leaves the popover
+// shut. But `dismissComboBox` presses Escape unconditionally, and when the fill
+// has already closed the popover that key travels on to the dialog, which
+// answers a dirty form by arming its unsaved-changes guard. The guard takes the
+// submit out of the footer, so the next press finds no "Create policy" and
+// times out thirty seconds later, several lines below the line that caused it.
+// Both recorded failures show "Unsaved changes · Keep editing · Discard" in the
+// footer at the timeout. `dismissComboBoxInDialog` sends the key only while
+// `aria-expanded` is true, which is the whole fix.
 async function fillModelBox(
   page: Page,
   name: RegExp,
@@ -63,7 +67,7 @@ async function fillModelBox(
 ): Promise<void> {
   const box = page.getByRole("combobox", { name })
   await box.fill(value)
-  await dismissComboBox(box)
+  await dismissComboBoxInDialog(box)
 }
 
 test.describe("standalone provider setup", () => {

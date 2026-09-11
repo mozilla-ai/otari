@@ -1,5 +1,5 @@
 import { Button, Chip } from "@heroui/react"
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 
 import type {
   OrganizationMember,
@@ -11,6 +11,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   asMembershipRole,
@@ -70,8 +71,7 @@ export function AddWorkspaceMemberDialog({
   // Every field the operator can change, against what the form was seeded
   // with, rather than the one that gates the submit: a role picked on its own
   // is work, and a guard that only watches the person loses it silently.
-  const seeded = useRef(JSON.stringify({ userId: "", role: "member" }))
-  const isPristine = JSON.stringify({ userId, role }) === seeded.current
+  const { isDirty } = useDirtySnapshot({ userId, role })
 
   return (
     <FormDialog
@@ -87,7 +87,7 @@ export function AddWorkspaceMemberDialog({
       }
       isPending={add.isPending}
       isSubmitDisabled={userId === ""}
-      isDirty={!isPristine}
+      isDirty={isDirty}
       error={add.error}
     >
       {isNobodyLeft ? (
@@ -102,13 +102,12 @@ export function AddWorkspaceMemberDialog({
             label="Organization member"
             value={userId}
             onChange={setUserId}
-            options={[
-              { value: "", label: "Select a member…" },
-              ...candidates.map((member) => ({
-                value: member.user_id ?? "",
-                label: memberLabel(member),
-              })),
-            ]}
+            placeholder="Select a member…"
+            autoFocus
+            options={candidates.map((member) => ({
+              value: member.user_id ?? "",
+              label: memberLabel(member),
+            }))}
             reserveMessage={false}
           />
           <Select
