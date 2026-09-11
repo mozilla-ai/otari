@@ -11,8 +11,16 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 ## Ports and composition
 
 Domain protocols live in `ports/`, core implementations in `adapters/`, and
-bindings in `container.py`. `OTARI_BOOTSTRAP=module:callable` may rebind a port
-or contribute a capability-gated router after core bindings are installed.
+bindings in `container.py`. `OTARI_BOOTSTRAP=module:callable` may rebind a port,
+contribute a router, contribute a lifespan background task, or contribute an
+Alembic migration chain for tables of its own, after core bindings are
+installed.
+
+A router contribution naming a `capability` is mounted behind
+`require_capability`; one whose `capability` is `None` is mounted ungated,
+which is the right answer for a plugin that sits on no licensing axis. A
+migration contribution runs after the core chain under the existing
+`auto_migrate` gate, stamping the version table it declares.
 
 Add a port only when a real second implementation exists. Core never imports an
 overlay. Dependencies request protocols from the container and never name an

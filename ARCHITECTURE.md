@@ -154,13 +154,31 @@ An overlay (or your own deployment) rebinds ports to its own adapters **without 
 def register(container: Container) -> None:
     container.bind(BillingPort, _wallet_billing_adapter)
     container.contribute_router(RouterContribution(capability="billing", router=wallet_router))
+    container.contribute_background_task(BackgroundTaskContribution(name="budget alerts", start=run_alert_evaluator))
 ```
 
 With nothing configured nothing is imported, the defaults stand, and Otari boots standalone. A selector that is set but cannot be loaded fails startup rather than quietly falling back, because a build nobody chose is worse than a gateway that will not start.
 
-A contributed router is the additive half of the seam, and it is gated rather than swapped: Otari mounts it behind `require_capability(...)`, which resolves `EntitlementPort` and answers a request for an unentitled capability with the same 404 a path nothing serves gets. That gate is the server-side half of the entitlement axis; hiding a nav item in the dashboard is not authorization.
+A contributed router is the additive half of the seam, and it is mounted rather than swapped. A contribution that names a `capability` is gated: Otari mounts it behind `require_capability(...)`, which resolves `EntitlementPort` and answers a request for an unentitled capability with the same 404 a path nothing serves gets. That gate is the server-side half of the entitlement axis; hiding a nav item in the dashboard is not authorization.
+
+A contribution may instead leave `capability` as `None`, and then Otari mounts the router with no entitlement dependency at all. A capability names a licensing axis, so it belongs on a surface an overlay licenses per deployment. A contribution that is simply present when the module is installed, which is what a plugin is, has no such axis, and inventing a capability name only to satisfy the gate would add a licensing decision nobody makes and a second place the real answer could be read from.
 
 Entitlement is not authentication either, and the mount point adds none. A capability names no caller, so on an entitled deployment a contributed route is reachable by anyone unless the router says otherwise. A contribution declares the credential each of its routes needs on the route, the way Otari's own routers do; there is no router-level default to mount, because the right answer differs per route, a contributed route may be deliberately public, and the header check resolves a database session a hybrid gateway does not have.
+
+A contributed background task is the additive seam for a periodic worker (an alert evaluator, a sync job, a purge), which would otherwise need a line in the lifespan's hand-kept refresher list. `start` is a coroutine function that receives the `GatewayConfig`; the lifespan schedules it after Otari's own refreshers, in every mode, and stops it under the same shared cancellation bound, so a task that ignores cancellation is abandoned rather than allowed to hang shutdown, and one that dies is logged under its `name` and never takes the process down. Names are unique per container, and the startup summary lists them beside the contributed routers.
+
+A contributed **migration chain** is the other additive half, for a module that owns tables of its own. Its revisions cannot join Otari's chain without editing the repo, and a second `alembic upgrade` on the default `alembic_version` table would fight Otari's over one row, so a bootstrap records an Alembic script directory of its own together with a version table of its own:
+
+```python
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(
+            name="alerts", script_location=str(ALERTS_ALEMBIC_DIR), version_table="alerts_alembic_version"
+        )
+    )
+```
+
+At startup, with `auto_migrate` on, `init_db` upgrades Otari's own chain to `head` and then each contribution's, on the same database URL, each stamping only the version table it named, so the two histories never interleave. `alembic_version` itself is refused at contribution time, as is a version table or a name another contribution already holds. Hybrid mode skips `init_db`, and therefore contributed chains too: there is no local database. `otari migrate` runs the core chain only; whether it should also run contributed chains is an open question. Otari hands a contributed `env.py` the database URL on two channels, `sqlalchemy.url` and `config.attributes["database_url"]`, and a contributed chain should prefer the attribute: the main option is read back through configparser, whose interpolation treats a percent sign as a token, so a password containing one breaks it. The declared version table travels as `config.attributes["version_table"]`, but reading it is optional; a chain may hardcode a constant of its own. What Otari requires is that the declared `version_table` is the table the chain actually stamps, since the declared value is the only thing the collision check has to work with. Contributed chains run under the existing `auto_migrate` gate and get no switch of their own. The full `env.py` contract and the foreign-key caution are in [docs/configuration.md](docs/configuration.md#extending-otari-with-a-bootstrap-module).
 
 > **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps.py`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
 
@@ -199,7 +217,7 @@ In the dashboard both meet on one nav entry, which is where the vocabulary earns
 Be clear about how much of that is built. The surface axis is real and served: `GET /api/v1/bootstrap` answers it. `EntitlementPort` now exists on both sides of the wire, but **no endpoint serves entitlements to the browser**, so the two halves answer independently:
 
 - **In the browser**, the axis resolves from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent. An overlay answers it for real by rendering `EntitlementProvider`, through `web/src/app/overlayEntitlementResolver.tsx`: the seam the shell mounts above the navigation and the routes, whose base default renders its children unchanged so this build falls through to the constant. A resolver that answers asynchronously reports `isLoading` and the shell waits on it, rather than telling a visitor an entitled page is not served here while the answer is still in flight.
-- **On the server**, `EntitlementPort` resolves through the container, and its core adapter (`src/gateway/adapters/entitlement_adapter.py`) answers with its own `BASE_CAPABILITIES`. That is what `require_capability` gates a contributed router on, so a route an overlay mounts into this process refuses for itself rather than trusting a hidden link. Hiding a link is not authorization; this is the half that is.
+- **On the server**, `EntitlementPort` resolves through the container, and its core adapter (`src/gateway/adapters/entitlement_adapter.py`) answers with its own `BASE_CAPABILITIES`. That is what `require_capability` gates a capability-naming contributed router on, so a route an overlay mounts into this process refuses for itself rather than trusting a hidden link. A contribution that names no capability is mounted ungated and never reaches this port. Hiding a link is not authorization; this is the half that is.
 
 Both constants are empty, and deliberately so: no base nav entry and no base route is gated on a capability, because the one candidate is routing, whose split this document still marks provisional. They are meant to agree, so a capability the base grows is added to both at once.
 

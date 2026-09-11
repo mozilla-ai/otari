@@ -22,8 +22,13 @@ from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAda
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.container import (
+    BackgroundTaskContribution,
     BootstrapError,
     Container,
+    ContainerError,
+    DuplicateBackgroundTaskError,
+    MigrationContribution,
+    MigrationContributionError,
     PortNotBoundError,
     RouterContribution,
     build_container,
@@ -96,6 +101,8 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
     container = build_container()
 
     assert container.router_contributions() == ()
+    assert container.background_task_contributions() == ()
+    assert container.migration_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
     for port in (
         BillingPort,
@@ -300,3 +307,175 @@ def test_router_contributions_keep_their_order() -> None:
     container.contribute_router(second)
 
     assert container.router_contributions() == (first, second)
+
+
+def test_the_summary_calls_an_ungated_contribution_ungated_rather_than_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "ungated_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import Container, RouterContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_router(RouterContribution(capability=None, router=APIRouter()))
+    container.contribute_router(RouterContribution(capability="alerts", router=APIRouter()))
+""",
+    )
+
+    container = build_container("ungated_bootstrap:register")
+
+    assert container.summary == "ungated_bootstrap:register rebound no ports, contributed routers for ungated, alerts"
+
+
+async def _never_runs(_config: object) -> None:
+    raise AssertionError("the container records a task; only the lifespan starts one")
+
+
+def test_background_task_contributions_keep_their_order() -> None:
+    container = Container()
+    first = BackgroundTaskContribution(name="one", start=_never_runs)
+    second = BackgroundTaskContribution(name="two", start=_never_runs)
+
+    container.contribute_background_task(first)
+    container.contribute_background_task(second)
+
+    assert container.background_task_contributions() == (first, second)
+
+
+def test_a_duplicate_background_task_name_is_refused_and_the_first_stands() -> None:
+    container = Container()
+    first = BackgroundTaskContribution(name="sync", start=_never_runs)
+    container.contribute_background_task(first)
+
+    with pytest.raises(DuplicateBackgroundTaskError, match="'sync' is already contributed") as caught:
+        container.contribute_background_task(BackgroundTaskContribution(name="sync", start=_never_runs))
+
+    assert isinstance(caught.value, ContainerError)
+    assert caught.value.name == "sync"
+    assert container.background_task_contributions() == (first,)
+
+
+def _chain(name: str, version_table: str) -> MigrationContribution:
+    return MigrationContribution(name=name, script_location=f"/plugins/{name}/alembic", version_table=version_table)
+
+
+def test_migration_contributions_are_recorded_in_order() -> None:
+    container = Container()
+    first = _chain("one", "one_alembic_version")
+    second = _chain("two", "two_alembic_version")
+
+    container.contribute_migrations(first)
+    container.contribute_migrations(second)
+
+    assert container.migration_contributions() == (first, second)
+
+
+def test_a_migration_contribution_may_not_claim_the_core_version_table() -> None:
+    container = Container()
+
+    with pytest.raises(MigrationContributionError, match="Otari's own version table"):
+        container.contribute_migrations(_chain("greedy", "alembic_version"))
+
+    assert container.migration_contributions() == ()
+
+
+def test_two_migration_contributions_may_not_share_a_version_table() -> None:
+    container = Container()
+    container.contribute_migrations(_chain("one", "shared_alembic_version"))
+
+    with pytest.raises(MigrationContributionError, match="already held by 'one'"):
+        container.contribute_migrations(_chain("two", "shared_alembic_version"))
+
+    assert [contribution.name for contribution in container.migration_contributions()] == ["one"]
+
+
+def test_two_migration_contributions_may_not_share_a_name() -> None:
+    container = Container()
+    container.contribute_migrations(_chain("one", "one_alembic_version"))
+
+    with pytest.raises(MigrationContributionError, match="'one' is already recorded"):
+        container.contribute_migrations(_chain("one", "other_alembic_version"))
+
+
+def test_bootstrap_summary_names_the_contributed_background_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "tasks_bootstrap",
+        """
+from fastapi import APIRouter
+
+from gateway.container import BackgroundTaskContribution, Container, RouterContribution
+
+
+async def evaluate(config) -> None:
+    pass
+
+
+async def purge(config) -> None:
+    pass
+
+
+def register(container: Container) -> None:
+    container.contribute_router(RouterContribution(capability="alerts", router=APIRouter()))
+    container.contribute_background_task(BackgroundTaskContribution(name="budget alerts", start=evaluate))
+    container.contribute_background_task(BackgroundTaskContribution(name="purge", start=purge))
+""",
+    )
+
+    container = build_container("tasks_bootstrap:register")
+
+    assert [contribution.name for contribution in container.background_task_contributions()] == [
+        "budget alerts",
+        "purge",
+    ]
+    assert container.summary == (
+        "tasks_bootstrap:register rebound no ports, contributed routers for alerts, "
+        "contributed background tasks budget alerts, purge"
+    )
+
+
+def test_bootstrap_contributes_a_migration_chain_and_the_summary_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "chain_bootstrap",
+        """
+from gateway.container import Container, MigrationContribution
+
+
+def register(container: Container) -> None:
+    container.contribute_migrations(
+        MigrationContribution(
+            name="alerts", script_location="/plugins/alerts/alembic", version_table="alerts_alembic_version"
+        )
+    )
+""",
+    )
+
+    container = build_container("chain_bootstrap:register")
+
+    assert [contribution.name for contribution in container.migration_contributions()] == ["alerts"]
+    assert container.summary == "chain_bootstrap:register rebound no ports, contributed migration chains alerts"
+
+
+@pytest.mark.parametrize("field", ["name", "script_location", "version_table"])
+def test_a_migration_contribution_with_a_blank_field_is_refused(field: str) -> None:
+    container = Container()
+    values = {"name": "one", "script_location": "/plugins/one/alembic", "version_table": "one_alembic_version"}
+    values[field] = "   "
+
+    with pytest.raises(MigrationContributionError, match=f"blank {field}"):
+        container.contribute_migrations(MigrationContribution(**values))
+
+    assert container.migration_contributions() == ()

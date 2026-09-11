@@ -94,21 +94,23 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
 
 
 def _register_contributed_routers(api: APIRouter, container: Container) -> None:
-    """Mount the routers this build's bootstrap contributed, each behind its gate.
+    """Mount the routers this build's bootstrap contributed.
 
     The additive half of the extension seam: an overlay records a router on the
-    container and Otari mounts it, gated on the capability it names. Mounted in
-    both modes, because an overlay may extend the data plane as readily as the
-    management plane.
+    container and Otari mounts it. A contribution that names a capability is
+    gated on it; one whose ``capability`` is ``None`` is mounted with no
+    entitlement dependency, because a plugin that is simply present when
+    installed sits on no licensing axis. Mounted in both modes, because an
+    overlay may extend the data plane as readily as the management plane.
 
     A contribution inherits the aggregate's prefix, so it declares its resource
     only.
     """
     for contribution in container.router_contributions():
-        api.include_router(
-            contribution.router,
-            dependencies=[Depends(require_capability(contribution.capability))],
+        dependencies = (
+            [Depends(require_capability(contribution.capability))] if contribution.capability is not None else []
         )
+        api.include_router(contribution.router, dependencies=dependencies)
 
 
 def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:

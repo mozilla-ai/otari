@@ -12,7 +12,10 @@ from collections import Counter
 
 from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
+from gateway.adapters.entitlement_adapter import BASE_CAPABILITIES
+from gateway.api.deps import get_db_if_needed
 from gateway.api.main import _register_contributed_routers, _register_core_routers, register_routers
 from gateway.api.routes import hosted_mode, otlp
 from gateway.container import RouterContribution, build_container
@@ -141,3 +144,55 @@ def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
         "so the stub will answer for it"
     )
     assert probe < min(stubs), "the stub is ahead of a contributed route, so it will answer for it"
+
+
+def _client_for(contribution: RouterContribution) -> TestClient:
+    """A base build serving only ``contribution``, with no database behind it.
+
+    The base entitlement set is static per deployment, so the session the port
+    factory takes is unused; overriding it away is what keeps this a unit test.
+    """
+    container = build_container(None)
+    container.contribute_router(contribution)
+
+    api = APIRouter(prefix=API_ROOT)
+    _register_contributed_routers(api, container)
+
+    app = FastAPI()
+    app.state.container = container
+    app.include_router(api)
+    app.dependency_overrides[get_db_if_needed] = lambda: None
+    return TestClient(app)
+
+
+def _probe_router(path: str) -> APIRouter:
+    router = APIRouter()
+
+    @router.get(path)
+    async def probe() -> dict[str, str]:
+        return {"source": "contribution"}
+
+    return router
+
+
+def test_an_ungated_contribution_answers_in_a_build_that_entitles_nothing() -> None:
+    """``capability=None`` mounts the router with no entitlement dependency.
+
+    The base build's capability set is empty, so any capability string would
+    refuse here. A plugin that is simply present once installed sits on no
+    licensing axis, and naming a capability only to pass the gate is what this
+    avoids.
+    """
+    assert not BASE_CAPABILITIES, "the base grants a capability, so this check no longer isolates the gate"
+    client = _client_for(RouterContribution(capability=None, router=_probe_router("/ungated-probe")))
+
+    response = client.get(f"{API_ROOT}/ungated-probe")
+
+    assert response.status_code == 200
+    assert response.json() == {"source": "contribution"}
+
+
+def test_a_gated_contribution_still_refuses_in_a_build_that_entitles_nothing() -> None:
+    client = _client_for(RouterContribution(capability="unlicensed", router=_probe_router("/gated-probe")))
+
+    assert client.get(f"{API_ROOT}/gated-probe").status_code == 404

@@ -16,15 +16,16 @@ claim a swap point that does not exist.
 
 An overlay rebinds ports without editing any Otari source file, by pointing
 ``OTARI_BOOTSTRAP`` at a ``module:callable`` selector. The callable receives
-this container after the core defaults are bound, and may rebind any port and
-contribute routers of its own. Unset, the defaults stand.
+this container after the core defaults are bound, and may rebind any port,
+contribute routers and lifespan background tasks of its own, and contribute an
+Alembic migration chain for tables of its own. Unset, the defaults stand.
 """
 
 import importlib
 import inspect
-from collections.abc import Callable, ItemsView
+from collections.abc import Callable, Coroutine, ItemsView
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,9 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+
+if TYPE_CHECKING:
+    from gateway.core.config import GatewayConfig
 
 T = TypeVar("T")
 
@@ -66,12 +70,20 @@ Register = Callable[["Container"], None]
 class RouterContribution:
     """One router an overlay mounts on top of Otari's own.
 
-    The additive half of the seam: nothing is swapped here, a surface is added
-    and made conditional. Every route the router exposes is served only when
-    the deployment is entitled to ``capability``, resolved through
-    ``EntitlementPort``, because hiding a link in a dashboard is not
-    authorization and a route mounted into this process has to refuse for
-    itself.
+    The additive half of the seam: nothing is swapped here, a surface is added.
+
+    ``capability`` names the licensing axis the surface sits on. Given a name,
+    every route the router exposes is served only when the deployment is
+    entitled to it, resolved through ``EntitlementPort``, because hiding a link
+    in a dashboard is not authorization and a route mounted into this process
+    has to refuse for itself. Use it for a surface an overlay licenses per
+    deployment.
+
+    ``None`` mounts the router with no entitlement dependency. That is the
+    right answer for a contribution that is simply present when the module is
+    installed, which is what a plugin is: there is no licensing decision to
+    make, and inventing a capability name solely to satisfy the gate would
+    invent one.
 
     **Entitlement is not authentication, and the mount point adds none.**
     ``capability`` answers "is this build licensed for this surface", a
@@ -86,12 +98,76 @@ class RouterContribution:
     to open in hybrid mode.
     """
 
-    capability: str
+    capability: str | None
     router: APIRouter
+
+
+@dataclass(frozen=True)
+class BackgroundTaskContribution:
+    """One periodic worker an overlay runs for the life of the process.
+
+    The lifespan (``gateway.main``) schedules ``start(config)`` as a task after
+    Otari's own refreshers, in every mode, and stops it under the same shared
+    cancellation bound, so a contributed task that ignores cancellation cannot
+    hang shutdown. ``name`` labels the task in the startup summary and in the
+    shutdown log, and is unique per container.
+
+    ``start`` is a coroutine function, not the coroutine itself: a coroutine
+    object built at register time in a container that never runs (as the test
+    suite builds) would only leak a "never awaited" warning.
+    """
+
+    name: str
+    start: Callable[["GatewayConfig"], Coroutine[Any, Any, None]]
+
+
+# The version table Otari's own chain stamps (``alembic/env.py`` leaves
+# Alembic's default in place, see #921). A contribution may not claim it.
+CORE_VERSION_TABLE = "alembic_version"
+
+
+@dataclass(frozen=True)
+class MigrationContribution:
+    """One Alembic chain an overlay runs against Otari's database, after Otari's own.
+
+    A module a bootstrap loads may own tables of its own. Its revisions cannot
+    join Otari's chain without editing the repo, and a second ``upgrade`` on the
+    default version table would fight Otari's over one row, so a contribution
+    brings its own script directory and its own ``version_table``, and the two
+    histories never interleave. ``init_db`` runs Otari's chain to ``head``
+    first, then each contribution's, on the same database URL.
+
+    The contract for the contributed ``env.py``: Otari passes the database URL
+    both as ``sqlalchemy.url`` and as ``config.attributes["database_url"]``, and
+    passes the declared table name as ``config.attributes["version_table"]``.
+    Prefer the attribute for the URL: ``sqlalchemy.url`` is read back through
+    configparser, whose interpolation treats a percent sign as a token, so a
+    password containing one breaks it. The ``version_table`` attribute is
+    offered, not required: a chain may read it, or may hardcode a constant of
+    its own. What Otari requires is that the ``version_table`` declared on the
+    contribution is the table the chain actually stamps, because Otari uses the
+    declared value only to refuse a collision with core's ``alembic_version``
+    and with another contribution. A contributed chain must not
+    reference a core table by foreign key in a way that would block a core
+    migration: the core chain runs first and knows nothing about contributed
+    tables, so a core revision that drops or rebuilds a table the contribution
+    points at fails on a constraint the core chain did not create.
+
+    ``name`` identifies the chain in the startup log and in errors; it is
+    unique among contributions, as is ``version_table``.
+    """
+
+    name: str
+    script_location: str
+    version_table: str
 
 
 class ContainerError(Exception):
     """Base error for composition-root wiring failures."""
+
+
+class MigrationContributionError(ContainerError):
+    """Raised when a contributed migration chain would collide with another chain."""
 
 
 class PortNotBoundError(ContainerError):
@@ -107,6 +183,14 @@ class BootstrapError(ContainerError):
     """Raised when the bootstrap module ``OTARI_BOOTSTRAP`` names cannot be loaded."""
 
 
+class DuplicateBackgroundTaskError(ContainerError):
+    """Raised when a second background task is contributed under a name already taken."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"A background task named {name!r} is already contributed")
+        self.name = name
+
+
 class Container:
     """A registry mapping each port to the adapter that satisfies it.
 
@@ -119,6 +203,8 @@ class Container:
     def __init__(self) -> None:
         self._factories: dict[Any, PortFactory[Any]] = {}
         self._router_contributions: list[RouterContribution] = []
+        self._background_task_contributions: dict[str, BackgroundTaskContribution] = {}
+        self._migration_contributions: list[MigrationContribution] = []
         # One line naming what this container was built from, logged by
         # build_container and asserted on by tests.
         self.summary = "unbuilt"
@@ -159,6 +245,63 @@ class Container:
     def router_contributions(self) -> tuple[RouterContribution, ...]:
         """Return the recorded router contributions, in contribution order."""
         return tuple(self._router_contributions)
+
+    def contribute_background_task(self, contribution: BackgroundTaskContribution) -> None:
+        """Record a background task the lifespan runs beside Otari's own refreshers.
+
+        Raises:
+            DuplicateBackgroundTaskError: If a task of the same name is already
+                contributed. Two tasks sharing a name would be indistinguishable
+                in the shutdown log, and a bootstrap registering the same worker
+                twice is a mistake worth refusing at startup.
+
+        """
+        if contribution.name in self._background_task_contributions:
+            raise DuplicateBackgroundTaskError(contribution.name)
+        self._background_task_contributions[contribution.name] = contribution
+
+    def background_task_contributions(self) -> tuple[BackgroundTaskContribution, ...]:
+        """Return the recorded background task contributions, in contribution order."""
+        return tuple(self._background_task_contributions.values())
+
+    def contribute_migrations(self, contribution: MigrationContribution) -> None:
+        """Record an Alembic chain ``init_db`` runs after Otari's own.
+
+        Refused at contribution time rather than at first boot, so a colliding
+        bootstrap fails while the container is being built and never reaches
+        the database.
+
+        Raises:
+            MigrationContributionError: If a field is blank, if the contribution
+                claims Otari's own version table, or if it claims a version
+                table or name another contribution already holds.
+
+        """
+        for field in ("name", "script_location", "version_table"):
+            if not getattr(contribution, field).strip():
+                msg = f"Migration contribution {contribution.name!r} has a blank {field}"
+                raise MigrationContributionError(msg)
+        if contribution.version_table == CORE_VERSION_TABLE:
+            msg = (
+                f"Migration contribution {contribution.name!r} claims {CORE_VERSION_TABLE!r}, "
+                "which is Otari's own version table; a contributed chain stamps a table of its own"
+            )
+            raise MigrationContributionError(msg)
+        for recorded in self._migration_contributions:
+            if recorded.version_table == contribution.version_table:
+                msg = (
+                    f"Migration contribution {contribution.name!r} claims version table "
+                    f"{contribution.version_table!r}, already held by {recorded.name!r}"
+                )
+                raise MigrationContributionError(msg)
+            if recorded.name == contribution.name:
+                msg = f"Migration contribution {contribution.name!r} is already recorded"
+                raise MigrationContributionError(msg)
+        self._migration_contributions.append(contribution)
+
+    def migration_contributions(self) -> tuple[MigrationContribution, ...]:
+        """Return the recorded migration contributions, in contribution order."""
+        return tuple(self._migration_contributions)
 
 
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
@@ -249,8 +392,8 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
     Binds the core adapters, then, if a selector is given, lets the bootstrap it
-    names rebind ports and contribute routers. With no selector the core
-    defaults stand and Otari boots standalone.
+    names rebind ports and contribute routers, background tasks and migration
+    chains. With no selector the core defaults stand and Otari boots standalone.
 
     Raises:
         BootstrapError: If the selector is present but blank, or names a
@@ -317,9 +460,15 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
-    contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
+    contributed = ", ".join(contribution.capability or "ungated" for contribution in container.router_contributions())
     if contributed:
         container.summary += f", contributed routers for {contributed}"
+    contributed_tasks = ", ".join(contribution.name for contribution in container.background_task_contributions())
+    if contributed_tasks:
+        container.summary += f", contributed background tasks {contributed_tasks}"
+    chains = ", ".join(contribution.name for contribution in container.migration_contributions())
+    if chains:
+        container.summary += f", contributed migration chains {chains}"
     logger.info("Composition root: %s", container.summary)
     return container
 
