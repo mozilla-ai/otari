@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useRef, useState } from "react"
+import { useState } from "react"
 
 import type {
   CreateOrgProviderKeyRequest,
@@ -16,6 +16,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -139,8 +140,7 @@ function KeyForm({
   const pending = create.isPending || update.isPending
   // The whole draft against what the form was seeded with, so a guard cannot
   // miss a field the form grows later.
-  const seeded = useRef(JSON.stringify(draft))
-  const isDirty = JSON.stringify(draft) !== seeded.current
+  const { isDirty } = useDirtySnapshot(draft)
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&

@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 
 import type {
   User as ApiUser,
@@ -26,6 +26,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
@@ -191,8 +192,11 @@ function AddMemberForm({
   // Everything the operator can change, against what the form was seeded with.
   // A list of fields drifts: this one read the address alone, so a role or a
   // workspace change with no address typed closed unguarded.
-  const draft = JSON.stringify({ email, role, workspaceIds })
-  const seededDraft = useRef(draft)
+  const { isDirty, reset: reseed } = useDirtySnapshot({
+    email,
+    role,
+    workspaceIds,
+  })
   if (!seeded && rows && rows.length > 0) {
     setSeeded(true)
     // The workspace the shell is on, when it is one of this organization's.
@@ -205,12 +209,9 @@ function AddMemberForm({
     setWorkspaceIds(defaults)
     // Part of the seed, not a change: this lands after mount, so a snapshot
     // taken at first render would report the form dirty the moment the roster
-    // answers, and Escape would ask before closing an untouched form.
-    seededDraft.current = JSON.stringify({
-      email,
-      role,
-      workspaceIds: defaults,
-    })
+    // answers, and Escape would ask before closing an untouched form. Seeded
+    // with the explicit value, because this render still holds the old list.
+    reseed({ email, role, workspaceIds: defaults })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -250,7 +251,7 @@ function AddMemberForm({
       onSubmit={submit}
       isPending={add.isPending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={add.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -329,8 +330,11 @@ function InviteMemberForm({
   const rows = workspaces.data
   const [seeded, setSeeded] = useState(false)
   // Same snapshot as the add form beside it, and the same reason.
-  const draft = JSON.stringify({ email, role, workspaceIds })
-  const seededDraft = useRef(draft)
+  const { isDirty, reset: reseed } = useDirtySnapshot({
+    email,
+    role,
+    workspaceIds,
+  })
   if (!seeded && rows && rows.length > 0) {
     setSeeded(true)
     const preferred = rows.find(
@@ -340,12 +344,9 @@ function InviteMemberForm({
     setWorkspaceIds(defaults)
     // Part of the seed, not a change: this lands after mount, so a snapshot
     // taken at first render would report the form dirty the moment the roster
-    // answers, and Escape would ask before closing an untouched form.
-    seededDraft.current = JSON.stringify({
-      email,
-      role,
-      workspaceIds: defaults,
-    })
+    // answers, and Escape would ask before closing an untouched form. Seeded
+    // with the explicit value, because this render still holds the old list.
+    reseed({ email, role, workspaceIds: defaults })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -423,7 +424,7 @@ function InviteMemberForm({
       onSubmit={submit}
       isPending={invite.isPending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={invite.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">

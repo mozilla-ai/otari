@@ -17,6 +17,7 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
@@ -190,7 +191,7 @@ function KnownProviderForm({
   // client options and every typed credential (a Bedrock region) were invisible
   // to the guard and went on Escape with nothing asked. `key={addOpenCount}`
   // reseeds it per open. See feedback.md.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     providerId,
     apiKey,
     name,
@@ -198,7 +199,6 @@ function KnownProviderForm({
     clientArgsText,
     credentials,
   })
-  const seededDraft = useRef(draft)
   const canSubmit =
     providerId !== "" &&
     !nameHasDelimiter &&
@@ -249,7 +249,7 @@ function KnownProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={create.error}
       footerStart={
         <ConnectionTestButton test={test} getPayload={buildPayload} />
@@ -374,14 +374,13 @@ function CustomProviderForm({
   const nameHasDelimiter = /[:/]/.test(name)
   // Same snapshot as the known tab, for the same reason: this list had missed
   // `providerType` and the client options.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     name,
     providerType,
     apiBase,
     apiKey,
     clientArgsText,
   })
-  const seededDraft = useRef(draft)
   const canSubmit =
     name.trim() !== "" &&
     !nameHasDelimiter &&
@@ -415,7 +414,7 @@ function CustomProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={create.error}
       footerStart={
         <ConnectionTestButton

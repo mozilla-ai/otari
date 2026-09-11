@@ -8,7 +8,7 @@
  */
 
 import { Link } from "@tanstack/react-router"
-import { type RefObject, useMemo, useRef, useState } from "react"
+import { type RefObject, useMemo, useState } from "react"
 
 import type { PolicyGuardrail, PolicySpec, User } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -17,6 +17,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
@@ -528,7 +529,7 @@ export function PolicyForm({
   // Everything the operator can change, against what it was seeded with. A guard
   // that watched only the name would be worse than none on a form this long,
   // where a stray Escape can land ten minutes into building a fallback chain.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     name,
     userIds,
     target,
@@ -540,8 +541,6 @@ export function PolicyForm({
     backend,
     weights,
   })
-  const seeded = useRef(draft)
-  const isDirty = draft !== seeded.current
 
   // An alias has exactly one target, so growing one a chain, a condition, or a
   // guardrail makes it a policy. Saving it as a policy alone would leave the alias
