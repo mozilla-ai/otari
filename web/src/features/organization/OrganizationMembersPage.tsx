@@ -12,6 +12,7 @@ import type {
   User as ApiUser,
   Budget,
   CreateOrganizationMemberRequest,
+  CreateOrganizationMemberResult,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   MembershipRole,
@@ -186,6 +187,9 @@ function AddMemberForm({
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
+  const [result, setResult] = useState<CreateOrganizationMemberResult | null>(
+    null,
+  )
   const trimmed = email.trim()
 
   // Seeded once the workspace list answers, and only then: the default is a
@@ -247,7 +251,46 @@ function AddMemberForm({
             )
           : null,
     }
-    add.mutate(body, { onSuccess: onClose })
+    add.mutate(body, { onSuccess: setResult })
+  }
+
+  // After a successful add when mail is not configured: show the claim link so
+  // the admin can share it out-of-band. Mirrors the InviteMemberForm success
+  // state, with the same acknowledgement-as-exit pattern when a link is present.
+  if (result) {
+    return (
+      <FormDialog
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) onClose()
+        }}
+        title="Member added"
+        isDismissable={!result.claim_link}
+        submitLabel="Done"
+        onSubmit={onClose}
+        isPending={false}
+      >
+        {result.claim_link ? (
+          <InfoBanner>
+            {/* claim_link is set when mail is not configured: the identity is
+                password-less, so the admin must share this link with the member
+                so they can set a password and sign in. */}
+            Otari did not send a welcome email. Share this signup link with{" "}
+            <strong>{result.email}</strong> so they can set a password and sign
+            in.
+            <div className="mt-2">
+              <CopyableValue value={result.claim_link} label="Signup link">
+                <span className="break-all text-xs">{result.claim_link}</span>
+              </CopyableValue>
+            </div>
+          </InfoBanner>
+        ) : (
+          <InfoBanner>
+            <strong>{result.email}</strong> has been added as a {result.role}.
+          </InfoBanner>
+        )}
+      </FormDialog>
+    )
   }
 
   return (
@@ -272,7 +315,7 @@ function AddMemberForm({
           placeholder="alice@example.com"
           isRequired
           autoFocus
-          description="The handle this identity is claimed by. Nothing is emailed here; the membership is active straight away. Use Invite member instead to email an accept link."
+          description="The handle this identity is claimed by. The membership is active straight away. When mail is unavailable you will get a signup link to share with them. Use Invite member instead to email an accept link."
         />
         <Select
           label="Role"
@@ -316,8 +359,8 @@ function AddMemberForm({
 // Invites rather than adds: the membership lands `invited`, not `active`, and
 // an email with an accept link goes out if mail is configured. Kept separate
 // from AddMemberForm rather than a toggle on it: the two produce different
-// results (`mail_sent`, `accept_link`) and this one has something to show
-// after it succeeds, which AddMemberForm's immediate close does not.
+// results (`mail_sent`, `accept_link` vs `claim_link`) and both show something
+// after they succeed when mail is absent.
 function InviteMemberForm({
   isOpen,
   onClose,

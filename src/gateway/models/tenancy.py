@@ -744,6 +744,12 @@ class ActiveOrganizationMemberCreateResultPublic(SQLModel):
     an invitation to send nor a way to accept one, so it answers on the other
     arm of the same union, ``active``, and the invitation fields stay null until
     that flow rehomes.
+
+    ``claim_link`` is set when mail is not configured: the identity is
+    password-less and unverified, so an admin who has nowhere to send credentials
+    can share this link out-of-band instead.  It is null when mail is ready
+    (the member can use ``POST /api/v1/auth/signup`` normally) and on every existing
+    row that pre-dates this field.
     """
 
     status: Literal["active", "invited"]
@@ -757,6 +763,7 @@ class ActiveOrganizationMemberCreateResultPublic(SQLModel):
     expires_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    claim_link: str | None = None
 
 
 class ActiveOrganizationMemberUpdateRequest(SQLModel):

@@ -215,7 +215,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberCreateResultPublic": {
-        "description": "The outcome of adding a member.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance: a known address gets an ``invited``\nmembership, an unknown one an emailed invitation. This edition has neither\nan invitation to send nor a way to accept one, so it answers on the other\narm of the same union, ``active``, and the invitation fields stay null until\nthat flow rehomes.",
+        "description": "The outcome of adding a member.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance: a known address gets an ``invited``\nmembership, an unknown one an emailed invitation. This edition has neither\nan invitation to send nor a way to accept one, so it answers on the other\narm of the same union, ``active``, and the invitation fields stay null until\nthat flow rehomes.\n\n``claim_link`` is set when mail is not configured: the identity is\npassword-less and unverified, so an admin who has nowhere to send credentials\ncan share this link out-of-band instead.  It is null when mail is ready\n(the member can use ``POST /api/v1/auth/signup`` normally) and on every existing\nrow that pre-dates this field.",
         "properties": {
           "attribution_user_id": {
             "anyOf": [
@@ -227,6 +227,17 @@
               }
             ],
             "title": "Attribution User Id"
+          },
+          "claim_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Link"
           },
           "created_at": {
             "anyOf": [
@@ -20934,7 +20945,7 @@
         ]
       },
       "post": {
-        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.",
+        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.\n\nWhen mail is not configured the response includes ``claim_link``: the\nidentity is password-less, so the admin can share this link out-of-band so\nthe member can set their own password and sign in.",
         "operationId": "organizations-create_active_organization_member",
         "requestBody": {
           "content": {

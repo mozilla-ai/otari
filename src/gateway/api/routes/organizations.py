@@ -192,6 +192,7 @@ async def list_active_organization_members(
 async def create_active_organization_member(
     service: OrganizationServiceDep,
     current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
     body: ActiveOrganizationMemberCreateRequest,
 ) -> ActiveOrganizationMemberCreateResultPublic:
     """Add a member to the caller's active organization, by email address.
@@ -202,8 +203,14 @@ async def create_active_organization_member(
     the ``invited`` one the platform uses. An address that belongs to no
     identity yet creates one, which carries the address as the handle a future
     sign-in flow will claim it by, and can do nothing until then.
+
+    When mail is not configured the response includes ``claim_link``: the
+    identity is password-less, so the admin can share this link out-of-band so
+    the member can set their own password and sign in.
     """
-    return await service.create_active_organization_member_for_user(user=current_identity, request=body)
+    return await service.create_active_organization_member_for_user(
+        user=current_identity, request=body, config=config
+    )
 
 
 @router.patch("/me/members/{organization_member_id}")

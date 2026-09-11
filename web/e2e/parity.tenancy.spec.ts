@@ -126,6 +126,14 @@ test.describe("standalone tenancy", () => {
     await pickOption(page, "Role", "Member", addDialog)
     await addDialog.getByRole("button", { name: "Add member" }).click()
 
+    // No mail transport in the parity gateway: the dialog shows the signup
+    // link so the admin can share it out-of-band. Dismiss before checking the
+    // roster, which is behind the open dialog.
+    const doneButton = addDialog.getByRole("button", { name: "Done" })
+    if (await doneButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await doneButton.click()
+    }
+
     // Nothing is emailed and nothing has to be accepted: this edition answers
     // on the "active" arm of the platform's result union, so the row is live
     // immediately. Re-running revives the membership suspended below rather
@@ -156,6 +164,10 @@ test.describe("standalone tenancy", () => {
     const readdDialog = page.getByRole("dialog", { name: "New member" })
     await readdDialog.getByLabel("Email address").fill(MEMBER_EMAIL)
     await readdDialog.getByRole("button", { name: "Add member" }).click()
+    const readdDone = readdDialog.getByRole("button", { name: "Done" })
+    if (await readdDone.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await readdDone.click()
+    }
     await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(1)
 
     // Leave the roster as this spec found it.

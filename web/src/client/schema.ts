@@ -2016,6 +2016,10 @@ export interface paths {
          *     the ``invited`` one the platform uses. An address that belongs to no
          *     identity yet creates one, which carries the address as the handle a future
          *     sign-in flow will claim it by, and can do nothing until then.
+         *
+         *     When mail is not configured the response includes ``claim_link``: the
+         *     identity is password-less, so the admin can share this link out-of-band so
+         *     the member can set their own password and sign in.
          */
         post: operations["organizations-create_active_organization_member"];
         delete?: never;
@@ -4620,10 +4624,18 @@ export interface components {
          *     an invitation to send nor a way to accept one, so it answers on the other
          *     arm of the same union, ``active``, and the invitation fields stay null until
          *     that flow rehomes.
+         *
+         *     ``claim_link`` is set when mail is not configured: the identity is
+         *     password-less and unverified, so an admin who has nowhere to send credentials
+         *     can share this link out-of-band instead.  It is null when mail is ready
+         *     (the member can use ``POST /api/v1/auth/signup`` normally) and on every existing
+         *     row that pre-dates this field.
          */
         ActiveOrganizationMemberCreateResultPublic: {
             /** Attribution User Id */
             attribution_user_id?: string | null;
+            /** Claim Link */
+            claim_link?: string | null;
             /** Created At */
             created_at?: string | null;
             /** Email */
