@@ -330,9 +330,7 @@ def register(container: Container) -> None:
 
     container = build_container("ungated_bootstrap:register")
 
-    assert container.summary == (
-        "ungated_bootstrap:register rebound no ports, contributed routers for ungated, alerts"
-    )
+    assert container.summary == "ungated_bootstrap:register rebound no ports, contributed routers for ungated, alerts"
 
 
 async def _never_runs(_config: object) -> None:

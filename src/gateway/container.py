@@ -460,9 +460,7 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
-    contributed = ", ".join(
-        contribution.capability or "ungated" for contribution in container.router_contributions()
-    )
+    contributed = ", ".join(contribution.capability or "ungated" for contribution in container.router_contributions())
     if contributed:
         container.summary += f", contributed routers for {contributed}"
     contributed_tasks = ", ".join(contribution.name for contribution in container.background_task_contributions())
