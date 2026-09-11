@@ -98,7 +98,7 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // explanation is more useful here than a page that would just 404.
   if (deployment_type === "hybrid") {
     return (
-      <PublicPageTitle>
+      <PublicPageTitle page="Gateway">
         <HybridLanding />
       </PublicPageTitle>
     )

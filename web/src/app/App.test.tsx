@@ -84,6 +84,7 @@ describe("App", () => {
     expect(
       screen.getByRole("link", { name: "Manage this gateway on otari.ai" }),
     ).toHaveAttribute("href", "https://otari.ai")
+    expect(document.title).toBe("Gateway · Otari")
     // The management shell is not merely hidden behind a sign-in here.
     expect(screen.queryByRole("navigation")).toBeNull()
   })

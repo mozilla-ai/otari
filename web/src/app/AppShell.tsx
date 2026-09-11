@@ -55,6 +55,11 @@ import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
+const CHROME_TITLES: Record<string, string | undefined> = {
+  "/docs": "Documentation",
+  "/account": "Account",
+}
+
 // One width, not a range. The rail used to be draggable between 200 and 480px
 // and to remember where it was left; it is now the design's 264px, or 72px
 // collapsed, which is also what `otari-ai/frontend`'s shell is fixed at
@@ -426,14 +431,7 @@ function AppShellChrome() {
   const isVisible = useNavVisibility()
   const recordNavigation = useRecordNavigation()
   const { pathname } = useLocation()
-  useDocumentTitle(
-    navLabelForPath(pathname) ??
-      (pathname === "/docs"
-        ? "Documentation"
-        : pathname === "/account"
-          ? "Account"
-          : undefined),
-  )
+  useDocumentTitle(navLabelForPath(pathname) ?? CHROME_TITLES[pathname])
   // A gated-off destination is still reachable by bookmark or shared URL, so the
   // shell answers those with a panel instead of a page whose every request the
   // server would refuse. An unregistered path (the guide, the 404 splat) has no

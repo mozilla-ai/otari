@@ -267,8 +267,8 @@ def test_hybrid_mode_serves_no_install_manifest(tmp_path: Path, monkeypatch: pyt
     """Only the standalone dashboard is an app worth installing.
 
     A hybrid gateway's root is a status page for a control plane that lives
-    elsewhere, so an installed icon named "Otari" would promise
-    management this deployment does not have. The index still links the manifest,
+    elsewhere, so an installed icon named "Otari" would promise management this
+    deployment does not have. The index still links the manifest,
     so what stops the install offer is this 404, which must not be cached: /pwa/
     carries a day of caching for the icons it usually serves, and a day-long 404
     would outlive a switch to standalone and keep the prompt away from a
