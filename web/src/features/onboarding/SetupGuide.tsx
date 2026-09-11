@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
-import type { WorkspaceActivation } from "@/client"
+import type { ActivationApiKey, WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
 import { SetupSuccess } from "@/features/onboarding/SetupSuccess"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
@@ -107,10 +107,13 @@ function SetupFlow({
   // the examples are then withheld rather than aimed at this host (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
 
-  const [apiKey, setApiKey] = useState<string>()
   // Closing the sheet without skipping: for this page load only, so Escape is
   // not a decision an operator cannot take back. Skipping is the permanent one,
   // and the server records it.
+  // The issued key and a failed mint, held here rather than read off the
+  // mutation. The effect below says why the observer cannot carry them.
+  const [issued, setIssued] = useState<ActivationApiKey>()
+  const [mintError, setMintError] = useState<unknown>()
   const [isClosed, setIsClosed] = useState(false)
   const [isFinished, setIsFinished] = useState(false)
   // Only a press somebody made, never the background poll: `isFetching` would
@@ -142,13 +145,27 @@ function SetupFlow({
   // remounting the effect; the component is keyed on the workspace, so
   // switching workspaces gets a fresh one.
   const hasRequestedKey = useRef(false)
+  // Fired once across both of React's development effect invocations, and with
+  // no "ignore a late result" flag, which is the part that is easy to get
+  // wrong: such a flag is scoped to one invocation while the ref above is
+  // scoped to the component, so the first invocation's cleanup would discard
+  // the only request in flight and the second would decline to replace it,
+  // having been told one was already sent. The key minted, arrived, and was
+  // thrown away, leaving the sheet on "Creating your API key…" forever. In
+  // development only, so a production build never showed it.
+  //
+  // Nothing is needed in its place. This component is keyed on the workspace,
+  // so switching destroys the instance, and React discards a `setState` that
+  // lands on one that is gone.
+  //
+  // `mutateAsync` rather than `mutate` with callbacks, because the result then
+  // comes from the promise rather than through the mutation observer, which is
+  // one less thing between the response and the screen.
   useEffect(() => {
     if (!isOffered || hasRequestedKey.current) return
     hasRequestedKey.current = true
-    createKey.mutate(workspaceId, {
-      onSuccess: (issued) => setApiKey(issued.key),
-    })
-  }, [isOffered, workspaceId, createKey.mutate])
+    createKey.mutateAsync(workspaceId).then(setIssued, setMintError)
+  }, [isOffered, workspaceId, createKey.mutateAsync])
 
   if (isFinished) return null
 
@@ -179,7 +196,7 @@ function SetupFlow({
   return (
     <SetupSheet
       workspaceName={workspaceName}
-      apiKey={apiKey}
+      apiKey={issued?.key}
       baseUrl={baseUrl}
       // The first model the gateway can serve, so the examples are runnable as
       // pasted. With none the placeholder stands and the sheet says what to do.
@@ -194,7 +211,7 @@ function SetupFlow({
       }
       isChecking={isChecking}
       checkFailed={checkFailed}
-      keyError={createKey.error}
+      keyError={mintError}
       skipError={dismiss.error}
       isSkipping={dismiss.isPending}
       onCheckNow={() => void checkNow()}

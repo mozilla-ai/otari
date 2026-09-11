@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
@@ -191,6 +192,43 @@ describe("SetupGuide", () => {
         screen.queryByRole("heading", { name: "Send your first request" }),
       ).not.toBeInTheDocument()
     })
+  })
+
+  it("hands over the key under StrictMode's double-invoked effects", async () => {
+    // The bug this pins shipped and was found by hand: the mint fires once
+    // across both invocations, so an "ignore a late result" flag scoped to the
+    // first invocation discarded the only request in flight and the second
+    // declined to replace it. The key minted, arrived, and was dropped, leaving
+    // the sheet on "Creating your API key…" forever.
+    //
+    // Only StrictMode double-invokes, so a production build never showed it and
+    // neither did this suite, which renders without one. This is the one test
+    // that does.
+    const fetchMock = mockApi()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await renderWithRouter(
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <DeploymentProvider value={bootstrap()}>
+            <SelectedWorkspaceProvider>
+              <SetupGuide canServeRequests />
+            </SelectedWorkspaceProvider>
+          </DeploymentProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+
+    expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText("Creating your API key…")).toBeNull()
+    })
+    // And exactly one key was minted, not one per invocation.
+    const mints = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/activation/key"),
+    )
+    expect(mints).toHaveLength(1)
   })
 
   it("mints the key as the sheet opens, and only once", async () => {
