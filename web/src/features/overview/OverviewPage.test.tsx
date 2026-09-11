@@ -1124,6 +1124,30 @@ describe("the tenant Overview's budget signal", () => {
     ).toBe(false)
   })
 
+  it("does not ask for a roster on Refresh when no workspace is selected", async () => {
+    // `refetch` runs a disabled query, and the roster's is disabled precisely
+    // because there is no workspace to name: firing it interpolates the id as
+    // `null`, which `GET /v1/workspaces/{workspace_id}/members` refuses as a
+    // 422, and `members.error` feeds the page's own banner. A caller who
+    // belongs to no workspace is the one this page is for, so Refresh must not
+    // be what tells them the page is broken.
+    const user = userEvent.setup()
+    const requested = mockScopedApi({
+      context: { role: "admin" },
+      period: { cost: 200, request_count: 2000 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    await user.click(screen.getByRole("button", { name: /refresh/i }))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled(),
+    )
+
+    expect(requested.some((url) => url.includes("/v1/workspaces/"))).toBe(false)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it("reads a failed ceiling query as unknown, not as zero spend", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)

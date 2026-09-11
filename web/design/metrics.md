@@ -21,7 +21,7 @@ Is it a part-to-whole with ordered segments?
 ## KpiStrip and KpiCell
 
 ```ts
-KpiStrip: { empty: boolean, children }
+KpiStrip: { empty: boolean, columns?: 4 | 5, children }
 KpiCell: { label: string, value: string, severity?: Severity, subline?: string,
   delta?: ReactNode, graphic?: ReactNode }
 Severity: { status: "ok" | "warn" | "alert", word: string }
@@ -41,10 +41,13 @@ A cell may carry `severity`, `delta` and `subline` at once: the meta line drops 
 subline first, because its facts also live in the breakdown table below while a delta
 lives nowhere else.
 
-**Five cells.** The strip's grid is a fixed 2 / 3 / 5 columns by breakpoint, so four
-cells leave one empty track on a wide viewport and three leave two. Both call sites
-in the product pass five. If a page has fewer than five things worth leading with,
-it does not want this band: put the one number in the `PageIntro` sentence instead.
+**Cell count.** The strip's grid is 2 / 3 / `columns` by breakpoint, and `columns`
+(4 or 5, default 5) is the number of cells the caller passes, not a layout
+preference: a track count that outruns its children leaves a blank column at the end
+of the row. Two of the three call sites in the product pass five; the tenant Overview
+passes four where it withholds its budget cell from a member. If a page has fewer
+than four things worth leading with, it does not want this band: put the one number
+in the `PageIntro` sentence instead.
 
 A cell has four rows and **always four**, in this order:
 
