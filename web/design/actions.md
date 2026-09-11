@@ -1,7 +1,8 @@
 # Buttons
 
 Use a `Button` for an action. Navigation that looks like a button is a `Link`.
-An action inside a table row is a `RowAction`, not a `Button`.
+An action inside a table row is a `RowAction`, not a `Button`, and it wears a
+glyph rather than its word (see [A row's actions are glyphs](#a-rows-actions-are-glyphs)).
 
 ## Three variants. Nothing else exists.
 
@@ -141,6 +142,74 @@ written the same way.
 control *is*, not where it sits: `CopyButton` renders in tables, panels, banners and
 bare pages, so no container can reach it.
 
+## A row's actions are glyphs
+
+**Pass `icon` and `label` to a `RowAction`.** A lane of words is prose the reader
+has to parse before they can act, and it repeats on every row: four words per row
+is four words to re-read down the length of the table (otari-ai#2123). Four shapes
+are recognized instead.
+
+`label` is not optional beside an icon, and it is not a caption either: it is the
+accessible name *and* the tooltip, so the word is still read aloud, still matched
+by speech input, and still spelled out on hover. A glyph with no name is anonymous
+to a screen reader and unreachable by voice.
+
+```tsx
+// Correct
+<RowActionRow>
+  <RowAction icon={FiClock} label="History" onPress={toggleHistory} />
+  <RowAction icon={FiEdit2} label="Edit" onPress={openEdit} />
+  <RowAction icon={FiTrash2} label="Delete" onPress={() => setPendingDelete(row)} />
+</RowActionRow>
+
+// Incorrect: the glyph is named nowhere, so the control has no name at all
+<RowAction icon={FiTrash2} ariaLabel="" onPress={remove} />
+```
+
+Where the text form is still right: **the armed half of a confirm**, whose whole
+job is to name the consequence of the next press, and a lane whose actions have
+no convention to borrow. A lane does not go half words and half glyphs, so if one
+action in it has no glyph, ask whether the lane wants words.
+
+The glyphs, so the same act does not arrive as two shapes on two pages:
+
+| Act | Glyph | Act | Glyph |
+| --- | --- | --- | --- |
+| Edit, Rename | `FiEdit2` | Delete | `FiTrash2` |
+| Remove from a group | `FiUserMinus` | Remove a grant | `FiUserX` |
+| Revoke an invitation | `FiXCircle` | Grant operator access | `FiShield` |
+| Block, Deactivate | `FiSlash` | Unblock, Reactivate | `FiCheckCircle` |
+| Disable | `FiPause` | Enable | `FiPlay` |
+| Regenerate | `FiRefreshCw` | Archive | `FiArchive` |
+| Restore | `FiRotateCcw` | Make default | `FiStar` |
+| History | `FiClock` | Examples | `FiList` |
+| Test | `FiActivity` | | |
+
+Two splits in there are the vocabulary rather than a coincidence, and both are
+worth keeping: **an X takes something away, a strike turns something off.** So
+removing operator access is `FiUserX` while deactivating the account is `FiSlash`,
+and `FiSlash` then means the same thing on Accounts (Deactivate) as it does on the
+roster (Block). A toggle carries its state in the glyph, not only in the label,
+which is what lets a reader see which rows are stopped without reading a lane.
+
+**The geometry is 32px of visual and 44px of target**, the pair `CopyButton`
+already uses in these rows: the `before:` bleed is the device
+[motion-and-access.md](motion-and-access.md) names for keeping a small glyph
+reachable, and 6px each way is under half `RowActionRow`'s 16px pitch, so no two
+targets overlap. `RowAction` owns both, and the glyph's size with them, so a lane
+cannot be built out of step with the next one.
+
+**A disabled glyph gets a native `title` as well as its name.** A disabled control
+takes neither hover nor focus, so react-aria's tooltip never opens on one, and the
+pointer is the one reader an `aria-label` does not reach. `RowAction` adds it for
+the disabled case only: on a pressable action the browser's tooltip and the
+product's would open on the same hover and say the same thing.
+
+An `actions` column's width is the widest lane it can reach, and for a lane with a
+two-step confirm in it that is the **armed** state rather than the glyphs: arming
+one row must not reflow the table. `.otari-provider-keys-table` is the one sized
+that way.
+
 ## Deleting a record: a dialog, never an in-place confirm
 
 **Every delete of a record goes through `ConfirmDialog`** (otari-ai#2110), whether
@@ -198,6 +267,9 @@ The resting trigger is **neutral** and the armed confirm is danger. The first cl
 is safe, so spending the loudest signal in the product on it wastes it; the danger
 hue marks the irreversible step.
 
+In a row the trigger is a glyph and the armed half is words, which makes the
+escalation structural before it is chromatic: a shape becomes a sentence.
+
 Label the two steps differently: the trigger names the object, the armed confirm
 names the consequence.
 
@@ -222,11 +294,11 @@ hides.
 
 | Component | Props | Use for |
 | --- | --- | --- |
-| `RowAction` | `onPress`, `isDanger?`, `isDisabled?`, `ariaLabel?`, children | An action in a table row. Caption-sized, not a `Button` |
+| `RowAction` | `icon` + `label`, or children; `onPress`, `isDanger?`, `isDisabled?`, `ariaLabel?` | An action in a table row. A glyph by default, not a `Button` |
 | `RowActionRow` | children | The trailing lane those sit in. **Use this one** |
 | `RowActions` | children | A near-duplicate with a tighter gap, on 2 call sites. Do not reach for it in new code |
 | `ConfirmButton` | `confirmLabel`, `onConfirm`, `isPending?`, children | The page-level two-step confirm, for a destructive action that deletes nothing |
-| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, children | The same two-step inside a row. It supplies its own `isDanger` and its own Cancel. Not for a delete |
+| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, and `icon` + `label` or children | The same two-step inside a row. Its trigger takes a glyph; its armed half stays words. It supplies its own `isDanger` and its own Cancel. Not for a delete |
 | `RefreshButton` | `onRefresh`, `isFetching?`, `updatedAt?`, `label?` | A refetch, with its own freshness caption. Pass `updatedAt` or the caption reads nothing |
 | `CopyButton` | `value`, `label` | Copy one value. Icon-only, 44x44 hit area |
 | `CopyField` | `label`, `value`, `multiline?`, `concealed?`, `action?` | A readonly field of a value to paste elsewhere. `concealed` is what it shows until the operator asks for the value, for a credential: Copy copies the real one either way, so a key is handed over without being read off the screen |

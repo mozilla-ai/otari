@@ -8,17 +8,21 @@
  */
 
 import { Link } from "@tanstack/react-router"
-import { type RefObject, useMemo, useRef, useState } from "react"
+import { type RefObject, useMemo, useState } from "react"
 
-import type { PolicyGuardrail, PolicySpec } from "@/client"
+import type { PolicyGuardrail, PolicySpec, User } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
-import { UserComboBox } from "@/features/users/UserComboBox"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import { UserMultiSelect } from "@/features/users/UserMultiSelect"
+import { userOptionText } from "@/features/users/userOptions"
 import {
   useCreateAlias,
   useCreateOrganizationAlias,
@@ -91,65 +95,128 @@ function conditionsOf(
     }))
 }
 
-/** Who a policy applies to. Same control and wording as the alias scope picker,
- *  because it is the same decision. */
+/** Who a policy applies to. Same control and wording as assigning a budget,
+ *  because naming the people something applies to is the same decision.
+ *
+ *  Three states, not two. `null` is every caller, which is one policy with no
+ *  scope. A list is the scoped case, and because a policy's key is its name
+ *  plus its user, each person in it is a row of their own. An empty list is
+ *  therefore scoped with nobody chosen yet, which is not "every caller" and is
+ *  not something the form will submit.
+ */
 function ScopePicker({
-  userId,
+  userIds,
+  users,
   onChange,
-  enabled,
+  isSettled,
 }: {
-  userId: string | null
-  onChange: (userId: string | null) => void
+  userIds: string[] | null
+  users: User[]
+  onChange: (userIds: string[] | null) => void
   /**
-   * Whether the dialog holding this is open.
-   *
-   * This picker renders inside the modal, which is `null` while closed, so the
-   * roster never fetches with the dialog shut whatever this says. What the gate
-   * buys is the exit: the subtree lives for the ~100ms fade, and a refetch
-   * landing in it would be work for a form already leaving.
+   * Whether a write under this name has already landed, which freezes the
+   * scope. See the branch below for why it cannot be changed after that.
    */
-  enabled: boolean
+  isSettled: boolean
 }) {
-  const users = useUsers(enabled)
-  const scoped = userId !== null
-
-  const modeButton = (value: boolean, label: string) => (
-    <Tab
-      key={label}
-      isActive={scoped === value}
-      onPress={() => onChange(value ? "" : null)}
-    >
-      {label}
-    </Tab>
-  )
+  const isScoped = userIds !== null
 
   return (
     <div className="flex flex-col gap-3">
       <ControlField
         label="Applies to"
-        description="A global policy resolves for every caller. A user-scoped one resolves only for that user, and takes precedence over a global policy of the same name."
+        description="A global policy resolves for every caller. A scoped one resolves only for the people named, and takes precedence over a global policy of the same name."
       />
-      <TabRow>
-        {modeButton(false, "Every caller")}
-        {modeButton(true, "One user")}
-      </TabRow>
-      {scoped ? (
-        <UserComboBox
-          label="User"
-          value={userId ?? ""}
-          onChange={onChange}
-          users={users.data ?? []}
-          placeholder="Pick a user…"
-          description="Only this user resolves the policy."
-          unknownHint={
-            <span className="text-danger">
-              No such user. Pick an existing one.
-            </span>
-          }
-        />
-      ) : null}
+      {isSettled ? (
+        // Withheld, not disabled: there is no write that takes a policy back,
+        // so a control offering to change who this applies to would be
+        // offering something this form cannot do. Taking a person out of the
+        // selection would leave the policy already written for them in place,
+        // and choosing every caller would leave it in place AND outranking the
+        // global one for exactly that person, which is the precedence rule
+        // stated above. Stated rather than greyed out, because a disabled
+        // control with no reason beside it teaches nothing.
+        <p className="text-caption">
+          Some policies under this name have already been created, and this form
+          cannot take one back, so who it applies to is fixed now. Create policy
+          writes the ones still missing. To remove one you did not mean to
+          create, close this and delete it from the list.
+        </p>
+      ) : (
+        <>
+          <TabRow>
+            {/* Each tab acts only on a change of state: pressing the one
+                already active would otherwise throw away the people chosen
+                under it. */}
+            <Tab
+              isActive={!isScoped}
+              onPress={() => {
+                if (isScoped) onChange(null)
+              }}
+            >
+              Every caller
+            </Tab>
+            <Tab
+              isActive={isScoped}
+              onPress={() => {
+                if (!isScoped) onChange([])
+              }}
+            >
+              Specific users
+            </Tab>
+          </TabRow>
+          {userIds === null ? null : (
+            <UserMultiSelect
+              label="Users"
+              value={userIds}
+              onChange={onChange}
+              users={users}
+              description="One policy is written per person, each resolving only for them."
+            />
+          )}
+        </>
+      )}
     </div>
   )
+}
+
+/** What to call a user id in prose, matching what the picker shows.
+ *
+ *  Through the same helper both pickers label their rows with, so somebody who
+ *  reads as a name on a chip is named that way in the account of a save rather
+ *  than appearing there as the UUID the request plane bills.
+ */
+function useUserLabel(users: User[]): (userId: string) => string {
+  const memberLabels = useMemberAttributionLabels()
+  const byId = new Map(users.map((entry) => [entry.user_id, entry]))
+  return (userId) => {
+    const user = byId.get(userId)
+    return user === undefined
+      ? userId
+      : userOptionText(user, memberLabels).label
+  }
+}
+
+/** The account of a save that wrote some of its scopes and not the others.
+ *
+ *  Both halves by name, because "it failed" over a part-written save leaves the
+ *  operator to work out which rows exist by reading the table. The ones that
+ *  landed are remembered, so the retry the last sentence promises is real
+ *  rather than a second pass over everything.
+ */
+function partialScopeReport(
+  written: string[],
+  failed: { userId: string; reason: string }[],
+  labelFor: (userId: string) => string,
+): string {
+  const created =
+    written.length > 0
+      ? `Created for ${written.map(labelFor).join(", ")}. `
+      : ""
+  const missing = failed
+    .map((entry) => `${labelFor(entry.userId)} (${entry.reason})`)
+    .join(", ")
+  return `${created}Not created for ${missing}. Submitting again retries only the ones still missing.`
 }
 
 const MODE_VALUES = ["block", "monitor"] as const
@@ -244,8 +311,48 @@ export function PolicyForm({
   // gate it would fetch for every render of the page behind a closed dialog.
   const guardrails_ = useGuardrailsConfigured(isOpen)
 
+  // Where a user scope can be written at all: `/users` is a deployment-wide
+  // operator route, so asking for it as a tenant admin buys a 403 for a picker
+  // this form does not offer them, and an edit cannot move a scope so it does
+  // not offer one either.
+  const canScope = !editing && !tenantScoped
+  // Read here rather than inside the picker, because the account of a
+  // part-written save names the same people the chips do and so needs the same
+  // roster, and two reads on one key would be two gates that have to agree.
+  //
+  // `isOpen` is load-bearing at this level and was not one level down. Inside
+  // the picker the read sat within the modal, which is `null` while closed, so
+  // nothing could fetch with the dialog shut whatever the gate said and it only
+  // bought the ~100ms exit fade. Out here the form is mounted whether or not the
+  // dialog is, so this gate is the whole of what keeps a closed form from
+  // asking for the roster.
+  const users = useUsers(isOpen && canScope)
+  const labelForUser = useUserLabel(users.data ?? [])
+
   const [name, setName] = useState(existing?.name ?? "")
-  const [userId, setUserId] = useState<string | null>(existing?.user_id ?? null)
+  // An existing row carries one scope, since it is one row; the list shape is
+  // what create writes N of.
+  const [userIds, setUserIds] = useState<string[] | null>(
+    existing?.user_id == null ? null : [existing.user_id],
+  )
+  // The scopes this dialog has already written, so a retry after a part-written
+  // save does not create again what exists. Kept per dialog rather than per
+  // press: the dialog stays open on a partial failure, and the whole point is
+  // that the next press picks up where the last one stopped.
+  //
+  // Carried with the payload they were written under, because that is what
+  // makes skipping them safe: editing the name or the spec after a partial
+  // failure means those ids hold a *different* policy, and skipping them then
+  // would leave the corrected one unwritten for exactly the people it already
+  // reached.
+  const [written, setWritten] = useState<{ key: string; userIds: string[] }>({
+    key: "",
+    userIds: [],
+  })
+  const [partialFailure, setPartialFailure] = useState<Error | undefined>(
+    undefined,
+  )
+  const [isWritingScopes, setIsWritingScopes] = useState(false)
   const [target, setTarget] = useState(
     existing ? defaultTargetOf(existing.spec) : initialTarget,
   )
@@ -317,7 +424,10 @@ export function PolicyForm({
     !editingAlias &&
     name.trim() !== "" &&
     name.trim() !== previousName
-  const scopeReady = userId === null || userId.trim() !== ""
+  // No scope at all, or at least one person under it. The empty list is the
+  // state this refuses: "scoped, nobody chosen" would submit as a global policy
+  // and quietly mean the opposite of what the tab says.
+  const scopeReady = userIds === null || userIds.length > 0
   const conditionsReady = conditions.every(
     (c) => c.target.trim() !== "" && c.threshold > 0 && c.threshold < 100,
   )
@@ -419,9 +529,9 @@ export function PolicyForm({
   // Everything the operator can change, against what it was seeded with. A guard
   // that watched only the name would be worse than none on a form this long,
   // where a stray Escape can land ten minutes into building a fallback chain.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     name,
-    userId,
+    userIds,
     target,
     chain,
     conditions,
@@ -431,8 +541,6 @@ export function PolicyForm({
     backend,
     weights,
   })
-  const seeded = useRef(draft)
-  const isDirty = draft !== seeded.current
 
   // An alias has exactly one target, so growing one a chain, a condition, or a
   // guardrail makes it a policy. Saving it as a policy alone would leave the alias
@@ -448,11 +556,51 @@ export function PolicyForm({
     save.isPending ||
     saveAlias.isPending ||
     saveOrgPolicy.isPending ||
-    saveOrgAlias.isPending
+    saveOrgAlias.isPending ||
+    // Its own flag as well as the mutation's: between two of N writes the
+    // mutation is idle, and a submit that re-armed itself in that gap would
+    // start a second run over the same list.
+    isWritingScopes
+
+  /** Write one policy per chosen scope, one at a time, and report what landed.
+   *
+   *  There is no batch endpoint and no transaction over N rows, so a refusal
+   *  partway leaves the earlier rows in place. The honest thing is to keep the
+   *  dialog open, name both halves, and remember the ids that succeeded so the
+   *  next press writes only what is missing. Every scope is attempted rather
+   *  than stopping at the first refusal, so one person's conflict does not
+   *  read as everyone after them having failed too.
+   */
+  const writeUserScopes = async (scopes: string[]) => {
+    const key = JSON.stringify([name.trim(), spec])
+    setIsWritingScopes(true)
+    const done = written.key === key ? [...written.userIds] : []
+    const failed: { userId: string; reason: string }[] = []
+    for (const scope of scopes) {
+      if (done.includes(scope)) continue
+      try {
+        await save.mutateAsync({ name: name.trim(), spec, user_id: scope })
+        done.push(scope)
+      } catch (caught) {
+        failed.push({ userId: scope, reason: errorMessage(caught) })
+      }
+    }
+    setWritten({ key, userIds: done })
+    setIsWritingScopes(false)
+    if (failed.length === 0) {
+      onClose()
+      return
+    }
+    setPartialFailure(new Error(partialScopeReport(done, failed, labelForUser)))
+  }
 
   const submit = () => {
     if (!canSubmit || outgrewAlias) return
-    const scope = userId === null ? null : userId.trim()
+    // Cleared on every path, not only the one that sets it: left standing it
+    // would outrank a fresh refusal from any of the four mutations below and
+    // report the last attempt's scopes over this one's failure.
+    setPartialFailure(undefined)
+    const scope = userIds === null ? null : (userIds[0] ?? null)
     if (editingAlias) {
       if (workspaceId !== null) {
         saveOrgAlias.mutate(
@@ -481,6 +629,12 @@ export function PolicyForm({
         },
         { onSuccess: onClose },
       )
+      return
+    }
+    // Only on create: an edit is one row, whose scope is half its key and so
+    // cannot move, and a rename has to travel on that one write.
+    if (!editing && userIds !== null) {
+      void writeUserScopes(userIds)
       return
     }
     save.mutate(
@@ -539,7 +693,12 @@ export function PolicyForm({
       // All four writers, not two: an organization-scoped save fails through its
       // own mutation, and with those two missing the refusal was swallowed and
       // the panel just sat there.
+      //
+      // The part-written account goes first, and it is the same surface rather
+      // than a second one: over N scopes `save.error` holds only the last
+      // refusal, which says nothing about the rows that did land.
       error={
+        partialFailure ??
         save.error ??
         saveAlias.error ??
         saveOrgPolicy.error ??
@@ -637,7 +796,17 @@ export function PolicyForm({
           This applies to everyone in the selected workspace.
         </p>
       ) : (
-        <ScopePicker userId={userId} onChange={setUserId} enabled={isOpen} />
+        <ScopePicker
+          userIds={userIds}
+          users={users.data ?? []}
+          onChange={setUserIds}
+          // Any landed write settles it, whatever payload it went under. Not
+          // keyed on the current name and spec the way `done` is: a policy
+          // written for somebody stays written when the name changes, so a key
+          // match would release the scope and let them be dropped from the
+          // selection while their row lived on.
+          isSettled={written.userIds.length > 0}
+        />
       )}
 
       {/* Conditional tier-down */}

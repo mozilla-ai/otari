@@ -10,7 +10,7 @@ import { PageIntro } from "./PageIntro"
  * be larger than the page's own name. That is why a 30px KPI figure does not
  * fight a 28px title, and why a second `text-display` on one route is a bug.
  *
- * Replaces `deprecated/PageHeader`, which is still on four pages.
+ * Replaced `deprecated/PageHeader`, which is gone: every page opens with this.
  */
 const meta = {
   title: "Design system/Layout/PageIntro",

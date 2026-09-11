@@ -66,5 +66,9 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // The catalog stays behind the sign-in screen unless an operator opens it
     // with public_catalog; see docs/configuration.md#a-public-catalog.
     public_catalog: false,
+    // Closed, which is the default and is what mail_ready above would force
+    // anyway: signup sends a verification link, so a deployment that cannot
+    // send one registers nobody.
+    open_signup: false,
   })
 })

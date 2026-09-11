@@ -5,14 +5,7 @@ import { useState } from "react"
 import { AuthEmailField, AuthPasswordField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 
-/**
- * The shell every pre-session page sits in: the Otari mark, a centred `max-w-md`
- * card, and slots for the title, copy, body and footer. Six pages share it, which
- * is what keeps sign-up, recovery and verification reading as one flow.
- *
- * `PublicAuthLink` renders a plain `href` rather than a router `Link`, because
- * these pages run before the router is mounted.
- */
+/** Public auth pages share the same background, card, and content slots. */
 const meta = {
   title: "Dashboard/Auth/PublicAuthLayout",
   component: PublicAuthLayout,

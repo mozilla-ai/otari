@@ -150,7 +150,7 @@ topic file in `web/design/` that documents each one. A new primitive is a file o
 the topic it belongs to, and it owes a `.stories.tsx` beside it.
 
 `shared/components/` keeps the two directories that are not primitives: `access/`, which
-renders what a deployment does not serve, and `deprecated/`, the four that must not be used
+renders what a deployment does not serve, and `deprecated/`, the three that must not be used
 in new code. The split is the extraction contract in DESIGN.md: `design-system/` may import
 nothing else under `src/`, so anything reading the transport, the deployment or a generated
 type lives on the other side of that line.
@@ -166,7 +166,7 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 | Labeled metric tile | `KpiStrip` + `KpiCell` (`metrics/`). **Not** `StatCard`, which is in `deprecated/` |
 | Error alert from an unknown thrown value | `ErrorBanner` (`feedback/`; pairs with `errorMessage(error)` from `feedback/errorMessage`) |
 | Info/warning callout | `InfoBanner` (`feedback/`; `tone="info" \| "warning"`) |
-| Page title + description + action | `PageIntro` (`layout/`). **Not** `PageHeader`, which is in `deprecated/` |
+| Page title + description + action | `PageIntro` (`layout/`) |
 | Deleting a record | `ConfirmDialog` (`feedback/`), always, one row or a selection. A neutral `RowAction` or ghost `Button` opens it and the dialog carries the danger confirm; the delete's `isPending` and `error` go to the dialog, not to the page's `ErrorBanner`. See [actions.md](../../../web/design/actions.md) |
 | Destructive action that deletes nothing (regenerate, archive, reset) | `ConfirmButton` (`actions/`; two-click arm/confirm), or `ConfirmRowAction` inside a table row |
 | Filter over a small fixed option set | `FilterSelect` (`navigation/`; a HeroUI `Select`, so the list is a popover anchored under the trigger) |

@@ -1070,7 +1070,7 @@ describe("KeysPage", () => {
     expect(screen.getByText(/starts unrestricted/)).toBeInTheDocument()
   })
 
-  it("opens the edit form from a key row's Edit action", async () => {
+  it("opens the edit form in a dialog, naming the key it is about", async () => {
     mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot" })] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -1078,10 +1078,30 @@ describe("KeysPage", () => {
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
 
-    // The inline edit card appears (its Save button is unique to edit mode).
+    // A dialog rather than a band above the table: the row keeps its place, and
+    // the page under it does not shift by the height of a form (otari-ai#2125).
+    const dialog = await screen.findByRole("dialog", { name: "Edit key" })
+    expect(within(dialog).getByText("ci-bot")).toBeInTheDocument()
     expect(
-      await screen.findByRole("button", { name: "Save changes" }),
+      within(dialog).getByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
+  })
+
+  it("asks before discarding an edited field", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot" })] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await user.type(await screen.findByLabelText("Name"), "-2")
+    await user.keyboard("{Escape}")
+
+    // The guard, not the exit: an edit form seeds from the row, so dirty has to
+    // mean "differs from the key" rather than "is not empty".
+    expect(screen.getByRole("button", { name: "Keep editing" })).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("toggles exclude_from_budget on an existing key via PATCH", async () => {
@@ -1096,7 +1116,7 @@ describe("KeysPage", () => {
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     await user.click(await screen.findByLabelText("Exempt from budget"))
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -1118,7 +1138,7 @@ describe("KeysPage", () => {
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
     await pickOption(user, "Mismatched user field", "Always accept")
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -1150,7 +1170,7 @@ describe("KeysPage", () => {
       "Mismatched user field",
       "Use the deployment setting (default)",
     )
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -1174,9 +1194,10 @@ describe("KeysPage", () => {
     const alphaRow = (await screen.findByText("alpha")).closest("tr")!
     await user.click(within(alphaRow).getByRole("button", { name: "Edit" }))
     expect(await screen.findByLabelText("Name")).toHaveValue("alpha")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
 
-    // Switching to another key must remount the form; without a keyed remount it
-    // would keep "alpha" and PATCH the wrong key.
+    // The next key must open on its own values; a form that survived the first
+    // row would keep "alpha" and PATCH the wrong key.
     const bravoRow = screen.getByText("bravo").closest("tr")!
     await user.click(within(bravoRow).getByRole("button", { name: "Edit" }))
     expect(await screen.findByLabelText("Name")).toHaveValue("bravo")
@@ -1193,7 +1214,7 @@ describe("KeysPage", () => {
     await user.click(within(row).getByRole("button", { name: "Disable" }))
 
     expect(
-      screen.queryByRole("button", { name: "Save changes" }),
+      screen.queryByRole("button", { name: "Save" }),
     ).not.toBeInTheDocument()
   })
 
@@ -1368,7 +1389,7 @@ describe("KeysPage", () => {
         screen.queryByLabelText("Exempt from budget"),
       ).not.toBeInTheDocument()
 
-      await usr.click(screen.getByRole("button", { name: "Save changes" }))
+      await usr.click(screen.getByRole("button", { name: "Save" }))
 
       const patch = fetchMock.mock.calls.find(
         ([u, init]) =>

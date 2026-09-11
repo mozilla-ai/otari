@@ -30,6 +30,8 @@
 // request time. `services/bedrock_gateway_auth.py` builds the same names on the
 // hybrid path, out of the platform's `extra_params` rather than out of these.
 
+import { REDACTED_SECRET } from "@/shared/helpers/redaction"
+
 /** One `client_args` entry a provider expects, and how to ask for it. */
 export interface ProviderCredentialFieldSpec {
   /** Literal SDK keyword argument, and the `client_args` key it is stored under. */
@@ -67,11 +69,9 @@ export interface ProviderCredentialSpec {
   apiKeyHelpText?: string
 }
 
-// The value the gateway substitutes for a credential-shaped `client_args`
-// entry when it serializes a key, and the value that means "keep what is
-// stored" when it is sent back. Kept in step with `REDACTED_VALUE` in
-// `src/gateway/models/secret_fields.py`.
-export const REDACTED_CLIENT_ARG = "***"
+// The mask a credential-shaped `client_args` entry comes back as, under the
+// name this feature's call sites already use.
+export const REDACTED_CLIENT_ARG = REDACTED_SECRET
 
 const AWS_REGION_PATTERN = /^[a-z0-9-]+$/
 

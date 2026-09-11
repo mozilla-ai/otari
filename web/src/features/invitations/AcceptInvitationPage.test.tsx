@@ -2,11 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
 
 // Mocks the network boundary (apiFetch), not the hooks, per
@@ -64,18 +64,20 @@ function renderPage(
   return {
     client,
     ...render(
-      <QueryClientProvider client={client}>
-        <AuthProvider>
-          <DeploymentProvider
-            value={bootstrap({
-              mail_ready: mailReady,
-              oauth_providers: oauthProviders,
-            })}
-          >
-            <AcceptInvitationPage />
-          </DeploymentProvider>
-        </AuthProvider>
-      </QueryClientProvider>,
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <AuthProvider>
+            <DeploymentProvider
+              value={bootstrap({
+                mail_ready: mailReady,
+                oauth_providers: oauthProviders,
+              })}
+            >
+              <AcceptInvitationPage />
+            </DeploymentProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+      </ThemeProvider>,
     ),
   }
 }

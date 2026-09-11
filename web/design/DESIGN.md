@@ -6,7 +6,8 @@ this dashboard to answer "what is this costing me and what is broken", so every
 pixel of chrome is pixels not spent on data.
 
 Read the topic file for what you are building before you build it. The rules below
-apply everywhere and are the ones most often broken.
+apply throughout the dashboard, with the scoped
+[public authentication exception](layout.md#public-authentication) below.
 
 ## The layer rule
 
@@ -186,7 +187,7 @@ and [web/AGENTS.md](../AGENTS.md).
 | [metrics.md](metrics.md) | KPI strip, trends, meters, status marks, charts |
 | [feedback.md](feedback.md) | Banners, empty states, loading, dialogs |
 | [navigation.md](navigation.md) | `TabRow`, `Segmented`, `FilterChips`, the rail |
-| [overlays.md](overlays.md) | `Tooltip`, `Popover`, `Dialog`, and which of the three a thing wants |
+| [overlays.md](overlays.md) | `Tooltip`, `Popover`, the two dialogs, and which of them a thing wants |
 | [motion-and-access.md](motion-and-access.md) | Durations, press, focus, 44px floor, reduced motion |
 
 Visual reference, in two places. The Paper file `Otari / Neat shell` has the
@@ -211,7 +212,6 @@ not already in its list, naming what to use instead.
 
 | Do not use | Use instead | Still in |
 | --- | --- | --- |
-| `deprecated/PageHeader` | `layout/PageIntro` | 3 pages, one use each |
 | `deprecated/StatCard` | `metrics/KpiStrip` + `KpiCell` | **nothing. Dead code** |
 | `deprecated/RowActions` | `actions/RowActionRow` | 1 use, in `PasskeysCard` |
 | `deprecated/SettingsSection` | `layout/SettingsGroup` | **nothing. Dead code** |

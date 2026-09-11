@@ -101,3 +101,17 @@ export const Required: Story = {
     className: "w-72",
   },
 }
+
+/**
+ * `autoFocus` puts the caret in a form's first field, the way `ComboBoxField`'s
+ * does. A dialog whose first control is a picker takes it; a page's filter
+ * never should, since focus on arrival belongs to the page.
+ */
+export const AutoFocused: Story = {
+  args: {
+    value: "",
+    autoFocus: true,
+    placeholder: "Pick how failures are routed",
+    className: "w-72",
+  },
+}

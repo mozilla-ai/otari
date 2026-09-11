@@ -1,18 +1,22 @@
-import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
-
 import type {
   GuardrailCatalog,
   GuardrailParameterSpec,
   OrganizationGuardrail,
   Workspace,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Field } from "@/design-system/forms/Field"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
@@ -27,6 +31,7 @@ import {
   parameterErrors,
   parameterSpecs,
   parseExtraJson,
+  profileIdentity,
   type SeededParameters,
   seedParameters,
 } from "@/features/tools/guardrailParameters"
@@ -89,6 +94,7 @@ function WorkspaceScope({
   selected,
   workspaces,
   disabled,
+  variant = "filter",
   onEverywhere,
   onToggle,
 }: {
@@ -97,22 +103,40 @@ function WorkspaceScope({
   everywhere: boolean
   selected: readonly string[]
   workspaces: readonly Workspace[]
-  disabled: boolean
+  disabled?: boolean
+  /**
+   * Which half of the pair the picker is. A row on this card is a dense line
+   * of toolbar controls; the dialog is a form, where a caption label beside
+   * the control would be the one thing on it reading differently.
+   */
+  variant?: "filter" | "form"
   onEverywhere: (value: boolean) => void
   onToggle: (workspaceId: string) => void
 }) {
+  const scopeOptions = [
+    { value: "all", label: "Every workspace" },
+    { value: "chosen", label: "Chosen workspaces" },
+  ]
   return (
     <div className="flex flex-col gap-2">
-      <FilterSelect
-        label="Runs in"
-        value={everywhere ? "all" : "chosen"}
-        onChange={(next) => onEverywhere(next === "all")}
-        options={[
-          { value: "all", label: "Every workspace" },
-          { value: "chosen", label: "Chosen workspaces" },
-        ]}
-        disabled={disabled}
-      />
+      {variant === "form" ? (
+        <Select
+          label="Runs in"
+          value={everywhere ? "all" : "chosen"}
+          onChange={(next) => onEverywhere(next === "all")}
+          options={scopeOptions}
+          isDisabled={disabled}
+          reserveMessage={false}
+        />
+      ) : (
+        <FilterSelect
+          label="Runs in"
+          value={everywhere ? "all" : "chosen"}
+          onChange={(next) => onEverywhere(next === "all")}
+          options={scopeOptions}
+          disabled={disabled}
+        />
+      )}
       {everywhere ? null : (
         // A named group rather than a per-box aria-label. Each box is labelled
         // by the workspace name a reader can see, and the group says which
@@ -154,6 +178,8 @@ function WorkspaceScope({
 function useParameterForm(
   specs: GuardrailParameterSpec[],
   stored: Record<string, unknown> | null | undefined,
+  /** From `profileIdentity`, which says what counts as a different profile. */
+  identity: string,
 ) {
   const [state, setState] = useState<SeededParameters>(() =>
     seedParameters(specs, stored),
@@ -161,13 +187,19 @@ function useParameterForm(
   const [issues, setIssues] = useState<ParameterErrors>({})
   const [rawError, setRawError] = useState<string | undefined>(undefined)
 
-  // Both dependencies are serialized, for the reason the workspace scope below
-  // is: each is a fresh object on every fetch and on every catalog read, so
-  // depending on them by reference would wipe a half-typed parameter whenever
-  // any row on the card saved. Parsed back inside the effect so nothing it
-  // touches is missing from the dependency list.
+  // Two of the three dependencies are serialized, for the reason the workspace
+  // scope below is: each is a fresh object on every fetch and on every catalog
+  // read, so depending on them by reference would wipe a half-typed parameter
+  // whenever any row on the card saved. Parsed back inside the effect so
+  // nothing it touches is missing from the dependency list.
+  //
+  // The identity is the third, because the two above cannot separate two
+  // profiles that declare the same parameters, which is the ordinary shape of a
+  // pair differing only in the model it pins. Nothing inside the effect reads
+  // it.
   const specsJson = JSON.stringify(specs)
   const storedJson = JSON.stringify(stored ?? {})
+  // biome-ignore lint/correctness/useExhaustiveDependencies: identity is a re-seed trigger, not an input
   useEffect(() => {
     setState(
       seedParameters(
@@ -177,7 +209,7 @@ function useParameterForm(
     )
     setIssues({})
     setRawError(undefined)
-  }, [specsJson, storedJson])
+  }, [identity, specsJson, storedJson])
 
   return {
     values: state.values,
@@ -204,18 +236,6 @@ function useParameterForm(
       return raw === undefined && Object.keys(found).length === 0
     },
     build: () => buildValidateKwargs(specs, state.values, state.extraJson),
-    /**
-     * Put the form back to what a fresh profile seeds, for the caller that
-     * clears the rest of its fields itself. The effect above cannot do it: it
-     * re-seeds on the serialized specs and stored values, and a cleared profile
-     * whose predecessor also took no typed parameters leaves both unchanged, so
-     * a raw entry would survive into the next guardrail this form adds.
-     */
-    reset: () => {
-      setState(seedParameters(specs, undefined))
-      setIssues({})
-      setRawError(undefined)
-    },
   }
 }
 
@@ -249,7 +269,11 @@ function GuardrailRow({
   const [isDeleteOpen, setDeleteOpen] = useState(false)
   const specs = parameterSpecs(catalog, guardrail.profile)
   const describedProfile = findProfile(catalog, guardrail.profile) !== undefined
-  const parameters = useParameterForm(specs, guardrail.validate_kwargs)
+  const parameters = useParameterForm(
+    specs,
+    guardrail.validate_kwargs,
+    profileIdentity(catalog, guardrail.profile),
+  )
 
   // Rehydrate from whatever the server last said, so the row never drifts from
   // the stored entry after a save.
@@ -473,12 +497,16 @@ function GuardrailRow({
   )
 }
 
-function AddGuardrailForm({
+function AddGuardrailDialog({
+  isOpen,
+  onClose,
   catalog,
   catalogPending,
   workspaces,
   onSaved,
 }: {
+  isOpen: boolean
+  onClose: () => void
   catalog: GuardrailCatalog | undefined
   catalogPending: boolean
   workspaces: readonly Workspace[]
@@ -491,18 +519,35 @@ function AddGuardrailForm({
   const [credential, setCredential] = useState("")
   const [everywhere, setEverywhere] = useState(false)
   const [scope, setScope] = useState<string[]>([])
-  const [error, setError] = useState("")
   const specs = parameterSpecs(catalog, profile)
   // An empty picker describes nothing, but its panel should not open on that
   // account: there is no profile yet for a raw parameter to belong to.
   const describedProfile =
     profile === "" || findProfile(catalog, profile) !== undefined
-  // Nothing stored yet, so the fields start blank and re-seed when the picker
-  // moves to a profile with a different schema.
-  const parameters = useParameterForm(specs, undefined)
+  // Nothing stored yet, so the fields start blank and re-seed whenever the
+  // picker moves to another profile the catalog describes, whether or not that
+  // profile's schema differs from the one left behind.
+  const parameters = useParameterForm(
+    specs,
+    undefined,
+    profileIdentity(catalog, profile),
+  )
+
+  // Everything the operator can change, in one snapshot: a field added to this
+  // form would otherwise have to be remembered in a second place, and the
+  // parameters are the half most easily forgotten.
+  const { isDirty } = useDirtySnapshot({
+    profile,
+    mode,
+    url,
+    credential,
+    everywhere,
+    scope,
+    values: parameters.values,
+    extraJson: parameters.extraJson,
+  })
 
   const submit = () => {
-    setError("")
     const named = profile.trim()
     if (!parameters.check()) return
     create.mutate(
@@ -517,63 +562,63 @@ function AddGuardrailForm({
       },
       {
         onSuccess: () => {
-          setProfile("")
-          setUrl("")
-          setCredential("")
-          setScope([])
-          parameters.reset()
           onSaved(`${named} added`)
+          onClose()
         },
-        onError: (err) => setError(errorMessage(err)),
       },
     )
   }
 
   return (
-    <div className="flex flex-col gap-2 py-4">
-      <span className="text-body">Mandate a guardrail</span>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg`, unlike the search-tool dialog beside it: the parameters section
+      // is a variable-length list of controls plus a raw-JSON escape hatch,
+      // which the small frame has no room for.
+      size="lg"
+      title="Mandated guardrail"
+      submitLabel="Mandate a guardrail"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={profile.trim() === ""}
+      isDirty={isDirty}
+      error={create.error}
+    >
       <GuardrailProfileField
         catalog={catalog}
         pending={catalogPending}
         value={profile}
-        disabled={create.isPending}
         onChange={setProfile}
       />
-      <div className="flex flex-wrap items-end gap-2">
-        <FilterSelect
-          ariaLabel="Guardrail mode"
-          value={mode}
-          onChange={(next) => setMode(next as Mode)}
-          options={MODE_OPTIONS}
-          disabled={create.isPending}
-        />
-        <input
-          type="text"
-          inputMode="url"
-          aria-label="Guardrails endpoint"
-          value={url}
-          disabled={create.isPending}
-          placeholder="endpoint (blank uses the URL above)"
-          onChange={(event) => setUrl(event.target.value)}
-          className={`w-full sm:w-72 ${INPUT_CLASS}`}
-        />
-        <input
-          type="password"
-          autoComplete="new-password"
-          aria-label="Guardrail credential"
-          value={credential}
-          disabled={create.isPending}
-          placeholder="credential (needs an https endpoint)"
-          onChange={(event) => setCredential(event.target.value)}
-          className={`w-full sm:w-52 ${INPUT_CLASS}`}
-        />
-      </div>
+      <Select
+        label="Mode"
+        value={mode}
+        onChange={(next) => setMode(next as Mode)}
+        options={MODE_OPTIONS}
+        description="A caller can tighten a mandated guardrail but never weaken it."
+      />
+      <Field
+        label="Endpoint"
+        value={url}
+        onChange={setUrl}
+        placeholder="blank uses the guardrails URL above"
+        reserveMessage={false}
+      />
+      <SecretField
+        label="Credential"
+        value={credential}
+        onChange={setCredential}
+        description="Needs an https endpoint of its own, since the URL above may be a plain-http sidecar, and OTARI_SECRET_KEY set on the gateway."
+      />
       <WorkspaceScope
         scopeName={profile || "New guardrail"}
+        variant="form"
         everywhere={everywhere}
         selected={scope}
         workspaces={workspaces}
-        disabled={create.isPending}
         onEverywhere={setEverywhere}
         onToggle={(workspaceId) =>
           setScope((current) =>
@@ -595,30 +640,10 @@ function AddGuardrailForm({
         extraJson={parameters.extraJson}
         extraJsonError={parameters.rawError}
         described={describedProfile}
-        disabled={create.isPending}
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
       />
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="primary"
-          isDisabled={profile.trim() === "" || create.isPending}
-          onPress={submit}
-        >
-          {create.isPending ? "Adding…" : "Add"}
-        </Button>
-      </div>
-      <span className="text-caption">
-        A caller can tighten a mandated guardrail but never weaken it. A
-        credential needs an https endpoint of its own, since the URL above may
-        be a plain-http sidecar, and{" "}
-        <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
-      </span>
-      {error ? (
-        <span className="break-words text-caption text-danger">{error}</span>
-      ) : null}
-    </div>
+    </FormDialog>
   )
 }
 
@@ -638,50 +663,77 @@ export function OrganizationGuardrailsCard({
   // asked for over a form the caller cannot use.
   const catalog = useGuardrailProfiles(manages)
   const workspaces = useWorkspaces()
+  const [adding, setAdding] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in rather than on the way out.
+  const [openCount, setOpenCount] = useState(0)
+  const openAdd = () => {
+    setOpenCount((count) => count + 1)
+    setAdding(true)
+  }
   const entries = guardrails.data ?? []
   const known = workspaces.data ?? []
 
   return (
-    <SettingsGroup
-      bounded
-      title="Organization guardrails"
-      description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
-    >
-      {manages ? null : (
-        <InfoBanner>
-          Organization guardrails are set by an owner or admin of the
-          organization.
-        </InfoBanner>
-      )}
+    <>
+      {/* Outside the group, not inside it: `FormDialog` renders its trigger
+          slot as a real element, and a group's rows are a `divide-y` container
+          where one more child changes which row is last.
+
+          Keyed on the open count, so each open remounts a blank form. */}
       {manages ? (
-        <>
-          <ErrorBanner error={guardrails.error ?? workspaces.error} />
-          {entries.map((guardrail) => (
-            <GuardrailRow
-              key={guardrail.id}
-              guardrail={guardrail}
-              catalog={catalog.data}
-              workspaces={known}
-              onSaved={onSaved}
-            />
-          ))}
-          {entries.length === 0 && !guardrails.isLoading ? (
-            <p className="py-4 text-sm text-muted">
-              No organization guardrails, so only the guardrails a caller asks
-              for run.
-            </p>
-          ) : null}
-          <AddGuardrailForm
-            catalog={catalog.data}
-            // `isFetched` rather than `isPending`: an errored query returns to
-            // pending when its observers remount, which would leave the picker
-            // stuck reading a service that already answered.
-            catalogPending={!catalog.isFetched}
-            workspaces={known}
-            onSaved={onSaved}
-          />
-        </>
+        <AddGuardrailDialog
+          key={openCount}
+          isOpen={adding}
+          onClose={() => setAdding(false)}
+          catalog={catalog.data}
+          // `isFetched` rather than `isPending`: an errored query returns to
+          // pending when its observers remount, which would leave the picker
+          // stuck reading a service that already answered.
+          catalogPending={!catalog.isFetched}
+          workspaces={known}
+          onSaved={onSaved}
+        />
       ) : null}
-    </SettingsGroup>
+      <SettingsGroup
+        bounded
+        title="Organization guardrails"
+        description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
+        action={
+          manages ? (
+            <Button variant="primary" onPress={openAdd}>
+              Mandate a guardrail
+            </Button>
+          ) : null
+        }
+      >
+        {manages ? null : (
+          <InfoBanner>
+            Organization guardrails are set by an owner or admin of the
+            organization.
+          </InfoBanner>
+        )}
+        {manages ? (
+          <>
+            <ErrorBanner error={guardrails.error ?? workspaces.error} />
+            {entries.map((guardrail) => (
+              <GuardrailRow
+                key={guardrail.id}
+                guardrail={guardrail}
+                catalog={catalog.data}
+                workspaces={known}
+                onSaved={onSaved}
+              />
+            ))}
+            {entries.length === 0 && !guardrails.isLoading ? (
+              <p className="py-4 text-sm text-muted">
+                No organization guardrails, so only the guardrails a caller asks
+                for run.
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </SettingsGroup>
+    </>
   )
 }

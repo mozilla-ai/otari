@@ -1,5 +1,5 @@
 import type { OrganizationContext } from "@/client"
-import { PageHeader } from "@/shared/components/deprecated/PageHeader"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 
 import { OrganizationBudgetsCard } from "./OrganizationBudgetsCard"
 import { SpendCeilingsCard } from "./SpendCeilingsCard"
@@ -27,10 +27,13 @@ export function OrganizationBudgetsPage({
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Spend & budgets"
-        description="What this organization may spend, and where each limit applies. A request is refused when any ceiling covering it is out of headroom."
-      />
+      {/* No action here, unlike every other page's intro: this page holds two
+          collections, and each one's Add sits on its own section heading rather
+          than competing for one slot that could only name one of them. */}
+      <PageIntro title="Spend & budgets">
+        What this organization may spend, and where each limit applies. A
+        request is refused when any ceiling covering it is out of headroom.
+      </PageIntro>
       <OrganizationBudgetsCard />
       <SpendCeilingsCard organizationName={organization.organization.name} />
     </div>

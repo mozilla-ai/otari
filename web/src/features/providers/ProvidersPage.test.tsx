@@ -529,7 +529,7 @@ describe("ProvidersPage", () => {
       screen.queryByRole("textbox", { name: /AWS region/ }),
     ).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -1369,6 +1369,20 @@ describe("ProvidersPage", () => {
     )
   })
 
+  it("opens the edit form in a dialog, naming the instance", async () => {
+    mockApi({ stored: [storedProvider("homelab", "1234", true)] })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await screen.findByText("••••1234")
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+
+    // A dialog rather than a band above the table: the row keeps its place, and
+    // the page under it does not shift by the height of a form (otari-ai#2125).
+    const dialog = await screen.findByRole("dialog", { name: "Edit provider" })
+    expect(within(dialog).getByText("homelab")).toBeInTheDocument()
+  })
+
   it("prefills stored client options on edit and clears them when emptied", async () => {
     const fetchMock = mockApi({
       stored: [storedProvider("homelab", "1234", true, { timeout: 1800 })],
@@ -1384,7 +1398,7 @@ describe("ProvidersPage", () => {
     // Emptying the field clears the stored options: an explicit null, not an
     // omission, which the API would read as "leave them alone".
     await user.clear(clientArgs)
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -1408,7 +1422,7 @@ describe("ProvidersPage", () => {
     await user.type(screen.getByLabelText("Client options (JSON)"), "oops")
 
     expect(await screen.findByText("Not valid JSON.")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
     expect(
       fetchMock.mock.calls.some(([, init]) => (init?.method ?? "") === "PATCH"),
     ).toBe(false)
@@ -1442,7 +1456,7 @@ describe("ProvidersPage", () => {
       screen.getByLabelText("API base"),
       "https://api.otari.ai/v1",
     )
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
       expect(
@@ -1482,7 +1496,7 @@ describe("ProvidersPage", () => {
       screen.getByLabelText("API base"),
       "https://api.otari.ai/v1",
     )
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() =>
       expect(screen.queryByText("Testing…")).not.toBeInTheDocument(),
     )
@@ -1642,7 +1656,7 @@ describe("ProvidersPage", () => {
       screen.getByLabelText("API base"),
       "https://api.otari.ai/v1",
     )
-    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() =>
       expect(screen.queryByText("Testing…")).not.toBeInTheDocument(),
     )

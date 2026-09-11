@@ -1,8 +1,9 @@
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react"
-import { useEffect, useState } from "react"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Input, Label, TextField } from "@heroui/react"
+import { useState } from "react"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
 // output are required; the cache rates are optional (blank folds those tokens
@@ -62,11 +63,20 @@ export interface SetPriceDialogProps {
   onOpenChange: (open: boolean) => void
   /** How many rows the price will be applied to, for the dialog copy. */
   targetCount?: number
-  isPending: boolean
-  error: unknown
-  onSubmit: (rates: ManualRates, modelKey: string) => void
+  /**
+   * Saves the rates. Awaited, and a rejection is reported inside this dialog:
+   * the pending and error state live here, below the caller's key, so a refused
+   * save cannot greet the next open (feedback.md). The callers each own a
+   * different endpoint, which is why the mutation itself stays with them.
+   */
+  onSubmit: (rates: ManualRates, modelKey: string) => Promise<unknown>
   /** Dialog heading; defaults to "Set price". */
   title?: string
+  /**
+   * The submit's label, which is also its trigger's, word for word
+   * (actions.md). Defaults to "Set price".
+   */
+  submitLabel?: string
   /** Body copy explaining what the rates apply to; a sensible usage default is used when omitted. */
   description?: (count: number) => string
   /**
@@ -92,32 +102,30 @@ export function SetPriceDialog({
   isOpen,
   onOpenChange,
   targetCount = 0,
-  isPending,
-  error,
   onSubmit,
+  submitLabel = "Set price",
   title = "Set price",
   description = defaultDescription,
   collectModelKey = false,
   initialModelKey = "",
 }: SetPriceDialogProps) {
+  // Seeded on mount only, because the caller remounts this on each open.
+  // Reopening for a different selection must not inherit the last rates, which
+  // is a real footgun when the values set money.
   const [modelKey, setModelKey] = useState(initialModelKey)
   const [input, setInput] = useState("")
   const [output, setOutput] = useState("")
   const [cacheRead, setCacheRead] = useState("")
   const [cacheWrite, setCacheWrite] = useState("")
-
-  // The dialog stays mounted across close/reopen, so clear the rate fields each time
-  // it opens: reopening for a different selection must not inherit the last rates
-  // (a real footgun when the values set money).
-  useEffect(() => {
-    if (isOpen) {
-      setModelKey(initialModelKey)
-      setInput("")
-      setOutput("")
-      setCacheRead("")
-      setCacheWrite("")
-    }
-  }, [isOpen, initialModelKey])
+  // One predicate naming every field, so what "unsaved" means cannot drift
+  // from what the form holds.
+  const { isDirty } = useDirtySnapshot({
+    modelKey,
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+  })
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)
@@ -135,8 +143,16 @@ export function SetPriceDialog({
     Number.isNaN(cacheReadRate ?? 0) ||
     Number.isNaN(cacheWriteRate ?? 0)
 
+  // Owned here rather than by the caller: below its key, so both reset with the
+  // draft on the next open.
+  const [isSaving, setIsSaving] = useState(false)
+  const [failure, setFailure] = useState<unknown>(undefined)
+
   const submit = () => {
     if (invalid || inputRate === null || outputRate === null) return
+    if (isSaving) return
+    setFailure(undefined)
+    setIsSaving(true)
     onSubmit(
       {
         input_price_per_million: inputRate,
@@ -150,86 +166,67 @@ export function SetPriceDialog({
       },
       modelKey.trim(),
     )
+      .catch((error: unknown) => setFailure(error))
+      .finally(() => setIsSaving(false))
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
-      {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>{title}</AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-muted">{description(targetCount)}</p>
-                {collectModelKey ? (
-                  <Field
-                    label="Model key"
-                    value={modelKey}
-                    onChange={setModelKey}
-                    placeholder="provider:model"
-                    isRequired
-                    autoFocus
-                    description={
-                      modelKey.trim() !== "" && keyInvalid
-                        ? "Include the provider or instance prefix, as in ollama:llama3.2."
-                        : "The selector callers send as model, prefix included (for example vllm:mistral-small)."
-                    }
-                  />
-                ) : null}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <RateField
-                    label="Input $ / 1M"
-                    value={input}
-                    onChange={setInput}
-                    isRequired
-                    autoFocus={!collectModelKey}
-                  />
-                  <RateField
-                    label="Output $ / 1M"
-                    value={output}
-                    onChange={setOutput}
-                    isRequired
-                  />
-                  <RateField
-                    label="Cache read $ / 1M"
-                    value={cacheRead}
-                    onChange={setCacheRead}
-                  />
-                  <RateField
-                    label="Cache write $ / 1M"
-                    value={cacheWrite}
-                    onChange={setCacheWrite}
-                  />
-                </div>
-                <InfoBanner tone="info">
-                  Leave a cache rate blank to bill those tokens at the input
-                  rate.
-                </InfoBanner>
-                <ErrorBanner error={error} />
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button
-                  variant="ghost"
-                  isDisabled={isPending}
-                  onPress={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={invalid}
-                  isPending={isPending}
-                  onPress={submit}
-                >
-                  Set price
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={title}
+      description={description(targetCount)}
+      submitLabel={submitLabel}
+      onSubmit={submit}
+      isPending={isSaving}
+      isSubmitDisabled={invalid}
+      isDirty={isDirty}
+      error={failure}
+    >
+      {collectModelKey ? (
+        <Field
+          label="Model key"
+          value={modelKey}
+          onChange={setModelKey}
+          placeholder="provider:model"
+          isRequired
+          autoFocus
+          description={
+            modelKey.trim() !== "" && keyInvalid
+              ? "Include the provider or instance prefix, as in ollama:llama3.2."
+              : "The selector callers send as model, prefix included (for example vllm:mistral-small)."
+          }
+        />
       ) : null}
-    </AlertDialog>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <RateField
+          label="Input $ / 1M"
+          value={input}
+          onChange={setInput}
+          isRequired
+          autoFocus={!collectModelKey}
+        />
+        <RateField
+          label="Output $ / 1M"
+          value={output}
+          onChange={setOutput}
+          isRequired
+        />
+        <RateField
+          label="Cache read $ / 1M"
+          value={cacheRead}
+          onChange={setCacheRead}
+        />
+        <RateField
+          label="Cache write $ / 1M"
+          value={cacheWrite}
+          onChange={setCacheWrite}
+        />
+      </div>
+      <InfoBanner tone="info">
+        Leave a cache rate blank to bill those tokens at the input rate.
+      </InfoBanner>
+    </FormDialog>
   )
 }

@@ -29,12 +29,14 @@ function Mounted({
   mailReady = false,
   maintenanceMode = false,
   oauthProviders = [],
+  openSignup = false,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password" | "passkey")[]
   mailReady?: boolean
   maintenanceMode?: boolean
   oauthProviders?: string[]
+  openSignup?: boolean
 }) {
   return (
     <AppProviders>
@@ -44,6 +46,7 @@ function Mounted({
           mail_ready: mailReady,
           maintenance_mode: maintenanceMode,
           oauth_providers: oauthProviders,
+          open_signup: openSignup,
         })}
       >
         {children}
@@ -161,6 +164,108 @@ describe("Login", () => {
     expect(
       screen.getByRole("link", { name: /Set your password/ }),
     ).toBeInTheDocument()
+  })
+
+  // otari-ai#2100. A deployment publishes both typed credentials whenever a
+  // member holds a password on one its operator never claimed, and the screen
+  // used to render the pair as either/or: the master-key box, and nowhere to
+  // put the password that would have worked.
+  it("shows the password form when both typed credentials are published", () => {
+    render(
+      <Mounted signInMethods={["master_key", "password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+    expect(screen.getByLabelText("Password")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Master key")).toBeNull()
+  })
+
+  it("swaps to the master-key box on request, and back", async () => {
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["master_key", "password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(
+      screen.getByRole("button", { name: "Use your master key" }),
+    )
+
+    expect(screen.getByLabelText("Master key")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Email")).toBeNull()
+
+    await user.click(
+      screen.getByRole("button", { name: "Use your email and password" }),
+    )
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+  })
+
+  it("signs in with a member password on a deployment nobody has claimed", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ user_id: "u1" }), { status: 200 }),
+      )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["master_key", "password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "member@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+    const body = String(
+      (fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body,
+    )
+    expect(JSON.parse(body)).toEqual({
+      email: "member@example.com",
+      password: "correct-horse",
+    })
+  })
+
+  it("offers no swap when the gateway publishes one typed credential", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.queryByRole("button", { name: /Use your master key/ }),
+    ).toBeNull()
+  })
+
+  it("offers recovery to a member holding a password on an unclaimed deployment", () => {
+    render(
+      <Mounted mailReady signInMethods={["master_key", "password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("link", { name: /Forgot your password/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("invites registration rather than a claim where signup is open", () => {
+    render(
+      <Mounted mailReady openSignup>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("link", { name: /Create an account/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
   })
 
   it("links to the auth-free welcome page", () => {

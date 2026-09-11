@@ -61,7 +61,7 @@ their markup will not stay in step.
 `design-system/` already holds the recurring pieces, in a directory per design topic:
 `layout/`, `metrics/`, `feedback/`, `forms/`, `actions/`, `data/`, `navigation/`,
 `indicators/`, `overlays/`. Two directories stayed in `shared/components/` and are not part
-of it: `access/` (which reads the deployment) and `deprecated/` (the four that must not be
+of it: `access/` (which reads the deployment) and `deprecated/` (the three that must not be
 used in new code).
 `web/design/DESIGN.md` maps every export to its module and is the inventory. Extend a
 primitive rather than forking it, and add it to that table in the same change when you add

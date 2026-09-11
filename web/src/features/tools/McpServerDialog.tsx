@@ -1,11 +1,11 @@
-import { AlertDialog, Button } from "@heroui/react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import type { WorkspaceMcpServer } from "@/client"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 
 // The form behind both Add and Edit, one component rather than two: the only
 // field that behaves differently between them is the bearer token, and keeping
@@ -85,28 +85,25 @@ export function McpServerDialog({
   error,
   onSubmit,
 }: McpServerDialogProps) {
-  const [name, setName] = useState("")
-  const [url, setUrl] = useState("")
+  // Seeded on mount only. The caller remounts this on each open, so there is
+  // no effect reseeding it: a draft is cleared on the way in rather than on the
+  // way out, and the fields survive the closing animation intact. The token box
+  // is always seeded empty, because there is nothing to seed it from: the
+  // server never returns one.
+  const seed = {
+    name: editing?.name ?? "",
+    url: editing?.url ?? "",
+    hint: editing?.purpose_hint ?? "",
+    allowedTools: (editing?.allowed_tools ?? []).join(", "),
+    enabled: editing?.enabled ?? true,
+  }
+  const [name, setName] = useState(seed.name)
+  const [url, setUrl] = useState(seed.url)
   const [token, setToken] = useState("")
   const [clearToken, setClearToken] = useState(false)
-  const [hint, setHint] = useState("")
-  const [allowedTools, setAllowedTools] = useState("")
-  const [enabled, setEnabled] = useState(true)
-
-  // The dialog stays mounted across close and reopen, so every field is
-  // reseeded each time it opens. The token box is always seeded empty, because
-  // there is nothing to seed it from: leaving a previous edit's typed token in
-  // it would rotate the wrong server's credential on the next save.
-  useEffect(() => {
-    if (!isOpen) return
-    setName(editing?.name ?? "")
-    setUrl(editing?.url ?? "")
-    setToken("")
-    setClearToken(false)
-    setHint(editing?.purpose_hint ?? "")
-    setAllowedTools((editing?.allowed_tools ?? []).join(", "))
-    setEnabled(editing?.enabled ?? true)
-  }, [isOpen, editing])
+  const [hint, setHint] = useState(seed.hint)
+  const [allowedTools, setAllowedTools] = useState(seed.allowedTools)
+  const [enabled, setEnabled] = useState(seed.enabled)
 
   const typedToken = token.trim() !== ""
   // What the row will hold once this save lands, which is what the https rule
@@ -118,6 +115,17 @@ export function McpServerDialog({
   const urlReason = urlProblem(url, willHaveToken)
   const invalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
+  // One predicate naming every field the operator can change, so "is there
+  // anything to lose" cannot drift from what the form actually holds.
+  const { isDirty } = useDirtySnapshot({
+    name,
+    url,
+    token,
+    clearToken,
+    hint,
+    allowedTools,
+    enabled,
+  })
 
   const submit = () => {
     if (invalid) return
@@ -136,134 +144,106 @@ export function McpServerDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
-      {isOpen ? (
-        <AlertDialog.Backdrop
-          // Dismissable, unlike HeroUI's default for an alert dialog: this is
-          // an ordinary edit form rather than a decision that has to be
-          // acknowledged, so clicking away or pressing Escape cancels it.
-          isDismissable
-          isKeyboardDismissDisabled={false}
-        >
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>
-                  {editing ? "Edit MCP server" : "Add MCP server"}
-                </AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-muted">
-                  An MCP endpoint this workspace&rsquo;s requests can reach by
-                  naming its id in{" "}
-                  <code className="font-mono">mcp_server_ids</code>. The gateway
-                  connects to it while a request runs, so it has to be reachable
-                  from the gateway rather than from this browser.
-                </p>
-                <ErrorBanner error={error} />
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={editing ? "Edit MCP server" : "New MCP server"}
+      description={
+        <>
+          An MCP endpoint this workspace's requests can reach by naming its id
+          in <code className="font-mono">mcp_server_ids</code>. The gateway
+          connects to it while a request runs, so it has to be reachable from
+          the gateway rather than from this browser.
+        </>
+      }
+      submitLabel={editing ? "Save server" : "Add MCP server"}
+      onSubmit={submit}
+      isPending={isPending}
+      isSubmitDisabled={invalid}
+      isDirty={isDirty}
+      error={error}
+    >
+      <Field
+        label="Name"
+        value={name}
+        onChange={setName}
+        placeholder="github"
+        isRequired
+        autoFocus
+        description="Unique within this workspace, and what the model sees this server's tools labeled with."
+      />
+      <Field
+        label="URL"
+        value={url}
+        onChange={setUrl}
+        placeholder="https://mcp.example.com/github"
+        isRequired
+        description="The streamable HTTP MCP endpoint."
+        // On the field rather than at the foot of the dialog, which is five
+        // controls further down: the refusal is about this input, so it is
+        // announced with this input.
+        isInvalid={urlReason !== undefined}
+        errorMessage={urlReason}
+      />
 
-                <Field
-                  label="Name"
-                  value={name}
-                  onChange={setName}
-                  placeholder="github"
-                  isRequired
-                  autoFocus
-                  description="Unique within this workspace, and what the model sees this server's tools labeled with."
-                />
-                <Field
-                  label="URL"
-                  value={url}
-                  onChange={setUrl}
-                  placeholder="https://mcp.example.com/github"
-                  isRequired
-                  description="The streamable HTTP MCP endpoint."
-                  // On the field rather than at the foot of the dialog, which
-                  // is five controls further down: the refusal is about this
-                  // input, so it is announced with this input.
-                  isInvalid={urlReason !== undefined}
-                  errorMessage={urlReason}
-                />
+      <div className="flex flex-col gap-2">
+        {/* Masked, like the provider API key it is the sibling of: the gateway
+            stores this encrypted and never reads it back, so it must not sit in
+            the clear on the one form that collects it, nor be offered to a
+            password manager. */}
+        <SecretField
+          label="Authorization token"
+          value={token}
+          // Typing a replacement takes the tick off Remove rather than sitting
+          // beside it: the two say opposite things and only one of them can be
+          // what the operator meant.
+          onChange={(next) => {
+            setToken(next)
+            if (next.trim() !== "") setClearToken(false)
+          }}
+          placeholder={
+            editing?.has_token
+              ? "Leave blank to keep the stored token"
+              : "Optional bearer token"
+          }
+          description={
+            editing?.has_token
+              ? "A token is stored for this server. It is never shown; type a new one only to replace it."
+              : "Sent as a bearer token. Stored encrypted and never shown again."
+          }
+        />
+        {editing?.has_token ? (
+          <Checkbox isSelected={clearToken} onChange={setClearToken}>
+            Remove the stored token
+          </Checkbox>
+        ) : null}
+      </div>
 
-                <div className="flex flex-col gap-2">
-                  {/* Masked, like the provider API key it is the sibling of:
-                      the gateway stores this encrypted and never reads it back,
-                      so it must not sit in the clear on the one form that
-                      collects it, nor be offered to a password manager. */}
-                  <SecretField
-                    label="Authorization token"
-                    value={token}
-                    // Typing a replacement takes the tick off Remove rather
-                    // than sitting beside it: the two say opposite things and
-                    // only one of them can be what the operator meant.
-                    onChange={(next) => {
-                      setToken(next)
-                      if (next.trim() !== "") setClearToken(false)
-                    }}
-                    placeholder={
-                      editing?.has_token
-                        ? "Leave blank to keep the stored token"
-                        : "Optional bearer token"
-                    }
-                    description={
-                      editing?.has_token
-                        ? "A token is stored for this server. It is never shown; type a new one only to replace it."
-                        : "Sent as a bearer token. Stored encrypted and never shown again."
-                    }
-                  />
-                  {editing?.has_token ? (
-                    <Checkbox isSelected={clearToken} onChange={setClearToken}>
-                      Remove the stored token
-                    </Checkbox>
-                  ) : null}
-                </div>
+      <Field
+        label="Purpose hint"
+        value={hint}
+        onChange={setHint}
+        placeholder="Use for repository and issue lookups"
+        description="Prepended to the system message to help the model choose this server's tools."
+      />
+      <Field
+        label="Allowed tools"
+        value={allowedTools}
+        onChange={setAllowedTools}
+        placeholder="Comma separated, blank for every tool"
+        description="Only these tool names are exposed to the model. Blank exposes every tool the server offers."
+      />
 
-                <Field
-                  label="Purpose hint"
-                  value={hint}
-                  onChange={setHint}
-                  placeholder="Use for repository and issue lookups"
-                  description="Prepended to the system message to help the model choose this server's tools."
-                />
-                <Field
-                  label="Allowed tools"
-                  value={allowedTools}
-                  onChange={setAllowedTools}
-                  placeholder="Comma separated, blank for every tool"
-                  description="Only these tool names are exposed to the model. Blank exposes every tool the server offers."
-                />
-
-                <div className="flex flex-col gap-1">
-                  <Checkbox isSelected={enabled} onChange={setEnabled}>
-                    Enabled
-                  </Checkbox>
-                  <span className="text-caption">
-                    A disabled server keeps its row and its token. A request
-                    that names it skips it rather than failing.
-                  </span>
-                </div>
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button
-                  variant="ghost"
-                  isDisabled={isPending}
-                  onPress={() => onOpenChange(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={invalid}
-                  isPending={isPending}
-                  onPress={submit}
-                >
-                  {editing ? "Save server" : "Add server"}
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
-      ) : null}
-    </AlertDialog>
+      <div className="flex flex-col gap-1">
+        <Checkbox isSelected={enabled} onChange={setEnabled}>
+          Enabled
+        </Checkbox>
+        <span className="text-caption">
+          A disabled server keeps its row and its token. A request that names it
+          skips it rather than failing.
+        </span>
+      </div>
+    </FormDialog>
   )
 }

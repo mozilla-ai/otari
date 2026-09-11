@@ -1,14 +1,20 @@
 import { Link } from "@tanstack/react-router"
+import { useState } from "react"
+import { Button } from "@/design-system/actions/Button"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 import { OrganizationRosterCard } from "@/features/organization/OrganizationRosterCard"
 import { canManage, canManageWorkspace } from "@/features/organization/roles"
-import { WorkspaceMembersPanel } from "@/features/workspaces/WorkspaceMembersPanel"
+import {
+  AddWorkspaceMemberDialog,
+  WorkspaceMembersPanel,
+} from "@/features/workspaces/WorkspaceMembersPanel"
 import {
   useOrganizationContext,
   useOrganizationMembers,
 } from "@/shared/api/organizations"
-import { PageHeader } from "@/shared/components/deprecated/PageHeader"
+import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The roster of the workspace the switcher has selected, which is the one page
@@ -28,6 +34,13 @@ export function WorkspaceMembersPage() {
   const { selected, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
   const orgMembers = useOrganizationMembers()
+  // The same query the panel below reads, so this costs no second request. It
+  // is here because who is *already* in the workspace is what makes the rest of
+  // the organization a candidate list, and the control that uses that list now
+  // sits in the heading row.
+  const members = useWorkspaceMembers(selected?.workspace_id ?? null)
+  const [isAdding, setIsAdding] = useState(false)
+  const [openCount, setOpenCount] = useState(0)
 
   // An organization's owners and admins manage every workspace in it, and so
   // does an owner/admin of this workspace specifically, which is the rule the
@@ -45,16 +58,57 @@ export function WorkspaceMembersPage() {
   const hasOrganizationAnswered = !context.isLoading
   const canManageOrganization = canManage(context.data)
 
+  // Both reads, not just the organization's. The candidate list is the
+  // organization minus whoever is already in the workspace, so answering it
+  // from one read offers exactly the people the other one was about to
+  // exclude. Empty until both have landed, which is also what makes
+  // "everyone is already here" safe to say.
+  const bothRostersAnswered = orgMembers.isSuccess && members.isSuccess
+  const present = new Set((members.data ?? []).map((member) => member.user_id))
+  const candidates = bothRostersAnswered
+    ? (orgMembers.data ?? []).filter(
+        (member) =>
+          member.user_id &&
+          member.status === "active" &&
+          !present.has(member.user_id),
+      )
+    : []
+
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
+      <PageIntro
         title="Members"
-        description={
-          selected
-            ? `People assigned to ${selected.name} and their role in it. A workspace's members are a subset of the organization's, so someone joins the organization first.`
-            : "People assigned to this workspace and their role in it."
+        action={
+          selected && canManageSelectedWorkspace ? (
+            <Button
+              variant="primary"
+              onPress={() => {
+                setOpenCount((count) => count + 1)
+                setIsAdding(true)
+              }}
+            >
+              Add member
+            </Button>
+          ) : null
         }
-      />
+      >
+        {selected
+          ? `People assigned to ${selected.name} and their role in it. A workspace's members are a subset of the organization's, so someone joins the organization first.`
+          : "People assigned to this workspace and their role in it."}
+      </PageIntro>
+      {/* Keyed on the open count, so each open remounts a blank form. Clearing
+          the draft on close instead would blank the fields while the dialog is
+          still animating away. */}
+      {selected ? (
+        <AddWorkspaceMemberDialog
+          key={openCount}
+          isOpen={isAdding}
+          onClose={() => setIsAdding(false)}
+          workspaceId={selected.workspace_id}
+          candidates={candidates}
+          rosterResolved={bothRostersAnswered}
+        />
+      ) : null}
       {/* The organization roster is what the panel picks candidates from, and
           what the card below lists, so a failure there is reported rather than
           left to read as "everyone is already in this workspace", which is what
@@ -65,7 +119,6 @@ export function WorkspaceMembersPage() {
           workspaceId={selected.workspace_id}
           workspaceName={selected.name}
           orgMembers={orgMembers.data ?? []}
-          rosterResolved={orgMembers.isSuccess}
           canManageWorkspace={canManageSelectedWorkspace}
         />
       ) : (

@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
-import { Button } from "@/design-system/actions/Button"
-import { Dialog } from "@/design-system/feedback/Dialog"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 
 export interface RenameOrganizationDialogProps {
@@ -34,38 +32,29 @@ export function RenameOrganizationDialog({
   error,
   onSubmit,
 }: RenameOrganizationDialogProps) {
+  // Seeded on mount only, because the caller remounts this on each open: an
+  // abandoned edit, or a switch to another organization while this was shut,
+  // must not be what the next confirm sends.
   const [draft, setDraft] = useState(currentName)
-
-  // The dialog stays mounted across close and reopen, so the draft is reseeded
-  // each time it opens: an abandoned edit, or a switch to another organization
-  // while this was shut, must not be what the next confirm sends.
-  useEffect(() => {
-    if (isOpen) setDraft(currentName)
-  }, [isOpen, currentName])
 
   const trimmed = draft.trim()
   const isUnchanged = trimmed === currentName
 
   return (
-    <Dialog
+    <FormDialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      heading="Change organization name"
-      footer={
-        <>
-          <Button isDisabled={isPending} onPress={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            isDisabled={isUnchanged || trimmed === ""}
-            isPending={isPending}
-            onPress={() => onSubmit(trimmed)}
-          >
-            Change name
-          </Button>
-        </>
-      }
+      size="sm"
+      // The object, not the action: the trigger and the submit both say
+      // "Change organization name", so a title repeating it would be the third
+      // copy of one string (actions.md).
+      title="Organization name"
+      submitLabel="Change organization name"
+      onSubmit={() => onSubmit(trimmed)}
+      isPending={isPending}
+      isSubmitDisabled={isUnchanged || trimmed === ""}
+      isDirty={!isUnchanged}
+      error={error}
     >
       <dl className="flex flex-col gap-1">
         <dt className="text-muted">Current name</dt>
@@ -80,7 +69,6 @@ export function RenameOrganizationDialog({
         description="What this deployment's tenant is called across the dashboard. The slug does not follow a rename."
         reserveMessage
       />
-      <ErrorBanner error={error} />
-    </Dialog>
+    </FormDialog>
   )
 }

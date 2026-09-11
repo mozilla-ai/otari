@@ -1,5 +1,12 @@
 import { Button } from "@heroui/react"
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
+import {
+  FiCheckCircle,
+  FiEdit2,
+  FiSlash,
+  FiUserMinus,
+  FiXCircle,
+} from "react-icons/fi"
 
 import type {
   User as ApiUser,
@@ -26,9 +33,9 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
@@ -191,8 +198,11 @@ function AddMemberForm({
   // Everything the operator can change, against what the form was seeded with.
   // A list of fields drifts: this one read the address alone, so a role or a
   // workspace change with no address typed closed unguarded.
-  const draft = JSON.stringify({ email, role, workspaceIds })
-  const seededDraft = useRef(draft)
+  const { isDirty, reset: reseed } = useDirtySnapshot({
+    email,
+    role,
+    workspaceIds,
+  })
   if (!seeded && rows && rows.length > 0) {
     setSeeded(true)
     // The workspace the shell is on, when it is one of this organization's.
@@ -206,11 +216,12 @@ function AddMemberForm({
     // Part of the seed, not a change: this lands after mount, so a snapshot
     // taken at first render would report the form dirty the moment the roster
     // answers, and Escape would ask before closing an untouched form.
-    seededDraft.current = JSON.stringify({
-      email,
-      role,
-      workspaceIds: defaults,
-    })
+    //
+    // The mount values, not `email` and `role` as they stand: the roster pages
+    // through `fetchAllPaged`, so on a cold cache this can fire after the
+    // operator has typed an address, and seeding what they typed would make the
+    // guard forget it.
+    reseed({ email: "", role: "member", workspaceIds: defaults })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -250,7 +261,7 @@ function AddMemberForm({
       onSubmit={submit}
       isPending={add.isPending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={add.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -329,8 +340,11 @@ function InviteMemberForm({
   const rows = workspaces.data
   const [seeded, setSeeded] = useState(false)
   // Same snapshot as the add form beside it, and the same reason.
-  const draft = JSON.stringify({ email, role, workspaceIds })
-  const seededDraft = useRef(draft)
+  const { isDirty, reset: reseed } = useDirtySnapshot({
+    email,
+    role,
+    workspaceIds,
+  })
   if (!seeded && rows && rows.length > 0) {
     setSeeded(true)
     const preferred = rows.find(
@@ -341,11 +355,12 @@ function InviteMemberForm({
     // Part of the seed, not a change: this lands after mount, so a snapshot
     // taken at first render would report the form dirty the moment the roster
     // answers, and Escape would ask before closing an untouched form.
-    seededDraft.current = JSON.stringify({
-      email,
-      role,
-      workspaceIds: defaults,
-    })
+    //
+    // The mount values, not `email` and `role` as they stand: the roster pages
+    // through `fetchAllPaged`, so on a cold cache this can fire after the
+    // operator has typed an address, and seeding what they typed would make the
+    // guard forget it.
+    reseed({ email: "", role: "member", workspaceIds: defaults })
   }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
@@ -423,7 +438,7 @@ function InviteMemberForm({
       onSubmit={submit}
       isPending={invite.isPending}
       isSubmitDisabled={trimmed === ""}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={invite.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -579,6 +594,14 @@ function MemberEditor({
     })
 
   const canSave = !saving && scopeValid
+  // The workspace rows are a Map, which `JSON.stringify` flattens to `{}`, so
+  // the guard is handed their entries. Both halves seed on mount and neither
+  // changes on its own, so nothing here arms without a keystroke.
+  const { isDirty } = useDirtySnapshot({
+    rows: [...rows],
+    allowedModels,
+    scopeValid,
+  })
 
   const save = async () => {
     if (!canSave || !member.user_id) return
@@ -676,13 +699,22 @@ function MemberEditor({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-5"
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg`: the workspace access table is three columns wide.
+      size="lg"
+      title="Edit member"
+      description={memberLabel(member)}
+      submitLabel="Save"
+      onSubmit={() => void save()}
+      isPending={saving}
+      isSubmitDisabled={!scopeValid}
+      isDirty={isDirty}
+      error={error}
     >
-      <div className="text-title">Edit {memberLabel(member)}</div>
-      <ErrorBanner error={error} />
-
       {/* Withheld entirely from a caller who does not operate the deployment.
           `spendRow` comes from `useUsers(operates)`, so for them it is always
           undefined and the fallback below would report "no spend row yet" for a
@@ -708,7 +740,7 @@ function MemberEditor({
 
       <div className="flex flex-col gap-2">
         <span className="text-body">Workspace access</span>
-        <div className="max-w-3xl overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-lg text-sm">
             <thead>
               <tr className="text-left text-xs text-muted">
@@ -780,7 +812,7 @@ function MemberEditor({
         {/* Gated with the Budget column it explains: "pick a different budget
             here" names a control this caller is not offered. */}
         {operates ? (
-          <span className="max-w-2xl text-xs text-muted">
+          <span className="text-xs text-muted">
             Each workspace holds its own allowance, so someone in two workspaces
             has two. The amount and the reset period belong to the budget, so
             editing one moves everyone held to it; pick a different budget here
@@ -790,16 +822,7 @@ function MemberEditor({
           </span>
         ) : null}
       </div>
-
-      <div className="flex gap-2">
-        <Button variant="primary" isDisabled={!canSave} onPress={save}>
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-        <Button variant="ghost" isDisabled={saving} onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -1113,11 +1136,11 @@ export function OrganizationMembersPage() {
             return (
               <RowActionRow>
                 <RowAction
+                  icon={FiXCircle}
+                  label="Revoke"
                   isDisabled={!manages}
                   onPress={() => setRevoking(member)}
-                >
-                  Revoke
-                </RowAction>
+                />
               </RowActionRow>
             )
           }
@@ -1133,13 +1156,15 @@ export function OrganizationMembersPage() {
             <RowActionRow>
               {manages ? (
                 <RowAction
+                  icon={FiEdit2}
+                  label="Edit"
                   onPress={() => setEditingMember(memberRowKey(member))}
-                >
-                  Edit
-                </RowAction>
+                />
               ) : null}
               {manages && spendRow ? (
                 <RowAction
+                  icon={spendRow.blocked ? FiCheckCircle : FiSlash}
+                  label={spendRow.blocked ? "Unblock" : "Block"}
                   isDisabled={updateUser.isPending}
                   onPress={() =>
                     updateUser.mutate({
@@ -1147,25 +1172,23 @@ export function OrganizationMembersPage() {
                       body: { blocked: !spendRow.blocked },
                     })
                   }
-                >
-                  {spendRow.blocked ? "Unblock" : "Block"}
-                </RowAction>
+                />
               ) : null}
-              <span title={blocked}>
-                <RowAction
-                  // See the Role cell: the reason has to be in the name, not only
-                  // in the tooltip, to reach anything but a pointer.
-                  ariaLabel={
-                    blocked
-                      ? `Remove ${memberLabel(member)} (${blocked})`
-                      : undefined
-                  }
-                  isDisabled={blocked !== undefined}
-                  onPress={() => setRemoving(member)}
-                >
-                  Remove
-                </RowAction>
-              </span>
+              <RowAction
+                icon={FiUserMinus}
+                label="Remove"
+                // See the Role cell: the reason has to be in the name, not only
+                // in the tooltip, to reach anything but a pointer. `RowAction`
+                // puts the same name on a `title` while the action is refused,
+                // which is how the pointer gets it without a wrapper here.
+                ariaLabel={
+                  blocked
+                    ? `Remove ${memberLabel(member)} (${blocked})`
+                    : undefined
+                }
+                isDisabled={blocked !== undefined}
+                onPress={() => setRemoving(member)}
+              />
             </RowActionRow>
           )
         },
@@ -1268,8 +1291,8 @@ export function OrganizationMembersPage() {
         onClose={() => setInviting(false)}
       />
 
-      {/* Keyed on the row so switching which member is edited remounts the
-          form: its fields seed from the member on mount only. */}
+      {/* Keyed on the row: its fields seed from the member on mount only, so
+          the next Edit has to arrive at a fresh form. */}
       {editingRow ? (
         <MemberEditor
           key={memberRowKey(editingRow)}

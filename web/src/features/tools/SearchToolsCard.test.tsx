@@ -162,19 +162,74 @@ describe("SearchToolsCard", () => {
     expect(screen.queryByText("0 tools")).toBeNull()
   })
 
+  it("opens the drill-in when a tool is created, so the new row is on screen", async () => {
+    // The row lands inside a disclosure that is collapsed by default, and the
+    // trigger is on the group heading outside it, so without this the dialog
+    // closes and the only thing that changes is the trailing count.
+    mockApi()
+    const user = userEvent.setup()
+    renderWithClient(<SearchToolsCard docsHref="https://docs.example/tools" />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add search tool" }),
+    )
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.type(dialog.getByLabelText(/^Name/), "second")
+    await pickOption(user, "Provider", "searxng")
+    await user.type(dialog.getByLabelText(/^Backend URL/), "http://other:8080")
+    await user.click(dialog.getByRole("button", { name: "Add search tool" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    // The drill-in itself reports open, which is what puts the new row in
+    // front of the operator; asserting a row's text would pass on a closed
+    // disclosure whose content is still in the DOM.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Configure search tools/ }),
+      ).toHaveAttribute("aria-expanded", "true"),
+    )
+  })
+
+  it("keeps the heading trigger on screen and opens on a blank draft", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderOpened(user)
+    await screen.findByText("local")
+
+    const trigger = screen.getByRole("button", { name: "Add search tool" })
+    await user.click(trigger)
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(trigger).toBeVisible()
+
+    await user.type(
+      within(screen.getByRole("dialog")).getByLabelText(/^Name/),
+      "second",
+    )
+    // A draft this far along is dirty, so the way out is through the guard.
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(trigger)
+    expect(
+      within(await screen.findByRole("dialog")).getByLabelText(/^Name/),
+    ).toHaveValue("")
+  })
+
   it("adds a tool with the chosen provider", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderOpened(user)
     await screen.findByText("local")
 
-    await user.type(screen.getByLabelText("Search tool name"), "second")
-    await pickOption(user, "Search provider", "searxng")
-    await user.type(
-      screen.getByLabelText("Search backend URL"),
-      "http://other:8080",
-    )
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("button", { name: "Add search tool" }))
+    // Scoped to the dialog: the heading's trigger and the submit say the same
+    // words, and every row behind it has a backend-URL box of its own.
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.type(dialog.getByLabelText(/^Name/), "second")
+    await pickOption(user, "Provider", "searxng")
+    await user.type(dialog.getByLabelText(/^Backend URL/), "http://other:8080")
+    await user.click(dialog.getByRole("button", { name: "Add search tool" }))
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
@@ -196,11 +251,14 @@ describe("SearchToolsCard", () => {
     await renderOpened(user)
     await screen.findByText("local")
 
-    await user.type(screen.getByLabelText("Search tool name"), "keyless-exa")
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Add search tool" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.type(dialog.getByLabelText(/^Name/), "keyless-exa")
+    const submit = dialog.getByRole("button", { name: "Add search tool" })
+    expect(submit).toBeDisabled()
 
-    await user.type(screen.getByLabelText("Search API key"), "exa-live")
-    expect(screen.getByRole("button", { name: "Add" })).toBeEnabled()
+    await user.type(dialog.getByLabelText(/^API key/), "exa-live")
+    expect(submit).toBeEnabled()
   })
 
   it("omits api_key from a save that only changes the backend URL", async () => {

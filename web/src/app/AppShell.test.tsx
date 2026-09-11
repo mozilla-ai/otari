@@ -230,6 +230,7 @@ describe("AppShell responsive layout", () => {
     await user.click(await screen.findByRole("link", { name: "Providers" }))
 
     expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
+    expect(document.title).toBe("Providers · Otari")
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
@@ -250,6 +251,7 @@ describe("AppShell responsive layout", () => {
     // Awaited: Providers is one of the three rows gated `operatorOnly`, so it
     // arrives with the membership context rather than with the first paint.
     const providers = await screen.findByRole("link", { name: "Providers" })
+    expect(document.title).toBe("Overview · Otari")
     expect(overview).toHaveAttribute("aria-current", "page")
     expect(providers).not.toHaveAttribute("aria-current")
 

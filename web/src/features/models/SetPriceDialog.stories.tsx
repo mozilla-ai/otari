@@ -2,8 +2,6 @@ import { Button } from "@heroui/react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
-import { ApiError } from "@/shared/api/client"
-
 import { SetPriceDialog } from "./SetPriceDialog"
 
 /**
@@ -19,9 +17,7 @@ const meta = {
   args: {
     isOpen: true,
     onOpenChange: () => {},
-    isPending: false,
-    error: null,
-    onSubmit: () => {},
+    onSubmit: async () => {},
   },
 } satisfies Meta<typeof SetPriceDialog>
 
@@ -62,17 +58,10 @@ export const CustomCopy: Story = {
   },
 }
 
-export const Pending: Story = {
-  args: { targetCount: 1, isPending: true },
-}
-
-/** A refusal: the dialog stays open holding the gateway's own message. */
-export const WithError: Story = {
-  args: {
-    targetCount: 1,
-    error: new ApiError(422, "Output price must be greater than zero."),
-  },
-}
+// No `Pending` or `WithError` story any more: this dialog awaits its caller's
+// save and owns both states itself, below the caller's key, so neither can be
+// handed in as a prop. Both are asserted where they are produced, in the models
+// and activity page tests.
 
 /** Driven from a trigger, so the fields and validation can actually be exercised. */
 export const FromTrigger: Story = {
@@ -90,7 +79,7 @@ export const FromTrigger: Story = {
           collectModelKey
           isOpen={open}
           onOpenChange={setOpen}
-          onSubmit={(rates, modelKey) => {
+          onSubmit={async (rates, modelKey) => {
             setSaved(
               `${modelKey || "(selected models)"} in $${rates.input_price_per_million}/M, out $${rates.output_price_per_million}/M`,
             )

@@ -80,5 +80,6 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     // Closed by default: a gateway old enough to omit this served no catalog to
     // a visitor, and guessing open would render pages that then 401.
     public_catalog: wire.public_catalog ?? false,
+    open_signup: wire.open_signup ?? false,
   }
 }

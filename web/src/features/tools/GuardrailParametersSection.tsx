@@ -49,7 +49,7 @@ export function GuardrailParametersSection({
    * takes none.
    */
   described: boolean
-  disabled: boolean
+  disabled?: boolean
   onChange: (name: string, next: ParameterValues[string]) => void
   onExtraJsonChange: (next: string) => void
 }) {
@@ -67,7 +67,7 @@ export function GuardrailParametersSection({
           scopeName={scopeName}
           values={values}
           errors={errors}
-          disabled={disabled}
+          disabled={disabled ?? false}
           onChange={onChange}
         />
       ) : null}

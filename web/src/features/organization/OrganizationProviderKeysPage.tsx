@@ -1,5 +1,12 @@
 import { Button } from "@heroui/react"
-import { useRef, useState } from "react"
+import { useState } from "react"
+import {
+  FiArchive,
+  FiEdit2,
+  FiRotateCcw,
+  FiStar,
+  FiTrash2,
+} from "react-icons/fi"
 
 import type {
   CreateOrgProviderKeyRequest,
@@ -16,6 +23,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -139,8 +147,7 @@ function KeyForm({
   const pending = create.isPending || update.isPending
   // The whole draft against what the form was seeded with, so a guard cannot
   // miss a field the form grows later.
-  const seeded = useRef(JSON.stringify(draft))
-  const isDirty = JSON.stringify(draft) !== seeded.current
+  const { isDirty } = useDirtySnapshot(draft)
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
@@ -395,37 +402,41 @@ export function OrganizationProviderKeysPage() {
           {row.archived_at ? (
             <>
               <RowAction
+                icon={FiRotateCcw}
+                label="Restore"
                 isDisabled={restore.isPending}
                 onPress={() => restore.mutate(row.id)}
-              >
-                Restore
-              </RowAction>
+              />
               {/* Permanent, and the only place it is offered: the API
                     accepts a delete for an archived key alone. */}
-              <RowAction onPress={() => setPendingDelete(row)}>
-                Delete
-              </RowAction>
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(row)}
+              />
             </>
           ) : (
             <>
               <RowAction
+                icon={FiStar}
+                label="Make default"
                 isDisabled={row.is_org_default || setDefault.isPending}
                 onPress={() => setDefault.mutate(row.id)}
-              >
-                Make default
-              </RowAction>
+              />
               <RowAction
+                icon={FiEdit2}
+                label="Edit"
                 onPress={() => {
                   setAdding(false)
                   setEditingId(row.id)
                 }}
-              >
-                Edit
-              </RowAction>
+              />
               {/* Archive rather than delete: it is reversible, it is what
                     clears the default, and it is the step the API requires
                     before a key can be removed for good. */}
               <ConfirmRowAction
+                icon={FiArchive}
+                label="Archive"
                 confirmLabel="Archive"
                 isPending={archive.isPending}
                 onConfirm={() =>
@@ -435,9 +446,7 @@ export function OrganizationProviderKeysPage() {
                     },
                   })
                 }
-              >
-                Archive
-              </ConfirmRowAction>
+              />
             </>
           )}
         </RowActionRow>

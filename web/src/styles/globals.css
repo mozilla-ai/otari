@@ -2778,8 +2778,8 @@ main {
   min-width: 140px;
 }
 .otari-mcp-table .table__column[data-key="actions"] {
-  width: 160px;
-  min-width: 160px;
+  width: 96px;
+  min-width: 96px;
 }
 .otari-budgets-table .table__row .table__cell {
   height: 58px;
@@ -2794,8 +2794,8 @@ main {
   min-width: 90px;
 }
 .otari-budgets-table .table__column[data-key="actions"] {
-  width: 240px;
-  min-width: 240px;
+  width: 144px;
+  min-width: 144px;
 }
 /* The slack absorber, so the lanes after the identity stay next to it. */
 .otari-budgets-table .table__column[data-key="default-for"] {
@@ -2840,8 +2840,8 @@ main {
   min-width: 190px;
 }
 .otari-accounts-table .table__column[data-key="actions"] {
-  width: 220px;
-  min-width: 220px;
+  width: 96px;
+  min-width: 96px;
 }
 /* The slack absorber, so the lanes after the identity stay adjacent to it. */
 .otari-accounts-table .table__column[data-key="organizations"] {
@@ -2875,8 +2875,8 @@ main {
   min-width: 220px;
 }
 .otari-workspaces-table .table__column[data-key="actions"] {
-  width: 190px;
-  min-width: 190px;
+  width: 96px;
+  min-width: 96px;
 }
 .otari-workspaces-table .table__column[data-key="name"],
 .otari-workspaces-table .table__cell[data-key="name"] {
@@ -2944,8 +2944,8 @@ main {
   min-width: 130px;
 }
 .otari-rate-overrides-table .table__column[data-key="actions"] {
-  width: 160px;
-  min-width: 160px;
+  width: 96px;
+  min-width: 96px;
 }
 /* One width for both, so the model key occupies the same lane in the catalog
    and in the overrides below it. */
@@ -2990,6 +2990,10 @@ main {
   width: 120px;
   min-width: 120px;
 }
+/* The one lane whose armed state is wider than its resting one: the archive
+   confirm swaps a glyph for the word "Archive" and a Cancel beside it, and the
+   column is fixed, so the width is the armed lane's rather than the three
+   glyphs'. Sized to the words, or arming one row would reflow every column. */
 .otari-provider-keys-table .table__column[data-key="actions"] {
   width: 230px;
   min-width: 230px;
@@ -3030,8 +3034,8 @@ main {
   min-width: 120px;
 }
 .otari-members-table .table__column[data-key="actions"] {
-  width: 200px;
-  min-width: 200px;
+  width: 144px;
+  min-width: 144px;
 }
 .otari-members-table .table__column[data-key="member"],
 .otari-members-table .table__cell[data-key="member"] {
@@ -3067,7 +3071,7 @@ main {
   width: 120px;
 }
 .otari-keys-table .table__column[data-key="actions"] {
-  width: 250px;
+  width: 192px;
 }
 .otari-keys-table .otari-table .otari-detail-row > td {
   background-color: transparent;

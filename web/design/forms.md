@@ -307,3 +307,29 @@ guesses a number, and the guess is wrong the moment the caption is retuned.
 // Wrong: a hand-tuned nudge that does not track the caption
 <Button variant="ghost" className="pb-2" onPress={remove}>Remove</Button>
 ```
+
+A field whose action submits it is the one row `FieldAction` cannot answer: its
+message is a sentence long enough to wrap, and a wrapped message makes that field
+taller than the reserve the action holds. Put the button inside the field instead,
+beside the input, and let the message sit under both.
+
+```tsx
+// Correct: one row for the input line, the message under the whole field
+<TextField className="flex max-w-2xl flex-col gap-1">
+  <Label className="text-body">Name</Label>
+  <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+    <Input className="w-full max-w-md" />
+    <Button type="submit" variant="primary">Add a passkey</Button>
+  </div>
+  <FieldMessages>
+    <Description className="text-muted">Optional, and only a label.</Description>
+  </FieldMessages>
+</TextField>
+```
+
+The input keeps `max-w-md`, the house field width; the wrapper is widened to hold
+the input, the gap and the button, so the field does not narrow to make room. The
+`items-start` is what keeps the button its own width once the row stacks: a column
+stretches its children by default, and a full-width button does not press (see
+[actions.md](actions.md)). The input carries `w-full` so the stretch it wanted is
+still the width it gets.

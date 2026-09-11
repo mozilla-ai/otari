@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ResendVerificationPage } from "@/features/auth/ResendVerificationPage"
 import { apiFetch } from "@/shared/api/client"
+import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
@@ -29,7 +30,9 @@ function renderPage() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <ResendVerificationPage />
+      <ThemeProvider>
+        <ResendVerificationPage />
+      </ThemeProvider>
     </QueryClientProvider>,
   )
 }

@@ -160,7 +160,6 @@ among the band components. `Tab` ships with `TabRow` and `RowActionRow` with
 | `FilterMultiComboBox` | `navigation/FilterMultiComboBox.tsx` |
 | `Badge` | `indicators/Badge.tsx` |
 | `UnavailableHere` | `access/UnavailableHere.tsx` |
-| `PageHeader` | `deprecated/PageHeader.tsx` |
 | `StatCard`, `StatStatus` | `deprecated/StatCard.tsx` |
 
 `errorMessage` and `INPUT_CLASS` take `.ts`, not `.tsx`: naming-conventions.md
@@ -230,11 +229,10 @@ directory makes it mechanical: one `noRestrictedImports` pattern for
 `@/shared/components/deprecated/**` scoped to everything outside it, or a
 `foundation.test.ts` assertion that the import count per module never rises.
 
-Four members, two of which this spec is the first to name:
+Three members, two of which this spec is the first to name:
 
 | Component | Call sites | Replacement | Why |
 | --- | --- | --- | --- |
-| `PageHeader` | 4 pages | `layout/PageIntro` | Already in DESIGN.md's table |
 | `StatCard` | 2 pages | `metrics/KpiStrip` + `KpiCell` | Already in DESIGN.md's table |
 | `RowActions` | 1 | `actions/RowActionRow` | actions.md already says "do not reach for it", and puts it on two |
 | `SettingsSection` | **0** | `layout/SettingsGroup` | Undocumented near-duplicate, and an `export const` arrow against this tree's `export function` |
@@ -358,8 +356,8 @@ and is the remaining check.
 - **Delete `deprecated/SettingsSection`.** No call site anywhere. Removing a
   component is a maintainer's call, not a side effect of moving files, so it is
   pinned at zero by a test instead.
-- **Convert the remaining deprecated call sites.** `PageHeader` on 4 pages,
-  `StatCard` on 4 uses in `OverviewPage`, `RowActions` on 1 in `PasskeysCard`. A
+- **Convert the remaining deprecated call sites.** `StatCard` on 4 uses in
+  `OverviewPage`, `RowActions` on 1 in `PasskeysCard`. A
   taxonomy change that also rewrote six pages would stop being reviewable by
   shape. One page at a time, which is what DESIGN.md already invites.
 - **Split `tabs.test.tsx`** if its header docstring is ever separable per

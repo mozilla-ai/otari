@@ -405,3 +405,63 @@ def test_an_entry_without_an_endpoint_uses_the_deployments_own(
     assert response.status_code == 200
     assert guardrails.calls[0]["host"] == "anyguardrails"
     assert guardrails.calls[0]["authorization"] is None
+
+
+def test_a_secret_parameter_is_masked_on_read_and_survives_an_edit_of_the_rest(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A guardrail vendor key typed into the parameter form never comes back out (otari-ai#2118)."""
+    entry = _mandate(
+        client,
+        master_key_header,
+        profile="patronus",
+        mode="monitor",
+        validate_kwargs={"threshold": 0.8, "patronus_api_key": "pat-live-key"},
+        applies_to_all_workspaces=True,
+    )
+    assert entry["validate_kwargs"] == {"threshold": 0.8, "patronus_api_key": "***"}
+
+    listed = client.get(f"{API_ROOT}/organizations/me/guardrails", headers=master_key_header)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["data"][0]["validate_kwargs"] == {"threshold": 0.8, "patronus_api_key": "***"}
+
+    # What the dashboard sends when someone changes the threshold: the whole
+    # dict, with the mask where the credential it was never shown belongs.
+    edited = client.patch(
+        f"{API_ROOT}/organizations/me/guardrails/{entry['id']}",
+        json={"validate_kwargs": {"threshold": 0.5, "patronus_api_key": "***"}},
+        headers=master_key_header,
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["validate_kwargs"] == {"threshold": 0.5, "patronus_api_key": "***"}
+
+
+def test_the_check_is_sent_the_stored_secret_parameter_and_not_the_mask(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Masking is a serialization rule, so the request path still reads the row."""
+    monkeypatch.setenv("OTARI_GUARDRAILS_URL", _DEPLOYMENT_URL)
+    entry = _mandate(
+        client,
+        master_key_header,
+        profile="patronus",
+        mode="monitor",
+        validate_kwargs={"threshold": 0.8, "patronus_api_key": "pat-live-key"},
+        applies_to_all_workspaces=True,
+    )
+    edited = client.patch(
+        f"{API_ROOT}/organizations/me/guardrails/{entry['id']}",
+        json={"validate_kwargs": {"threshold": 0.5, "patronus_api_key": "***"}},
+        headers=master_key_header,
+    )
+    assert edited.status_code == 200, edited.text
+    guardrails = _Guardrails(valid=True)
+
+    response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
+
+    assert response.status_code == 200
+    assert guardrails.calls[0]["validate_kwargs"] == {"threshold": 0.5, "patronus_api_key": "pat-live-key"}

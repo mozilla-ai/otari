@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { FiArchive, FiEdit2 } from "react-icons/fi"
 
 import { ConfirmRowAction } from "./ConfirmRowAction"
 import { RowAction, RowActionRow } from "./RowAction"
@@ -17,14 +18,19 @@ import { RowAction, RowActionRow } from "./RowAction"
  * 1.17:1 in light, 1.11:1 in dark, and 1.03:1 under simulated protanopia. What
  * survives is structural, a second control appearing and the row's layout
  * changing, which no color deficiency hides. Press one below to see it.
+ *
+ * The resting trigger takes a glyph like any other row action, so a lane does
+ * not go half words and half icons. The armed half stays text either way: its
+ * whole job is to name the consequence, and no glyph names one.
  */
 const meta = {
   title: "Design system/Actions/ConfirmRowAction",
   component: ConfirmRowAction,
   args: {
-    confirmLabel: "Archive",
+    confirmLabel: "Archive permanently",
     onConfirm: () => {},
-    children: "Archive",
+    icon: FiArchive,
+    label: "Archive",
   },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof ConfirmRowAction>
@@ -42,6 +48,25 @@ export const Default: Story = {}
  * about what changed.
  */
 export const InALane: Story = {
+  render: () => (
+    <RowActionRow>
+      <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
+      <ConfirmRowAction
+        icon={FiArchive}
+        label="Archive"
+        confirmLabel="Archive permanently"
+        onConfirm={() => {}}
+      />
+    </RowActionRow>
+  ),
+}
+
+/**
+ * The text form, which is what a lane with no glyph to borrow still reaches
+ * for. Both halves are words here, so the escalation is the second control
+ * appearing rather than a glyph becoming a sentence.
+ */
+export const TheTextForm: Story = {
   render: () => (
     <RowActionRow>
       <RowAction onPress={() => {}}>Edit</RowAction>

@@ -1,14 +1,21 @@
 """Masking credential-shaped entries in a free-form settings dict.
 
-Three tables carry arbitrary operator-supplied JSON that a provider SDK is
+Four tables carry arbitrary operator-supplied JSON that something downstream is
 handed as keyword arguments: ``org_provider_keys.client_args``,
-``provider_credentials.client_args``, and ``search_tool_credentials.options``.
-All three are places a real credential legitimately lives (standalone Bedrock
-needs ``aws_secret_access_key`` in ``client_args``; ``services/
-bedrock_gateway_auth.py`` explains why), and none of them may echo one back
-over the API. A leaf module rather than a helper on one of the three models, so
-the second and third serializers share the first's rules instead of carrying a
-copy that drifts.
+``provider_credentials.client_args`` and ``search_tool_credentials.options``,
+which reach a provider SDK, and ``organization_guardrails.validate_kwargs``,
+which reaches the guardrails service. All four are places a real credential
+legitimately lives (standalone Bedrock needs ``aws_secret_access_key`` in
+``client_args``, ``services/bedrock_gateway_auth.py`` explains why; a guardrail
+class can take its vendor key as a parameter), and none of them may echo one
+back over the API. A leaf module rather than a helper on one of the models, so
+the later serializers share the first's rules instead of carrying a copy that
+drifts.
+
+Masking keys off the entry's *name*, which is what lets it hold for a guardrail
+parameter whose catalog entry cannot be read at all: the guardrails service is
+what says which parameters are secret, and the mask has to apply while it is
+down.
 """
 
 from typing import Any

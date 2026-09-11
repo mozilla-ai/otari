@@ -793,6 +793,10 @@ def test_a_member_s_password_leaves_an_unclaimed_deployment_on_the_master_key(tm
     Without this, the first member to complete signup retires the dashboard
     login of an operator who never set a password, by an act of their own and
     with no way back through the UI.
+
+    ``password`` is published beside it rather than instead of it
+    (otari-ai#2100): that member can sign in with the password they just set,
+    and the screen used to offer them the master-key box alone.
     """
     with _client(tmp_path) as client:
         headers = {"Otari-Key": MASTER_KEY}
@@ -804,7 +808,7 @@ def test_a_member_s_password_leaves_an_unclaimed_deployment_on_the_master_key(tm
 
         _add_a_password(tmp_path, "member@example.com", PASSWORD)
 
-        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key", "password"]
         client.cookies.clear()
         assert client.post(f"{API_ROOT}/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
 
@@ -838,6 +842,57 @@ def test_a_member_changing_their_password_is_told_the_master_key_still_signs_in(
         assert changed.json() == {"email": "member@example.com", "master_key_sign_in_retired": False}
 
 
+def test_a_member_on_an_unclaimed_deployment_is_offered_the_form_that_works(tmp_path: Path) -> None:
+    """otari-ai#2100: the screen used to show them the one box they cannot fill.
+
+    ``POST /api/v1/auth/session`` verifies a password against whichever identity
+    the address resolves to and has never consulted the operator's row, so this
+    member could always sign in. Publishing the typed credentials as mutually
+    exclusive is what hid the form from them, leaving a master-key box they hold
+    no key for as the only thing on the page.
+    """
+    with _client(tmp_path) as client:
+        headers = {"Otari-Key": MASTER_KEY}
+        _sign_in_with_master_key(client)
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
+        )
+        assert added.status_code == 201, added.text
+        _add_a_password(tmp_path, "member@example.com", PASSWORD)
+        client.cookies.clear()
+
+        assert "password" in client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"]
+        signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "member@example.com", "password": PASSWORD})
+        assert signed_in.status_code == 200, signed_in.text
+
+
+def test_deactivating_the_only_password_holder_withdraws_the_form(tmp_path: Path) -> None:
+    """Published only while it could answer, the rule every method here follows.
+
+    ``authenticate`` refuses a deactivated identity, so a deployment whose one
+    password-holder has been deactivated is one where the form's only outcome is
+    a refusal.
+    """
+    with _client(tmp_path) as client:
+        headers = {"Otari-Key": MASTER_KEY}
+        _sign_in_with_master_key(client)
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=headers
+        )
+        assert added.status_code == 201, added.text
+        _add_a_password(tmp_path, "member@example.com", PASSWORD)
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+        with engine.begin() as connection:
+            connection.execute(
+                text('UPDATE "user" SET is_active = 0 WHERE email = :email'),
+                {"email": "member@example.com"},
+            )
+        engine.dispose()
+
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
+
+
 def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -845,9 +900,10 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
 
     Platform identities carry ``hashed_password`` already, so a backfilled
     deployment would otherwise read as claimed before anyone had claimed it:
-    ``/api/v1/bootstrap`` would publish ``["password"]`` and the sign-in screen
-    would ask the operator holding the master key for credentials that are not
-    theirs.
+    ``/api/v1/bootstrap`` would drop ``master_key`` and the sign-in screen would
+    ask the operator holding the master key for credentials that are not theirs.
+    ``password`` is published too, since those identities really can sign in
+    with one; what must not happen is the master key disappearing beside it.
     """
     with _client(tmp_path) as client:
         # The shape a backfill leaves behind: rows this gateway never
@@ -878,7 +934,7 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
                 },
             )
 
-        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key", "password"]
 
         # And the master key is not refused as a retired login. It cannot mint a
         # session on this database either, but for the reason that actually

@@ -174,6 +174,31 @@ def _generated_slug(name: str) -> str:
     return f"{stem or _SLUG_FALLBACK_STEM}-{secrets.token_hex(4)}"
 
 
+# What ``_default_organization_name`` wraps its subject in, and how much of the
+# column that leaves. ``Organization.name`` holds 255 and both possible subjects
+# reach it on their own (``SignupRequest.full_name`` is capped at 255, and so is
+# an address), so an untruncated name overflows the column and fails the flush on
+# a signup that is otherwise perfectly valid.
+_DEFAULT_ORGANIZATION_NAME_SUFFIX = "'s organization"
+_DEFAULT_ORGANIZATION_SUBJECT_LIMIT = 255 - len(_DEFAULT_ORGANIZATION_NAME_SUFFIX)
+
+
+def _default_organization_name(email: str, full_name: str | None) -> str:
+    """What to call the organization a self-serve signup lands in.
+
+    The platform's own wording, falling back to the address's local part when no
+    name was given, because the alternative is every such organization sharing
+    one name in a switcher that shows nothing else about them.
+
+    Truncated to fit the column rather than validated against it: the subject is
+    a name somebody typed about themselves, not a value with a contract, so a
+    long one is shortened where refusing the signup over it would be absurd. The
+    owner can rename the organization afterwards either way.
+    """
+    who = (full_name or "").strip() or email.split("@", 1)[0]
+    return f"{who[:_DEFAULT_ORGANIZATION_SUBJECT_LIMIT].strip()}{_DEFAULT_ORGANIZATION_NAME_SUFFIX}"
+
+
 # The most workspaces a switcher seed carries. Above the repository's paging
 # default so the common deployment is never truncated, and bounded so one
 # unusually large organization cannot make every context read unbounded.
@@ -429,6 +454,67 @@ class OrganizationService:
             raise
 
         return OrganizationPublic.model_validate(organization)
+
+    async def provision_signup_tenancy(self, *, email: str, full_name: str | None) -> User:
+        """Create an identity for an address nobody has added, with a tenant of its own.
+
+        The self-serve half of signup (otari-ai#2100), reached only where
+        ``open_signup`` is on: an address an admin already put on the roster is
+        claimed by ``user_service.create_user_for_signup`` instead and nothing
+        here runs. The rows are the ones every other identity on the deployment
+        holds, which is the point: an account that arrived this way is not a
+        second kind of member, so nothing downstream has to ask how it got here.
+
+        The sibling of ``create_organization_for_user`` with the order reversed.
+        That one has a caller already and creates an organization for them; this
+        one has an address and no identity yet, and ``User.active_organization_id``
+        is not nullable, so the organization is created first and stamped with
+        its creator once the identity exists. No role check for the same reason
+        that one gives, and a stronger one: there is no organization to hold a
+        role in until this returns.
+
+        **Flushes and does not commit**, unlike every other write on this
+        service. The caller is mid-unit-of-work: signup hashes a password and
+        mints a verification token onto the row this returns, and an account
+        committed here without them would be a live, password-less,
+        unverifiable identity if the rest of that call failed.
+
+        The slug carries ``_generated_slug``'s random suffix, so two people
+        registering under the same name do not collide and the organization can
+        never be mistaken for first boot's ``default``.
+        """
+        address = _validated_email(email)
+        name = _default_organization_name(address, full_name)
+        organization = await self.organizations.create_organization(
+            name=name,
+            slug=_generated_slug(name),
+            created_by_user_id=None,
+        )
+        identity = await self.users.create_local_identity(
+            full_name=full_name,
+            email=address,
+            active_organization_id=organization.id,
+        )
+        await self.organizations.update_organization(organization, {"created_by_user_id": identity.id})
+        await self.members.create_membership(
+            organization_id=organization.id,
+            user_id=identity.id,
+            role="owner",
+        )
+        # The request-plane owner every other roster path mints beside a
+        # membership (`create_active_organization_member_for_user`), without
+        # which this identity could not hold a key in the organization it owns.
+        await get_or_create_attribution_user(self.db, user_id=str(identity.id), alias=address)
+        workspace = await self.workspace_rows.create_workspace(
+            name=DEFAULT_WORKSPACE_NAME,
+            organization_id=organization.id,
+            created_by_user_id=identity.id,
+        )
+        await self._apply_workspace_assignments(
+            user_id=identity.id,
+            assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],
+        )
+        return identity
 
     async def list_organization_memberships_for_user(
         self,

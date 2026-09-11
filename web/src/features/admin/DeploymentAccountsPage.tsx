@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { FiCheckCircle, FiShield, FiSlash, FiUserX } from "react-icons/fi"
 
 import type { DeploymentUser } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -139,56 +140,64 @@ export function DeploymentAccountsPage() {
           const blocked = accountLockoutReason(account)
           return (
             <RowActionRow>
-              {/* `title` reaches a mouse; the reason is folded into the
-                  control's own name so it reaches everyone else too, as the
-                  organization roster does it. A disabled control is not
-                  focusable, so an `aria-describedby` would never be announced. */}
-              <span title={account.is_superuser ? blocked : undefined}>
-                <RowAction
-                  isDisabled={
-                    (account.is_superuser && blocked !== undefined) ||
-                    update.isPending
+              {/* The reason is folded into each control's own name, as the
+                  organization roster does it: a disabled control is not
+                  focusable, so an `aria-describedby` would never be announced
+                  and the name is the only channel left. `RowAction` repeats that
+                  name on a native `title` while the action is refused, which is
+                  what reaches a mouse, so neither of these needs a wrapper of
+                  its own for it any more. */}
+              <RowAction
+                // An X for taking something away, a strike for turning
+                // something off, which is the split the pair below follows
+                // too: the shield is the grant, and a shield with a strike
+                // through it said "suspended" where this means "removed".
+                icon={account.is_superuser ? FiUserX : FiShield}
+                label={
+                  account.is_superuser ? "Remove operator" : "Make operator"
+                }
+                isDisabled={
+                  (account.is_superuser && blocked !== undefined) ||
+                  update.isPending
+                }
+                ariaLabel={
+                  account.is_superuser
+                    ? `Remove operator access from ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
+                    : `Grant operator access to ${accountLabel(account)}`
+                }
+                onPress={() =>
+                  update.mutate({
+                    id: account.id,
+                    body: { is_superuser: !account.is_superuser },
+                  })
+                }
+              />
+              <RowAction
+                // The same strike the roster's Block wears, because it is
+                // the same act: this person's access stops, their record
+                // stays.
+                icon={account.is_active ? FiSlash : FiCheckCircle}
+                label={account.is_active ? "Deactivate" : "Reactivate"}
+                isDisabled={
+                  (account.is_active && blocked !== undefined) ||
+                  update.isPending
+                }
+                ariaLabel={
+                  account.is_active
+                    ? `Deactivate ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
+                    : `Reactivate ${accountLabel(account)}`
+                }
+                onPress={() => {
+                  if (account.is_active) {
+                    setDeactivating(account)
+                    return
                   }
-                  ariaLabel={
-                    account.is_superuser
-                      ? `Remove operator access from ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
-                      : `Grant operator access to ${accountLabel(account)}`
-                  }
-                  onPress={() =>
-                    update.mutate({
-                      id: account.id,
-                      body: { is_superuser: !account.is_superuser },
-                    })
-                  }
-                >
-                  {account.is_superuser ? "Remove operator" : "Make operator"}
-                </RowAction>
-              </span>
-              <span title={account.is_active ? blocked : undefined}>
-                <RowAction
-                  isDisabled={
-                    (account.is_active && blocked !== undefined) ||
-                    update.isPending
-                  }
-                  ariaLabel={
-                    account.is_active
-                      ? `Deactivate ${accountLabel(account)}${blocked ? ` (${blocked})` : ""}`
-                      : `Reactivate ${accountLabel(account)}`
-                  }
-                  onPress={() => {
-                    if (account.is_active) {
-                      setDeactivating(account)
-                      return
-                    }
-                    update.mutate({
-                      id: account.id,
-                      body: { is_active: true },
-                    })
-                  }}
-                >
-                  {account.is_active ? "Deactivate" : "Reactivate"}
-                </RowAction>
-              </span>
+                  update.mutate({
+                    id: account.id,
+                    body: { is_active: true },
+                  })
+                }}
+              />
             </RowActionRow>
           )
         },

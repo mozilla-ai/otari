@@ -1,5 +1,6 @@
 import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
+import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { OrganizationPricingOverride } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -12,17 +13,12 @@ import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
-  useCreateOrganizationPricing,
   useDeleteOrganizationPricing,
   useOrganizationPricing,
-  useReplaceOrganizationPricing,
 } from "@/shared/api/pricing"
 import { formatDateTime, formatRate } from "@/shared/helpers/format"
 import { useUrlValue } from "@/shared/helpers/urlState"
-import {
-  PricingOverrideDialog,
-  type PricingOverrideDraft,
-} from "./PricingOverrideDialog"
+import { PricingOverrideDialog } from "./PricingOverrideDialog"
 import { overrideStatus } from "./pricingOverride"
 import { canManage } from "./roles"
 
@@ -84,11 +80,12 @@ function period(override: OrganizationPricingOverride): string {
 export function RateOverridesCard() {
   const context = useOrganizationContext()
   const overrides = useOrganizationPricing()
-  const create = useCreateOrganizationPricing()
-  const replace = useReplaceOrganizationPricing()
   const remove = useDeleteOrganizationPricing()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in rather than on the way out. These values set money.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationPricingOverride>()
   const [pendingDelete, setPendingDelete] =
     useState<OrganizationPricingOverride>()
@@ -97,6 +94,7 @@ export function RateOverridesCard() {
   const rows = overrides.data ?? []
 
   const openAdd = () => {
+    setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
@@ -107,37 +105,18 @@ export function RateOverridesCard() {
   const requestedKey = useUrlValue("override")
   useEffect(() => {
     if (requestedKey && canEdit) {
+      // Bumped like the two openers below it: the dialog seeds its draft on
+      // mount, so an open that does not remount would show a blank model key.
+      setOpenCount((count) => count + 1)
       setEditing(undefined)
       setDialogOpen(true)
     }
   }, [requestedKey, canEdit])
 
   const openEdit = (override: OrganizationPricingOverride) => {
+    setOpenCount((count) => count + 1)
     setEditing(override)
     setDialogOpen(true)
-  }
-
-  const submit = (draft: PricingOverrideDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
-    if (editing) {
-      // model_key is absent from the update body: the endpoint refuses to
-      // repoint an override at another model.
-      const { model_key: _unused, ...rest } = draft
-      // The endpoint requires a start on a replacement, so that an omitted one
-      // cannot silently move a stored period to the present. The dialog blocks a
-      // blank start while editing; this narrows the type and is the belt to that
-      // brace.
-      if (rest.effective_from === null) return
-      replace.mutate(
-        {
-          id: editing.id,
-          body: { ...rest, effective_from: rest.effective_from },
-        },
-        onDone,
-      )
-      return
-    }
-    create.mutate(draft, onDone)
   }
 
   const columns: DataTableColumn<OrganizationPricingOverride>[] = [
@@ -201,15 +180,18 @@ export function RateOverridesCard() {
         // Both controls stay mounted and disabled for a reader rather than
         // vanishing, so the page does not reflow between roles.
         <RowActionRow>
-          <RowAction isDisabled={!canEdit} onPress={() => openEdit(row)}>
-            Edit
-          </RowAction>
           <RowAction
+            icon={FiEdit2}
+            label="Edit"
+            isDisabled={!canEdit}
+            onPress={() => openEdit(row)}
+          />
+          <RowAction
+            icon={FiTrash2}
+            label="Delete"
             isDisabled={!canEdit}
             onPress={() => setPendingDelete(row)}
-          >
-            Delete
-          </RowAction>
+          />
         </RowActionRow>
       ),
     },
@@ -271,15 +253,15 @@ export function RateOverridesCard() {
         />
       </TableScrollFrame>
 
+      {/* Keyed on the open count, so each open remounts a blank form. */}
       <PricingOverrideDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
         initialModelKey={requestedKey}
         existing={rows}
-        isPending={create.isPending || replace.isPending}
-        error={editing ? replace.error : create.error}
-        onSubmit={submit}
+        onSaved={() => setDialogOpen(false)}
       />
 
       <ConfirmDialog

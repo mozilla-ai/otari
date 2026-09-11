@@ -48,7 +48,7 @@ async function openRenameDialog(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
     await screen.findByRole("button", { name: "Change organization name" }),
   )
-  return within(await screen.findByRole("alertdialog"))
+  return within(await screen.findByRole("dialog"))
 }
 
 afterEach(() => {
@@ -106,7 +106,9 @@ describe("OrganizationGeneralPage", () => {
     const name = dialog.getByRole("textbox", { name: /New name/ })
     await user.clear(name)
     await user.type(name, "Platform")
-    await user.click(dialog.getByRole("button", { name: "Change name" }))
+    await user.click(
+      dialog.getByRole("button", { name: "Change organization name" }),
+    )
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toContain(`${API_ROOT}/organizations/me`)
@@ -122,9 +124,11 @@ describe("OrganizationGeneralPage", () => {
     const name = dialog.getByRole("textbox", { name: /New name/ })
     await user.clear(name)
     await user.type(name, "Platform")
-    await user.click(dialog.getByRole("button", { name: "Change name" }))
+    await user.click(
+      dialog.getByRole("button", { name: "Change organization name" }),
+    )
 
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("will not save a name that has not changed", async () => {
@@ -133,7 +137,9 @@ describe("OrganizationGeneralPage", () => {
     renderPage(<OrganizationGeneralPage />)
 
     const dialog = await openRenameDialog(user)
-    expect(dialog.getByRole("button", { name: "Change name" })).toBeDisabled()
+    expect(
+      dialog.getByRole("button", { name: "Change organization name" }),
+    ).toBeDisabled()
   })
 
   it("reports a rejected rename in the dialog rather than closing over it", async () => {
@@ -150,7 +156,9 @@ describe("OrganizationGeneralPage", () => {
     const name = dialog.getByRole("textbox", { name: /New name/ })
     await user.clear(name)
     await user.type(name, "Platform")
-    await user.click(dialog.getByRole("button", { name: "Change name" }))
+    await user.click(
+      dialog.getByRole("button", { name: "Change organization name" }),
+    )
 
     expect(await dialog.findByRole("alert")).toHaveTextContent(
       "Name already taken",

@@ -1,9 +1,14 @@
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react"
-import { useEffect, useState } from "react"
+import { Input, Label, TextField } from "@heroui/react"
+import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
-import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import {
+  useCreateOrganizationPricing,
+  useReplaceOrganizationPricing,
+} from "@/shared/api/pricing"
 
 import {
   findOverlapping,
@@ -34,6 +39,8 @@ interface RateFieldProps {
   onChange: (value: string) => void
   isRequired?: boolean
   description?: string
+  /** Takes focus on mount, for the instance that is the form's first field. */
+  autoFocus?: boolean
 }
 
 function RateField({
@@ -42,6 +49,7 @@ function RateField({
   onChange,
   isRequired,
   description,
+  autoFocus,
 }: RateFieldProps) {
   return (
     <TextField
@@ -51,7 +59,7 @@ function RateField({
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input inputMode="decimal" placeholder="0.00" />
+      <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
       {description ? <span className="text-caption">{description}</span> : null}
     </TextField>
   )
@@ -87,9 +95,8 @@ export interface PricingOverrideDialogProps {
   initialModelKey?: string
   /** Every stored override, so an overlapping period is refused before the request. */
   existing: readonly OrganizationPricingOverride[]
-  isPending: boolean
-  error: unknown
-  onSubmit: (draft: PricingOverrideDraft) => void
+  /** Called once a save has landed, so the caller can close this. */
+  onSaved: () => void
 }
 
 export function PricingOverrideDialog({
@@ -98,33 +105,68 @@ export function PricingOverrideDialog({
   editing,
   initialModelKey = "",
   existing,
-  isPending,
-  error,
-  onSubmit,
+  onSaved,
 }: PricingOverrideDialogProps) {
-  const [modelKey, setModelKey] = useState("")
-  const [input, setInput] = useState("")
-  const [output, setOutput] = useState("")
-  const [cacheRead, setCacheRead] = useState("")
-  const [cacheWrite, setCacheWrite] = useState("")
-  const [cacheWrite1h, setCacheWrite1h] = useState("")
-  const [from, setFrom] = useState("")
-  const [to, setTo] = useState("")
-
-  // The dialog stays mounted across close and reopen, so every field is reseeded
-  // each time it opens. Not a nicety: these values set money, and inheriting the
-  // last row's rates into a different model is the expensive kind of mistake.
-  useEffect(() => {
-    if (!isOpen) return
-    setModelKey(editing?.model_key ?? initialModelKey)
-    setInput(rateToInput(editing?.input_price_per_million))
-    setOutput(rateToInput(editing?.output_price_per_million))
-    setCacheRead(rateToInput(editing?.cache_read_price_per_million))
-    setCacheWrite(rateToInput(editing?.cache_write_price_per_million))
-    setCacheWrite1h(rateToInput(editing?.cache_write_1h_price_per_million))
-    setFrom(toLocalInput(editing?.effective_from))
-    setTo(toLocalInput(editing?.effective_to))
-  }, [isOpen, editing, initialModelKey])
+  // Below the caller's key with the draft, so a refused save cannot greet the
+  // next open (feedback.md: the component that renders the FormDialog owns the
+  // draft *and* its mutation).
+  const create = useCreateOrganizationPricing()
+  const replace = useReplaceOrganizationPricing()
+  const save = (draft: PricingOverrideDraft) => {
+    const onDone = { onSuccess: onSaved }
+    if (editing) {
+      // model_key is absent from the update body: the endpoint refuses to
+      // repoint an override at another model.
+      const { model_key: _unused, ...rest } = draft
+      // The endpoint requires a start on a replacement, so that an omitted one
+      // cannot silently move a stored period to the present. The form blocks a
+      // blank start while editing; this narrows the type and is the belt to
+      // that brace.
+      if (rest.effective_from === null) return
+      replace.mutate(
+        {
+          id: editing.id,
+          body: { ...rest, effective_from: rest.effective_from },
+        },
+        onDone,
+      )
+      return
+    }
+    create.mutate(draft, onDone)
+  }
+  // Seeded on mount only, because the caller remounts this on each open. Not a
+  // nicety: these values set money, and inheriting the last row's rates into a
+  // different model is the expensive kind of mistake.
+  const seed = {
+    modelKey: editing?.model_key ?? initialModelKey,
+    input: rateToInput(editing?.input_price_per_million),
+    output: rateToInput(editing?.output_price_per_million),
+    cacheRead: rateToInput(editing?.cache_read_price_per_million),
+    cacheWrite: rateToInput(editing?.cache_write_price_per_million),
+    cacheWrite1h: rateToInput(editing?.cache_write_1h_price_per_million),
+    from: toLocalInput(editing?.effective_from),
+    to: toLocalInput(editing?.effective_to),
+  }
+  const [modelKey, setModelKey] = useState(seed.modelKey)
+  const [input, setInput] = useState(seed.input)
+  const [output, setOutput] = useState(seed.output)
+  const [cacheRead, setCacheRead] = useState(seed.cacheRead)
+  const [cacheWrite, setCacheWrite] = useState(seed.cacheWrite)
+  const [cacheWrite1h, setCacheWrite1h] = useState(seed.cacheWrite1h)
+  const [from, setFrom] = useState(seed.from)
+  const [to, setTo] = useState(seed.to)
+  // One predicate naming every field, so what "unsaved" means cannot drift
+  // from what the form holds.
+  const { isDirty } = useDirtySnapshot({
+    modelKey,
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    cacheWrite1h,
+    from,
+    to,
+  })
 
   const inputRate = parseRate(input)
   const outputRate = parseRate(output)
@@ -175,7 +217,7 @@ export function PricingOverrideDialog({
 
   const submit = () => {
     if (invalid || inputRate === undefined || outputRate === undefined) return
-    onSubmit({
+    save({
       model_key: modelKey.trim(),
       input_price_per_million: inputRate,
       output_price_per_million: outputRate,
@@ -194,127 +236,102 @@ export function PricingOverrideDialog({
   }
 
   return (
-    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
-      {isOpen ? (
-        <AlertDialog.Backdrop>
-          <AlertDialog.Container placement="center" size="lg">
-            <AlertDialog.Dialog>
-              <AlertDialog.Header>
-                <AlertDialog.Heading>
-                  {editing ? "Edit rate override" : "Add rate override"}
-                </AlertDialog.Heading>
-              </AlertDialog.Header>
-              <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-muted">
-                  What this organization pays for a model, above the
-                  deployment&rsquo;s own price list. Requests in the period
-                  below are billed at these rates; a model with no override here
-                  keeps being priced by the deployment.
-                </p>
-                <ErrorBanner error={error} />
-                {editing ? (
-                  <div className="flex flex-col gap-1">
-                    <span className="text-body">Model</span>
-                    <code className="font-mono text-caption">
-                      {editing.model_key}
-                    </code>
-                    <span className="text-caption">
-                      A model cannot be changed here. Delete this override and
-                      add one for the other model.
-                    </span>
-                  </div>
-                ) : (
-                  <Field
-                    label="Model key"
-                    value={modelKey}
-                    onChange={setModelKey}
-                    placeholder="provider:model"
-                    isRequired
-                    autoFocus
-                    description="For example openai:gpt-4o. A provider instance name works too."
-                  />
-                )}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <RateField
-                    label="Input, per 1M tokens"
-                    value={input}
-                    onChange={setInput}
-                    isRequired
-                  />
-                  <RateField
-                    label="Output, per 1M tokens"
-                    value={output}
-                    onChange={setOutput}
-                    isRequired
-                  />
-                  <RateField
-                    label="Cache read, per 1M tokens"
-                    value={cacheRead}
-                    onChange={setCacheRead}
-                    description="Leave blank to price cached reads as fresh input."
-                  />
-                  <RateField
-                    label="Cache write, per 1M tokens"
-                    value={cacheWrite}
-                    onChange={setCacheWrite}
-                    description="Leave blank to price cache writes as fresh input."
-                  />
-                  <RateField
-                    label="Cache write, 1 hour TTL"
-                    value={cacheWrite1h}
-                    onChange={setCacheWrite1h}
-                    description="Anthropic's longer cache TTL. Blank falls back to the ordinary cache-write rate."
-                  />
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <TextField
-                    value={from}
-                    onChange={setFrom}
-                    isRequired={editing !== undefined}
-                    className="flex flex-col gap-1"
-                  >
-                    <Label className="text-body">Applies from</Label>
-                    <Input type="datetime-local" />
-                    <span className="text-caption">
-                      {editing
-                        ? "Required when editing: a replacement states the whole period."
-                        : "Blank starts it now."}
-                    </span>
-                  </TextField>
-                  <TextField
-                    value={to}
-                    onChange={setTo}
-                    className="flex flex-col gap-1"
-                  >
-                    <Label className="text-body">Applies until</Label>
-                    <Input type="datetime-local" />
-                    <span className="text-caption">
-                      Blank leaves it open ended. The end is exclusive, so the
-                      next period may start at the same moment.
-                    </span>
-                  </TextField>
-                </div>
-                {blockedReason ? (
-                  <p className="text-sm text-danger">{blockedReason}</p>
-                ) : null}
-              </AlertDialog.Body>
-              <AlertDialog.Footer>
-                <Button variant="ghost" onPress={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={invalid}
-                  isPending={isPending}
-                  onPress={submit}
-                >
-                  {editing ? "Save override" : "Add override"}
-                </Button>
-              </AlertDialog.Footer>
-            </AlertDialog.Dialog>
-          </AlertDialog.Container>
-        </AlertDialog.Backdrop>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={editing ? "Edit rate override" : "New rate override"}
+      description="What this organization pays for a model, above the deployment's own price list. Requests in the period below are billed at these rates; a model with no override here keeps being priced by the deployment."
+      submitLabel={editing ? "Save override" : "Add override"}
+      onSubmit={submit}
+      isPending={create.isPending || replace.isPending}
+      isSubmitDisabled={invalid}
+      isDirty={isDirty}
+      error={editing ? replace.error : create.error}
+    >
+      {editing ? (
+        <div className="flex flex-col gap-1">
+          <span className="text-body">Model</span>
+          <code className="font-mono text-caption">{editing.model_key}</code>
+          <span className="text-caption">
+            A model cannot be changed here. Delete this override and add one for
+            the other model.
+          </span>
+        </div>
+      ) : (
+        <Field
+          label="Model key"
+          value={modelKey}
+          onChange={setModelKey}
+          placeholder="provider:model"
+          isRequired
+          autoFocus
+          description="For example openai:gpt-4o. A provider instance name works too."
+        />
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <RateField
+          label="Input, per 1M tokens"
+          value={input}
+          onChange={setInput}
+          isRequired
+          // The first field on the edit path: the model key's own `Field`, which
+          // carries `autoFocus` on the add path, is replaced by a read-only
+          // block there, and focus was landing on the frame's Close control.
+          autoFocus={editing !== undefined}
+        />
+        <RateField
+          label="Output, per 1M tokens"
+          value={output}
+          onChange={setOutput}
+          isRequired
+        />
+        <RateField
+          label="Cache read, per 1M tokens"
+          value={cacheRead}
+          onChange={setCacheRead}
+          description="Leave blank to price cached reads as fresh input."
+        />
+        <RateField
+          label="Cache write, per 1M tokens"
+          value={cacheWrite}
+          onChange={setCacheWrite}
+          description="Leave blank to price cache writes as fresh input."
+        />
+        <RateField
+          label="Cache write, 1 hour TTL"
+          value={cacheWrite1h}
+          onChange={setCacheWrite1h}
+          description="Anthropic's longer cache TTL. Blank falls back to the ordinary cache-write rate."
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <TextField
+          value={from}
+          onChange={setFrom}
+          isRequired={editing !== undefined}
+          className="flex flex-col gap-1"
+        >
+          <Label className="text-body">Applies from</Label>
+          <Input type="datetime-local" />
+          <span className="text-caption">
+            {editing
+              ? "Required when editing: a replacement states the whole period."
+              : "Blank starts it now."}
+          </span>
+        </TextField>
+        <TextField value={to} onChange={setTo} className="flex flex-col gap-1">
+          <Label className="text-body">Applies until</Label>
+          <Input type="datetime-local" />
+          <span className="text-caption">
+            Blank leaves it open ended. The end is exclusive, so the next period
+            may start at the same moment.
+          </span>
+        </TextField>
+      </div>
+      {blockedReason ? (
+        <p className="text-sm text-danger">{blockedReason}</p>
       ) : null}
-    </AlertDialog>
+    </FormDialog>
   )
 }

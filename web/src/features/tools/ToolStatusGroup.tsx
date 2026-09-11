@@ -12,11 +12,12 @@ import { settingInputId } from "@/features/tools/ToolSettingRows"
 /**
  * The declaration a client sends, as a value to take.
  *
- * Sized to its content rather than to the lane, which is what a full-width
- * readonly field got wrong: the value is 28 characters and the field was 800.
- * A frame rather than bare text, because it holds something to be copied
- * verbatim; the value inside it is real selectable text, since the Clipboard
- * API does not exist on the plain-HTTP origins this dashboard is served from.
+ * Sized to its content rather than filling the lane, since it is a value to
+ * take rather than a field to type in; it sits at the lane's leading edge with
+ * the controls above it. A frame rather than bare text, because it holds
+ * something to be copied verbatim; the value inside it is real selectable text,
+ * since the Clipboard API does not exist on the plain-HTTP origins this
+ * dashboard is served from.
  */
 function DeclarationChip({ tool }: { tool: ManagedTool }) {
   return (

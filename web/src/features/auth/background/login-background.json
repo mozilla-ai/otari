@@ -1,0 +1,9 @@
+{
+  "columns": 20,
+  "speed": 0.2,
+  "intensity": 0.85,
+  "contrast": 2.35,
+  "spacing": 0.05,
+  "rounding": 0.11,
+  "waveScale": 1.75
+}

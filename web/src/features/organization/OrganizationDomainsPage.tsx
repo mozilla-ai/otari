@@ -1,5 +1,5 @@
 import { Button, Chip } from "@heroui/react"
-import { useRef, useState } from "react"
+import { useState } from "react"
 
 import type {
   CreateOrganizationDomainRequest,
@@ -13,6 +13,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
@@ -83,8 +84,7 @@ function ClaimForm({
   // "differs from what was seeded", and a field added to the form is added here
   // or the guard cannot see it. A predicate of the fields had already forgotten
   // `role`, so changing who joins and pressing Escape discarded it unguarded.
-  const draft = JSON.stringify({ domain, role })
-  const seededDraft = useRef(draft)
+  const { isDirty } = useDirtySnapshot({ domain, role })
 
   const submit = () => {
     const body: CreateOrganizationDomainRequest = {
@@ -107,7 +107,7 @@ function ClaimForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={domain.trim() === ""}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={create.error}
     >
       <Field

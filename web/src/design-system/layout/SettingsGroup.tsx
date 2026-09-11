@@ -21,6 +21,7 @@ import { Section } from "./Section"
 export function SettingsGroup({
   title,
   count,
+  action,
   description,
   docsHref,
   bounded = false,
@@ -34,6 +35,13 @@ export function SettingsGroup({
   title?: string
   /** Shown beside the title where a group's size is worth knowing up front. */
   count?: number
+  /**
+   * The one thing this group is created into, on its heading row and aligned
+   * to the right, the way `PageIntro`'s does on a page's. A group that owns a
+   * collection is where that collection is added to, so the control belongs
+   * beside the heading naming it rather than at the foot of its rows.
+   */
+  action?: ReactNode
   /**
    * What the group is, under its heading and inside the same band. Capped to a
    * readable measure, because a band spans the page and a sentence should not.
@@ -69,15 +77,24 @@ export function SettingsGroup({
       </div>
     )
 
+  // The heading row: the words on the left, the action on the right, stacked
+  // on a phone where there is no room for two columns. Rendered here rather
+  // than at each call site so a group's action lands in one place.
+  const headingRow =
+    heading === null && blurb === null && !action ? null : (
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1">
+          {heading}
+          {blurb}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+    )
+
   if (bounded) {
     return (
       <section className="flex flex-col gap-3">
-        {heading === null && blurb === null ? null : (
-          <div className="flex flex-col gap-1">
-            {heading}
-            {blurb}
-          </div>
-        )}
+        {headingRow}
         {/* `otari-settings` is the dense place, the way `otari-toolbar` is:
             globals.css sizes `.input` and `.select__trigger` inside it, so a
             row's control is 32px beside its label on a desk and 44px at 16px
@@ -91,13 +108,12 @@ export function SettingsGroup({
 
   return (
     <>
-      {heading === null && blurb === null ? null : (
+      {headingRow === null ? null : (
         <Section
           className="border-t border-border pt-6 pb-3"
           contentClassName="flex flex-col gap-2"
         >
-          {heading}
-          {blurb}
+          {headingRow}
         </Section>
       )}
       {/* `border-subtle` between the rows, `border` around the group. The two

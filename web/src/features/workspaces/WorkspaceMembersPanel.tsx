@@ -8,7 +8,10 @@ import type {
 } from "@/client"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   asMembershipRole,
@@ -23,11 +26,10 @@ import {
   useWorkspaceMembers,
 } from "@/shared/api/workspaces"
 
-// A workspace's roster, shared by the two places one is shown: expanded inside
-// a row on the Workspaces page, and as the whole of the Members page in the
-// workspace context. Extracted rather than duplicated because the rules it
-// encodes (a workspace's members are a subset of the organization's, and the
-// roles are the organization's four) belong to the roster, not to either page.
+// A workspace's roster and the dialog that adds to it, kept out of the page so
+// the rules they encode (a workspace's members are a subset of the
+// organization's, and the roles are the organization's four) live with the
+// roster rather than with whichever page shows it.
 
 // The workspace vocabulary is the organization one: four fixed roles, the same
 // spellings, published on both requests. `asMembershipRole` narrows a picker's
@@ -37,11 +39,21 @@ const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
   label: membershipLabel(role),
 }))
 
-function AddWorkspaceMember({
+/**
+ * Put somebody from the organization into this workspace.
+ *
+ * Opened from the page's heading row rather than sitting under the roster: the
+ * page is one collection and this is the thing it is added to.
+ */
+export function AddWorkspaceMemberDialog({
+  isOpen,
+  onClose,
   workspaceId,
   candidates,
   rosterResolved,
 }: {
+  isOpen: boolean
+  onClose: () => void
   workspaceId: string
   candidates: OrganizationMember[]
   /**
@@ -55,56 +67,59 @@ function AddWorkspaceMember({
   const add = useAddWorkspaceMember()
   const [userId, setUserId] = useState("")
   const [role, setRole] = useState<WorkspaceMemberRole>("member")
-
-  if (!rosterResolved) {
-    return null
-  }
-
-  if (candidates.length === 0) {
-    return (
-      <InfoBanner>
-        Every active member of this organization is already in this workspace. A
-        workspace's members are always a subset of the organization's, so add
-        someone there first, on the Members page.
-      </InfoBanner>
-    )
-  }
+  const isNobodyLeft = rosterResolved && candidates.length === 0
+  // Every field the operator can change, against what the form was seeded
+  // with, rather than the one that gates the submit: a role picked on its own
+  // is work, and a guard that only watches the person loses it silently.
+  const { isDirty } = useDirtySnapshot({ userId, role })
 
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <FilterSelect
-        label="Organization member"
-        value={userId}
-        onChange={setUserId}
-        options={[
-          { value: "", label: "Select a member…" },
-          ...candidates.map((member) => ({
-            value: member.user_id ?? "",
-            label: memberLabel(member),
-          })),
-        ]}
-      />
-      <FilterSelect
-        label="Role"
-        value={role}
-        onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-        options={ROLE_OPTIONS}
-      />
-      <Button
-        variant="primary"
-        isDisabled={userId === ""}
-        isPending={add.isPending}
-        onPress={() =>
-          add.mutate(
-            { workspaceId, userId, role },
-            { onSuccess: () => setUserId("") },
-          )
-        }
-      >
-        Add member
-      </Button>
-      <ErrorBanner error={add.error} />
-    </div>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="sm"
+      title="New workspace member"
+      submitLabel="Add member"
+      onSubmit={() =>
+        add.mutate({ workspaceId, userId, role }, { onSuccess: onClose })
+      }
+      isPending={add.isPending}
+      isSubmitDisabled={userId === ""}
+      isDirty={isDirty}
+      error={add.error}
+    >
+      {isNobodyLeft ? (
+        <InfoBanner>
+          Every active member of this organization is already in this workspace.
+          A workspace's members are always a subset of the organization's, so
+          add someone there first, on the Members page.
+        </InfoBanner>
+      ) : (
+        <>
+          <Select
+            label="Organization member"
+            value={userId}
+            onChange={setUserId}
+            placeholder="Select a member…"
+            autoFocus
+            options={candidates.map((member) => ({
+              value: member.user_id ?? "",
+              label: memberLabel(member),
+            }))}
+            reserveMessage={false}
+          />
+          <Select
+            label="Role"
+            value={role}
+            onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
+            options={ROLE_OPTIONS}
+            reserveMessage={false}
+          />
+        </>
+      )}
+    </FormDialog>
   )
 }
 
@@ -112,7 +127,6 @@ export function WorkspaceMembersPanel({
   workspaceId,
   workspaceName,
   orgMembers,
-  rosterResolved,
   canManageWorkspace,
 }: {
   // Id and name rather than a Workspace: the Members page reaches this holding
@@ -120,7 +134,6 @@ export function WorkspaceMembersPanel({
   workspaceId: string
   workspaceName: string
   orgMembers: OrganizationMember[]
-  rosterResolved: boolean
   canManageWorkspace: boolean
 }) {
   const members = useWorkspaceMembers(workspaceId)
@@ -138,14 +151,6 @@ export function WorkspaceMembersPanel({
       ),
     [orgMembers],
   )
-  const present = new Set(rows.map((member) => member.user_id))
-  const candidates = orgMembers.filter(
-    (member) =>
-      member.user_id &&
-      member.status === "active" &&
-      !present.has(member.user_id),
-  )
-
   return (
     <div className="flex flex-col gap-4 p-4">
       <h2 className="text-title">Members of {workspaceName}</h2>
@@ -204,14 +209,6 @@ export function WorkspaceMembersPanel({
           ))}
         </ul>
       )}
-
-      {canManageWorkspace ? (
-        <AddWorkspaceMember
-          workspaceId={workspaceId}
-          candidates={candidates}
-          rosterResolved={rosterResolved}
-        />
-      ) : null}
 
       <ConfirmDialog
         isOpen={removing !== null}

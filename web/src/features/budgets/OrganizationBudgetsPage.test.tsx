@@ -52,10 +52,14 @@ function mockApi({
   budgets = [organizationBudget()],
   ceilings = [] as OrganizationSpendCeiling[],
   writeStatus = 201,
+  budgetsGate,
 }: {
   budgets?: OrganizationBudget[]
   ceilings?: OrganizationSpendCeiling[]
   writeStatus?: number
+  // Holds the budget list in flight, so a dialog can be opened before it
+  // lands: that is when a default arriving after mount is observable.
+  budgetsGate?: Promise<unknown>
 } = {}) {
   const requests: RecordedRequest[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -75,6 +79,7 @@ function mockApi({
     }
     if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
       if (method === "GET") {
+        if (budgetsGate) await budgetsGate
         return jsonResponse({ data: budgets, count: budgets.length })
       }
       if (method === "DELETE") return jsonResponse({ message: "deleted" })
@@ -230,6 +235,64 @@ describe("OrganizationBudgetsPage", () => {
     expect(await within(table).findByText("No limit")).toBeInTheDocument()
   })
 
+  it("does not greet the next budget open with the last attempt's refusal", async () => {
+    // The create and update mutations live inside the dialog, below the card's
+    // key, so the remount that clears the draft clears the refusal too. Held in
+    // the card they outlived it, and a failed edit of one row was what the next
+    // row's dialog showed.
+    mockApi({ writeStatus: 409 })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add budget" }))
+    await user.type(await screen.findByLabelText(/^Name/), "team-a")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add budget",
+      }),
+    )
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Add budget" }))
+
+    const reopened = await screen.findByRole("dialog")
+    expect(within(reopened).queryByRole("alert")).toBeNull()
+    expect(within(reopened).getByLabelText(/^Name/)).toHaveValue("")
+  })
+
+  it("does not greet the next ceiling open with the last attempt's refusal", async () => {
+    mockApi({ writeStatus: 409 })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add ceiling" }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "New spend ceiling",
+    })
+    await user.type(within(dialog).getByLabelText(/^Name/), "whole org")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add ceiling" }),
+    )
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New spend ceiling" }),
+      ).toBeNull(),
+    )
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+
+    const reopened = await screen.findByRole("dialog", {
+      name: "New spend ceiling",
+    })
+    expect(within(reopened).queryByRole("alert")).toBeNull()
+  })
+
   it("warns that deleting a held budget will be refused, before trying", async () => {
     mockApi({ budgets: [organizationBudget({ ceiling_count: 3 })] })
     const user = userEvent.setup()
@@ -345,7 +408,7 @@ describe("OrganizationBudgetsPage", () => {
   })
 
   it("will not save a ceiling still holding a budget the organization does not own", async () => {
-    // `FilterSelect` carries an unmatched value as its own option rather than
+    // `Select` carries an unmatched value as its own option rather than
     // dropping it, so the deployment budget stays selected and Save looked
     // enabled while submitting an id the endpoint answers 404 for.
     mockApi({
@@ -372,6 +435,77 @@ describe("OrganizationBudgetsPage", () => {
     expect(screen.getByRole("button", { name: "Save ceiling" })).toBeDisabled()
   })
 
+  it("announces the budget refusal on the Budget control, not five fields below it", async () => {
+    // Two of the three reasons this form blocks are about this one choice, so
+    // they are announced with it. The third, "add a budget first", is about the
+    // list rather than the choice and stays prose.
+    mockApi({
+      ceilings: [
+        spendCeiling({
+          manageable: false,
+          budget_id: "dddddddd-9999-9999-9999-999999999999",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await screen.findByRole("grid", {
+      name: "Organization spend ceilings",
+    })
+    await user.click(await within(table).findByRole("button", { name: "Edit" }))
+
+    const refusal = await screen.findByText(
+      /Choose one of your own to take it over/,
+    )
+    // Inside the Budget control's own group rather than at the foot of the
+    // dialog. Asserted as containment, not as `aria-describedby`: measured,
+    // `forms/Select` renders its message as a plain span and puts nothing on
+    // the trigger, so the association a `Field` would give does not exist here
+    // (reported separately).
+    const group = refusal.closest('[data-slot="select"]')
+    expect(group).not.toBeNull()
+    expect(group?.textContent).toContain("Budget")
+  })
+
+  it("keeps a ceiling clean when the budget list lands after the dialog opens", async () => {
+    // The default budget is part of the seed and arrives with the list, which
+    // this holds until the dialog is already open. Seeded at mount alone the
+    // choice would stay blank; compared against a seed recomputed per render it
+    // would read dirty the moment the list answered, and Escape would ask to
+    // discard a form nobody typed in.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({
+      budgets: [organizationBudget({ name: "Team" })],
+      budgetsGate: gate,
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add ceiling" }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "New spend ceiling",
+    })
+    release()
+
+    // The default arrives and is taken, rather than leaving the choice blank.
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: /Budget/ }),
+      ).toHaveTextContent(/Team/),
+    )
+
+    // And it is part of the seed: nothing was typed, so Escape closes.
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New spend ceiling" }),
+      ).toBeNull(),
+    )
+  })
+
   it("sends only the label and the budget when editing a ceiling", async () => {
     // The endpoint ignores the scope on a PATCH, because changing it would move
     // the ceiling to another identity while carrying its spend.
@@ -394,6 +528,36 @@ describe("OrganizationBudgetsPage", () => {
       "budget_id",
       "name",
     ])
+  })
+
+  it("seeds each opener's dialog fresh, whichever one was used last", async () => {
+    // Keying a dialog on an open counter is only right if every opener bumps
+    // it. Both cards have two, Add and a row's Edit, and one that skipped the
+    // bump would leave the previous open's values in the fields.
+    const requests = mockApi({ ceilings: [spendCeiling({ name: "Prod cap" })] })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await screen.findByRole("grid", {
+      name: "Organization spend ceilings",
+    })
+
+    // Edit first, so the add that follows has something to inherit.
+    await user.click(await within(table).findByRole("button", { name: "Edit" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("Prod cap")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("")
+
+    // And the other way round: a typed add must not reach the next edit.
+    await user.type(screen.getByLabelText("Name"), "Abandoned")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(within(table).getByRole("button", { name: "Edit" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("Prod cap")
+    expect(requests.some((request) => request.method === "PATCH")).toBe(false)
   })
 
   it("names a failed workspace roster instead of just offering no workspaces", async () => {

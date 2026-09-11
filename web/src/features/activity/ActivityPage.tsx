@@ -1758,6 +1758,11 @@ export function ActivityPage() {
   const setModelPrice = useSetPricing()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [priceOpen, setPriceOpen] = useState(false)
+  // Bumped on every open of either price dialog and used as its key, so the
+  // rates are cleared on the way in. Clearing them on close would blank the
+  // fields while the dialog is still animating away, and these values set
+  // money.
+  const [priceOpenCount, setPriceOpenCount] = useState(0)
   // The model selector whose price is being set from a request detail, or null
   // when that dialog is closed. Distinct from `priceOpen` above, which reprices
   // already-logged imported rows rather than setting a model's price.
@@ -1782,7 +1787,14 @@ export function ActivityPage() {
         </div>
         <RequestDetail
           entry={entry}
-          onPriceModel={scope.isDeploymentWide ? setModelPriceKey : null}
+          onPriceModel={
+            scope.isDeploymentWide
+              ? (model) => {
+                  setPriceOpenCount((count) => count + 1)
+                  setModelPriceKey(model)
+                }
+              : null
+          }
         />
       </div>
     ),
@@ -1839,8 +1851,12 @@ export function ActivityPage() {
   // requests are billed at. Deliberately does not touch the rows already logged:
   // a gateway row's cost is what it was served at, and rewriting history from an
   // activity view would move spend that budgets were already enforced against.
-  const onSetModelPrice = (rates: ManualRates, modelKey: string) => {
-    setModelPrice.mutate(
+  // Awaited by the dialog, which owns the pending and error state below its own
+  // key: a refusal cannot then greet the next open. `mutateAsync`, so a
+  // rejection reaches it rather than being reported from page state that
+  // outlives the form.
+  const onSetModelPrice = (rates: ManualRates, modelKey: string) =>
+    setModelPrice.mutateAsync(
       {
         model_key: modelKey,
         input_price_per_million: rates.input_price_per_million,
@@ -1852,10 +1868,9 @@ export function ActivityPage() {
       },
       { onSuccess: () => setModelPriceKey(null) },
     )
-  }
 
-  const onSetPrice = (rates: ManualRates) => {
-    setPrice.mutate(
+  const onSetPrice = (rates: ManualRates) =>
+    setPrice.mutateAsync(
       { ...selectionBody(), ...rates },
       {
         onSuccess: () => {
@@ -1864,7 +1879,6 @@ export function ActivityPage() {
         },
       },
     )
-  }
 
   // Refresh means "same view, newer rows", so it deliberately does *not* re-anchor
   // a rolling preset's window. Re-anchoring recomputed "now", which changed
@@ -2182,7 +2196,10 @@ export function ActivityPage() {
           <Button
             size="sm"
             variant="primary"
-            onPress={() => setPriceOpen(true)}
+            onPress={() => {
+              setPriceOpenCount((count) => count + 1)
+              setPriceOpen(true)
+            }}
           >
             Set price
           </Button>
@@ -2257,23 +2274,27 @@ export function ActivityPage() {
         onConfirm={onDeleteConfirm}
       />
 
+      {/* Keyed on the open count, so each open remounts a blank form. */}
       <SetPriceDialog
+        key={`repricing-${priceOpenCount}`}
         isOpen={priceOpen}
         onOpenChange={setPriceOpen}
         targetCount={effectiveCount}
-        isPending={setPrice.isPending}
-        error={setPrice.error}
         onSubmit={onSetPrice}
+        submitLabel="Set price"
+        // The object rather than the verb: the submit and its trigger are both
+        // "Set price", so the default title was a third copy of that string.
+        title="Imported row costs"
       />
 
       <SetPriceDialog
+        key={`model-${priceOpenCount}`}
         isOpen={modelPriceKey !== null}
         onOpenChange={(open) =>
           setModelPriceKey(open ? (modelPriceKey ?? "") : null)
         }
-        isPending={setModelPrice.isPending}
-        error={setModelPrice.error}
         onSubmit={onSetModelPrice}
+        submitLabel="Price this model"
         collectModelKey
         initialModelKey={modelPriceKey ?? ""}
         title="Price this model"

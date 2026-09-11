@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 
 import type { PolicySpec } from "@/client"
 import { API_ROOT } from "@/shared/api/client"
+import { organizationMember, user } from "@/tests/fixtures"
+
 import { PolicyForm } from "./PolicyForm"
 
 /**
@@ -42,6 +44,25 @@ const GUARDRAILS_ON = {
   fields: [{ key: "guardrails_url", value: "https://guardrails.internal" }],
 }
 
+/** Who the scope picker can name, and what the roster calls them.
+ *
+ *  Both halves of the labeling, so the scoped tab shows the real thing: one
+ *  owner id the organization has a person behind, and one it does not.
+ */
+const OWNERS = [user({ user_id: "u-ana" }), user({ user_id: "release-bot" })]
+
+const ROSTER = {
+  data: [
+    organizationMember({
+      user_id: "u-ana",
+      attribution_user_id: "u-ana",
+      full_name: "Ana Ruiz",
+      role: "member",
+    }),
+  ],
+  count: 1,
+}
+
 const meta = {
   title: "Features/Routing/PolicyForm",
   component: PolicyForm,
@@ -50,9 +71,11 @@ const meta = {
     api: {
       [`${API_ROOT}/models/discoverable`]: CATALOG,
       [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
-      // `ScopePicker` asks for the roster on every render, so without this the
-      // mock answers its deliberate 501 rather than the network's 404.
-      [`${API_ROOT}/users`]: [],
+      // The scope picker's two reads, which the form makes while it is open, so
+      // without these the mock answers its deliberate 501 rather than the
+      // network's 404.
+      [`${API_ROOT}/users`]: OWNERS,
+      [`${API_ROOT}/organizations/me/members`]: ROSTER,
     },
   },
   args: {
@@ -127,7 +150,8 @@ export const WithoutGuardrailsService: Story = {
     api: {
       [`${API_ROOT}/models/discoverable`]: CATALOG,
       [`${API_ROOT}/tool-settings`]: { fields: [] },
-      [`${API_ROOT}/users`]: [],
+      [`${API_ROOT}/users`]: OWNERS,
+      [`${API_ROOT}/organizations/me/members`]: ROSTER,
     },
   },
 }

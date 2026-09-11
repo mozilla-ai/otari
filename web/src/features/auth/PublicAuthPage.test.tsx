@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
@@ -66,7 +66,7 @@ describe("PublicAuthPage: the mail gate", () => {
       expect(
         screen.getByRole("heading", { name: "Not available on this gateway" }),
       ).toBeInTheDocument()
-      expect(screen.queryByRole("button")).toBeNull()
+      expect(within(screen.getByRole("main")).queryByRole("button")).toBeNull()
       expect(apiFetch).not.toHaveBeenCalled()
     },
   )

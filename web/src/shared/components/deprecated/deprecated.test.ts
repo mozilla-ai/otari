@@ -27,7 +27,6 @@ const SRC = join(process.cwd(), "src")
 
 /** What a deprecated module's callers should reach for instead. */
 const REPLACEMENT: Record<string, string> = {
-  PageHeader: "layout/PageIntro",
   StatCard: "metrics/KpiStrip + metrics/KpiCell",
   RowActions: "actions/RowActionRow",
   SettingsSection: "layout/SettingsGroup",
@@ -41,9 +40,6 @@ const REPLACEMENT: Record<string, string> = {
  * when it was on one.
  */
 const KNOWN: Record<string, readonly string[]> = {
-  "features/budgets/OrganizationBudgetsPage.tsx": ["PageHeader"],
-  "features/tools/McpServersPage.tsx": ["PageHeader"],
-  "features/workspaces/WorkspaceMembersPage.tsx": ["PageHeader"],
   "features/account/PasskeysCard.tsx": ["RowActions"],
 }
 

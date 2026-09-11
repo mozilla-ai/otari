@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
-import { SettingRow } from "./SettingRow"
+import { CONTROL_LANE, SettingRow } from "./SettingRow"
 
 describe("SettingRow", () => {
   it("names the control by its label and its config key together", () => {
@@ -69,6 +69,30 @@ describe("SettingRow", () => {
     expect(screen.getByLabelText("Backend URL")).toHaveAccessibleDescription(
       "Must be an http or https URL.",
     )
+  })
+
+  it("puts every control in one lane, whatever the control is", () => {
+    // Sized per control it was not a lane at all: a URL field, a select and a
+    // two-digit number came out 220px, 174px and 88px, so the column had a
+    // different left edge on every row.
+    render(
+      <>
+        <SettingRow
+          label="Backend URL"
+          control={<input aria-label="Backend URL" />}
+        />
+        <SettingRow
+          label="Max results"
+          control={<input aria-label="Max results" />}
+        />
+      </>,
+    )
+
+    for (const label of ["Backend URL", "Max results"]) {
+      expect(screen.getByLabelText(label).parentElement?.className).toContain(
+        CONTROL_LANE,
+      )
+    }
   })
 
   it("draws no rule of its own, because the group divides its children", () => {

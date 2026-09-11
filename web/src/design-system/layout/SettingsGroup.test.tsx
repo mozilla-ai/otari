@@ -72,4 +72,39 @@ describe("SettingsGroup", () => {
     const description = screen.getByText("What this group is for.")
     expect(description).toHaveClass("max-w-prose")
   })
+
+  it("puts an action on the heading row, in both shapes", () => {
+    // The slot exists so a group that owns a collection carries the control
+    // that adds to it, beside the words naming it. Both shapes, because the
+    // heading band and the bounded header are two different returns.
+    for (const bounded of [false, true]) {
+      const { unmount } = render(
+        <SettingsGroup
+          bounded={bounded}
+          title="Search tools"
+          action={<button type="button">Add search tool</button>}
+        >
+          <div>a row</div>
+        </SettingsGroup>,
+      )
+      const heading = screen.getByRole("heading", { name: "Search tools" })
+      const action = screen.getByRole("button", { name: "Add search tool" })
+      // The same row, which is what "on the heading row" means structurally:
+      // one element holds both, rather than the action following the band.
+      expect(heading.closest("div")?.parentElement).toContainElement(action)
+      unmount()
+    }
+  })
+
+  it("renders the heading row for an action alone, with no title", () => {
+    // The branch this prop moved: the row used to be skipped whenever there
+    // were no words, which would now also drop the control.
+    render(
+      <SettingsGroup action={<button type="button">Add</button>}>
+        <div>a row</div>
+      </SettingsGroup>,
+    )
+    expect(screen.queryByRole("heading")).toBeNull()
+    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument()
+  })
 })

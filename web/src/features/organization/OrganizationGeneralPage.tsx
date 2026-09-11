@@ -89,6 +89,9 @@ export function OrganizationGeneralPage() {
   const context = useOrganizationContext()
   const update = useUpdateOrganization()
   const [isRenaming, setIsRenaming] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is seeded
+  // on the way in rather than reset on the way out.
+  const [renameCount, setRenameCount] = useState(0)
 
   if (context.isLoading) {
     return <PageLoading label="Loading organization…" />
@@ -128,11 +131,13 @@ export function OrganizationGeneralPage() {
           // A rejected attempt must not be waiting in the dialog the next time
           // it opens.
           update.reset()
+          setRenameCount((count) => count + 1)
           setIsRenaming(true)
         }}
       />
 
       <RenameOrganizationDialog
+        key={renameCount}
         isOpen={isRenaming}
         onOpenChange={setIsRenaming}
         currentName={organization.name}

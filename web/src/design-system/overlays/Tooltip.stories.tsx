@@ -13,9 +13,17 @@ import { Tooltip } from "./Tooltip"
  * `aria-label`, giving an exact timestamp beside a relative one) and wrong for
  * anything an operator needs in order to act.
  *
- * It wraps its trigger rather than taking one as a prop, so the trigger keeps
+ * It takes its trigger as `children` rather than as a prop, so the trigger keeps
  * its own type: an `IconButton` inside one is still an `IconButton`, with its
  * required label and 44px box intact.
+ *
+ * Two forms, and the pair of stories below is the whole difference. A node is
+ * wrapped in HeroUI's own trigger, a `div` the library reports as a button so a
+ * keyboard can reach something that is not a control. A **native** control is
+ * passed as a function and spreads the props it is handed, which is what keeps
+ * a real button from ending up inside something else the library also calls a
+ * button. A HeroUI `Button` cannot take those props (they are the DOM's, its
+ * are react-aria's) and so keeps the wrapper.
  */
 const meta = {
   title: "Design system/Overlays/Tooltip",
@@ -39,6 +47,29 @@ export const Default: Story = {
       <IconButton label="Delete this key" variant="danger">
         <FiTrash2 aria-hidden className="size-4" />
       </IconButton>
+    </Tooltip>
+  ),
+}
+
+/**
+ * The function form, for a native control: one element is both the button and
+ * the trigger. Tab to it and the tooltip opens; inspect it and there is a single
+ * `button`, where the wrapper form nests one inside a `div` that also reports as
+ * a button. `RowAction`'s glyph is the shipping example.
+ */
+export const AControlTakesTheTriggersProps: Story = {
+  render: () => (
+    <Tooltip content="Delete">
+      {(props) => (
+        <button
+          {...props}
+          type="button"
+          aria-label="Delete"
+          className="text-caption flex size-8 items-center justify-center hover:text-foreground"
+        >
+          <FiTrash2 aria-hidden className="h-3.5 w-3.5" />
+        </button>
+      )}
     </Tooltip>
   ),
 }

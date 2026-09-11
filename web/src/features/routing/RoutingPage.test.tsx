@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
   OrganizationContext,
+  OrganizationMember,
   PolicySpec,
   RoutingPolicyResponse,
 } from "@/client"
@@ -13,7 +14,11 @@ import { RoutingPage } from "@/features/routing/RoutingPage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationContext } from "@/tests/fixtures"
+import {
+  bootstrap,
+  organizationContext,
+  organizationMember,
+} from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const policy = (
@@ -70,6 +75,21 @@ const POLICIES: RoutingPolicyResponse[] = [
 
 const USERS = [
   { user_id: "alice", alias: "alice", spend: 0, is_blocked: false },
+  { user_id: "u-bob", alias: "bob", spend: 0, is_blocked: false },
+  { user_id: "u-carol", alias: "carol", spend: 0, is_blocked: false },
+]
+
+// One of the three has a roster row behind them, so the same list exercises both
+// halves of the picker's labeling: a person the organization can name, and an
+// owner id nobody named, whose id is its name.
+const MEMBERS = [
+  organizationMember({
+    organization_member_id: "55555555-5555-5555-5555-555555555555",
+    user_id: "u-bob",
+    attribution_user_id: "u-bob",
+    full_name: "Bob Builder",
+    role: "member",
+  }),
 ]
 
 function jsonResponse(body: unknown): Response {
@@ -107,12 +127,19 @@ function mockApi(
     deleteBody?: { status: number; detail: string }
     // The same for a save, which is the path the form's own banner reports.
     saveBody?: { status: number; detail: string }
+    // The organization roster, which is what names a person behind an owner id.
+    members?: OrganizationMember[]
+    // Owner ids whose *first* policy write is refused. N scopes are N writes, so
+    // the retry has to be able to succeed for the one that failed while leaving
+    // the ones that landed alone.
+    refuseFirstWriteFor?: string[]
   } = {},
 ) {
   let list = [...policies]
   let aliasList = [...aliases]
   let memberList = [...(opts.memberPolicies ?? [])]
   let memberAliasList = [...(opts.memberAliases ?? [])]
+  const refuseOnce = new Set(opts.refuseFirstWriteFor ?? [])
   const calls: { url: string; method: string; body: unknown }[] = []
   const spy = vi
     .spyOn(globalThis, "fetch")
@@ -168,10 +195,12 @@ function mockApi(
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(opts.context ?? organizationContext())
       }
-      // The user picker's roster read. Empty here: these tests are about
-      // policies, and every owner in `USERS` is a plain id rather than a member.
+      // The user picker's roster read, which names the person behind an owner
+      // id. Paged, like the real endpoint: `fetchAllPaged` reads `data`, so a
+      // bare array here throws rather than answering an empty roster.
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
-        return jsonResponse({ data: [], count: 0 })
+        const members = opts.members ?? []
+        return jsonResponse({ data: members, count: members.length })
       }
       if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
         return jsonResponse({
@@ -227,6 +256,14 @@ function mockApi(
       }
       if (url.includes(`${API_ROOT}/routing/policies`)) {
         if (method === "POST") {
+          const scope = (body.user_id ?? null) as string | null
+          if (scope !== null && refuseOnce.has(scope)) {
+            refuseOnce.delete(scope)
+            return new Response(
+              JSON.stringify({ detail: `No room for ${scope}` }),
+              { status: 409, headers: { "Content-Type": "application/json" } },
+            )
+          }
           if (opts.saveBody) {
             // Not `jsonResponse`, which is a 200 by construction.
             return new Response(
@@ -376,6 +413,78 @@ const createTrigger = async () => {
   return within(header).findByRole("button", { name: "Create policy" })
 }
 
+type TestUser = ReturnType<typeof userEvent.setup>
+
+/** The two fields every policy needs, with the model popover dismissed after.
+ *
+ *  An open React Aria popover aria-hides the submit button, so leaving it up
+ *  makes every later query in the dialog miss.
+ */
+async function nameAndServe(
+  user: TestUser,
+  name: string,
+  target = "openai:gpt-5-nano",
+) {
+  await user.type(screen.getByRole("textbox", { name: /policy name/i }), name)
+  await user.type(screen.getByRole("combobox", { name: /^serves$/i }), target)
+  await user.keyboard("{Escape}")
+}
+
+/** Switch to the scoped tab and choose people, the way an operator does.
+ *
+ *  Each query is typed rather than the list being opened cold: the picker's
+ *  menu triggers on input, and it matches the owner id as well as the label, so
+ *  "bob" reaches a person the roster calls something else entirely.
+ */
+async function pickUsers(user: TestUser, queries: string[]) {
+  const dialog = within(screen.getByRole("dialog"))
+  await user.click(dialog.getByRole("button", { name: "Specific users" }))
+  for (const query of queries) {
+    // Named by the field's own label: the multi-select primitive labels its
+    // search box that way rather than carrying an `aria-label` of its own.
+    const search = dialog.getByLabelText("Users")
+    // Cleared between queries, because the primitive keeps the query after a
+    // pick on purpose (see `MultiSelect`: clearing it would refill the list
+    // under the pointer). Typing the next name onto the last one matches
+    // nobody.
+    await user.clear(search)
+    await user.type(search, query)
+    await user.click(await screen.findByRole("option"))
+  }
+  await user.keyboard("{Escape}")
+}
+
+async function submitDialog(user: TestUser, label = "Create policy") {
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: label }),
+  )
+}
+
+/** The bodies of the deployment-wide policy writes, in the order they were sent.
+ *
+ *  Matched on the exact path, not a prefix: `/routing/policies/explain` is a
+ *  POST too, and counting one of those as a write would put a phantom row in
+ *  every assertion about how many writes a submit made.
+ */
+function policyWrites(
+  calls: { url: string; method: string; body: unknown }[],
+): { name: string; spec: PolicySpec; user_id?: string | null }[] {
+  return calls
+    .filter(
+      (call) =>
+        call.method === "POST" &&
+        call.url.endsWith(`${API_ROOT}/routing/policies`),
+    )
+    .map(
+      (call) =>
+        call.body as {
+          name: string
+          spec: PolicySpec
+          user_id?: string | null
+        },
+    )
+}
+
 describe("RoutingPage", () => {
   it("lists policies with what they serve and where they come from", async () => {
     mockApi()
@@ -522,6 +631,197 @@ describe("RoutingPage", () => {
     // The fallthrough is explicit and last, which is what the schema requires.
     expect(body.spec.select).toEqual([{ default: "openai:gpt-5-nano" }])
     expect(body.spec.on_failure).toBeUndefined()
+  })
+
+  it("writes exactly one unscoped policy for every caller", async () => {
+    // The default tab, asserted rather than assumed: "every caller" and "scoped
+    // but nobody chosen" are two states, and only this one is one write.
+    const { calls } = mockApi([], null, [], { members: MEMBERS })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await submitDialog(user)
+
+    const writes = policyWrites(calls)
+    expect(writes).toHaveLength(1)
+    expect(writes[0].user_id ?? null).toBeNull()
+  })
+
+  it("writes one policy per chosen user, each carrying its own scope", async () => {
+    // A policy's key is its name plus its user, so N people are N rows of the
+    // same name and spec. There is no batch endpoint; this is the whole design.
+    const { calls } = mockApi([], null, [], { members: MEMBERS })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await pickUsers(user, ["bob", "carol"])
+    await submitDialog(user)
+
+    const writes = policyWrites(calls)
+    expect(writes).toHaveLength(2)
+    expect(writes.map((write) => write.user_id)).toEqual(["u-bob", "u-carol"])
+    // Same name and same spec on each: only the scope differs.
+    expect(new Set(writes.map((write) => write.name))).toEqual(
+      new Set(["cheap"]),
+    )
+    for (const write of writes) {
+      expect(write.spec.select).toEqual([{ default: "openai:gpt-5-nano" }])
+    }
+  })
+
+  it("shows the chosen people by name above the input, not as bare owner ids", async () => {
+    mockApi([], null, [], { members: MEMBERS })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await pickUsers(user, ["bob"])
+
+    const dialog = within(screen.getByRole("dialog"))
+    // The roster names this one, so the chip says the person rather than the id
+    // the request plane bills to.
+    expect(
+      dialog.getByRole("button", { name: "Remove Bob Builder" }),
+    ).toBeInTheDocument()
+  })
+
+  it("will not submit a scoped policy with nobody chosen", async () => {
+    const { calls } = mockApi([], null, [], { members: MEMBERS })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    const dialog = within(screen.getByRole("dialog"))
+    await user.click(dialog.getByRole("button", { name: "Specific users" }))
+
+    expect(dialog.getByRole("button", { name: "Create policy" })).toBeDisabled()
+    await submitDialog(user)
+    expect(policyWrites(calls)).toHaveLength(0)
+  })
+
+  it("keeps the dialog open on a part-written save, naming who landed and who did not", async () => {
+    // Three writes with no transaction over them, so a refusal partway leaves
+    // the earlier rows in place. Saying "it failed" would leave the operator to
+    // work out which of the three exist by reading the table. The refusal is in
+    // the middle, so this also pins that the writes after it are still
+    // attempted rather than one conflict standing in for everyone behind it.
+    const { calls } = mockApi([], null, [], {
+      members: MEMBERS,
+      refuseFirstWriteFor: ["u-carol"],
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await pickUsers(user, ["bob", "carol", "alice"])
+    await submitDialog(user)
+
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Created for Bob Builder, alice (alice).")
+    // By its id, since nobody named this one, and with the refusal's own reason
+    // rather than a swallowed "something went wrong".
+    expect(alert).toHaveTextContent("Not created for u-carol (carol)")
+    expect(alert).toHaveTextContent("No room for u-carol")
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+
+    // Pressing again rewrites nothing that already landed.
+    await submitDialog(user)
+    const scopes = policyWrites(calls).map((write) => write.user_id)
+    expect(scopes).toEqual(["u-bob", "u-carol", "alice", "u-carol"])
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("fixes who a policy applies to once a write for somebody has landed", async () => {
+    // Nothing here can take a policy back, so a scope that can still be edited
+    // after a partial write is a way to end up with rows the operator did not
+    // ask for: drop a written person from the selection and their policy lives
+    // on unmentioned, or switch to every caller and it lives on ALSO outranking
+    // the global one for exactly them, which is the precedence the field's own
+    // description promises. The controls are withheld instead, and say why.
+    mockApi([], null, [], {
+      members: MEMBERS,
+      refuseFirstWriteFor: ["u-carol"],
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await pickUsers(user, ["bob", "carol"])
+    await submitDialog(user)
+    await screen.findByRole("alert")
+
+    const dialog = within(screen.getByRole("dialog"))
+    // Neither tab, and no picker: the selection is settled.
+    expect(
+      dialog.queryByRole("button", { name: "Specific users" }),
+    ).not.toBeInTheDocument()
+    expect(
+      dialog.queryByRole("button", { name: "Every caller" }),
+    ).not.toBeInTheDocument()
+    expect(dialog.queryByLabelText("Users")).not.toBeInTheDocument()
+    // And the reason, since a control that vanishes without one teaches
+    // nothing. The route back out is naming the list, not this form.
+    expect(
+      dialog.getByText(/already been created/, { exact: false }),
+    ).toHaveTextContent("delete it from the list")
+  })
+
+  it("writes every scope again when the payload changed after a part-written save", async () => {
+    // The ids that landed are remembered against the payload they landed under,
+    // so correcting the name first is not the same policy: skipping them then
+    // would leave the corrected one unwritten for exactly the people the old
+    // one already reached.
+    const { calls } = mockApi([], null, [], {
+      members: MEMBERS,
+      refuseFirstWriteFor: ["u-carol"],
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await pickUsers(user, ["bob", "carol"])
+    await submitDialog(user)
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+
+    await user.type(screen.getByRole("textbox", { name: /policy name/i }), "er")
+    await submitDialog(user)
+
+    const writes = policyWrites(calls)
+    expect(writes.map((write) => [write.name, write.user_id])).toEqual([
+      ["cheap", "u-bob"],
+      ["cheap", "u-carol"],
+      ["cheaper", "u-bob"],
+      ["cheaper", "u-carol"],
+    ])
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("lists a row per user for a policy written to several of them", async () => {
+    mockApi(
+      [
+        policy("cheap", CHAIN, { user_id: "u-bob" }),
+        policy("cheap", CHAIN, { user_id: "u-carol" }),
+      ],
+      null,
+      [],
+      { members: MEMBERS },
+    )
+    renderPage(<RoutingPage />)
+
+    // Two rows under one name: the scope is half the row's identity, so they do
+    // not collapse into one.
+    expect(
+      await screen.findAllByRole("rowheader", { name: "cheap" }),
+    ).toHaveLength(2)
   })
 
   it("keeps the failure chain and guardrails out of the way until asked for", async () => {
@@ -1904,7 +2204,9 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       await screen.findByText(/applies to everyone in the selected workspace/i),
     ).toBeInTheDocument()
-    expect(screen.queryByText("For one user")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Specific users" }),
+    ).not.toBeInTheDocument()
   })
 
   it("deletes through the tenant-scoped router, naming the workspace", async () => {

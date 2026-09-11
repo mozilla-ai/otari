@@ -477,6 +477,9 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
   // the catalog's "Edit rate" link lands here with it in hand.
   const editingKey = useUrlValue("model")
   const [customOpen, setCustomOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key: it seeds its draft on
+  // mount and owns the refusal, so a remount is what clears both.
+  const [customOpenCount, setCustomOpenCount] = useState(0)
   const rows = pricing.data ? currentRows(pricing.data, drift.data ?? []) : []
   const current = pricing.data
     ? currentPricing(pricing.data).find((row) => row.model_key === editingKey)
@@ -492,24 +495,17 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
   // lists, so the only way to meter them is a key typed by hand. The stored key
   // is what the server normalized, so the editor opens on that rather than on
   // the raw input.
-  const priceCustom = (rates: ManualRates, modelKey: string) => {
-    setPricing.mutate(
-      {
-        model_key: modelKey,
-        input_price_per_million: rates.input_price_per_million,
-        output_price_per_million: rates.output_price_per_million,
-        cache_read_price_per_million:
-          rates.cache_read_price_per_million ?? null,
-        cache_write_price_per_million:
-          rates.cache_write_price_per_million ?? null,
-      },
-      {
-        onSuccess: (created) => {
-          setCustomOpen(false)
-          edit(created.model_key)
-        },
-      },
-    )
+  const priceCustom = async (rates: ManualRates, modelKey: string) => {
+    const created = await setPricing.mutateAsync({
+      model_key: modelKey,
+      input_price_per_million: rates.input_price_per_million,
+      output_price_per_million: rates.output_price_per_million,
+      cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
+      cache_write_price_per_million:
+        rates.cache_write_price_per_million ?? null,
+    })
+    setCustomOpen(false)
+    edit(created.model_key)
   }
 
   const columns = canPrice
@@ -550,7 +546,14 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
       >
         <h2 className="text-title">Model prices</h2>
         {canPrice ? (
-          <Button size="sm" variant="ghost" onPress={() => setCustomOpen(true)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => {
+              setCustomOpenCount((count) => count + 1)
+              setCustomOpen(true)
+            }}
+          >
             Price a model
           </Button>
         ) : null}
@@ -596,10 +599,9 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
       </TableScrollFrame>
       {canPrice ? (
         <SetPriceDialog
+          key={customOpenCount}
           isOpen={customOpen}
           onOpenChange={setCustomOpen}
-          isPending={setPricing.isPending}
-          error={setPricing.error}
           onSubmit={priceCustom}
           collectModelKey
           title="Price a model"

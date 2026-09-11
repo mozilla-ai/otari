@@ -46,6 +46,10 @@ function mockApi(opts: {
   context?: OrganizationContext
   members?: OrganizationMember[]
   workspaces?: Workspace[]
+  // Holds the workspace roster in flight, so the dialog can be typed into
+  // before its default lands: `fetchAllPaged` walks every page, so on a cold
+  // cache that is the real order.
+  workspacesGate?: Promise<unknown>
   inviteResult?: unknown
   // The gateway's spend rows. The roster joins them on `attribution_user_id`
   // to show what a member may call and what they have spent, neither of which
@@ -106,6 +110,7 @@ function mockApi(opts: {
       return jsonResponse(roster[0] ?? {})
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
+      if (opts.workspacesGate) await opts.workspacesGate
       return jsonResponse({ data: workspaces, count: workspaces.length })
     }
     if (url.includes(`${API_ROOT}/users`)) {
@@ -422,6 +427,37 @@ describe("OrganizationMembersPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps an address typed before the roster lands inside the guard", async () => {
+    // The default workspace is part of the seed; what the operator has already
+    // typed is not. Seeding the fields as they stand when the roster answers
+    // made the guard forget an address typed in the meantime, and Escape then
+    // closed without asking.
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+      workspacesGate: gate,
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+
+    // Now the roster answers and seeds the workspace default.
+    release()
+    expect(await screen.findByLabelText("Production")).toBeChecked()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(
+      await screen.findByRole("button", { name: "Discard" }),
+    ).toBeInTheDocument()
+  })
+
   it("guards a role change on the add form, with no address typed", async () => {
     // The guard reads one snapshot of the whole draft. It read the address
     // alone, so changing the role, or unticking the seeded workspace the form
@@ -638,6 +674,23 @@ describe("OrganizationMembersPage", () => {
     expect(patch?.body).toEqual({ blocked: true })
   })
 
+  it("opens the member editor in a dialog, naming the member", async () => {
+    mockApi({ members: [OWNER, ANALYST], workspaces: [workspace()] })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+
+    // A dialog rather than a band above the roster: the row keeps its place,
+    // and the page under it does not shift by the height of a form
+    // (otari-ai#2125).
+    const dialog = await screen.findByRole("dialog", { name: "Edit member" })
+    expect(within(dialog).getByText("Workspace access")).toBeInTheDocument()
+  })
+
   it("edits model access, workspace membership and the workspace budget in one save", async () => {
     // One control over three tables underneath, so this asserts all three
     // writes land from a single save, and that the ceiling is written against
@@ -686,7 +739,7 @@ describe("OrganizationMembersPage", () => {
     // Bravo. A budget is picked, never an amount: the figure is the budget's.
     await pickOption(actor, "Budget in Default Workspace", "Large")
     await actor.click(screen.getByLabelText("Bravo"))
-    await actor.click(screen.getByRole("button", { name: "Save changes" }))
+    await actor.click(screen.getByRole("button", { name: "Save" }))
 
     // All three writes land from the one save. Model access goes to the spend
     // row the membership is joined to, and it is the third table the editor
@@ -808,7 +861,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     expect(
       screen.queryByLabelText("Budget in Default Workspace"),
     ).not.toBeInTheDocument()
-    await actor.click(screen.getByRole("button", { name: "Save changes" }))
+    await actor.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
       expect(

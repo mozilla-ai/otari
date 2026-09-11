@@ -2,7 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { GuardrailCatalog, OrganizationGuardrail } from "@/client"
+import type {
+  GuardrailCatalog,
+  GuardrailParameterSpec,
+  OrganizationGuardrail,
+} from "@/client"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext, organizationGuardrail } from "@/tests/fixtures"
@@ -58,6 +62,40 @@ const CATALOG: GuardrailCatalog = {
   ],
 }
 
+// Two profiles of one guardrail class differing only in the model they pin,
+// which is how an operator's guardrails configuration is ordinarily written.
+// They declare the same parameters, so nothing but the name separates them.
+const TWIN_PARAMETERS: GuardrailParameterSpec[] = [
+  {
+    name: "policy",
+    type: "string",
+    required: true,
+    secret: false,
+    description: "Natural-language policy to validate against.",
+  },
+]
+
+const TWIN_CATALOG: GuardrailCatalog = {
+  available: true,
+  reason: null,
+  profiles: [
+    {
+      profile: "house-policy-fast",
+      guardrail: "any_llm",
+      model_id: "openai/gpt-4o-mini",
+      parameters_known: true,
+      parameters: TWIN_PARAMETERS,
+    },
+    {
+      profile: "house-policy-strict",
+      guardrail: "any_llm",
+      model_id: "openai/gpt-4o",
+      parameters_known: true,
+      parameters: TWIN_PARAMETERS,
+    },
+  ],
+}
+
 function mockApi({
   guardrails = [] as OrganizationGuardrail[],
   role = "owner",
@@ -105,9 +143,30 @@ function mockApi({
   return calls
 }
 
-/** Wait for the profile picker to settle, so a press is not sent to the disabled one. */
+/**
+ * Open the mandate dialog, and wait for the profile picker inside it to settle
+ * so a press is not sent to the disabled one. Idempotent on an open dialog.
+ */
+async function openDialog() {
+  if (screen.queryByRole("dialog") === null) {
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Mandate a guardrail" }),
+    )
+    await screen.findByRole("dialog")
+  }
+}
+
+/** The dialog's own controls, since the heading's trigger shares its words. */
+function inDialog() {
+  return within(screen.getByRole("dialog"))
+}
+
 async function settledPicker() {
-  return await screen.findByRole("button", { name: /Choose a profile/ })
+  await openDialog()
+  // The profile control is a `forms/Select` now: react-aria names its trigger
+  // with the label and the current value, so it is found by label rather than
+  // by the placeholder it happens to be showing.
+  return await waitFor(() => selectTrigger("Guardrail profile"))
 }
 
 function renderCard() {
@@ -160,10 +219,15 @@ describe("OrganizationGuardrailsCard", () => {
     })
     renderCard()
 
-    expect(await screen.findByText("Alpha")).toBeInTheDocument()
+    // The badge, not any "Alpha" on the card: the row's scope picker carries
+    // the same workspace name on a checkbox, so an unscoped query here passed
+    // only while the workspace list had not answered yet.
     expect(
       await screen.findByText("Every workspace, including new ones"),
     ).toBeInTheDocument()
+    expect(
+      screen.getAllByText("Alpha").some((node) => node.tagName === "SPAN"),
+    ).toBe(true)
   })
 
   it("marks a paused entry and one that carries its own endpoint and credential", async () => {
@@ -390,6 +454,7 @@ describe("OrganizationGuardrailsCard", () => {
   it("mandates a new guardrail from the add form", async () => {
     const calls = mockApi()
     renderCard()
+    await openDialog()
 
     // A profile the catalog does not list, which is what the by-hand field is
     // for: this entry may be destined for an endpoint of its own.
@@ -397,7 +462,9 @@ describe("OrganizationGuardrailsCard", () => {
       await screen.findByRole("button", { name: "Name a profile by hand" }),
     )
     await userEvent.type(screen.getByLabelText("Guardrail profile"), "pii")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -420,21 +487,32 @@ describe("OrganizationGuardrailsCard", () => {
       }),
     })
     renderCard()
+    await openDialog()
 
     // The control does not start as a free-text box and turn into a picker
     // under the operator's cursor: it is the picker throughout, and says so
     // while it waits.
-    expect(
-      await screen.findByRole("button", {
-        name: /Reading the guardrails service/,
-      }),
-    ).toBeDisabled()
+    // Named by its label now, and reading its waiting placeholder: the control
+    // is the picker throughout rather than a box that becomes one.
+    const waiting = await waitFor(() => selectTrigger("Guardrail profile"))
+    expect(waiting).toBeDisabled()
+    // The waiting sentence is the control's description, which is where it is
+    // both rendered and announced; the trigger's own text is the selected
+    // option's, and there is nothing to select yet.
+    expect(waiting).toHaveAccessibleDescription(
+      /Reading the guardrails service/,
+    )
     expect(
       screen.queryByRole("button", { name: "Name a profile by hand" }),
     ).toBeNull()
 
     answer()
-    expect(await settledPicker()).toBeEnabled()
+    // Waited on the state rather than on the element: the trigger is named by
+    // its label throughout, so it exists before and after the catalog answers
+    // and only its disabled state says which.
+    await waitFor(() =>
+      expect(selectTrigger("Guardrail profile")).toBeEnabled(),
+    )
   })
 
   it("picks a profile from what the guardrails service has built", async () => {
@@ -443,7 +521,9 @@ describe("OrganizationGuardrailsCard", () => {
 
     await settledPicker()
     await pickOption(userEvent.setup(), "Guardrail profile", "prompt-injection")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -463,7 +543,9 @@ describe("OrganizationGuardrailsCard", () => {
     await user.type(await screen.findByLabelText("Policy"), "No personal data.")
     await user.type(screen.getByLabelText("Threshold"), "0.8")
     await pickOption(user, "Prompt version", "v2")
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -480,12 +562,19 @@ describe("OrganizationGuardrailsCard", () => {
   })
 
   it("refuses to add an entry whose guardrail needs a parameter it has not got", async () => {
+    // One validation path, and it is the app's own: `parameters.check()` names
+    // the field and says what it needs. The native `required` attribute would
+    // refuse the submit first and silently, so inside a dialog that message
+    // would never be reached.
     const calls = mockApi()
+    const user = userEvent.setup()
     renderCard()
 
     await settledPicker()
-    await pickOption(userEvent.setup(), "Guardrail profile", "house-policy")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await pickOption(user, "Guardrail profile", "house-policy")
+    await user.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     expect(
       await screen.findByText("This guardrail needs a value here."),
@@ -501,7 +590,9 @@ describe("OrganizationGuardrailsCard", () => {
     await settledPicker()
     await pickOption(user, "Guardrail profile", "house-policy")
     await user.type(await screen.findByLabelText("Policy"), "No personal data.")
-    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -590,12 +681,15 @@ describe("OrganizationGuardrailsCard", () => {
       },
     })
     renderCard()
+    await openDialog()
 
     expect(
       await screen.findByText("The guardrails service could not be reached."),
     ).toBeInTheDocument()
     await userEvent.type(screen.getByLabelText("Guardrail profile"), "pii")
-    await userEvent.click(screen.getByRole("button", { name: "Add" }))
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Mandate a guardrail" }),
+    )
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST")).toBe(true),
@@ -603,6 +697,53 @@ describe("OrganizationGuardrailsCard", () => {
     expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
       profile: "pii",
     })
+  })
+
+  it("clears a typed parameter when the picker moves to a profile with the same schema", async () => {
+    // otari-ai#2119. The two profiles declare identical parameters, so a form
+    // that re-seeds on the schema alone keeps what was typed for the first and
+    // sends it under the second one's name.
+    mockApi({ catalog: TWIN_CATALOG })
+    renderCard()
+    const user = userEvent.setup()
+
+    await settledPicker()
+    await pickOption(user, "Guardrail profile", "house-policy-fast")
+    await user.type(await screen.findByLabelText("Policy"), "No personal data.")
+    await pickOption(user, "Guardrail profile", "house-policy-strict")
+
+    await waitFor(() => expect(screen.getByLabelText("Policy")).toHaveValue(""))
+  })
+
+  it("keeps what is filled in while a profile the catalog does not describe is typed", async () => {
+    // The other half of otari-ai#2119: a name typed by hand reaches the form one
+    // character at a time, and none of those characters spell a profile the
+    // catalog describes, so they have to share one identity or the form resets
+    // on every keystroke.
+    mockApi()
+    renderCard()
+    const user = userEvent.setup()
+
+    await openDialog()
+    await user.click(
+      await screen.findByRole("button", { name: "Name a profile by hand" }),
+    )
+    // The raw editor is the only place a parameter can go for a profile with no
+    // schema behind it.
+    await user.click(
+      inDialog().getByRole("button", {
+        name: /Other parameters for the new guardrail/,
+      }),
+    )
+    await user.type(
+      screen.getByLabelText("Parameters (JSON)"),
+      '{{"threshold": 0.8}',
+    )
+    await user.type(screen.getByLabelText("Guardrail profile"), "pii")
+
+    expect(screen.getByLabelText("Parameters (JSON)")).toHaveValue(
+      '{"threshold": 0.8}',
+    )
   })
 
   it("asks for no catalog from a member who cannot manage the organization", async () => {

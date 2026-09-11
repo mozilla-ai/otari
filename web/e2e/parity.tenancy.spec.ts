@@ -39,10 +39,11 @@ function organizationDetail(page: Page, term: string): Locator {
 // before it takes the one replacing it.
 async function rename(page: Page, to: string): Promise<void> {
   await page.getByRole("button", { name: "Change organization name" }).click()
-  const dialog = page.getByRole("alertdialog")
+  // The title names the object, and the trigger and submit share the action.
+  const dialog = page.getByRole("dialog", { name: "Organization name" })
   await expect(dialog.getByText("Current name")).toBeVisible()
   await dialog.getByLabel("New name").fill(to)
-  await dialog.getByRole("button", { name: "Change name" }).click()
+  await dialog.getByRole("button", { name: "Change organization name" }).click()
   await expect(dialog).toBeHidden()
 }
 
@@ -185,8 +186,10 @@ test.describe("standalone tenancy", () => {
     await expect(created).toContainText("Created by the parity suite")
 
     await created.getByRole("button", { name: "Edit" }).click()
-    await page.getByLabel("Name").fill(RENAMED_WORKSPACE)
-    await page.getByRole("button", { name: "Save changes" }).click()
+    const editDialog = page.getByRole("dialog", { name: "Edit workspace" })
+    await editDialog.getByLabel("Name").fill(RENAMED_WORKSPACE)
+    await editDialog.getByRole("button", { name: "Save" }).click()
+    await expect(editDialog).toBeHidden()
 
     const renamed = workspaceRow(page, RENAMED_WORKSPACE)
     await expect(renamed).toBeVisible()
@@ -208,7 +211,12 @@ test.describe("standalone tenancy", () => {
     // A workspace's members are a subset of the organization's, and a standalone
     // deployment has exactly one identity, which owns every workspace it made.
     await expect(page.getByText(/Members of /)).toBeVisible()
-    await expect(page.getByText(/already in this workspace/)).toBeVisible()
+    // Said inside the dialog now rather than by a form under the roster. The
+    // trigger stays either way, so this is the only place that sentence can be.
+    await page.getByRole("button", { name: "Add member" }).click()
+    const dialog = page.getByRole("dialog", { name: "New workspace member" })
+    await expect(dialog.getByText(/already in this workspace/)).toBeVisible()
+    await dialog.getByRole("button", { name: "Cancel" }).click()
   })
 
   test("leaves creating and switching to the scope switcher, and offers no delete", async ({

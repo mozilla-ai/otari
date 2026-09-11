@@ -6,20 +6,15 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import {
-  useCreateOrganizationSpendCeiling,
   useDeleteOrganizationSpendCeiling,
   useOrganizationBudgets,
   useOrganizationSpendCeilings,
-  useUpdateOrganizationSpendCeiling,
 } from "@/shared/api/budgets"
 import { useWorkspaces } from "@/shared/api/workspaces"
 import { formatDate, formatUsd } from "@/shared/helpers/format"
 
 import { limitLabel, periodLabel, scopeLabel } from "./organizationBudget"
-import {
-  SpendCeilingDialog,
-  type SpendCeilingDraft,
-} from "./SpendCeilingDialog"
+import { SpendCeilingDialog } from "./SpendCeilingDialog"
 
 // Where the organization's budgets actually apply, and what has been spent
 // against each.
@@ -48,11 +43,12 @@ export function SpendCeilingsCard({
   const ceilings = useOrganizationSpendCeilings()
   const budgets = useOrganizationBudgets()
   const workspaces = useWorkspaces()
-  const create = useCreateOrganizationSpendCeiling()
-  const update = useUpdateOrganizationSpendCeiling()
   const remove = useDeleteOrganizationSpendCeiling()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in rather than on the way out.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationSpendCeiling>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationSpendCeiling>()
 
@@ -60,30 +56,15 @@ export function SpendCeilingsCard({
   const workspaceRows = workspaces.data ?? []
 
   const openAdd = () => {
+    setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
 
   const openEdit = (ceiling: OrganizationSpendCeiling) => {
+    setOpenCount((count) => count + 1)
     setEditing(ceiling)
     setDialogOpen(true)
-  }
-
-  const submit = (draft: SpendCeilingDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
-    if (editing) {
-      // Only the two fields the endpoint accepts on a PATCH. Sending the scope
-      // would be ignored, and sending it anyway would suggest it could change.
-      update.mutate(
-        {
-          id: editing.id,
-          body: { budget_id: draft.budget_id, name: draft.name },
-        },
-        onDone,
-      )
-      return
-    }
-    create.mutate(draft, onDone)
   }
 
   const columns: DataTableColumn<OrganizationSpendCeiling>[] = [
@@ -203,15 +184,14 @@ export function SpendCeilingsCard({
       </Card>
 
       <SpendCeilingDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
         budgets={budgets.data ?? []}
         workspaces={workspaceRows}
         organizationName={organizationName}
-        isPending={create.isPending || update.isPending}
-        error={editing ? update.error : create.error}
-        onSubmit={submit}
+        onSaved={() => setDialogOpen(false)}
       />
 
       <ConfirmDialog

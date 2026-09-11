@@ -156,3 +156,27 @@ export const WithDocsLink: Story = {
     </SettingsGroup>
   ),
 }
+
+/**
+ * `action` puts the one thing this group is created into on its heading row,
+ * right-aligned, the way a page's own action sits on `PageIntro`'s. A group
+ * that owns a collection is where that collection is added to, so the control
+ * belongs beside the heading naming it rather than at the foot of its rows.
+ */
+export const WithAction: Story = {
+  render: () => (
+    <SettingsGroup
+      bounded
+      title="Search tools"
+      description="Named tools behind the direct endpoint."
+      action={<Button variant="primary">Add search tool</Button>}
+    >
+      <SettingRow
+        label="Allow web search"
+        control={
+          <Field label="Allow web search" value="on" onChange={() => {}} />
+        }
+      />
+    </SettingsGroup>
+  ),
+}

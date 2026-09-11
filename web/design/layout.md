@@ -1,7 +1,7 @@
 # Layout
 
 A page is a vertical stack of **bands**. Each band sets its own rules and its own
-vertical padding. There is no page-level gap and no card anywhere: two bands are
+vertical padding. For authenticated dashboard pages, there is no page-level gap or card: two bands are
 separated by the hairline one of them draws.
 
 ## The bleed rule
@@ -62,8 +62,8 @@ under the title is `children`, not a `description` prop:
 **`Toolbar` already carries `.otari-toolbar`.** Do not pass the place class again;
 `className` is for layout only.
 
-`PageIntro`, not `PageHeader`. `PageHeader` is the pre-redesign card version still
-live on 4 pages; see [DESIGN.md](DESIGN.md).
+`PageIntro` opens every page. The pre-redesign `PageHeader` it replaced is gone:
+its last three call sites moved, and the component with them.
 
 ## Page recipes
 
@@ -173,6 +173,15 @@ row draws no rule of its own, because the group divides its children. `nested`
 indents it to `pl-8`, which is how a row says it belongs to the one above it: a
 `DisclosureRow`'s panel is rows, not prose.
 
+**The lane is a fixed-width slot and the control fills it**, by the repeated-row
+rule further down this file. `w-full` on a field, `min-w-0 flex-1` on one sharing
+the lane with a trailing button, `fullWidth` on a `FilterSelect`; a number keeps
+`text-right tabular-nums` rather than a narrow box of its own. A control that
+cannot fill a lane, a toggle or a copyable chip, sits at its leading edge. **No
+row picks a control width**, for the reason it picks no field height: sized per
+control the lane is not a lane, and a URL field, a select and a two-digit number
+gave a column three different left edges.
+
 `bounded` frames the rows inside the page column instead of bleeding them, and
 the frame is also the dense place (`.otari-settings`), so its controls come out
 32px on a desk and 36px at 16px on a phone. **No row picks a field height or a
@@ -203,3 +212,23 @@ Elements in repeated rows (a table, a rail, a list) must form vertical lanes. Us
 fixed-width slot with `flex-shrink-0` for icons, indicators and trailing actions,
 **even when the slot is empty in some rows.** Never rely on `gap` alone to align a
 column across rows whose content differs in length.
+
+## Public authentication
+
+Public auth and invitation pages use `features/auth/LoginPageShell`: one square,
+bordered form card over the animated bar field selected for the sign-in redesign
+([#991](https://github.com/mozilla-ai/otari/issues/991)). This is a deliberate
+exception to the dashboard's flat bands, scoped to entry and account-recovery
+flows. Keep the card horizontally centered and its top offset independent of
+content height so errors and disclosures grow downward.
+
+The decorative field uses the theme's primary color with changing opacity and
+slightly rounded bars from the selected studio preset. These are illustration
+marks, not rounded controls or tinted content surfaces. The corner marks and the
+primary action keep their accent alongside the field; readable content stays on
+an opaque semantic surface. Do not extend these exceptions to dashboard pages.
+
+The Otari header and Mozilla AI footer are shared across these public pages,
+including standalone deployments, as intentional product branding. Use existing
+type roles and semantic tokens for both. The appearance control includes system,
+light, and dark preferences; reduced motion renders a static field.

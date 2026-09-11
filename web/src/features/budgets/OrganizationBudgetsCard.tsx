@@ -6,15 +6,10 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import {
-  useCreateOrganizationBudget,
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
-  useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-import {
-  OrganizationBudgetDialog,
-  type OrganizationBudgetDraft,
-} from "./OrganizationBudgetDialog"
+import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { budgetLabel, limitLabel, periodLabel } from "./organizationBudget"
 
 // The organization's own budgets: the figures, without yet saying where they
@@ -28,33 +23,28 @@ import { budgetLabel, limitLabel, periodLabel } from "./organizationBudget"
 
 export function OrganizationBudgetsCard() {
   const budgets = useOrganizationBudgets()
-  const create = useCreateOrganizationBudget()
-  const update = useUpdateOrganizationBudget()
   const remove = useDeleteOrganizationBudget()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in. Clearing it on close would blank the fields while the dialog
+  // is still animating away.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<OrganizationBudget>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationBudget>()
 
   const rows = budgets.data ?? []
 
   const openAdd = () => {
+    setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
 
   const openEdit = (budget: OrganizationBudget) => {
+    setOpenCount((count) => count + 1)
     setEditing(budget)
     setDialogOpen(true)
-  }
-
-  const submit = (draft: OrganizationBudgetDraft) => {
-    const onDone = { onSuccess: () => setDialogOpen(false) }
-    if (editing) {
-      update.mutate({ id: editing.budget_id, body: draft }, onDone)
-      return
-    }
-    create.mutate(draft, onDone)
   }
 
   const columns: DataTableColumn<OrganizationBudget>[] = [
@@ -140,12 +130,11 @@ export function OrganizationBudgetsCard() {
       </Card>
 
       <OrganizationBudgetDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
-        isPending={create.isPending || update.isPending}
-        error={editing ? update.error : create.error}
-        onSubmit={submit}
+        onSaved={() => setDialogOpen(false)}
       />
 
       <ConfirmDialog

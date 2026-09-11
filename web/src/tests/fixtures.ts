@@ -157,6 +157,9 @@ export function bootstrap(
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
+    // Closed, matching the default posture: the signup tests that want
+    // registration turn it on rather than every other test turning it off.
+    open_signup: false,
     ...overrides,
   }
 }

@@ -188,7 +188,13 @@ describe("BudgetsPage", () => {
     // description rather than folded into the title.
     const dialog = await screen.findByRole("dialog")
     expect(dialog).toHaveAccessibleName("Edit budget")
-    expect(dialog).toHaveTextContent("team-free-tier")
+    // The accessible description, not the text: `toHaveTextContent` passes on a
+    // paragraph a screen reader never reaches, and what this case is about is
+    // that the budget is announced with the dialog. `FormDialog` wires the
+    // description through `aria-describedby`.
+    expect(dialog).toHaveAccessibleDescription(
+      expect.stringContaining("team-free-tier") as unknown as string,
+    )
   })
 
   it("shows onboarding when there are no budgets", async () => {

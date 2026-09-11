@@ -288,22 +288,35 @@ export function PasskeysCard() {
           is exactly when somebody has orphans to clear out. */}
         {passkeys_ready && canUsePasskeys && !passkeys.isError ? (
           <form
-            className="flex flex-col gap-3 sm:flex-row sm:items-end"
             onSubmit={(event) => {
               event.preventDefault()
               startRegistration()
             }}
           >
+            {/* The button is inside the field, beside the input, because this
+              field's description wraps: the width a wrapped message costs is
+              not a number `FieldAction` can reserve. See forms.md, "Control
+              rows". */}
             <TextField
               value={newName}
               onChange={setNewName}
-              className="flex max-w-md flex-1 flex-col gap-1"
+              className="flex max-w-2xl flex-col gap-1"
             >
               <Label className="text-body">Name</Label>
-              <Input
-                placeholder="Work laptop"
-                maxLength={MAX_PASSKEY_NAME_LENGTH}
-              />
+              <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+                <Input
+                  className="w-full max-w-md"
+                  placeholder="Work laptop"
+                  maxLength={MAX_PASSKEY_NAME_LENGTH}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  isPending={register.isPending}
+                >
+                  Add a passkey
+                </Button>
+              </div>
               <FieldMessages>
                 <Description className="text-muted">
                   Optional. It is only a label, so you can tell this passkey
@@ -311,15 +324,6 @@ export function PasskeysCard() {
                 </Description>
               </FieldMessages>
             </TextField>
-            <div className="sm:pb-6">
-              <Button
-                type="submit"
-                variant="primary"
-                isPending={register.isPending}
-              >
-                Add a passkey
-              </Button>
-            </div>
           </form>
         ) : null}
       </Section>

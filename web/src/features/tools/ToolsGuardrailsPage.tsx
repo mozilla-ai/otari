@@ -8,6 +8,7 @@ import type {
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
@@ -263,13 +264,13 @@ function LoadingGroups() {
           {[0, 1, 2].map((row) => (
             <div
               key={row}
-              className="flex min-h-11 items-center gap-6 px-4 py-3"
+              className="flex min-h-11 flex-col gap-2.5 px-4 py-3 md:flex-row md:items-center md:gap-6"
             >
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <Skeleton className="h-4 w-40" />
                 <Skeleton className="h-3.5 w-64" />
               </div>
-              <Skeleton className="h-8 w-[13.75rem] shrink-0" />
+              <Skeleton className={`h-8 ${CONTROL_LANE}`} />
             </div>
           ))}
         </SettingsGroup>
@@ -323,7 +324,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const narrowed = only ? shown[0] : undefined
 
   return (
-    <div className="flex max-w-[56rem] flex-col gap-10 pb-10">
+    <div className="flex flex-col gap-10 pb-10">
       <PageIntro
         title={narrowed?.label ?? "Tools & Guardrails"}
         docsHref={toolsDocs(narrowed?.docsAnchor)}

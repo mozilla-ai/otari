@@ -8,11 +8,14 @@ import type {
 import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { Field } from "@/design-system/forms/Field"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { SecretField } from "@/design-system/forms/SecretField"
+import { Select } from "@/design-system/forms/Select"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import {
   useCreateSearchTool,
@@ -146,7 +149,6 @@ function StoredToolLine({
           className={`otari-machine-field w-full md:w-[10rem] ${INPUT_CLASS}`}
         />
         <Button
-          size="sm"
           variant="ghost"
           // Named per row, as this row's fields are: the card is a list of
           // tools, so a bare "Remove" is the same name on every one of them.
@@ -217,13 +219,28 @@ function ConfigToolLine({ tool }: { tool: ConfigSearchTool }) {
   )
 }
 
-function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
+function AddToolDialog({
+  isOpen,
+  onClose,
+  onCreated,
+  providers,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  /**
+   * A tool landed. Separate from `onClose` because the created row is inside a
+   * drill-in that is collapsed by default: closing on a cancel should leave it
+   * as it was, and closing on a create should open it, or the only thing that
+   * changes on screen is the trailing count.
+   */
+  onCreated: () => void
+  providers: SearchProviderInfo[]
+}) {
   const create = useCreateSearchTool()
   const [name, setName] = useState("")
   const [provider, setProvider] = useState(providers[0]?.id ?? "")
   const [apiBase, setApiBase] = useState("")
   const [apiKey, setApiKey] = useState("")
-  const [error, setError] = useState("")
 
   const selected = providers.find((entry) => entry.id === provider)
   const inherited = selected?.default_api_base ?? null
@@ -233,13 +250,17 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
   const baseRequired =
     Boolean(selected?.requires_api_base) && inherited === null
   const keyRequired = Boolean(selected?.requires_api_key)
+  // One snapshot rather than a hand-listed predicate: the provider is a field
+  // like the others, and a guard that forgot it discarded a changed provider
+  // with no question asked.
+  const { isDirty } = useDirtySnapshot({ name, provider, apiBase, apiKey })
+
   const ready =
     name.trim() !== "" &&
     (!baseRequired || apiBase.trim() !== "") &&
     (!keyRequired || apiKey !== "")
 
   const submit = () => {
-    setError("")
     create.mutate(
       {
         name: name.trim(),
@@ -247,86 +268,69 @@ function AddToolForm({ providers }: { providers: SearchProviderInfo[] }) {
         api_base: apiBase.trim() === "" ? null : apiBase.trim(),
         api_key: apiKey === "" ? null : apiKey,
       },
-      {
-        onSuccess: () => {
-          setName("")
-          setApiBase("")
-          setApiKey("")
-        },
-        onError: (cause) => setError(errorMessage(cause)),
-      },
+      { onSuccess: onCreated },
     )
   }
 
   return (
-    <div className="flex flex-col gap-2 px-4 py-3">
-      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-        <input
-          type="text"
-          aria-label="Search tool name"
-          value={name}
-          placeholder="local"
-          disabled={create.isPending}
-          onChange={(event) => setName(event.target.value)}
-          className={`otari-machine-field w-full md:w-[7.5rem] ${INPUT_CLASS}`}
-        />
-        <FilterSelect
-          ariaLabel="Search provider"
-          value={provider}
-          onChange={setProvider}
-          options={providers.map((entry) => ({
-            value: entry.id,
-            label: entry.id,
-          }))}
-          disabled={create.isPending}
-        />
-        <input
-          type="text"
-          inputMode="url"
-          aria-label="Search backend URL"
-          value={apiBase}
-          disabled={create.isPending}
-          placeholder={
-            inherited
-              ? `inherits ${inherited}`
-              : baseRequired
-                ? "backend URL (required)"
-                : "backend URL"
-          }
-          onChange={(event) => setApiBase(event.target.value)}
-          className={`otari-machine-field w-full md:w-[15rem] ${INPUT_CLASS}`}
-        />
-        <input
-          type="password"
-          autoComplete="new-password"
-          aria-label="Search API key"
-          value={apiKey}
-          disabled={create.isPending}
-          placeholder={
-            keyRequired ? "API key (required)" : "API key (optional)"
-          }
-          onChange={(event) => setApiKey(event.target.value)}
-          className={`otari-machine-field w-full md:w-[10rem] ${INPUT_CLASS}`}
-        />
-        <Button
-          size="sm"
-          variant="primary"
-          isDisabled={!ready || create.isPending}
-          onPress={submit}
-        >
-          {create.isPending ? "Adding…" : "Add"}
-        </Button>
-      </div>
-      <p className="text-caption text-subtle">
-        Storing an API key needs{" "}
-        <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
-      </p>
-      {error ? (
-        <p role="alert" className="break-words text-caption text-danger">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    <FormDialog
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title="New search tool"
+      submitLabel="Add search tool"
+      onSubmit={submit}
+      isPending={create.isPending}
+      isSubmitDisabled={!ready}
+      isDirty={isDirty}
+      error={create.error}
+    >
+      <Field
+        label="Name"
+        value={name}
+        onChange={setName}
+        isRequired
+        autoFocus
+        placeholder="local"
+        description="What a caller names in search_tool_name, or in the /api/v1/search/{tool} path."
+      />
+      <Select
+        label="Provider"
+        value={provider}
+        onChange={setProvider}
+        options={providers.map((entry) => ({
+          value: entry.id,
+          label: entry.id,
+        }))}
+        reserveMessage={false}
+      />
+      <Field
+        label="Backend URL"
+        value={apiBase}
+        onChange={setApiBase}
+        isRequired={baseRequired}
+        placeholder={inherited ?? "https://…"}
+        description={
+          inherited
+            ? `Leave blank to inherit ${inherited}.`
+            : baseRequired
+              ? "This provider has no endpoint of its own, so it needs one here."
+              : "Optional for this provider."
+        }
+      />
+      <SecretField
+        label="API key"
+        value={apiKey}
+        onChange={setApiKey}
+        isRequired={keyRequired}
+        description={
+          keyRequired
+            ? "This provider needs one. Storing it needs OTARI_SECRET_KEY set on the gateway."
+            : "Optional for this provider. Storing one needs OTARI_SECRET_KEY set on the gateway."
+        }
+      />
+    </FormDialog>
   )
 }
 
@@ -342,6 +346,8 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
   const tools = useSearchTools()
   const providers = useSearchProviders()
   const [isOpen, setIsOpen] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [openCount, setOpenCount] = useState(0)
 
   const known = providers.data ?? []
   const stored = tools.data?.stored ?? []
@@ -354,48 +360,80 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
   const answered = !tools.isLoading && !failed
 
   return (
-    <SettingsGroup
-      bounded
-      title="Search tools"
-      description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
-      docsHref={docsHref}
-    >
-      {tools.error || providers.error ? (
-        // Outside the disclosure: a read that failed is the thing the operator
-        // most needs to see, and the row is collapsed by default.
-        <div className="px-4 py-3">
-          <ErrorBanner error={tools.error ?? providers.error} />
-        </div>
-      ) : null}
-      <DisclosureRow
-        label="Configure search tools"
-        help={
-          failed
-            ? "Could not read the tools this deployment serves."
-            : !answered
-              ? "Reading the tools this deployment serves."
-              : count === 0
-                ? "None configured, so POST /api/v1/search refuses every request."
-                : "Callers name one in search_tool_name, or in the /api/v1/search/{tool} path."
-        }
-        isOpen={isOpen}
-        onToggle={() => setIsOpen((open) => !open)}
-        trailing={
-          <span className="text-caption text-subtle tabular-nums">
-            {answered ? toolCount(count) : ""}
-          </span>
+    <>
+      {/* Outside the group, not inside it: `FormDialog` renders its trigger
+          slot as a real element, and a group's rows are a `divide-y` container
+          where one more child changes which row is last. */}
+      {/* Keyed on the open count, so each open remounts a blank form. Clearing
+          the draft on close instead would blank the fields while the dialog is
+          still animating away. */}
+      <AddToolDialog
+        key={openCount}
+        isOpen={adding}
+        onClose={() => setAdding(false)}
+        onCreated={() => {
+          setAdding(false)
+          // The new row lives in the drill-in, which is collapsed by default,
+          // so without this the only thing that changes on screen is the count.
+          setIsOpen(true)
+        }}
+        providers={known}
+      />
+      <SettingsGroup
+        bounded
+        title="Search tools"
+        description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
+        docsHref={docsHref}
+        action={
+          known.length > 0 ? (
+            <Button
+              variant="primary"
+              onPress={() => {
+                setOpenCount((count) => count + 1)
+                setAdding(true)
+              }}
+            >
+              Add search tool
+            </Button>
+          ) : null
         }
       >
-        <div className="flex flex-col divide-y divide-border-subtle">
-          {stored.map((tool) => (
-            <StoredToolLine key={tool.name} tool={tool} providers={known} />
-          ))}
-          {fromConfig.map((tool) => (
-            <ConfigToolLine key={tool.name} tool={tool} />
-          ))}
-          {known.length > 0 ? <AddToolForm providers={known} /> : null}
-        </div>
-      </DisclosureRow>
-    </SettingsGroup>
+        {tools.error || providers.error ? (
+          // Outside the disclosure: a read that failed is the thing the operator
+          // most needs to see, and the row is collapsed by default.
+          <div className="px-4 py-3">
+            <ErrorBanner error={tools.error ?? providers.error} />
+          </div>
+        ) : null}
+        <DisclosureRow
+          label="Configure search tools"
+          help={
+            failed
+              ? "Could not read the tools this deployment serves."
+              : !answered
+                ? "Reading the tools this deployment serves."
+                : count === 0
+                  ? "None configured, so POST /api/v1/search refuses every request."
+                  : "Callers name one in search_tool_name, or in the /api/v1/search/{tool} path."
+          }
+          isOpen={isOpen}
+          onToggle={() => setIsOpen((open) => !open)}
+          trailing={
+            <span className="text-caption text-subtle tabular-nums">
+              {answered ? toolCount(count) : ""}
+            </span>
+          }
+        >
+          <div className="flex flex-col divide-y divide-border-subtle">
+            {stored.map((tool) => (
+              <StoredToolLine key={tool.name} tool={tool} providers={known} />
+            ))}
+            {fromConfig.map((tool) => (
+              <ConfigToolLine key={tool.name} tool={tool} />
+            ))}
+          </div>
+        </DisclosureRow>
+      </SettingsGroup>
+    </>
   )
 }

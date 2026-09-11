@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationMember, workspaceMember } from "@/tests/fixtures"
-import { WorkspaceMembersPanel } from "./WorkspaceMembersPanel"
+import {
+  AddWorkspaceMemberDialog,
+  WorkspaceMembersPanel,
+} from "./WorkspaceMembersPanel"
 
 /**
- * One workspace's roster, plus the form that adds to it.
+ * One workspace's roster. The form that adds to it is a dialog now, opened from
+ * the page's heading row, and has stories of its own at the foot of this file.
  *
  * It takes an id and a name rather than a `Workspace`, because the Members page
  * reaches it holding only the caller's own membership, which carries both and
@@ -65,7 +69,6 @@ const meta = {
     workspaceId: WORKSPACE_ID,
     workspaceName: "Platform",
     orgMembers: ORG_MEMBERS,
-    rosterResolved: true,
     canManageWorkspace: true,
   },
   parameters: { api: { [membersPath]: ROSTER }, layout: "padded" },
@@ -75,10 +78,7 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/**
- * A manageable roster: roles are editable, members removable, and the add form
- * offers the organization members who are not in it yet (Alan, here).
- */
+/** A manageable roster: roles are editable and members are removable. */
 export const CanManage: Story = {
   render: (args) => (
     <div className="w-[44rem]">
@@ -97,19 +97,6 @@ export const ReadOnly: Story = {
   ),
 }
 
-/**
- * Every organization member is already in the workspace, so the add form has
- * nothing left to offer.
- */
-export const EveryoneAlreadyIn: Story = {
-  args: { orgMembers: ORG_MEMBERS.slice(0, 2) },
-  render: (args) => (
-    <div className="w-[44rem]">
-      <WorkspaceMembersPanel {...args} />
-    </div>
-  ),
-}
-
 /** A brand-new workspace, whose only member is whoever created it. */
 export const SingleOwner: Story = {
   parameters: { api: { [membersPath]: [ROSTER[0]] } },
@@ -120,16 +107,33 @@ export const SingleOwner: Story = {
   ),
 }
 
+/** Who is left to add, offered by the dialog the heading row opens. */
+export const AddDialog: StoryObj<typeof AddWorkspaceMemberDialog> = {
+  args: {
+    isOpen: true,
+    onClose: () => {},
+    workspaceId: WORKSPACE_ID,
+    candidates: ORG_MEMBERS.slice(2),
+    rosterResolved: true,
+  },
+  render: (args) => <AddWorkspaceMemberDialog {...args} />,
+}
+
 /**
- * The organization roster has not resolved yet. `rosterResolved` is a prop rather
- * than something this component waits on, because the page owns that query, and
- * an unresolved roster must not read as "nobody to add".
+ * Everyone is already in, so there is nobody to offer. Distinct from a roster
+ * that has not answered: `rosterResolved` is a prop rather than something this
+ * component waits on, because the page owns that query, and an unresolved
+ * roster must not read as "nobody to add".
  */
-export const RosterNotResolved: Story = {
-  args: { rosterResolved: false, orgMembers: [] },
-  render: (args) => (
-    <div className="w-[44rem]">
-      <WorkspaceMembersPanel {...args} />
-    </div>
-  ),
+export const AddDialogWithNobodyLeft: StoryObj<
+  typeof AddWorkspaceMemberDialog
+> = {
+  args: {
+    isOpen: true,
+    onClose: () => {},
+    workspaceId: WORKSPACE_ID,
+    candidates: [],
+    rosterResolved: true,
+  },
+  render: (args) => <AddWorkspaceMemberDialog {...args} />,
 }

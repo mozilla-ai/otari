@@ -1,13 +1,15 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
+import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { WorkspaceMcpServer } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
+import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { canManageWorkspace } from "@/features/organization/roles"
 import {
@@ -55,11 +57,21 @@ function tokenChip(server: WorkspaceMcpServer) {
   )
 }
 
+/** The page's own opening line, which the `/tools` card does not carry. */
+const PAGE_DESCRIPTION =
+  "MCP endpoints a workspace's requests can reach by naming their ids, without carrying a URL or a bearer token of their own. Each is checked for SSRF safety when it is stored and again when a request uses it, and its token is encrypted at rest."
+
 export function WorkspaceMcpServersCard({
-  showHeading = true,
+  variant = "card",
 }: {
-  /** Suppressed on the page whose own title already says "MCP servers". */
-  showHeading?: boolean
+  /**
+   * Where this is rendering. As a `card` it is one section at the foot of
+   * `/tools`, with its own `h2` and the register control beside it. As a
+   * `page` it *is* `/tools/mcp-servers`, so it renders that page's opening
+   * instead and the control sits in the heading row there, which is where
+   * every other page in the dashboard keeps the one thing it creates.
+   */
+  variant?: "card" | "page"
 }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -76,17 +88,23 @@ export function WorkspaceMcpServersCard({
   const remove = useDeleteWorkspaceMcpServer()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so the draft is cleared
+  // on the way in. Clearing it on close would blank the fields while the dialog
+  // is still animating away.
+  const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<WorkspaceMcpServer>()
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
-  const heading = showHeading ? (
-    <h2 className="text-title">MCP servers</h2>
-  ) : null
+  const isPage = variant === "page"
 
   if (!selected) {
     return (
       <section className="flex flex-col gap-2">
-        {heading}
+        {isPage ? (
+          <PageIntro title="MCP servers">{PAGE_DESCRIPTION}</PageIntro>
+        ) : (
+          <h2 className="text-title">MCP servers</h2>
+        )}
         <InfoBanner>
           {workspaceLoading
             ? "Reading the workspaces you belong to."
@@ -104,12 +122,14 @@ export function WorkspaceMcpServersCard({
   const openAdd = () => {
     setEditing(undefined)
     create.reset()
+    setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
 
   const openEdit = (server: WorkspaceMcpServer) => {
     setEditing(server)
     update.reset()
+    setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
 
@@ -188,23 +208,39 @@ export function WorkspaceMcpServersCard({
       header: "",
       cell: (row) => (
         <RowActionRow>
-          <RowAction onPress={() => openEdit(row)}>Edit</RowAction>
-          <RowAction onPress={() => openDelete(row)}>Delete</RowAction>
+          <RowAction
+            icon={FiEdit2}
+            label="Edit"
+            onPress={() => openEdit(row)}
+          />
+          <RowAction
+            icon={FiTrash2}
+            label="Delete"
+            onPress={() => openDelete(row)}
+          />
         </RowActionRow>
       ),
     })
   }
 
+  const addButton = manages ? (
+    <Button variant="primary" onPress={openAdd}>
+      Add MCP server
+    </Button>
+  ) : null
+
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {heading}
-        {manages ? (
-          <Button size="sm" variant="primary" onPress={openAdd}>
-            Add MCP server
-          </Button>
-        ) : null}
-      </div>
+      {isPage ? (
+        <PageIntro title="MCP servers" action={addButton}>
+          {PAGE_DESCRIPTION}
+        </PageIntro>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-title">MCP servers</h2>
+          {addButton}
+        </div>
+      )}
 
       <p className="max-w-prose text-sm text-muted">
         Endpoints that requests billed to {selected.name} can use by naming
@@ -233,7 +269,11 @@ export function WorkspaceMcpServersCard({
         />
       </TableScrollFrame>
 
+      {/* Keyed on the open count, so each open remounts the form: it seeds its
+          fields on mount, and one row's draft must not survive into the next
+          row's dialog. */}
       <McpServerDialog
+        key={openCount}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

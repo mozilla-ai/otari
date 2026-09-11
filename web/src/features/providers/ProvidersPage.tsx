@@ -1,6 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef, useState } from "react"
+import { FiActivity, FiEdit2, FiTrash2 } from "react-icons/fi"
 import type {
   CreateStoredProviderRequest,
   ProviderHealth,
@@ -17,6 +18,7 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { SecretField } from "@/design-system/forms/SecretField"
+import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
@@ -190,7 +192,7 @@ function KnownProviderForm({
   // client options and every typed credential (a Bedrock region) were invisible
   // to the guard and went on Escape with nothing asked. `key={addOpenCount}`
   // reseeds it per open. See feedback.md.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     providerId,
     apiKey,
     name,
@@ -198,7 +200,6 @@ function KnownProviderForm({
     clientArgsText,
     credentials,
   })
-  const seededDraft = useRef(draft)
   const canSubmit =
     providerId !== "" &&
     !nameHasDelimiter &&
@@ -249,7 +250,7 @@ function KnownProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={create.error}
       footerStart={
         <ConnectionTestButton test={test} getPayload={buildPayload} />
@@ -374,14 +375,13 @@ function CustomProviderForm({
   const nameHasDelimiter = /[:/]/.test(name)
   // Same snapshot as the known tab, for the same reason: this list had missed
   // `providerType` and the client options.
-  const draft = JSON.stringify({
+  const { isDirty } = useDirtySnapshot({
     name,
     providerType,
     apiBase,
     apiKey,
     clientArgsText,
   })
-  const seededDraft = useRef(draft)
   const canSubmit =
     name.trim() !== "" &&
     !nameHasDelimiter &&
@@ -415,7 +415,7 @@ function CustomProviderForm({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={!canSubmit}
-      isDirty={draft !== seededDraft.current}
+      isDirty={isDirty}
       error={create.error}
       footerStart={
         <ConnectionTestButton
@@ -577,14 +577,21 @@ function EditProviderForm({
     credentials,
     stored.redacted,
   )
+  // `replacingKey` is in the snapshot with the secret it reveals: arming the
+  // replacement and then closing without typing one loses nothing, but a typed
+  // key is work, and the flag is what says the field was ever on screen.
+  const { isDirty } = useDirtySnapshot({
+    providerType,
+    apiBase,
+    replacingKey,
+    apiKey,
+    clientArgsText,
+    credentials,
+  })
+  const blocked = !clientArgs.ok || Object.keys(credentialErrors).length > 0
 
   const submit = () => {
-    if (
-      update.isPending ||
-      !clientArgs.ok ||
-      Object.keys(credentialErrors).length > 0
-    )
-      return
+    if (update.isPending || blocked) return
     const body: UpdateStoredProviderRequest = {
       provider_type: providerType.trim() || null,
       api_base: apiBase.trim() || null,
@@ -612,26 +619,38 @@ function EditProviderForm({
   }
 
   return (
-    <Section
-      className="border-y border-border py-5"
-      contentClassName="flex flex-col gap-4"
+    <FormDialog
+      isOpen
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      // `lg` as on the add form: the same five fields, plus whatever typed
+      // credentials this provider declares.
+      size="lg"
+      title="Edit provider"
+      description={<code>{provider.instance}</code>}
+      submitLabel="Save"
+      onSubmit={submit}
+      isPending={update.isPending}
+      isSubmitDisabled={blocked}
+      isDirty={isDirty}
+      error={update.error}
     >
-      <div className="text-title">
-        Edit <code>{provider.instance}</code>
-      </div>
-      <ErrorBanner error={update.error} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Provider type"
           value={providerType}
           onChange={setProviderType}
           placeholder="openai"
+          autoFocus
+          reserveMessage={false}
         />
         <Field
           label="API base"
           value={apiBase}
           onChange={setApiBase}
           placeholder="https://api.openai.com/v1"
+          reserveMessage={false}
         />
       </div>
       <div className="flex flex-col gap-2">
@@ -684,23 +703,7 @@ function EditProviderForm({
         onChange={setClientArgsText}
         error={clientArgs.ok ? null : clientArgs.error}
       />
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={
-            update.isPending ||
-            !clientArgs.ok ||
-            Object.keys(credentialErrors).length > 0
-          }
-          onPress={submit}
-        >
-          {update.isPending ? "Saving…" : "Save changes"}
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </Section>
+    </FormDialog>
   )
 }
 
@@ -1186,26 +1189,28 @@ export function ProvidersPage() {
           <div className="flex flex-col items-end gap-1.5">
             <RowActionRow>
               <RowAction
+                icon={FiActivity}
+                label="Test"
                 // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
                 isDisabled={
                   tests[row.instance]?.status === "pending" ||
                   row.stored?.decryptable === false
                 }
                 onPress={() => void runTest(row.instance)}
-              >
-                Test
-              </RowAction>
+              />
               <RowAction
+                icon={FiEdit2}
+                label="Edit"
                 onPress={() => {
                   setAddOpen(false)
                   setEditing(row.instance)
                 }}
-              >
-                Edit
-              </RowAction>
-              <RowAction onPress={() => setPendingDelete(row.instance)}>
-                Delete
-              </RowAction>
+              />
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(row.instance)}
+              />
             </RowActionRow>
             <TestOutcome state={tests[row.instance]} />
           </div>
@@ -1316,9 +1321,9 @@ export function ProvidersPage() {
       />
       {editingProvider ? (
         <EditProviderForm
-          // Remount when the operator switches rows: the fields are seeded from
-          // the provider once, so without this, editing a second provider would
-          // open with the first one's values (and save them onto it).
+          // The fields are seeded from the provider once, so the next Edit has
+          // to arrive at a fresh form rather than the last provider's values,
+          // which a save would then write onto this one.
           key={editingProvider.instance}
           provider={editingProvider}
           onClose={() => setEditing(null)}
