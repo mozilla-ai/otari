@@ -1,3 +1,20 @@
+/** biome-ignore-all lint/style/noDescendingSpecificity: the rule reads selectors
+ * and not declarations, so it cannot tell a real override from two rules that
+ * never touch the same property. Suppressed here rather than in biome.jsonc so
+ * it stays in Biome's recommended set and still guards any other stylesheet.
+ *
+ * It first fired on Biome 2.5.13, 31 times. Thirty of those pairs share no
+ * declared property. The thirty-first was real and is fixed: the row-click
+ * acknowledgment below lost to the `:hover` rule above it, which is exactly the
+ * case a mouse produces, so the highlight only ever appeared for keyboard
+ * activation. That one is the reason this is a targeted suppression with a note
+ * rather than a rule switched off.
+ *
+ * Re-audit after editing this file: turn the rule on, take the diagnostics as
+ * JSON, and for each pair compare the two blocks' declared properties. Only a
+ * pair that shares one is a defect. Thirty findings will drown the thirty-first,
+ * so compare properties rather than reading the list.
+ */
 @import "tailwindcss";
 @import "@heroui/styles";
 
@@ -2540,8 +2557,13 @@ main {
   background-color: var(--color-surface-muted);
 }
 /* Same-frame acknowledgment of a row click while react-aria's interaction
-   render (linear in page size) catches up and the panel slides in. */
-.otari-table .otari-detail-opening .table__cell {
+   render (linear in page size) catches up and the panel slides in.
+
+   `.table__row` is in the selector to outweigh the `:hover` rule above, which is
+   otherwise more specific and wins for the whole of the acknowledgment: the class
+   is set by a click, and a click leaves the pointer on the row, so the mouse case
+   is exactly the one that lost. */
+.otari-table .table__row.otari-detail-opening .table__cell {
   background-color: var(--color-primary-subtle);
 }
 

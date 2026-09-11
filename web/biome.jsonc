@@ -47,16 +47,6 @@
       "suspicious": { "noExplicitAny": "off", "noArrayIndexKey": "off" },
       "style": {
         "noNonNullAssertion": "off",
-        // Newly firing as of Biome 2.5.13, 31 times and all of them in
-        // globals.css. The rule compares two selectors' specificity and warns
-        // when the later one is lower, on the theory that the later rule cannot
-        // win. It does not check whether the two declare any property in common,
-        // and here they almost never do: the pair it flags around .otari-table
-        // is a `:hover` rule setting background-color against a base rule
-        // setting user-select. Nothing in that pair competes, so there is
-        // nothing to reorder, and the ordering in that file is grouped by the
-        // component being restyled rather than by specificity on purpose.
-        "noDescendingSpecificity": "off",
         // The overlay tree is not in this repo and is not meant to be: an overlay
         // owns its own routes tree in otari-ai, composed onto this base at build
         // time as a sibling of src/ (see ARCHITECTURE.md, and otari-ai's
