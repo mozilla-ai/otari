@@ -738,6 +738,42 @@ describe("RoutingPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
+  it("fixes who a policy applies to once a write for somebody has landed", async () => {
+    // Nothing here can take a policy back, so a scope that can still be edited
+    // after a partial write is a way to end up with rows the operator did not
+    // ask for: drop a written person from the selection and their policy lives
+    // on unmentioned, or switch to every caller and it lives on ALSO outranking
+    // the global one for exactly them, which is the precedence the field's own
+    // description promises. The controls are withheld instead, and say why.
+    mockApi([], null, [], {
+      members: MEMBERS,
+      refuseFirstWriteFor: ["u-carol"],
+    })
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await nameAndServe(user, "cheap")
+    await pickUsers(user, ["bob", "carol"])
+    await submitDialog(user)
+    await screen.findByRole("alert")
+
+    const dialog = within(screen.getByRole("dialog"))
+    // Neither tab, and no picker: the selection is settled.
+    expect(
+      dialog.queryByRole("button", { name: "Specific users" }),
+    ).not.toBeInTheDocument()
+    expect(
+      dialog.queryByRole("button", { name: "Every caller" }),
+    ).not.toBeInTheDocument()
+    expect(dialog.queryByLabelText("Users")).not.toBeInTheDocument()
+    // And the reason, since a control that vanishes without one teaches
+    // nothing. The route back out is naming the list, not this form.
+    expect(
+      dialog.getByText(/already been created/, { exact: false }),
+    ).toHaveTextContent("delete it from the list")
+  })
+
   it("writes every scope again when the payload changed after a part-written save", async () => {
     // The ids that landed are remembered against the payload they landed under,
     // so correcting the name first is not the same policy: skipping them then

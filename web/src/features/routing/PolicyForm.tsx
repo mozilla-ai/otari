@@ -107,10 +107,16 @@ function ScopePicker({
   userIds,
   users,
   onChange,
+  isSettled,
 }: {
   userIds: string[] | null
   users: User[]
   onChange: (userIds: string[] | null) => void
+  /**
+   * Whether a write under this name has already landed, which freezes the
+   * scope. See the branch below for why it cannot be changed after that.
+   */
+  isSettled: boolean
 }) {
   const isScoped = userIds !== null
 
@@ -120,34 +126,54 @@ function ScopePicker({
         label="Applies to"
         description="A global policy resolves for every caller. A scoped one resolves only for the people named, and takes precedence over a global policy of the same name."
       />
-      <TabRow>
-        {/* Each tab acts only on a change of state: pressing the one already
-            active would otherwise throw away the people chosen under it. */}
-        <Tab
-          isActive={!isScoped}
-          onPress={() => {
-            if (isScoped) onChange(null)
-          }}
-        >
-          Every caller
-        </Tab>
-        <Tab
-          isActive={isScoped}
-          onPress={() => {
-            if (!isScoped) onChange([])
-          }}
-        >
-          Specific users
-        </Tab>
-      </TabRow>
-      {userIds === null ? null : (
-        <UserMultiSelect
-          label="Users"
-          value={userIds}
-          onChange={onChange}
-          users={users}
-          description="One policy is written per person, each resolving only for them."
-        />
+      {isSettled ? (
+        // Withheld, not disabled: there is no write that takes a policy back,
+        // so a control offering to change who this applies to would be
+        // offering something this form cannot do. Taking a person out of the
+        // selection would leave the policy already written for them in place,
+        // and choosing every caller would leave it in place AND outranking the
+        // global one for exactly that person, which is the precedence rule
+        // stated above. Stated rather than greyed out, because a disabled
+        // control with no reason beside it teaches nothing.
+        <p className="text-caption">
+          Some policies under this name have already been created, and this form
+          cannot take one back, so who it applies to is fixed now. Create policy
+          writes the ones still missing. To remove one you did not mean to
+          create, close this and delete it from the list.
+        </p>
+      ) : (
+        <>
+          <TabRow>
+            {/* Each tab acts only on a change of state: pressing the one
+                already active would otherwise throw away the people chosen
+                under it. */}
+            <Tab
+              isActive={!isScoped}
+              onPress={() => {
+                if (isScoped) onChange(null)
+              }}
+            >
+              Every caller
+            </Tab>
+            <Tab
+              isActive={isScoped}
+              onPress={() => {
+                if (!isScoped) onChange([])
+              }}
+            >
+              Specific users
+            </Tab>
+          </TabRow>
+          {userIds === null ? null : (
+            <UserMultiSelect
+              label="Users"
+              value={userIds}
+              onChange={onChange}
+              users={users}
+              description="One policy is written per person, each resolving only for them."
+            />
+          )}
+        </>
       )}
     </div>
   )
@@ -775,6 +801,12 @@ export function PolicyForm({
           userIds={userIds}
           users={users.data ?? []}
           onChange={setUserIds}
+          // Any landed write settles it, whatever payload it went under. Not
+          // keyed on the current name and spec the way `done` is: a policy
+          // written for somebody stays written when the name changes, so a key
+          // match would release the scope and let them be dropped from the
+          // selection while their row lived on.
+          isSettled={written.userIds.length > 0}
         />
       )}
 
