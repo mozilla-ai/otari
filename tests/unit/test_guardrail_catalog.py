@@ -10,13 +10,35 @@ with a schema nobody ships.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
 
 import httpx
 import pytest
+from any_guardrail.base import GuardrailName
+from any_guardrail.parameters import ParameterType as UpstreamParameterType
+from any_guardrail.taxonomy import BackendType, OutputShape
+from any_guardrail.taxonomy import GuardrailCategory as UpstreamCategory
+from any_guardrail.taxonomy import GuardrailStage as UpstreamStage
 
 from gateway.log_config import logger as gateway_logger
-from gateway.services.guardrail_catalog import fetch_guardrail_catalog
+from gateway.services.guardrail_catalog import (
+    _BACKEND_PACKAGES,
+    _KNOWN_BACKENDS,
+    _KNOWN_CATEGORIES,
+    _KNOWN_OUTPUT_SHAPES,
+    _KNOWN_STAGES,
+    _KNOWN_TYPES,
+    LOCAL_GUARDRAILS_EXTRA,
+    UNKNOWN,
+    BuiltInGuardrailCatalog,
+    BuiltInGuardrailSpec,
+    _backend_availability,
+    _installed,
+    _known_values,
+    build_builtin_guardrail_catalog,
+    fetch_guardrail_catalog,
+)
 
 _URL = "http://anyguardrails:8000"
 
@@ -251,3 +273,207 @@ async def test_an_unusable_configured_url_is_a_reason_not_a_500(monkeypatch: pyt
     assert catalog.available is False
     assert catalog.profiles == []
     assert catalog.reason is not None
+
+
+# ---------------------------------------------------------------------------
+# The built-in catalog (``build_builtin_guardrail_catalog``).
+#
+# Reads the installed any-guardrail registry with nothing stubbed, for the reason
+# the tests above leave the parameter half real: a fixture here could agree with a
+# schema nobody ships. Only the backend probe is faked, so an assertion about
+# `runnable` does not depend on which extras this environment happens to hold.
+# ---------------------------------------------------------------------------
+
+
+def _spec(catalog: BuiltInGuardrailCatalog, guardrail_name: str) -> BuiltInGuardrailSpec:
+    return next(spec for spec in catalog.guardrails if spec.guardrail_name == guardrail_name)
+
+
+def _force_probe(monkeypatch: pytest.MonkeyPatch, *, installed: bool) -> None:
+    """Answer every module probe the same way, whatever this environment installed."""
+    monkeypatch.setattr("gateway.services.guardrail_catalog._installed", lambda _package: installed)
+
+
+@pytest.fixture(autouse=True)
+def _clear_backend_cache() -> Iterator[None]:
+    """The probe is cached for the process; a test must not inherit another's answer."""
+    _backend_availability.cache_clear()
+    yield
+    _backend_availability.cache_clear()
+
+
+def test_lists_every_guardrail_the_library_ships() -> None:
+    catalog = build_builtin_guardrail_catalog()
+
+    assert {spec.guardrail_name for spec in catalog.guardrails} == {name.value for name in GuardrailName}
+
+
+def test_orders_the_catalog_for_a_picker() -> None:
+    catalog = build_builtin_guardrail_catalog()
+
+    names = [spec.display_name for spec in catalog.guardrails]
+    assert names == sorted(names, key=str.casefold)
+
+
+def test_publishes_the_constructor_stage_a_stored_guardrail_owns() -> None:
+    """The create stage is the point: it is where a vendor API key lives."""
+    api_key = next(
+        parameter
+        for parameter in _spec(build_builtin_guardrail_catalog(), "lakera_guard").create_parameters
+        if parameter.name == "api_key"
+    )
+
+    assert api_key.secret
+    assert api_key.storable
+    # Optional in the signature and read from LAKERA_API_KEY, so only upstream's
+    # effectively-required flag stops the form rendering it as skippable.
+    assert api_key.required
+
+
+def test_publishes_both_stages_of_one_guardrail() -> None:
+    spec = _spec(build_builtin_guardrail_catalog(), "any_llm")
+
+    assert {parameter.name for parameter in spec.validate_parameters} == {
+        "policy",
+        "model_id",
+        "system_prompt",
+        "prompt_version",
+    }
+    # any_llm is the one hosted guardrail taking no constructor arguments, which
+    # is why the two stages are published as separate lists rather than merged.
+    assert spec.create_parameters == []
+
+
+def test_marks_a_live_object_secret_as_unstorable() -> None:
+    """A json-typed secret is an authenticated client, not a value to write down."""
+    session = next(
+        parameter
+        for parameter in _spec(build_builtin_guardrail_catalog(), "bedrock_guardrails").create_parameters
+        if parameter.name == "boto3_session"
+    )
+
+    assert session.secret
+    assert session.type == "json"
+    assert not session.storable
+
+
+def test_a_plain_secret_stays_storable() -> None:
+    key = next(
+        parameter
+        for parameter in _spec(build_builtin_guardrail_catalog(), "watsonx_guardian").create_parameters
+        if parameter.name == "api_key"
+    )
+
+    assert key.secret
+    assert key.storable
+
+
+def test_carries_the_metadata_a_picker_groups_by() -> None:
+    spec = _spec(build_builtin_guardrail_catalog(), "lakera_guard")
+
+    assert spec.backend == "hosted_api"
+    assert spec.primary_category == "prompt_injection"
+    assert spec.requires_api_key
+    assert spec.display_name
+    assert spec.description
+    assert spec.vendor
+    assert spec.default_license
+    assert spec.stages
+
+
+def test_reports_a_second_way_to_run_the_same_guardrail() -> None:
+    """Susfactor also has a hosted path, which one runnable flag cannot express."""
+    assert _spec(build_builtin_guardrail_catalog(), "susfactor").alternate_backends == ["hosted_api"]
+
+
+def test_a_guardrail_whose_backend_is_installed_is_runnable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_probe(monkeypatch, installed=True)
+
+    spec = _spec(build_builtin_guardrail_catalog(), "llama_guard")
+
+    assert spec.runnable
+    assert spec.missing_extra is None
+
+
+def test_a_guardrail_whose_backend_is_absent_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_probe(monkeypatch, installed=False)
+
+    spec = _spec(build_builtin_guardrail_catalog(), "llama_guard")
+
+    assert not spec.runnable
+    assert spec.missing_extra == LOCAL_GUARDRAILS_EXTRA
+
+
+def test_a_hosted_guardrail_needs_no_extra_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The base install reaches Lakera over `requests`, so nothing is probed."""
+    _force_probe(monkeypatch, installed=False)
+
+    spec = _spec(build_builtin_guardrail_catalog(), "lakera_guard")
+
+    assert spec.runnable
+    assert spec.missing_extra is None
+
+
+def test_a_guardrail_with_no_backend_information_is_a_gap_not_a_guess(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A newer any-guardrail could ship one; reporting it runnable would be a lie."""
+    monkeypatch.delitem(_BACKEND_PACKAGES, GuardrailName.LAKERA_GUARD)
+
+    spec = _spec(build_builtin_guardrail_catalog(), "lakera_guard")
+
+    assert not spec.runnable
+    assert spec.missing_extra is None
+
+
+def test_every_guardrail_has_backend_information() -> None:
+    """A guardrail upstream adds must be given a probe, not left to the gap above."""
+    assert set(_BACKEND_PACKAGES) == set(GuardrailName)
+
+
+def test_a_missing_module_is_not_installed() -> None:
+    assert not _installed("a_module_no_one_ships")
+    # A dotted probe whose parent is absent raises rather than answering None.
+    assert not _installed("a_module_no_one_ships.deeper")
+
+
+def test_listing_the_catalog_never_loads_a_model_backend() -> None:
+    """The whole point of reading the registry rather than constructing anything."""
+    build_builtin_guardrail_catalog()
+
+    assert "torch" not in sys.modules
+    assert "transformers" not in sys.modules
+
+
+def test_names_every_taxonomy_value_upstream_can_report() -> None:
+    """The guard on the Literals above: an upstream addition fails here, loudly.
+
+    Without it a new member degrades in silence, to "unknown" for a scalar and to
+    nothing at all for a list, and the catalog looks fine while quietly losing a
+    value a picker groups by.
+    """
+    assert {member.value for member in BackendType} <= _KNOWN_BACKENDS
+    assert {member.value for member in UpstreamCategory} <= _KNOWN_CATEGORIES
+    assert {member.value for member in UpstreamStage} <= _KNOWN_STAGES
+    assert {member.value for member in OutputShape} <= _KNOWN_OUTPUT_SHAPES
+    # The parameter types the sidecar catalog publishes too, which degrade to
+    # "json" rather than to "unknown" but drift exactly the same way.
+    assert {member.value for member in UpstreamParameterType} <= _KNOWN_TYPES
+
+
+def test_the_unknown_fallback_is_not_a_value_upstream_reports() -> None:
+    """So a real upstream member can never be mistaken for the fallback."""
+    assert UNKNOWN not in _KNOWN_BACKENDS
+    assert UNKNOWN not in _KNOWN_CATEGORIES
+    assert UNKNOWN not in {member.value for member in BackendType}
+    assert UNKNOWN not in {member.value for member in UpstreamCategory}
+
+
+def test_drops_a_taxonomy_member_this_gateway_cannot_name() -> None:
+    """A category upstream adds widens its data, never this API's published contract."""
+
+    class _Value:
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+    named = _known_values(frozenset({_Value("pii"), _Value("brand_new_category")}), _KNOWN_CATEGORIES, "category")
+
+    assert named == ["pii"]

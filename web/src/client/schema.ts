@@ -6631,6 +6631,12 @@ export interface components {
              */
             secret: boolean;
             /**
+             * Storable
+             * @description Whether a saved value can stand in for this parameter. False for a secret whose type is json, which upstream uses for a live object (an authenticated SDK client or session) that cannot be written down. A form offers no field for one
+             * @default true
+             */
+            storable: boolean;
+            /**
              * Type
              * @description Value shape, so a form can render the matching control
              * @enum {string}

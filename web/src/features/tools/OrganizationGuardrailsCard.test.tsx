@@ -34,6 +34,7 @@ const CATALOG: GuardrailCatalog = {
           type: "string",
           required: true,
           secret: false,
+          storable: true,
           description: "Natural-language policy to validate against.",
         },
         {
@@ -41,6 +42,7 @@ const CATALOG: GuardrailCatalog = {
           type: "number",
           required: false,
           secret: false,
+          storable: true,
           default: 0.5,
         },
         {
@@ -48,6 +50,7 @@ const CATALOG: GuardrailCatalog = {
           type: "enum",
           required: false,
           secret: false,
+          storable: true,
           choices: ["v1", "v2"],
         },
       ],
@@ -71,6 +74,7 @@ const TWIN_PARAMETERS: GuardrailParameterSpec[] = [
     type: "string",
     required: true,
     secret: false,
+    storable: true,
     description: "Natural-language policy to validate against.",
   },
 ]
