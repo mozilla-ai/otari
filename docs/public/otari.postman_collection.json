@@ -6416,6 +6416,27 @@
           }
         },
         {
+          "name": "List Builtin Guardrails",
+          "request": {
+            "description": "List the guardrails this gateway can run itself, for the form that defines one.\n\nEvery guardrail ``any_guardrail`` ships, with the constructor and per-call\narguments each one takes, so a guardrail is configured by picking it and\nfilling typed fields. A parameter names the environment variable that fills it\nwhere one exists, and ``requirement_groups`` carries the constraints satisfied\nby any of several parameters, which no single required flag can state. This is\nthe counterpart of\n``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather\nthan a provider, and on the same gate that one takes.\n\nReaches no service, so there is no unavailable state to report. ``runnable``\nsays whether the modules a guardrail's backend needs are installed here,\nprobed rather than imported, and ``missing_extra`` names the Otari extra that\nwould fix it.\n\nOn the operator router rather than the reader beside it, on both halves of\nwhat it answers. It is the input to a write that stores a vendor API key\ndeployment-wide, which is an operator's action alone; and ``runnable``\ndescribes the host's installed packages, which is infrastructure rather than\nsomething a tenant is owed about their own requests. A profile *name* is the\none thing a caller needs, and the profiles read next door is where the set of\nthose is published.\n\nNot on ``verify_catalog_reader`` either: that plane is a closed set of three\ndeployment-describing reads a data-plane key may make, and this is a\nmanagement read, not one of them.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tool-settings",
+                "guardrails",
+                "catalog"
+              ],
+              "raw": "{{baseUrl}}/api/v1/tool-settings/guardrails/catalog"
+            }
+          }
+        },
+        {
           "name": "List Guardrail Profiles",
           "request": {
             "description": "List the guardrail profiles this deployment's guardrails service has built.\n\nWhat an organization guardrail's ``profile`` may name, with the\n``validate_kwargs`` each one accepts, so the dashboard offers a picker and\ntyped fields instead of a free-text box beside an unrendered dict. The\nprofiles come from the service itself and the parameter schemas from the\n``any_guardrail`` registry; neither is a list kept in this repository. See\n`gateway.services.guardrail_catalog`.\n\nReports ``available: false`` with a reason rather than an error when the\nservice is unconfigured, unreachable, or older than its ``/profiles``\nendpoint, because a guardrails outage must not also break the page that\nconfigures guardrails.\n\nRead against ``guardrails_url``, which is the deployment's own service. An\nentry that carries an endpoint of its own is not probed: that URL is\ncaller-supplied and fetching it here would make this a way to have the\ngateway request an address of the caller's choosing.\n\nNot on ``verify_catalog_reader``, despite being a catalog read: that plane is\nthe three deployment-describing reads a data-plane key may also make, and\nadmitting a key here would let any workspace credential dial the deployment's\nguardrails service. This is a management read, so it takes the router's own gate.",

@@ -25,6 +25,11 @@ gated, mirroring the other management routers.
   a profile name is what a caller puts in a request body, so the set of them is
   not the operator's to withhold, and the endpoint they were read from does not
   appear in the answer.
+* ``GET /api/v1/tool-settings/guardrails/catalog`` lists the guardrails this
+  gateway can run itself, from the installed ``any_guardrail``. On the operator
+  router, unlike the profiles read beside it: it is the picker behind a form that
+  stores a vendor API key deployment-wide, and it reports which packages this host
+  has installed. Neither is a tenant's to read.
 """
 
 from typing import Annotated, Literal, cast
@@ -39,7 +44,12 @@ from gateway.api.deps import get_config, get_db, get_session_identity, require_d
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
-from gateway.services.guardrail_catalog import GuardrailCatalog, fetch_guardrail_catalog
+from gateway.services.guardrail_catalog import (
+    BuiltInGuardrailCatalog,
+    GuardrailCatalog,
+    build_builtin_guardrail_catalog,
+    fetch_guardrail_catalog,
+)
 from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import (
@@ -213,6 +223,39 @@ async def list_guardrail_profiles(
     guardrails service. This is a management read, so it takes the router's own gate.
     """
     return await fetch_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
+
+
+@operator_router.get("/guardrails/catalog")
+async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
+    """List the guardrails this gateway can run itself, for the form that defines one.
+
+    Every guardrail ``any_guardrail`` ships, with the constructor and per-call
+    arguments each one takes, so a guardrail is configured by picking it and
+    filling typed fields. A parameter names the environment variable that fills it
+    where one exists, and ``requirement_groups`` carries the constraints satisfied
+    by any of several parameters, which no single required flag can state. This is
+    the counterpart of
+    ``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather
+    than a provider, and on the same gate that one takes.
+
+    Reaches no service, so there is no unavailable state to report. ``runnable``
+    says whether the modules a guardrail's backend needs are installed here,
+    probed rather than imported, and ``missing_extra`` names the Otari extra that
+    would fix it.
+
+    On the operator router rather than the reader beside it, on both halves of
+    what it answers. It is the input to a write that stores a vendor API key
+    deployment-wide, which is an operator's action alone; and ``runnable``
+    describes the host's installed packages, which is infrastructure rather than
+    something a tenant is owed about their own requests. A profile *name* is the
+    one thing a caller needs, and the profiles read next door is where the set of
+    those is published.
+
+    Not on ``verify_catalog_reader`` either: that plane is a closed set of three
+    deployment-describing reads a data-plane key may make, and this is a
+    management read, not one of them.
+    """
+    return build_builtin_guardrail_catalog()
 
 
 @operator_router.patch("")

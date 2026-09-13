@@ -3546,6 +3546,52 @@ export interface paths {
         patch: operations["tool-settings-update_tool_settings"];
         trace?: never;
     };
+    "/api/v1/tool-settings/guardrails/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Builtin Guardrails
+         * @description List the guardrails this gateway can run itself, for the form that defines one.
+         *
+         *     Every guardrail ``any_guardrail`` ships, with the constructor and per-call
+         *     arguments each one takes, so a guardrail is configured by picking it and
+         *     filling typed fields. A parameter names the environment variable that fills it
+         *     where one exists, and ``requirement_groups`` carries the constraints satisfied
+         *     by any of several parameters, which no single required flag can state. This is
+         *     the counterpart of
+         *     ``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather
+         *     than a provider, and on the same gate that one takes.
+         *
+         *     Reaches no service, so there is no unavailable state to report. ``runnable``
+         *     says whether the modules a guardrail's backend needs are installed here,
+         *     probed rather than imported, and ``missing_extra`` names the Otari extra that
+         *     would fix it.
+         *
+         *     On the operator router rather than the reader beside it, on both halves of
+         *     what it answers. It is the input to a write that stores a vendor API key
+         *     deployment-wide, which is an operator's action alone; and ``runnable``
+         *     describes the host's installed packages, which is infrastructure rather than
+         *     something a tenant is owed about their own requests. A profile *name* is the
+         *     one thing a caller needs, and the profiles read next door is where the set of
+         *     those is published.
+         *
+         *     Not on ``verify_catalog_reader`` either: that plane is a closed set of three
+         *     deployment-describing reads a data-plane key may make, and this is a
+         *     management read, not one of them.
+         */
+        get: operations["tool-settings-list_builtin_guardrails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tool-settings/guardrails/profiles": {
         parameters: {
             query?: never;
@@ -5142,6 +5188,12 @@ export interface components {
              */
             state: string;
         };
+        /**
+         * BackendType
+         * @description How a guardrail executes.
+         * @enum {string}
+         */
+        BackendType: "local_encoder" | "local_decoder" | "hosted_api" | "library_wrapped";
         /** BatchRequestItem */
         BatchRequestItem: {
             /** Body */
@@ -5294,6 +5346,107 @@ export interface components {
              * @default 0
              */
             user_count: number;
+        };
+        /**
+         * BuiltInGuardrailCatalog
+         * @description Every guardrail this gateway ships, whether or not it can currently run it.
+         */
+        BuiltInGuardrailCatalog: {
+            /** Guardrails */
+            guardrails?: components["schemas"]["BuiltInGuardrailSpec"][];
+        };
+        /**
+         * BuiltInGuardrailSpec
+         * @description One guardrail this gateway can construct and run itself.
+         *
+         *     Upstream's own metadata model, extended rather than copied, so a field it adds
+         *     is carried instead of waiting on an edit here. The four taxonomy enums document
+         *     themselves in the published schema, which is why almost nothing below restates
+         *     what a field name and its type already say; the descriptions that remain are on
+         *     the answers only this gateway can give.
+         *
+         *     Inheriting also takes upstream's field serializers, which sort every set-valued
+         *     field on the way out, so the JSON is stable across calls without sorting anything
+         *     here.
+         */
+        BuiltInGuardrailSpec: {
+            /** Alternate Backends */
+            alternate_backends?: string[];
+            backend: components["schemas"]["BackendType"];
+            /** Categories */
+            categories: string[];
+            /**
+             * Create Parameters
+             * @description Constructor arguments, which is where a vendor API key and an endpoint live
+             */
+            create_parameters?: components["schemas"]["GuardrailParameterSpec"][];
+            /** Default License */
+            default_license: string;
+            /** Description */
+            description: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Guardrail Name
+             * @description The any-guardrail class, and the name a stored guardrail selects
+             */
+            guardrail_name: string;
+            /**
+             * Missing Extra
+             * @description The Otari extra to install to make this runnable, when one would. Null when it already runs, and null for a guardrail this gateway holds no backend information about
+             */
+            missing_extra?: string | null;
+            /**
+             * Multilingual
+             * @default false
+             */
+            multilingual: boolean;
+            /**
+             * Multimodal
+             * @default false
+             */
+            multimodal: boolean;
+            /** Optional Validate Kwargs */
+            optional_validate_kwargs?: string[];
+            /** Output Shapes */
+            output_shapes: string[];
+            primary_category: components["schemas"]["GuardrailCategory"];
+            /** Required Validate Kwargs */
+            required_validate_kwargs?: string[];
+            /**
+             * Requirement Groups
+             * @description One-of constraints that no single parameter's required flag can express. At least one member of each group must be supplied, or one of the environment variables that satisfies it
+             */
+            requirement_groups?: components["schemas"]["RequirementGroup"][];
+            /**
+             * Requires Api Key
+             * @default false
+             */
+            requires_api_key: boolean;
+            /**
+             * Runnable
+             * @description Whether every module this guardrail's backend needs is installed here. False is a missing package and not a broken guardrail
+             */
+            runnable: boolean;
+            /** Stages */
+            stages: string[];
+            /**
+             * Supports Batch
+             * @description Whether several inputs run as one real batched call, not a per-item loop
+             * @default false
+             */
+            supports_batch: boolean;
+            /**
+             * Validate Parameters
+             * @description Per-call arguments, sent with the text on every check
+             */
+            validate_parameters?: components["schemas"]["GuardrailParameterSpec"][];
+            /** Variant Licenses */
+            variant_licenses?: {
+                [key: string]: string;
+            }[];
+            /** Vendor */
+            vendor: string;
         };
         /**
          * CallToolResult
@@ -6559,6 +6712,12 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * GuardrailCategory
+         * @description What a guardrail is designed to detect (a guardrail may span several).
+         * @enum {string}
+         */
+        GuardrailCategory: "prompt_injection" | "content_safety" | "toxicity" | "pii" | "hallucination" | "off_topic" | "bias" | "tool_use" | "general_judge";
+        /**
          * GuardrailConfig
          * @description A single guardrail check the caller wants the gateway to enforce.
          *
@@ -6614,6 +6773,11 @@ export interface components {
              * @description One-line help text from the guardrail's docstring
              */
             description?: string | null;
+            /**
+             * Env Var
+             * @description The environment variable that supplies this parameter when no value is stored, so a form can offer that instead of demanding a credential the deployment already has
+             */
+            env_var?: string | null;
             /**
              * Name
              * @description The keyword argument's name, as it is sent in validate_kwargs
@@ -6674,6 +6838,16 @@ export interface components {
              */
             profile: string;
         };
+        /**
+         * GuardrailStage
+         * @description Where in a request/response flow a guardrail runs.
+         *
+         *     A guardrail that screens both the prompt and the response has ``stages ==
+         *     {INPUT, OUTPUT}`` (there is no separate ``EITHER`` value). ``RAG_CONTEXT``
+         *     marks guardrails that additionally consume retrieved documents/context.
+         * @enum {string}
+         */
+        GuardrailStage: "input" | "output" | "rag_context";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -8422,6 +8596,22 @@ export interface components {
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
         };
         /**
+         * OutputShape
+         * @description The decision form a guardrail produces (aligns with the populated ``GuardrailOutput`` fields).
+         *
+         *     ``SCORE`` and ``RUBRIC`` are also the queryable signal for whether
+         *     ``GuardrailOutput.score`` can ever be populated: a guardrail declaring
+         *     **neither** always leaves ``score`` as ``None`` (it only emits a
+         *     categorical/binary verdict, not a calibrated risk value). A guardrail
+         *     declaring **either** populates ``score`` in the common, successfully-parsed
+         *     case, but individual guardrails may still leave it ``None`` in specific
+         *     edge cases (e.g. a fail-closed parse-failure path, or a guardrail that
+         *     flags something but has nothing to score) — consult the guardrail's own
+         *     docstring for those exceptions.
+         * @enum {string}
+         */
+        OutputShape: "binary" | "multi_label" | "categorical" | "score" | "rubric" | "span";
+        /**
          * PasskeySessionResponse
          * @description A dashboard session minted by a passkey (the token travels only in the cookie).
          *
@@ -8925,6 +9115,27 @@ export interface components {
              * @description The same message whether or not the address has a password to reset.
              */
             message: string;
+        };
+        /**
+         * RequirementGroup
+         * @description A guardrail-level "at least one of these must be provided" constraint.
+         *
+         *     Some guardrails require *a value* that no single parameter's :attr:`ParameterSpec.required`
+         *     or :attr:`ParameterSpec.effectively_required` can express, because it can be satisfied by any
+         *     of several parameters — e.g. watsonx needs a ``project_id`` *or* a ``space_id``. Each group
+         *     names the interchangeable parameters (and any environment variables that also satisfy it); a
+         *     config UI should require the user to supply at least one member.
+         */
+        RequirementGroup: {
+            /** Description */
+            description: string;
+            /**
+             * Env Vars
+             * @default []
+             */
+            env_vars: string[];
+            /** Parameters */
+            parameters: string[];
         };
         /**
          * RerankRequest
@@ -10656,6 +10867,23 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * VariantLicense
+         * @description License governing a single model variant of a guardrail.
+         *
+         *     Used where a guardrail's ``SUPPORTED_MODELS`` span several base models with
+         *     different governing licenses (e.g. Llama Guard's 3.2 / 3.1 / 4 variants, or
+         *     PolyGuard's non-commercial Ministral vs Apache Qwen variants), so a single
+         *     ``default_license`` string cannot capture per-variant redistribution terms.
+         *     Instances are frozen, so a ``tuple`` of them keeps :class:`GuardrailMetadata`
+         *     hashable.
+         */
+        VariantLicense: {
+            /** License */
+            license: string;
+            /** Model Id */
+            model_id: string;
         };
         /** VerifyEmailRequest */
         VerifyEmailRequest: {
@@ -17032,6 +17260,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "tool-settings-list_builtin_guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuiltInGuardrailCatalog"];
                 };
             };
         };

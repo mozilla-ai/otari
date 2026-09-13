@@ -35,7 +35,9 @@ Beside that sits a second, local catalog: every guardrail ``any_guardrail`` ship
 read straight from its import-free registry. Nothing is joined and nothing is
 fetched, so there is no unavailable state to report. It carries **both** stages,
 because a guardrail this gateway constructs itself has no operator YAML fixing its
-constructor, and the create stage is where a vendor API key lives.
+constructor, and the create stage is where a vendor API key lives. It carries the
+one-of requirement groups beside them, because a constraint satisfied by any of
+several parameters is one no parameter's own ``required`` flag can state.
 
 Whether a guardrail can actually run here is a question about installed packages,
 not about a service. It is answered by probing for the top-level modules that
@@ -48,13 +50,15 @@ from __future__ import annotations
 import importlib.util
 import json
 from functools import cache
-from typing import Any, Literal, cast, get_args
+from typing import Any, Literal, get_args
 
 import httpx
 from any_guardrail.base import GuardrailName
-from any_guardrail.parameter_registry import get_parameter_schema
+from any_guardrail.parameter_registry import get_parameter_schema, get_requirement_groups
+from any_guardrail.parameters import RequirementGroup
 from any_guardrail.registry import GUARDRAIL_METADATA
-from pydantic import BaseModel, Field
+from any_guardrail.taxonomy import GuardrailMetadata
+from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.log_config import logger
 from gateway.services.url_safety import redact_url_secrets
@@ -74,11 +78,12 @@ _MAX_PROFILES = 500
 
 ParameterType = Literal["string", "integer", "number", "boolean", "enum", "json"]
 
-# Declared here rather than reused from `any_guardrail.parameters.ParameterType`,
-# so the published contract is this API's own and a new upstream member cannot
-# silently widen it. An unrecognized type degrades to "json", which is already
-# upstream's "not flat-form-able, use a raw editor" signal, so the parameter
-# stays configurable instead of vanishing from the form.
+# The one taxonomy this module does declare rather than import from
+# any-guardrail, because a type it has never seen has somewhere sensible to go:
+# "json" is already upstream's "not flat-form-able, use a raw editor" signal, so
+# an unrecognized type still renders a working field. It also types the sidecar
+# catalog, whose guardrails service may run a newer any-guardrail than this
+# gateway, which is a source the enum import below cannot speak for.
 _KNOWN_TYPES: frozenset[str] = frozenset(get_args(ParameterType))
 
 
@@ -106,6 +111,16 @@ class GuardrailParameterSpec(BaseModel):
             "Whether a saved value can stand in for this parameter. False for a secret whose type is "
             "json, which upstream uses for a live object (an authenticated SDK client or session) that "
             "cannot be written down. A form offers no field for one"
+        ),
+    )
+    # The variable's name only. Whether it is set on this host is deliberately not
+    # answered: the catalog is readable by any dashboard session, and that is the
+    # kind of infrastructure detail this module withholds elsewhere.
+    env_var: str | None = Field(
+        default=None,
+        description=(
+            "The environment variable that supplies this parameter when no value is stored, so a form "
+            "can offer that instead of demanding a credential the deployment already has"
         ),
     )
     description: str | None = Field(default=None, description="One-line help text from the guardrail's docstring")
@@ -166,6 +181,7 @@ def _specs_for_stage(name: GuardrailName, stage: str) -> list[GuardrailParameter
             choices=list(spec.choices) if spec.choices is not None else None,
             secret=spec.secret,
             storable=not (spec.secret and spec.type.value == "json"),
+            env_var=spec.env_var,
             description=spec.description,
         )
         for spec in get_parameter_schema(name)
@@ -287,37 +303,13 @@ async def fetch_guardrail_catalog(base_url: str | None) -> GuardrailCatalog:
 # The built-in catalog: every guardrail any-guardrail ships.
 # ---------------------------------------------------------------------------
 
-# Mirrors of upstream's taxonomy enums, declared here for the reason `_KNOWN_TYPES`
-# is: the published contract is this API's own, so a member upstream adds cannot
-# silently widen it. The two scalars fall back to "unknown" rather than dropping
-# the guardrail; the lists drop a member this gateway cannot name, since a list is
-# what a picker groups by and a name it has never seen groups nothing.
-GuardrailBackend = Literal["local_encoder", "local_decoder", "hosted_api", "library_wrapped", "unknown"]
-GuardrailCategory = Literal[
-    "prompt_injection",
-    "content_safety",
-    "toxicity",
-    "pii",
-    "hallucination",
-    "off_topic",
-    "bias",
-    "tool_use",
-    "general_judge",
-    "unknown",
-]
-GuardrailStage = Literal["input", "output", "rag_context"]
-GuardrailOutputShape = Literal["binary", "multi_label", "categorical", "score", "rubric", "span"]
-
-# Derived from those four, so no member is spelled twice: one added to a Literal
-# joins its known set with it, rather than degrading silently because only half
-# the pair was edited. ``UNKNOWN`` is this API's own fallback and not a value
-# upstream reports, so the two scalars drop it from what they will accept.
-UNKNOWN = "unknown"
-
-_KNOWN_BACKENDS: frozenset[str] = frozenset(get_args(GuardrailBackend)) - {UNKNOWN}
-_KNOWN_CATEGORIES: frozenset[str] = frozenset(get_args(GuardrailCategory)) - {UNKNOWN}
-_KNOWN_STAGES: frozenset[str] = frozenset(get_args(GuardrailStage))
-_KNOWN_OUTPUT_SHAPES: frozenset[str] = frozenset(get_args(GuardrailOutputShape))
+# The taxonomy a guardrail is described by is upstream's own enum, imported rather
+# than re-spelled. `any_guardrail.taxonomy` is a stdlib+pydantic leaf that loads no
+# model backend, and every value published here is read from `GUARDRAIL_METADATA`,
+# so a list written out again in this file could only ever drift from the one set of
+# values it exists to accept. A member upstream adds therefore reaches this contract
+# instead of degrading to a fallback, and the drift checks over the generated
+# artifacts are what report it; see AGENTS.md, "Generated Artifacts".
 
 # The one extra that carries every optional backend, so a guardrail that cannot
 # run here is always missing this single name. See `pyproject.toml`.
@@ -379,39 +371,27 @@ _BACKEND_PACKAGES: dict[GuardrailName, tuple[str, ...]] = {
 }
 
 
-class GuardrailVariantLicense(BaseModel):
-    """The license one model variant of a guardrail is served under."""
+class BuiltInGuardrailSpec(GuardrailMetadata):
+    """One guardrail this gateway can construct and run itself.
 
-    model_id: str = Field(description="The variant this license governs")
-    license: str = Field(description="SPDX-style license id, for example apache-2.0 or llama-3.2")
+    Upstream's own metadata model, extended rather than copied, so a field it adds
+    is carried instead of waiting on an edit here. The four taxonomy enums document
+    themselves in the published schema, which is why almost nothing below restates
+    what a field name and its type already say; the descriptions that remain are on
+    the answers only this gateway can give.
 
+    Inheriting also takes upstream's field serializers, which sort every set-valued
+    field on the way out, so the JSON is stable across calls without sorting anything
+    here.
+    """
 
-class BuiltInGuardrailSpec(BaseModel):
-    """One guardrail this gateway can construct and run itself."""
+    model_config = ConfigDict(frozen=True)
 
     guardrail_name: str = Field(description="The any-guardrail class, and the name a stored guardrail selects")
-    display_name: str = Field(description="The guardrail's own name, for a picker row")
-    description: str = Field(description="One line on what the guardrail checks")
-    vendor: str = Field(description="Who publishes the guardrail or the model behind it")
-    backend: GuardrailBackend = Field(description="How it runs: a vendor API, a local model, or a wrapped library")
-    alternate_backends: list[GuardrailBackend] = Field(
-        default_factory=list,
-        description="Other ways the same guardrail can run, where upstream offers a second path",
-    )
-    primary_category: GuardrailCategory = Field(description="What it mainly detects, for grouping a picker")
-    categories: list[GuardrailCategory] = Field(default_factory=list, description="Everything it detects")
-    stages: list[GuardrailStage] = Field(default_factory=list, description="Which text it is meant to be run on")
-    output_shapes: list[GuardrailOutputShape] = Field(
-        default_factory=list, description="The shapes of verdict it can return"
-    )
-    requires_api_key: bool = Field(description="Whether it calls a vendor that charges for the call")
-    multilingual: bool = Field(description="Whether it is trained or documented beyond English")
-    multimodal: bool = Field(description="Whether it accepts more than text")
-    supports_batch: bool = Field(description="Whether several inputs run as one call")
-    default_license: str = Field(description="The license covering the guardrail unless a variant says otherwise")
-    variant_licenses: list[GuardrailVariantLicense] = Field(
-        default_factory=list,
-        description="Per-variant licenses, where a guardrail's models are not all under the default",
+    # Redeclared for its description alone: the name reads as "accepts a list",
+    # and upstream spends a paragraph warning that it does not mean that.
+    supports_batch: bool = Field(
+        default=False, description="Whether several inputs run as one real batched call, not a per-item loop"
     )
     runnable: bool = Field(
         description=(
@@ -432,6 +412,13 @@ class BuiltInGuardrailSpec(BaseModel):
     )
     validate_parameters: list[GuardrailParameterSpec] = Field(
         default_factory=list, description="Per-call arguments, sent with the text on every check"
+    )
+    requirement_groups: list[RequirementGroup] = Field(
+        default_factory=list,
+        description=(
+            "One-of constraints that no single parameter's required flag can express. At least one "
+            "member of each group must be supplied, or one of the environment variables that satisfies it"
+        ),
     )
 
 
@@ -471,50 +458,17 @@ def _backend_availability(name: GuardrailName) -> tuple[bool, str | None]:
     return False, LOCAL_GUARDRAILS_EXTRA
 
 
-def _known_values(values: frozenset[Any], allowed: frozenset[str], field: str) -> list[str]:
-    """The members of ``values`` this gateway can name, sorted, with the rest dropped."""
-    named = sorted(value.value for value in values if value.value in allowed)
-    if len(named) != len(values):
-        logger.info("Dropped %d %s value(s) this gateway's contract does not name", len(values) - len(named), field)
-    return named
-
-
 def _builtin_spec(name: GuardrailName) -> BuiltInGuardrailSpec:
     """One guardrail's row, built from the import-free registry alone."""
-    meta = GUARDRAIL_METADATA[name]
     runnable, missing_extra = _backend_availability(name)
-    backend = meta.backend.value
-    primary_category = meta.primary_category.value
     return BuiltInGuardrailSpec(
+        **GUARDRAIL_METADATA[name].model_dump(),
         guardrail_name=name.value,
-        display_name=meta.display_name,
-        description=meta.description,
-        vendor=meta.vendor,
-        backend=cast("GuardrailBackend", backend if backend in _KNOWN_BACKENDS else UNKNOWN),
-        alternate_backends=cast(
-            "list[GuardrailBackend]", _known_values(meta.alternate_backends, _KNOWN_BACKENDS, "backend")
-        ),
-        primary_category=cast(
-            "GuardrailCategory", primary_category if primary_category in _KNOWN_CATEGORIES else UNKNOWN
-        ),
-        categories=cast("list[GuardrailCategory]", _known_values(meta.categories, _KNOWN_CATEGORIES, "category")),
-        stages=cast("list[GuardrailStage]", _known_values(meta.stages, _KNOWN_STAGES, "stage")),
-        output_shapes=cast(
-            "list[GuardrailOutputShape]", _known_values(meta.output_shapes, _KNOWN_OUTPUT_SHAPES, "output shape")
-        ),
-        requires_api_key=meta.requires_api_key,
-        multilingual=meta.multilingual,
-        multimodal=meta.multimodal,
-        supports_batch=meta.supports_batch,
-        default_license=meta.default_license,
-        variant_licenses=[
-            GuardrailVariantLicense(model_id=variant.model_id, license=variant.license)
-            for variant in meta.variant_licenses
-        ],
         runnable=runnable,
         missing_extra=missing_extra,
         create_parameters=_specs_for_stage(name, "create"),
         validate_parameters=_specs_for_stage(name, "validate"),
+        requirement_groups=get_requirement_groups(name),
     )
 
 

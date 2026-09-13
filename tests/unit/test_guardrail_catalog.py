@@ -24,18 +24,13 @@ from any_guardrail.taxonomy import GuardrailStage as UpstreamStage
 from gateway.log_config import logger as gateway_logger
 from gateway.services.guardrail_catalog import (
     _BACKEND_PACKAGES,
-    _KNOWN_BACKENDS,
-    _KNOWN_CATEGORIES,
-    _KNOWN_OUTPUT_SHAPES,
-    _KNOWN_STAGES,
     _KNOWN_TYPES,
     LOCAL_GUARDRAILS_EXTRA,
-    UNKNOWN,
     BuiltInGuardrailCatalog,
     BuiltInGuardrailSpec,
+    GuardrailParameterSpec,
     _backend_availability,
     _installed,
-    _known_values,
     build_builtin_guardrail_catalog,
     fetch_guardrail_catalog,
 )
@@ -381,9 +376,48 @@ def test_carries_the_metadata_a_picker_groups_by() -> None:
     assert spec.stages
 
 
+def test_names_the_environment_variable_that_fills_a_parameter() -> None:
+    """So a form can offer "or set this" rather than demanding a key the host already has."""
+    spec = _spec(build_builtin_guardrail_catalog(), "openai_moderation")
+
+    api_key = next(parameter for parameter in spec.create_parameters if parameter.name == "api_key")
+
+    assert api_key.env_var == "OPENAI_API_KEY"
+    assert api_key.secret
+
+
+def test_does_not_say_whether_that_environment_variable_is_set() -> None:
+    """The catalog is readable by any dashboard session, so it names the variable and stops there."""
+    published = set(GuardrailParameterSpec.model_fields)
+
+    assert "env_var" in published
+    assert not published & {"env_var_set", "env_var_value", "value"}
+
+
+def test_publishes_a_one_of_requirement_no_single_parameter_can_express() -> None:
+    """Watsonx needs a project or a space, which every parameter alone reads as optional."""
+    spec = _spec(build_builtin_guardrail_catalog(), "watsonx_guardian")
+
+    project_or_space = next(group for group in spec.requirement_groups if "project_id" in group.parameters)
+
+    assert set(project_or_space.parameters) == {"project_id", "space_id", "api_client"}
+    assert set(project_or_space.env_vars) == {"WATSONX_PROJECT_ID", "WATSONX_SPACE_ID"}
+    assert project_or_space.description
+    # Each member reads optional on its own, which is the whole reason the group exists.
+    for name in ("project_id", "space_id"):
+        assert not next(p for p in spec.create_parameters if p.name == name).required
+
+
+def test_leaves_requirement_groups_empty_for_a_guardrail_without_one() -> None:
+    """The majority. An empty list must not read as "constraints unknown"."""
+    assert _spec(build_builtin_guardrail_catalog(), "lakera_guard").requirement_groups == []
+
+
 def test_reports_a_second_way_to_run_the_same_guardrail() -> None:
     """Susfactor also has a hosted path, which one runnable flag cannot express."""
-    assert _spec(build_builtin_guardrail_catalog(), "susfactor").alternate_backends == ["hosted_api"]
+    spec = _spec(build_builtin_guardrail_catalog(), "susfactor")
+
+    assert spec.model_dump(mode="json")["alternate_backends"] == ["hosted_api"]
 
 
 def test_a_guardrail_whose_backend_is_installed_is_runnable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -443,37 +477,49 @@ def test_listing_the_catalog_never_loads_a_model_backend() -> None:
     assert "transformers" not in sys.modules
 
 
-def test_names_every_taxonomy_value_upstream_can_report() -> None:
-    """The guard on the Literals above: an upstream addition fails here, loudly.
+def test_publishes_every_taxonomy_value_upstream_can_report() -> None:
+    """The taxonomy fields are upstream's enums, so a member it adds is carried, not dropped."""
+    published = BuiltInGuardrailSpec.model_json_schema()["$defs"]
 
-    Without it a new member degrades in silence, to "unknown" for a scalar and to
-    nothing at all for a list, and the catalog looks fine while quietly losing a
-    value a picker groups by.
+    assert set(published["BackendType"]["enum"]) == {member.value for member in BackendType}
+    assert set(published["GuardrailCategory"]["enum"]) == {member.value for member in UpstreamCategory}
+    assert set(published["GuardrailStage"]["enum"]) == {member.value for member in UpstreamStage}
+    assert set(published["OutputShape"]["enum"]) == {member.value for member in OutputShape}
+
+
+def test_names_every_parameter_type_upstream_can_report() -> None:
+    """The one taxonomy still spelled out here, so an upstream addition fails loudly.
+
+    Unlike the four above it degrades rather than widening, to "json", so nothing
+    else would report a member this gateway has never seen.
     """
-    assert {member.value for member in BackendType} <= _KNOWN_BACKENDS
-    assert {member.value for member in UpstreamCategory} <= _KNOWN_CATEGORIES
-    assert {member.value for member in UpstreamStage} <= _KNOWN_STAGES
-    assert {member.value for member in OutputShape} <= _KNOWN_OUTPUT_SHAPES
-    # The parameter types the sidecar catalog publishes too, which degrade to
-    # "json" rather than to "unknown" but drift exactly the same way.
     assert {member.value for member in UpstreamParameterType} <= _KNOWN_TYPES
 
 
-def test_the_unknown_fallback_is_not_a_value_upstream_reports() -> None:
-    """So a real upstream member can never be mistaken for the fallback."""
-    assert UNKNOWN not in _KNOWN_BACKENDS
-    assert UNKNOWN not in _KNOWN_CATEGORIES
-    assert UNKNOWN not in {member.value for member in BackendType}
-    assert UNKNOWN not in {member.value for member in UpstreamCategory}
+def test_taxonomy_values_serialize_as_their_wire_strings() -> None:
+    """An enum field must reach a client as the same string a Literal did."""
+    spec = next(
+        spec
+        for spec in build_builtin_guardrail_catalog().guardrails
+        if spec.guardrail_name == GuardrailName.LAKERA_GUARD
+    )
+
+    dumped = spec.model_dump(mode="json")
+
+    assert dumped["backend"] == "hosted_api"
+    assert dumped["primary_category"] == "prompt_injection"
+    assert all(isinstance(stage, str) for stage in dumped["stages"])
 
 
-def test_drops_a_taxonomy_member_this_gateway_cannot_name() -> None:
-    """A category upstream adds widens its data, never this API's published contract."""
+def test_orders_the_taxonomy_lists_deterministically() -> None:
+    """Upstream holds these as frozensets, whose iteration order a JSON artifact cannot inherit.
 
-    class _Value:
-        def __init__(self, value: str) -> None:
-            self.value = value
+    Subclassing its model is what makes them sorted: the serializers doing it are
+    upstream's, so nothing here sorts anything.
+    """
+    for spec in build_builtin_guardrail_catalog().guardrails:
+        dumped = spec.model_dump(mode="json")
 
-    named = _known_values(frozenset({_Value("pii"), _Value("brand_new_category")}), _KNOWN_CATEGORIES, "category")
-
-    assert named == ["pii"]
+        for field in ("categories", "stages", "output_shapes", "alternate_backends"):
+            assert dumped[field] == sorted(dumped[field]), field
+        assert dumped["variant_licenses"] == sorted(dumped["variant_licenses"], key=lambda v: v["model_id"])
