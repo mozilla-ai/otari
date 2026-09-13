@@ -128,21 +128,9 @@ class _CatalogTooLargeError(Exception):
     """The answer went past a size this gateway is willing to hold."""
 
 
-def _parameter_specs(guardrail: str) -> tuple[list[GuardrailParameterSpec], bool]:
-    """The validate-stage parameters of one any-guardrail class, and whether they are known.
-
-    A class name the installed registry has never heard of is reported rather
-    than raised: the guardrails service may run a newer any-guardrail than this gateway, and
-    a profile whose fields cannot be typed is still a profile an organization can
-    mandate and configure through the raw editor.
-    """
-    try:
-        name = GuardrailName(guardrail)
-    except ValueError:
-        logger.info("Guardrail class %r is not in this gateway's any-guardrail registry", guardrail)
-        return [], False
-
-    specs = [
+def _specs_for_stage(name: GuardrailName, stage: str) -> list[GuardrailParameterSpec]:
+    """The parameters one any-guardrail class takes at ``stage``, typed for a form."""
+    return [
         GuardrailParameterSpec(
             name=spec.name,
             type=spec.type.value if spec.type.value in _KNOWN_TYPES else "json",
@@ -157,9 +145,25 @@ def _parameter_specs(guardrail: str) -> tuple[list[GuardrailParameterSpec], bool
             description=spec.description,
         )
         for spec in get_parameter_schema(name)
-        if spec.stage.value == "validate"
+        if spec.stage.value == stage
     ]
-    return specs, True
+
+
+def _parameter_specs(guardrail: str) -> tuple[list[GuardrailParameterSpec], bool]:
+    """The validate-stage parameters of one any-guardrail class, and whether they are known.
+
+    A class name the installed registry has never heard of is reported rather
+    than raised: the guardrails service may run a newer any-guardrail than this gateway, and
+    a profile whose fields cannot be typed is still a profile an organization can
+    mandate and configure through the raw editor.
+    """
+    try:
+        name = GuardrailName(guardrail)
+    except ValueError:
+        logger.info("Guardrail class %r is not in this gateway's any-guardrail registry", guardrail)
+        return [], False
+
+    return _specs_for_stage(name, "validate"), True
 
 
 def _profile_spec(entry: object) -> GuardrailProfileSpec | None:
