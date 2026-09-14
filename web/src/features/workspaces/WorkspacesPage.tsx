@@ -2,12 +2,7 @@ import { Button } from "@heroui/react"
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react"
 import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
-import type {
-  Budget,
-  Workspace,
-  WorkspaceBudgetDefault,
-  WorkspaceProviderKeyOverride,
-} from "@/client"
+import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -23,6 +18,7 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { departureSummary } from "@/features/workspaces/providerKeyDepartures"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
 import { useBudgets } from "@/shared/api/budgets"
 import { ApiError } from "@/shared/api/client"
@@ -673,33 +669,6 @@ function EditWorkspaceForm({
       <WorkspaceProviderKeys workspaceId={workspace.id} />
     </FormDialog>
   )
-}
-
-/**
- * What one workspace changed about its organization's provider keys, in a phrase.
- *
- * The three departures counted separately, because they cost a workspace
- * different things: a pin only chooses between keys, a narrowing takes models
- * off its catalog, and a disable takes a provider off it. Undefined when there
- * is nothing to say, which covers both an organization holding no keys and a
- * read that has not answered: the column is a pointer into the edit form, so an
- * absent count is a quiet cell rather than a claim either way.
- */
-function departureSummary(
-  rows: WorkspaceProviderKeyOverride[] | undefined,
-): { text: string; hasDepartures: boolean } | undefined {
-  if (rows === undefined || rows.length === 0) return undefined
-  const counts = [
-    [rows.filter((row) => row.is_default).length, "pinned"],
-    [rows.filter((row) => row.allowed_models.length > 0).length, "narrowed"],
-    [rows.filter((row) => row.disabled).length, "disabled"],
-  ] as const
-  const parts = counts
-    .filter(([count]) => count > 0)
-    .map(([count, what]) => `${count} ${what}`)
-  return parts.length === 0
-    ? { text: "Inherits all", hasDepartures: false }
-    : { text: parts.join(", "), hasDepartures: true }
 }
 
 export function WorkspacesPage() {
