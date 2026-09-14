@@ -107,6 +107,7 @@ export function WorkspaceMembersPage() {
           workspaceId={selected.workspace_id}
           candidates={candidates}
           rosterResolved={bothRostersAnswered}
+          canManageOrganization={canManageOrganization}
         />
       ) : null}
       {/* The organization roster is what the panel picks candidates from, and

@@ -115,6 +115,7 @@ export const AddDialog: StoryObj<typeof AddWorkspaceMemberDialog> = {
     workspaceId: WORKSPACE_ID,
     candidates: ORG_MEMBERS.slice(2),
     rosterResolved: true,
+    canManageOrganization: true,
   },
   render: (args) => <AddWorkspaceMemberDialog {...args} />,
 }
@@ -134,6 +135,22 @@ export const AddDialogWithNobodyLeft: StoryObj<
     workspaceId: WORKSPACE_ID,
     candidates: [],
     rosterResolved: true,
+    canManageOrganization: true,
+  },
+  render: (args) => <AddWorkspaceMemberDialog {...args} />,
+}
+
+/**
+ * The same exhausted workspace, read by somebody who manages it but not the
+ * organization. The way out is the same page either way, and it is one they
+ * could only read, so they are told who can act instead of being sent there.
+ */
+export const AddDialogWithNobodyLeftForAMember: StoryObj<
+  typeof AddWorkspaceMemberDialog
+> = {
+  args: {
+    ...AddDialogWithNobodyLeft.args,
+    canManageOrganization: false,
   },
   render: (args) => <AddWorkspaceMemberDialog {...args} />,
 }
