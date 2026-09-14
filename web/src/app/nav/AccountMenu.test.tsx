@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -28,6 +28,13 @@ function mockCaller(caller: OrganizationContext["caller"]) {
 // The identity a standalone first boot leaves behind, which the fixture already
 // describes: a name and no address.
 const OPERATOR = organizationContext().caller
+
+/** The same read, answered for a caller who does not operate the deployment. */
+function mockNonOperator() {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json(organizationContext({ deployment_operator: false })),
+  )
+}
 
 // The other thing that read can do. The trigger names nobody rather than
 // guessing, for the same reason it does before the answer lands.
@@ -265,5 +272,102 @@ describe("AccountMenu", () => {
     await settled()
 
     expect(screen.getByText("Signed in")).toBeInTheDocument()
+  })
+  describe("the Deployment group", () => {
+    // The rows are registry entries (`rendersIn: "account-menu"`), so these
+    // cases are about the menu drawing what the registry declares and gating it
+    // with the rail's own predicate, not about a list this file keeps.
+    const rowNames = () =>
+      screen
+        .getAllByRole("link")
+        .map((link) => link.textContent)
+        .filter((label) => label === "Settings" || label === "Accounts")
+
+    it("draws the two deployment rows under a named heading, in registry order", async () => {
+      mockCaller(OPERATOR)
+      await openMenu()
+      await settled()
+
+      const group = await screen.findByRole("region", { name: "Deployment" })
+      expect(
+        within(group)
+          .getAllByRole("link")
+          .map((link) => link.textContent),
+      ).toEqual(["Settings", "Accounts"])
+      expect(
+        within(group).getByRole("link", { name: "Settings" }),
+      ).toHaveAttribute("href", "/settings")
+      expect(
+        within(group).getByRole("link", { name: "Accounts" }),
+      ).toHaveAttribute("href", "/admin/accounts")
+    })
+
+    it("shows neither row, nor the heading, to a caller who is not an operator", async () => {
+      mockNonOperator()
+      await openMenu()
+      await settled()
+
+      expect(rowNames()).toEqual([])
+      // The heading goes with them. A label over nothing names a group that is
+      // not there, and it is the reason the group is one conditional and not
+      // three.
+      expect(screen.queryByText("Deployment")).toBeNull()
+      expect(screen.queryByRole("region", { name: "Deployment" })).toBeNull()
+      // The rest of the menu is untouched, so this is the group disappearing
+      // and not the menu failing to render.
+      expect(
+        screen.getByRole("link", { name: "Account settings" }),
+      ).toBeInTheDocument()
+    })
+
+    it("keeps the 404 row absent and the 403 row present when the caller cannot be read", async () => {
+      // The two `operatorOnly` values differing, which is the whole reason they
+      // are two: `/settings` is a destination the server 403s, so its existence
+      // is no secret and a failed read shows it rather than stranding a real
+      // operator; `/admin/accounts` is one the server 404s, so with no answer
+      // the menu must not reveal it either. This is the case that moved here
+      // when the rows left the rail, and it is the only component-level cover
+      // of the "unlisted" branch.
+      mockCallerUnavailable()
+      await openMenu()
+      await settled()
+
+      expect(rowNames()).toEqual(["Settings"])
+      expect(
+        await screen.findByRole("region", { name: "Deployment" }),
+      ).toBeInTheDocument()
+    })
+
+    it("drops a row whose surface the deployment does not host", async () => {
+      // The deployment axis, which the caller axis would otherwise mask: an
+      // operator on a gateway serving neither surface still has no page behind
+      // either row. Composed here because the menu runs the same
+      // `useNavVisibility` the rail does rather than asking about the operator
+      // alone.
+      mockCaller(OPERATOR)
+      await openMenu({
+        surfaces: HOSTED_SURFACES.filter(
+          (surface) => surface !== "settings" && surface !== "admin",
+        ),
+      })
+      await settled()
+
+      expect(rowNames()).toEqual([])
+      expect(screen.queryByText("Deployment")).toBeNull()
+    })
+
+    it("gives the heading no interaction of its own", async () => {
+      // It labels the group; it is not a way into it. A heading that took focus
+      // would put a stop between Appearance and the first row it names.
+      mockCaller(OPERATOR)
+      await openMenu()
+      await settled()
+
+      const heading = await screen.findByText("Deployment")
+      expect(heading.tagName).toBe("P")
+      expect(heading).not.toHaveAttribute("tabindex")
+      expect(heading.closest("button")).toBeNull()
+      expect(heading.closest("a")).toBeNull()
+    })
   })
 })

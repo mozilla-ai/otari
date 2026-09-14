@@ -1,6 +1,6 @@
 import { Button, Popover } from "@heroui/react"
 import { Link, type LinkProps } from "@tanstack/react-router"
-import { useState } from "react"
+import { useId, useState } from "react"
 import type { IconType } from "react-icons"
 import {
   FiBookOpen,
@@ -22,12 +22,14 @@ import {
   type ThemePreference,
   useTheme,
 } from "@/shared/hooks/useTheme"
+import { ACCOUNT_MENU_ITEMS } from "./registry"
 import {
   NAV_ICON_CLASS,
   NAV_TRANSITION,
   navIndicatorClass,
   navRowClass,
 } from "./rowStyles"
+import { useNavVisibility } from "./useNavVisibility"
 
 // The control that ends the sidebar, and the menu it opens: account settings,
 // appearance, the legal pages, and the way out. The design's account-menu
@@ -68,6 +70,14 @@ const MENU_ROW_DISABLED = "cursor-not-allowed text-muted opacity-60"
 // names for the same rows, at the rail's own 16px and muted against the label.
 const MENU_ICON_CLASS = `${NAV_ICON_CLASS} text-muted`
 const MENU_DIVIDER = "h-px shrink-0 bg-border"
+// The rail's own group heading at the menu's scale: `text-overline` is the
+// shell's one spelling of this role, so the label above the deployment rows is
+// the same mark as the label above a rail group and not a second one that
+// drifts. What changes is the geometry around it, the way `MENU_ROW` is the
+// rail's row at the menu's scale: 24px against the rail's 32, and the menu's own
+// 10px leading pad, which puts the label on the icon lane rather than the label
+// lane so the group reads as a bracket around the rows and not as one of them.
+const MENU_SECTION_HEADING = "flex min-h-6 items-center px-2.5 text-overline"
 
 // Whose session this is, as the trigger at the foot of the rail names it: the
 // person, not their standing. It used to name a standing, because nothing
@@ -288,6 +298,14 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   const organization = useOrganizationContext()
   const [open, setOpen] = useState(false)
   const identity = sessionIdentity(organization.data?.caller)
+  // The same predicate the rail runs its own rows through, rather than a check
+  // of `deployment_operator` here: one answer per destination, so a row cannot
+  // appear in this menu that the rail would have gated away, and neither can
+  // drift from the other when a gate changes. It composes all three axes, so
+  // these rows also disappear on a gateway that does not host their surface.
+  const isVisible = useNavVisibility()
+  const deployment = ACCOUNT_MENU_ITEMS.filter(isVisible)
+  const deploymentHeadingId = useId()
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -342,6 +360,44 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
             onNavigate={() => setOpen(false)}
           />
           <AppearanceControl />
+          {/* The deployment's own pages, which used to sit in the organization
+              rail's General section. They are the deployment talking about
+              itself rather than the tenant, and that rail is where a tenant
+              reads, so they hang off the account control instead.
+
+              No divider above: the heading already separates, and two marks for
+              one break read as noise. The divider below is the existing one,
+              and it is load-bearing now rather than decorative, because without
+              it Data & Privacy sits directly under Accounts and reads as a
+              third deployment row.
+
+              Rows and heading appear together or not at all. Each row is gated
+              on the value it declares (`/settings` 403s, `/admin/accounts`
+              404s), so a caller can be refused both, and a label over nothing
+              names a group that is not there. */}
+          {deployment.length > 0 ? (
+            // Labeled rather than left as three loose rows: the heading is what
+            // tells a sighted reader these two belong together, and a screen
+            // reader gets the same fact from the group's name instead of
+            // meeting Settings and Accounts as peers of Log out.
+            <section
+              aria-labelledby={deploymentHeadingId}
+              className="flex flex-col gap-1.5"
+            >
+              <p id={deploymentHeadingId} className={MENU_SECTION_HEADING}>
+                Deployment
+              </p>
+              {deployment.map((item) => (
+                <MenuLink
+                  key={item.to}
+                  label={item.label}
+                  icon={item.icon}
+                  to={item.to}
+                  onNavigate={() => setOpen(false)}
+                />
+              ))}
+            </section>
+          ) : null}
           <div className={MENU_DIVIDER} />
           {/* The top bar owns Documentation above `md` (that cluster is
               `hidden md:flex`), and this menu is the one surface that renders
