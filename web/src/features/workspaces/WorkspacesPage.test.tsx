@@ -641,6 +641,18 @@ describe("WorkspacesPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows no provider-key column where the organization holds no keys", async () => {
+    // Every standalone deployment: organization-owned keys are a hosted
+    // surface, so the column would be a header over blank cells.
+    mockApi()
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Default Workspace")
+    expect(
+      screen.queryByRole("columnheader", { name: "Provider keys" }),
+    ).toBeNull()
+  })
+
   it("says a workspace that departs from nothing inherits every key", async () => {
     // Distinct from the empty cell an organization holding no keys gets: this
     // workspace could depart and has not.

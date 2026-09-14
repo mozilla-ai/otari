@@ -742,6 +742,16 @@ export function WorkspacesPage() {
   // that could not be read says nothing rather than turning the list into an
   // error page.
   const providerKeys = useAllWorkspaceProviderKeys(manages ? workspaceIds : [])
+  // And dropped again where no workspace has a key to depart from, which is
+  // every standalone deployment: organization-owned provider keys are a hosted
+  // surface (`organization_providers`), so the column would otherwise be a
+  // header over blank cells on the single-tenant product. Read from the answer
+  // rather than from the surface, because the routes behind those keys are
+  // mounted on standalone too and an upgraded deployment can hold rows the
+  // dashboard never offered a page for.
+  const holdsProviderKeys = [...providerKeys.data.values()].some(
+    (rows) => rows.length > 0,
+  )
   const editingWorkspace = rows.find((row) => row.id === editing) ?? null
   // Not gated on `creating`: unmounting the empty state when the dialog opens
   // takes away the node react-aria restores focus to, so closing drops focus to
@@ -849,12 +859,19 @@ export function WorkspacesPage() {
         ),
       },
     ]
-    return all.filter(
-      (column) =>
-        (operates || column.id !== "default-budget") &&
-        (manages || column.id !== "provider-keys"),
-    )
-  }, [manages, isOnlyWorkspace, defaultBudgetName, operates, providerKeys.data])
+    return all.filter((column) => {
+      if (column.id === "default-budget") return operates
+      if (column.id === "provider-keys") return manages && holdsProviderKeys
+      return true
+    })
+  }, [
+    manages,
+    isOnlyWorkspace,
+    defaultBudgetName,
+    operates,
+    providerKeys.data,
+    holdsProviderKeys,
+  ])
 
   return (
     <div className="flex flex-col">
