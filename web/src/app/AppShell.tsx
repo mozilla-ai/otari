@@ -114,6 +114,18 @@ function tabNameForPath(to: NavPath): string {
  * context is a line here instead of an edit at every site that asks which rail
  * is showing.
  */
+/**
+ * The rails the drawer can open as a level inside itself, which is not every
+ * context: the workspace rail is the one the drawer starts on, so it is
+ * something you come back to rather than open into.
+ *
+ * Narrowed rather than reusing `NavContext`, so a fourth context that does want
+ * a level is a compile error at the call site instead of a silent fall-through
+ * in the focus restore below. Saying no more than the value can be is what the
+ * telemetry record on this page had to learn the expensive way.
+ */
+type MobileLevel = Exclude<NavContext, "workspace">
+
 const RAIL_SECTIONS: Record<NavContext, readonly NavSection[]> = {
   workspace: NAV_SECTIONS,
   organization: ORG_NAV_SECTIONS,
@@ -129,11 +141,26 @@ const RAIL_SECTIONS: Record<NavContext, readonly NavSection[]> = {
  * name over it: `context: "workspace"` beside a historical
  * `context: "workspace_sidebar"` splits one funnel exactly the way a renamed
  * event would.
+ *
+ * A record rather than a ternary, for the reason the sections above are one: a
+ * two-way answer over a three-way space does not fail when a third arrives, it
+ * falls through and reports the wrong rail. This was a ternary when the
+ * deployment context landed, and every visit to Settings or Accounts was filed
+ * under the workspace sidebar until someone read it.
+ *
+ * `deployment_settings` is new, and recording these pages under it rather than
+ * keeping `organization_settings` is a deliberate break: the old line stops and
+ * a new one starts, rather than a moved page quietly extending a funnel it is no
+ * longer part of.
  */
+const TRACK_CONTEXTS: Record<NavContext, string> = {
+  workspace: "workspace_sidebar",
+  organization: "organization_settings",
+  deployment: "deployment_settings",
+}
+
 function navTrackContext(to: NavPath): string {
-  return navContextForPath(to) === "organization"
-    ? "organization_settings"
-    : "workspace_sidebar"
+  return TRACK_CONTEXTS[navContextForPath(to)]
 }
 
 /**
@@ -548,7 +575,7 @@ function AppShellChrome() {
   const railBackRef = useRef<HTMLButtonElement>(null)
   // Which level was last open, read on the way out when the level itself is
   // already gone from state.
-  const lastMobileLevelRef = useRef<NavContext | null>(null)
+  const lastMobileLevelRef = useRef<MobileLevel | null>(null)
   const accountTriggerRef = useRef<HTMLButtonElement>(null)
   const restoreSidebarFocusRef = useRef(false)
   const [collapsed, setCollapsed] = useState<boolean>(readStoredCollapsed)
@@ -561,13 +588,13 @@ function AppShellChrome() {
   // navigated and the drawer closed over the result, so the rail it opened was
   // never a thing you got to read. Here the row opens that rail in place, and
   // choosing a destination in it is what dismisses the drawer.
-  const [mobileRailLevel, setMobileRailLevel] = useState<NavContext | null>(
+  const [mobileRailLevel, setMobileRailLevel] = useState<MobileLevel | null>(
     null,
   )
   // Set alongside the state rather than derived from it: the effect that
   // restores focus runs after the level has already been cleared, so the state
   // can no longer say which level it was.
-  const openMobileLevel = useCallback((context: NavContext) => {
+  const openMobileLevel = useCallback((context: MobileLevel) => {
     lastMobileLevelRef.current = context
     setMobileRailLevel(context)
   }, [])

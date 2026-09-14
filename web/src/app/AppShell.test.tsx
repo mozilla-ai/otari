@@ -1457,6 +1457,27 @@ describe("the telemetry the sidebar records", () => {
     })
   })
 
+  it("records a deployment page under its own context, not the workspace one", async () => {
+    // On a page that *moved*. The two cases above pin their values on
+    // `/providers` and `/organization/pricing`, neither of which changed rails,
+    // which is why this reported the wrong context silently: the assertions
+    // stayed green while the answer for the pages under change flipped. A
+    // two-way answer over a three-way space does not fail, it falls through.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/settings", operator: true })
+
+    const rail = screen.getByRole("navigation", { name: "Sidebar" })
+    await user.click(
+      await within(rail).findByRole("link", { name: "Accounts" }),
+    )
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "accounts",
+      context: "deployment_settings",
+    })
+  })
+
   it("records entering the organization rail from the footer row", async () => {
     // The row that crosses into the other rail does not go through
     // `NavRowLink`, so tracking the rows alone left every entry to and exit
