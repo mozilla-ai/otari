@@ -99,7 +99,7 @@ export function ModelComboBox({
   placeholder = "provider:model",
   autoFocus,
   isRequired,
-  hint: hintPlacement = "field",
+  hintPlacement = "field",
   describedBy,
 }: {
   label: string
@@ -115,8 +115,11 @@ export function ModelComboBox({
    * leaves the caption line empty, for a caller inside a control row that
    * renders the hint under the whole row instead; it reads the text from
    * `useModelCatalog`.
+   *
+   * Named for the placement rather than the hint, because `useModelCatalog`
+   * returns a `hint` too and that one is the sentence.
    */
-  hint?: "field" | "detached"
+  hintPlacement?: "field" | "detached"
   /** Id of the detached hint, so it is still announced with this input. */
   describedBy?: string
 }) {

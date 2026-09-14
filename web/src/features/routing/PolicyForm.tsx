@@ -929,7 +929,7 @@ export function PolicyForm({
                       ),
                     )
                   }
-                  hint="detached"
+                  hintPlacement="detached"
                   describedBy={`tier-hint-${index}`}
                   isRequired
                 />
@@ -991,7 +991,7 @@ export function PolicyForm({
                       prev.map((c, i) => (i === index ? value : c)),
                     )
                   }
-                  hint="detached"
+                  hintPlacement="detached"
                   describedBy={`pool-hint-${index}`}
                   isRequired
                 />
@@ -1151,7 +1151,7 @@ export function PolicyForm({
                       prev.map((e, i) => (i === index ? value : e)),
                     )
                   }
-                  hint="detached"
+                  hintPlacement="detached"
                   describedBy={`chain-hint-${index}`}
                   isRequired
                 />

@@ -119,8 +119,7 @@ export function ComboBoxField({
   errorMessage?: string
   reserveMessage?: boolean
   /**
-   * Ids of text elsewhere on the page that describes this field, announced with
-   * it in addition to `description`.
+   * The id of text elsewhere on the page that describes this field.
    *
    * For a field in a control row whose message is a sentence: a sentence long
    * enough to wrap makes that field taller than its siblings and pushes its
@@ -128,6 +127,11 @@ export function ComboBoxField({
    * caller renders it under the row instead. The `description` slot is what
    * wires a message to the input, and text outside the field never reaches it,
    * so this carries the association across the gap.
+   *
+   * Pairs with an absent `description`, which is the case it exists for. Set
+   * beside one, this lands as the input's own `aria-describedby` and react-aria
+   * has already put the description's id there, so the two compete rather than
+   * compose.
    */
   describedBy?: string
   /** Layout and width at the call site. Not for restyling the field. */
