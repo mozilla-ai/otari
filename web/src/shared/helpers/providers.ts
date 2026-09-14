@@ -14,8 +14,13 @@
  *
  * Keys are any-llm's own provider ids, read off `AnyLLM.get_supported_providers()`
  * rather than recalled, because a key that is not a real id is a row that never
- * gets its name and nothing fails. Ids with no widely-used brand spelling of
- * their own are deliberately absent and fall through unchanged.
+ * gets its name and nothing fails. The four ids with no widely-used brand
+ * spelling of their own are deliberately absent and fall through unchanged.
+ *
+ * `mzai` and `otari` are in it for the same reason every vendor is. A deployment
+ * serving its own models would otherwise have shown them lowercase while every
+ * third party got proper casing, which is the bug this map exists to fix,
+ * pointed at us.
  *
  * Names only. Vendor logos carry trademark terms of use, so which marks ship
  * and under what terms is a decision this file does not make.
@@ -48,10 +53,12 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   minimax: "MiniMax",
   mistral: "Mistral AI",
   moonshot: "Moonshot AI",
+  mzai: "Mozilla AI",
   nebius: "Nebius",
   ollama: "Ollama",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+  otari: "Otari",
   ovhcloud: "OVHcloud",
   perplexity: "Perplexity",
   portkey: "Portkey",

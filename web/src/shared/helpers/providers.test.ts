@@ -11,6 +11,10 @@ describe("providerDisplayName", () => {
     // `AnyLLM.get_supported_providers()`, and a key that is not a real id is a
     // row that silently never gets its name.
     expect(providerDisplayName("together")).toBe("Together AI")
+    // Our own two, held to the same rule: a deployment serving its own models
+    // would otherwise read lowercase beside correctly cased third parties.
+    expect(providerDisplayName("mzai")).toBe("Mozilla AI")
+    expect(providerDisplayName("otari")).toBe("Otari")
   })
 
   it("never title-cases an id it does not know", () => {
