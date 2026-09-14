@@ -55,6 +55,7 @@ import {
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
 import { formatRelative } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 import { canManage } from "./roles"
 
@@ -363,7 +364,10 @@ export function OrganizationProviderKeysPage() {
     {
       id: "provider",
       header: "Provider",
-      cell: (row) => <span className="text-muted">{row.provider}</span>,
+      // The vendor's own spelling; the id stays what the form and the API use.
+      cell: (row) => (
+        <span className="text-muted">{providerDisplayName(row.provider)}</span>
+      ),
     },
     {
       id: "api_key",

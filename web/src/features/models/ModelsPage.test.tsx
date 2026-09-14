@@ -442,7 +442,9 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await pickOption(user, "Filter by provider", "anthropic")
+    // Picked and read back by the vendor's own name: the option's value is
+    // still the `anthropic` id, and only the label changed (otari#990).
+    await pickOption(user, "Filter by provider", "Anthropic")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -458,7 +460,7 @@ describe("ModelsPage", () => {
 
     // The provider select is pre-set to the URL's provider, and only that
     // provider's models are shown.
-    expect(selectTrigger("Filter by provider")).toHaveTextContent("anthropic")
+    expect(selectTrigger("Filter by provider")).toHaveTextContent("Anthropic")
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
     ).toBeInTheDocument()

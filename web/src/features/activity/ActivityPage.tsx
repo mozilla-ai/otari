@@ -47,6 +47,7 @@ import {
   useUsageSummary,
 } from "@/shared/api/usage"
 import { formatRelative } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -999,7 +1000,9 @@ function RequestDetail({
         <RoutingPlan entry={entry} />
       ) : null}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <DetailField label="Provider">{entry.provider ?? "—"}</DetailField>
+        <DetailField label="Provider">
+          {entry.provider ? providerDisplayName(entry.provider) : "—"}
+        </DetailField>
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
         <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
         {entry.source_label ? (

@@ -192,7 +192,8 @@ describe("OrganizationProviderKeysPage", () => {
     expect(await screen.findByText("Production")).toBeInTheDocument()
     expect(screen.getByText("DEFAULT")).toBeInTheDocument()
     expect(screen.getByText("Staging")).toBeInTheDocument()
-    expect(screen.getByText("anthropic")).toBeInTheDocument()
+    // The column shows the vendor's name; the row's provider is still the id.
+    expect(screen.getByText("Anthropic")).toBeInTheDocument()
     expect(screen.getByText("https://proxy.example.com/v1")).toBeInTheDocument()
     // The credential itself never comes back, so the page can only ever show
     // the tail the API publishes.

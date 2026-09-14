@@ -52,6 +52,7 @@ import {
   formatCost,
   formatReleaseDate,
 } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlValue } from "@/shared/helpers/urlState"
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
@@ -1429,7 +1430,13 @@ function ModelTable({
       {
         id: "provider",
         header: "Provider",
-        cell: (row) => <span className="text-muted">{row.provider}</span>,
+        // The vendor's own spelling, not the wire id: "Mistral AI", never
+        // "mistral" (otari#990). The id stays what the filter and the URL carry.
+        cell: (row) => (
+          <span className="text-muted">
+            {providerDisplayName(row.provider)}
+          </span>
+        ),
       },
       {
         id: "modalities",
@@ -1933,13 +1940,12 @@ export function ModelsPage() {
   )
 
   const providerOptions = useMemo(() => {
-    const names = Array.from(
-      new Set(modelRows.map((row) => row.provider)),
-    ).sort((a, b) => a.localeCompare(b))
-    return [
-      { value: "all", label: "All providers" },
-      ...names.map((name) => ({ value: name, label: name })),
-    ]
+    // Sorted by what the reader sees rather than by the id behind it, so the
+    // list reads alphabetically on screen.
+    const ids = Array.from(new Set(modelRows.map((row) => row.provider)))
+      .map((id) => ({ value: id, label: providerDisplayName(id) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    return [{ value: "all", label: "All providers" }, ...ids]
   }, [modelRows])
 
   // A ?provider= value seeded from the URL may name a provider with no models,
