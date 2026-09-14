@@ -12,41 +12,62 @@
  * with no entry is returned unchanged rather than guessed at, so a provider
  * added upstream tomorrow is plain rather than misspelled.
  *
+ * Keys are any-llm's own provider ids, read off `AnyLLM.get_supported_providers()`
+ * rather than recalled, because a key that is not a real id is a row that never
+ * gets its name and nothing fails. Ids with no widely-used brand spelling of
+ * their own are deliberately absent and fall through unchanged.
+ *
  * Names only. Vendor logos carry trademark terms of use, so which marks ship
  * and under what terms is a decision this file does not make.
  */
 const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
-  ai21: "AI21 Labs",
   anthropic: "Anthropic",
+  atlascloud: "AtlasCloud",
   azure: "Azure OpenAI",
+  azureanthropic: "Azure Anthropic",
+  azureopenai: "Azure OpenAI",
   bedrock: "Amazon Bedrock",
   cerebras: "Cerebras",
   cohere: "Cohere",
+  dashscope: "DashScope",
   databricks: "Databricks",
+  deepinfra: "DeepInfra",
   deepseek: "DeepSeek",
+  edenai: "Eden AI",
   fireworks: "Fireworks AI",
   gemini: "Google Gemini",
-  google: "Google",
+  github: "GitHub Models",
   groq: "Groq",
   huggingface: "Hugging Face",
   inception: "Inception",
+  llama: "Llama API",
   llamacpp: "llama.cpp",
   llamafile: "llamafile",
   lmstudio: "LM Studio",
+  meta: "Meta",
+  minimax: "MiniMax",
   mistral: "Mistral AI",
   moonshot: "Moonshot AI",
   nebius: "Nebius",
   ollama: "Ollama",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+  ovhcloud: "OVHcloud",
   perplexity: "Perplexity",
   portkey: "Portkey",
+  qiniu: "Qiniu",
+  requesty: "Requesty",
+  sagemaker: "Amazon SageMaker",
   sambanova: "SambaNova",
-  togetherai: "Together AI",
+  telnyx: "Telnyx",
+  together: "Together AI",
   vertexai: "Vertex AI",
+  vertexaianthropic: "Vertex AI Anthropic",
+  vllm: "vLLM",
   voyage: "Voyage AI",
   watsonx: "IBM watsonx",
   xai: "xAI",
+  zai: "Z.ai",
 }
 
 /**

@@ -3204,8 +3204,13 @@ main {
 .otari-bulk-bar {
   animation: otari-bulk-bar-in 160ms ease-out;
   /* Centered on the content, not the viewport: `left-1/2` alone put the bar
-     132px left of the table it belongs to and over the last visible rows. */
+     132px left of the table it belongs to and over the last visible rows.
+     The width goes with it, because a fixed element's `100%` is the viewport
+     too: centered but still viewport-wide, the bar reached back over the rail
+     on a narrow desktop (at 768px with the rail expanded it is 736px wide in a
+     504px pane). The call site's `max-w-3xl` still caps it. */
   left: calc(50% + var(--rail-width, 0px) / 2);
+  width: calc(100% - var(--rail-width, 0px) - 2rem);
 }
 /* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
  * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and

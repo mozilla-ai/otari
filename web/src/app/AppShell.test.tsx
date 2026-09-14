@@ -1198,6 +1198,45 @@ describe("AppShell entitlement gating", () => {
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
   })
 
+  it("publishes the rail's footprint to the stylesheet", async () => {
+    mockMatchMedia(false)
+    // Guards the wiring, not the geometry. `globals.css` turns `data-rail` into
+    // `--rail-width`, which is the only thing keeping a `position: fixed`
+    // overlay centered on the content rather than on the window; drop the
+    // attribute and the variable falls back to `0px`, the overlay quietly
+    // re-centers, and nothing fails. Whether the arithmetic is right is a
+    // question about layout, which jsdom cannot answer: that is covered by the
+    // Playwright case in `e2e/dashboard.spec.ts`.
+    const { container } = await renderShell()
+
+    expect(container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "expanded",
+    )
+  })
+
+  it("says collapsed and drawer apart from expanded", async () => {
+    mockMatchMedia(false)
+    window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
+    const { container, unmount } = await renderShell()
+    expect(container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "collapsed",
+    )
+    unmount()
+
+    // Below `md` the rail is off-canvas and costs the content nothing, which is
+    // neither of the other two. It keeps saying so with a collapsed preference
+    // still stored, which is the case that was wrong when this attribute had
+    // only two values.
+    mockMatchMedia(true)
+    const drawer = await renderShell()
+    expect(drawer.container.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "drawer",
+    )
+  })
+
   it("reaches a group's nested destinations from the collapsed rail", async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()

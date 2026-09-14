@@ -7,6 +7,10 @@ describe("providerDisplayName", () => {
     expect(providerDisplayName("mistral")).toBe("Mistral AI")
     expect(providerDisplayName("xai")).toBe("xAI")
     expect(providerDisplayName("llamacpp")).toBe("llama.cpp")
+    // The wire id is `together`, not `togetherai`: this map's keys come from
+    // `AnyLLM.get_supported_providers()`, and a key that is not a real id is a
+    // row that silently never gets its name.
+    expect(providerDisplayName("together")).toBe("Together AI")
   })
 
   it("never title-cases an id it does not know", () => {

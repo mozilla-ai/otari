@@ -269,8 +269,6 @@ export function CopyField({
       setSelectHintFor(copying)
       return
     }
-    ref.current?.focus()
-    ref.current?.select()
     // The same helper the concealed path above uses, rather than
     // `navigator.clipboard` alone: the async Clipboard API is gated on a secure
     // context and this dashboard is routinely served from a plain-HTTP LAN
@@ -281,8 +279,14 @@ export function CopyField({
       acknowledgeCopy()
       return
     }
-    // Nothing could write: the text is selected, so the operator can press
-    // Ctrl/Cmd-C. Never claim it was copied.
+    // Nothing could write, so the value is selected for Ctrl/Cmd-C instead, and
+    // the copy is never claimed. Selected only now rather than before the
+    // attempt, which is the order the `action` arrangement above already keeps:
+    // `legacyCopy` restores whatever selection and focus it found on its way
+    // out, so a selection made first is undone by the fallback itself, and a
+    // successful copy has no business moving the operator's selection either.
+    ref.current?.focus()
+    ref.current?.select()
     setSelectHintFor(value)
   }
 

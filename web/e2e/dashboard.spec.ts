@@ -233,6 +233,59 @@ test.describe("dashboard core flows", () => {
     await expect(row.getByText("alice@example.com")).toBeVisible()
   })
 
+  test("the bulk bar sits over the table, not over the rail", async ({
+    page,
+  }) => {
+    // The only detector this fix will ever have. Its offset is CSS, so jsdom
+    // cannot see it and no Vitest case can assert it; the shell publishes the
+    // rail's footprint as `data-rail` and `globals.css` turns that into
+    // `--rail-width`, and if the attribute is ever dropped the variable falls
+    // back to `0px`, the bar silently returns to being centered on the viewport,
+    // and every other check stays green.
+    //
+    // Narrow enough that the cap on the bar's own width is not what keeps it
+    // inside the pane: at 1440 `max-w-3xl` dominates and the bug is invisible.
+    await page.setViewportSize({ width: 1024, height: 800 })
+    await login(page)
+    await nav(page).getByRole("link", { name: "API keys" }).click()
+
+    const rows = page.getByRole("row", { name: /ci-bot/ })
+    await expect(rows).toBeVisible()
+    // `force`, because the real `<input>` is behind the styled box that draws
+    // it: Playwright finds the input, then times out waiting for it to stop
+    // being covered by `.otari-checkbox-box`, which is the arrangement
+    // `web/AGENTS.md` describes under "A control's own box does not tell you
+    // whether it is visible". The input is the control; the span is paint.
+    await rows.getByRole("checkbox").first().check({ force: true })
+
+    const bar = page.getByRole("toolbar", { name: "Bulk actions" })
+    await expect(bar).toBeVisible()
+
+    const barBox = await bar.boundingBox()
+    // The content pane, not the table. They are the same thing only while the
+    // table fits: at 1440 the table is 1128 in a 1176 pane and the two centers
+    // coincide, which is what made the table look like a fair reference. At
+    // 1024 the table is 980 in a 760 pane and scrolls inside it, so centering
+    // the bar on the table would put it half off the screen. The pane is what
+    // the bar belongs to.
+    const paneBox = await page.locator("main").boundingBox()
+    if (!barBox || !paneBox) throw new Error("no layout to measure")
+
+    // Centered on the pane rather than on the window, within a pixel of
+    // rounding.
+    const barCenter = barBox.x + barBox.width / 2
+    const paneCenter = paneBox.x + paneBox.width / 2
+    expect(Math.abs(barCenter - paneCenter)).toBeLessThanOrEqual(1)
+
+    // And inside the pane rather than reaching back over the rail: a fixed
+    // element's own `100%` is the viewport, so centering it alone left it
+    // viewport-wide.
+    expect(barBox.x).toBeGreaterThanOrEqual(paneBox.x - 1)
+    expect(barBox.x + barBox.width).toBeLessThanOrEqual(
+      paneBox.x + paneBox.width + 1,
+    )
+  })
+
   test("create a routing policy", async ({ page }) => {
     await login(page)
     await openNested(page, "Routing", "Policies")
