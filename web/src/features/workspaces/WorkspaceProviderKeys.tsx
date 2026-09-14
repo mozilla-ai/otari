@@ -211,7 +211,9 @@ function ModelAllowList({
           options={options}
           allowsCustomValue
           menuTrigger="input"
-          placeholder="gpt-4o"
+          // An example from this key's own provider: a hardcoded `gpt-4o` on an
+          // Anthropic key is an instruction to type the wrong thing.
+          placeholder={suggestions[0] ?? "model name"}
           isInvalid={invalidReason !== undefined}
           errorMessage={invalidReason}
           reserveMessage={false}
@@ -342,7 +344,7 @@ export function WorkspaceProviderKeys({
             const departure = departureOf(row)
             return (
               <li key={keyId} className="flex flex-col gap-2 py-3 first:pt-0">
-                <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-mono-caption text-foreground">
                     {name}
                   </span>
