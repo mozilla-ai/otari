@@ -673,10 +673,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
             landing on the dashboard's own "that did not work" panel beats a
             bare 404 from a path they never typed.
 
-            The target is built from ``public_base_url`` rather than as a
-            root-absolute path, so a gateway served under a path prefix
-            (``https://example.com/otari``) sends the browser to its own
-            dashboard rather than to the origin's root.
+            The target is built from ``effective_ui_base_url`` rather than as
+            a root-absolute path, so a deployment whose dashboard sits under a
+            path prefix (``https://example.com/otari``) sends the browser there
+            rather than to the origin's root.
             """
             return RedirectResponse(
                 url=callback_landing_target(request.app.state.config, provider, request.url.query),

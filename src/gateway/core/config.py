@@ -505,6 +505,15 @@ class GatewayConfig(BaseSettings):
             "address, since every other reference is relative to the request."
         ),
     )
+    ui_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Where a browser reaches this deployment's user interface, with no trailing slash "
+            "(e.g. 'https://otari.example.com/ui'). Unset, public_base_url answers for it. Set it "
+            "when an edge serves the interface from an origin or path this process does not "
+            "answer on."
+        ),
+    )
     docs_url: str | None = Field(
         default=None,
         description=(
@@ -1314,6 +1323,14 @@ class GatewayConfig(BaseSettings):
         return self.effective_mode == "hosted"
 
     @property
+    def effective_ui_base_url(self) -> str:
+        """Where a browser reaches this deployment's interface, with no trailing slash.
+
+        ``ui_base_url`` when set, ``public_base_url`` otherwise, empty when neither is.
+        """
+        return (self.ui_base_url or "").strip().rstrip("/") or (self.public_base_url or "").strip().rstrip("/")
+
+    @property
     def effective_mail_transport(self) -> str:
         """Which transport a send would actually use: ``smtp``, ``console`` or ``none``.
 
@@ -1996,6 +2013,37 @@ class GatewayConfig(BaseSettings):
             # The value is left out of the message, as it is for
             # ``data_plane_url``: the offending part of it is the credential.
             msg = f"{info.field_name} must carry no username or password"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("ui_base_url")
+    @classmethod
+    def _validate_ui_base_url(cls, value: str | None) -> str | None:
+        """Reject an interface address a browser could not be sent to.
+
+        A host with no scheme is a relative reference, so a redirect built on it
+        would resolve against this deployment's own address. A root-relative path
+        ('/ui') is allowed, which is why this cannot demand an absolute URL.
+        """
+        normalized = (value or "").strip().rstrip("/")
+        if not normalized:
+            return None
+        if "@" in normalized:
+            msg = "ui_base_url must carry no username or password"
+            raise ValueError(msg)
+        if "?" in normalized or "#" in normalized:
+            msg = "ui_base_url must carry no query string or fragment"
+            raise ValueError(msg)
+        parsed = urlsplit(normalized)
+        if parsed.scheme:
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                msg = f"ui_base_url must be an absolute http(s) URL or a root-relative path, got '{value}'"
+                raise ValueError(msg)
+        elif parsed.netloc or not normalized.startswith("/"):
+            msg = (
+                f"ui_base_url must be an absolute http(s) URL (e.g. 'https://{normalized.lstrip('/')}') "
+                f"or a root-relative path (e.g. '/ui'), got '{value}'"
+            )
             raise ValueError(msg)
         return normalized
 
