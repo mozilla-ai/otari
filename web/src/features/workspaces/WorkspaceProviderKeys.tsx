@@ -1,18 +1,22 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrgProviderKey, WorkspaceProviderKeyOverride } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Field } from "@/design-system/forms/Field"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import {
+  ComboBoxField,
+  type ComboBoxOption,
+} from "@/design-system/forms/ComboBoxField"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { useModels } from "@/shared/api/models"
 import { useOrgProviderKeys } from "@/shared/api/organizations"
 import {
   useAddWorkspaceProviderKeyModel,
   useRemoveWorkspaceProviderKeyModel,
   useResetWorkspaceProviderKeyOverride,
   useSetWorkspaceProviderKeyOverride,
-  useWorkspaceProviderKeyModels,
   useWorkspaceProviderKeys,
 } from "@/shared/api/workspaces"
 
@@ -30,8 +34,8 @@ import {
  * being deleted. One flag is sent at a time and the other is left to
  * auto-resolve, which is what the tri-state request is for.
  *
- * The allow-list is per (workspace, key) and narrows rather than widens: no rows
- * means every model that key serves. It is what
+ * The allow-list is per (workspace, key) and narrows rather than widens: no
+ * entries means every model that key serves. It is what
  * `services/tenancy/organization_model_access.py` reads when it builds a
  * session's catalog scope, so emptying a workspace's catalog here also takes
  * `/models` down to nothing for it, and with it the first-request setup guide
@@ -43,7 +47,9 @@ type Departure = "inherited" | "pinned" | "disabled"
 
 const DEPARTURE_OPTIONS: { value: Departure; label: string }[] = [
   { value: "inherited", label: "Inherited" },
-  { value: "pinned", label: "Workspace default" },
+  // "Workspace default" said which scope and not which direction, so it read as
+  // a default *given to* the workspace rather than a key pinned *by* it (#2106).
+  { value: "pinned", label: "Pinned as default" },
   { value: "disabled", label: "Disabled" },
 ]
 
@@ -67,26 +73,44 @@ function asDeparture(value: string): Departure | undefined {
 /** How a key is named on screen: its provider and the name the organization gave it. */
 function keyLabel(key: OrgProviderKey | undefined, keyId: string): string {
   // A key the organization list does not carry is not a state the gateway
-  // produces (both reads cover the same non-archived set), so this is a fallback
-  // rather than a case: naming the id keeps the row addressable if it happens.
-  if (!key) return keyId
+  // produces (both reads cover the same non-archived set), so this is a
+  // fallback rather than a case. It says what the row is before it says which
+  // one: a bare UUID named nothing a person could act on, where "Unknown key"
+  // plus a fragment is both readable and enough to find the row again (#2106).
+  if (!key) return `Unknown key ${keyId.slice(0, 8)}`
   return `${key.provider} / ${key.name}`
 }
+
+/** At most this many suggestions in the popover, so a broad catalog stays scannable. */
+const MODEL_SUGGESTION_LIMIT = 50
+
+/**
+ * Why the suggestion list is empty, which the list itself cannot say.
+ *
+ * "No catalog entry for this provider" is a real answer and a refused catalog
+ * read is not, and both leave the same empty popover behind.
+ */
+type CatalogState = "pending" | "failed" | "ready"
 
 function ModelAllowList({
   workspaceId,
   keyId,
   keyName,
+  provider,
   models,
-  failed,
+  suggestions,
+  catalogState,
 }: {
   workspaceId: string
   keyId: string
   keyName: string
-  /** Undefined until this key's own read answers; an empty list is a real answer. */
-  models: string[] | undefined
-  /** Whether that read was refused, which is a wait that never ends otherwise. */
-  failed: boolean
+  /** The key's own provider, or undefined for a key the organization list does not carry. */
+  provider: string | undefined
+  /** This key's allow-list. Empty is a real answer: every model the key serves. */
+  models: string[]
+  /** Every model the catalog lists for this provider, already narrowed to it. */
+  suggestions: string[]
+  catalogState: CatalogState
 }) {
   const add = useAddWorkspaceProviderKeyModel()
   const remove = useRemoveWorkspaceProviderKeyModel()
@@ -94,22 +118,35 @@ function ModelAllowList({
   const pending = add.isPending || remove.isPending
   const trimmed = draft.trim()
 
+  // The catalog spells a model `provider:model` and the allow-list stores the
+  // bare name, so the id somebody copies off the models page is the one entry
+  // that looks right and narrows the workspace to a model that does not exist.
+  // Named rather than silently stripped: the two spellings mean different
+  // things elsewhere, and a control that quietly rewrote one would teach that
+  // they are interchangeable. Only the colon form, which is how the catalog
+  // spells it: a slash is part of a real model name on a provider that routes
+  // to others, where `openrouter/auto` is the model rather than a prefix.
+  const prefix = provider === undefined ? undefined : `${provider}:`
+  const isPrefixed = prefix !== undefined && trimmed.startsWith(prefix)
+  const isDuplicate = models.includes(trimmed)
+  const invalidReason = isPrefixed
+    ? `Name the model without its "${prefix}" prefix.`
+    : isDuplicate
+      ? "This model is already allowed on this key."
+      : undefined
+
+  // What the list could ever offer, which is what tells "this provider has no
+  // catalog entry" from "nothing matches what you typed".
+  const available = suggestions.filter((model) => !models.includes(model))
+  const options: ComboBoxOption[] = available
+    .filter((model) => model.toLowerCase().includes(trimmed.toLowerCase()))
+    .slice(0, MODEL_SUGGESTION_LIMIT)
+    .map((model) => ({ value: model, label: model }))
+
   return (
     <div className="flex flex-col gap-2">
       <ErrorBanner error={add.error ?? remove.error} />
-      {failed ? (
-        // Said on the row as well as in the banner above: without this the row
-        // waits forever on a read that already answered, and a caption saying
-        // "loading" is a claim that the answer is still coming.
-        <span className="text-caption">
-          The allowed models for this key could not be read.
-        </span>
-      ) : models === undefined ? (
-        // Not "every model is allowed", which is what an empty list means and
-        // what an unanswered read would otherwise be read as: a narrowed
-        // workspace would say it was open for as long as the read took.
-        <span className="text-caption">Loading allowed models…</span>
-      ) : models.length === 0 ? (
+      {models.length === 0 ? (
         <span className="text-caption">
           Every model this key serves is allowed.
         </span>
@@ -129,21 +166,51 @@ function ModelAllowList({
           ))}
         </ul>
       )}
-      {/* A text input rather than a picker over the catalog: the only listing a
-          tenant may read is `/models`, which is already filtered through
-          these very restrictions, so a picker built on it would stop offering
-          the models this control exists to add back. */}
+      {/* Suggestions rather than a whitelist, and free text is what commits:
+          `/models` is filtered through these very restrictions for a plain
+          workspace manager, so a closed picker would stop offering exactly the
+          models this control exists to add back. An organization owner or admin
+          reads it unfiltered (`resolve_session_catalog_scope` answers them from
+          the organization's keys), which is who this form usually belongs to. */}
       <div className="flex items-end gap-2">
-        <Field
-          label={`Allow a model on ${keyName}`}
+        <ComboBoxField
+          // Short and visible, with the key only in the accessible name: at one
+          // key the repetition is invisible and at five it is the loudest thing
+          // in the form (#2106). Said twice rather than continued, because the
+          // name is computed by concatenating the label's text with no
+          // separator, which runs "Allow a model" into what follows it.
+          label={
+            <>
+              <span aria-hidden="true">Allow a model</span>
+              <span className="sr-only">Allow a model on {keyName}</span>
+            </>
+          }
           value={draft}
           onChange={setDraft}
+          options={options}
+          allowsCustomValue
+          menuTrigger="input"
           placeholder="gpt-4o"
+          isInvalid={invalidReason !== undefined}
+          errorMessage={invalidReason}
+          reserveMessage={false}
+          isSourceEmpty={available.length === 0}
+          emptyMessage={
+            catalogState === "pending"
+              ? "Reading the catalog…"
+              : catalogState === "failed"
+                ? "The model catalog could not be read. Type the model id as the provider spells it."
+                : "No catalog entry for this provider. Type the model id as the provider spells it."
+          }
+          noMatchesMessage="No catalog entry matches. Type the model id to allow it anyway."
         />
         <Button
           size="sm"
           variant="ghost"
-          isDisabled={pending || trimmed === ""}
+          // Named per key, as the picker above it is: the form holds one of
+          // these per key, and "Allow" alone names all of them the same.
+          aria-label={`Allow a model on ${keyName}`}
+          isDisabled={pending || trimmed === "" || invalidReason !== undefined}
           onPress={() =>
             add.mutate(
               { workspaceId, keyId, model: trimmed },
@@ -166,15 +233,31 @@ export function WorkspaceProviderKeys({
   const orgKeys = useOrgProviderKeys()
   const overrides = useWorkspaceProviderKeys(workspaceId)
   const rows = overrides.data ?? []
-  const models = useWorkspaceProviderKeyModels(
-    workspaceId,
-    rows.map((row) => row.org_provider_key_id),
-  )
+  const catalog = useModels()
   const setOverride = useSetWorkspaceProviderKeyOverride()
   const resetOverride = useResetWorkspaceProviderKeyOverride()
 
+  const catalogState: CatalogState = catalog.isPending
+    ? "pending"
+    : catalog.isError
+      ? "failed"
+      : "ready"
+
   const byId = new Map((orgKeys.data ?? []).map((key) => [key.id, key]))
   const pending = setOverride.isPending || resetOverride.isPending
+
+  // `provider:model`, which is how the catalog names an entry and how a model
+  // restriction does not. Grouped once rather than per key, since an
+  // organization's keys share few providers.
+  const catalogByProvider = new Map<string, string[]>()
+  for (const model of catalog.data?.data ?? []) {
+    const separator = model.id.indexOf(":")
+    if (separator === -1) continue
+    const provider = model.id.slice(0, separator)
+    const entries = catalogByProvider.get(provider)
+    if (entries) entries.push(model.id.slice(separator + 1))
+    else catalogByProvider.set(provider, [model.id.slice(separator + 1)])
+  }
 
   const choose = (keyId: string, next: Departure) => {
     if (next === "inherited") {
@@ -202,11 +285,17 @@ export function WorkspaceProviderKeys({
           workspace, including from its model list.
         </span>
       </div>
+      {/* The rest of this form waits for Save, and this section does not. An
+          admin who sets a key to Disabled and then presses Cancel otherwise has
+          every reason to expect it undone (#2106). */}
+      <InfoBanner>
+        Each change in this section is saved as you make it, so Cancel does not
+        undo one.
+      </InfoBanner>
       <ErrorBanner
         error={
           orgKeys.error ??
           overrides.error ??
-          models.error ??
           setOverride.error ??
           resetOverride.error
         }
@@ -219,13 +308,17 @@ export function WorkspaceProviderKeys({
           workspace to depart from.
         </span>
       ) : (
-        <ul className="flex flex-col gap-4">
+        // Ruled rather than boxed, which is how this design system separates a
+        // repeated block: at one key the rule says nothing and at five it is
+        // what tells one key's controls from the next one's.
+        <ul className="flex flex-col divide-y divide-border-subtle">
           {rows.map((row) => {
             const keyId = row.org_provider_key_id
-            const name = keyLabel(byId.get(keyId), keyId)
+            const key = byId.get(keyId)
+            const name = keyLabel(key, keyId)
             const departure = departureOf(row)
             return (
-              <li key={keyId} className="flex flex-col gap-2">
+              <li key={keyId} className="flex flex-col gap-2 py-3 first:pt-0">
                 <div className="flex flex-wrap items-end gap-2">
                   <span className="text-mono-caption text-foreground">
                     {name}
@@ -260,8 +353,12 @@ export function WorkspaceProviderKeys({
                     workspaceId={workspaceId}
                     keyId={keyId}
                     keyName={name}
-                    models={models.data.get(keyId)?.models}
-                    failed={models.data.get(keyId)?.failed ?? false}
+                    provider={key?.provider}
+                    models={row.allowed_models}
+                    suggestions={
+                      key ? (catalogByProvider.get(key.provider) ?? []) : []
+                    }
+                    catalogState={catalogState}
                   />
                 )}
               </li>

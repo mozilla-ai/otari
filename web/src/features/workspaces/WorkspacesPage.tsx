@@ -2,7 +2,12 @@ import { Button } from "@heroui/react"
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react"
 import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
-import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
+import type {
+  Budget,
+  Workspace,
+  WorkspaceBudgetDefault,
+  WorkspaceProviderKeyOverride,
+} from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -25,6 +30,7 @@ import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviders } from "@/shared/api/providers"
 import {
   useAllWorkspaceBudgetDefaults,
+  useAllWorkspaceProviderKeys,
   useCreateWorkspace,
   useCreateWorkspaceBudgetDefault,
   useDeleteWorkspace,
@@ -669,6 +675,33 @@ function EditWorkspaceForm({
   )
 }
 
+/**
+ * What one workspace changed about its organization's provider keys, in a phrase.
+ *
+ * The three departures counted separately, because they cost a workspace
+ * different things: a pin only chooses between keys, a narrowing takes models
+ * off its catalog, and a disable takes a provider off it. Undefined when there
+ * is nothing to say, which covers both an organization holding no keys and a
+ * read that has not answered: the column is a pointer into the edit form, so an
+ * absent count is a quiet cell rather than a claim either way.
+ */
+function departureSummary(
+  rows: WorkspaceProviderKeyOverride[] | undefined,
+): { text: string; hasDepartures: boolean } | undefined {
+  if (rows === undefined || rows.length === 0) return undefined
+  const counts = [
+    [rows.filter((row) => row.is_default).length, "pinned"],
+    [rows.filter((row) => row.allowed_models.length > 0).length, "narrowed"],
+    [rows.filter((row) => row.disabled).length, "disabled"],
+  ] as const
+  const parts = counts
+    .filter(([count]) => count > 0)
+    .map(([count, what]) => `${count} ${what}`)
+  return parts.length === 0
+    ? { text: "Inherits all", hasDepartures: false }
+    : { text: parts.join(", "), hasDepartures: true }
+}
+
 export function WorkspacesPage() {
   const context = useOrganizationContext()
   const workspaces = useWorkspaces()
@@ -732,6 +765,14 @@ export function WorkspacesPage() {
   // not one workspace, and disabling on it would flicker.
   const isOnlyWorkspace = workspaces.isSuccess && rows.length === 1
   const manages = canManage(context.data)
+  // Emptied for a caller who cannot manage the organization, and the column
+  // dropped with it below: this summarizes what the edit form holds, which is
+  // the one place a departure can be changed, so a caller who cannot open that
+  // form is neither offered the summary nor made to pay N reads for it. Its
+  // failure is not surfaced for the same reason the defaults' is not: a column
+  // that could not be read says nothing rather than turning the list into an
+  // error page.
+  const providerKeys = useAllWorkspaceProviderKeys(manages ? workspaceIds : [])
   const editingWorkspace = rows.find((row) => row.id === editing) ?? null
   // Not gated on `creating`: unmounting the empty state when the dialog opens
   // takes away the node react-aria restores focus to, so closing drops focus to
@@ -788,6 +829,21 @@ export function WorkspacesPage() {
         },
       },
       {
+        id: "provider-keys",
+        header: "Provider keys",
+        cell: (workspace) => {
+          const summary = departureSummary(providerKeys.data.get(workspace.id))
+          if (summary === undefined) return null
+          // The muted rung for "nothing to see", the foreground one for a
+          // departure, which is the same pairing the default-budget cell makes.
+          return summary.hasDepartures ? (
+            <span className="text-sm text-foreground">{summary.text}</span>
+          ) : (
+            <span className="text-xs text-subtle">{summary.text}</span>
+          )
+        },
+      },
+      {
         id: "actions",
         header: "Actions",
         align: "end",
@@ -824,8 +880,12 @@ export function WorkspacesPage() {
         ),
       },
     ]
-    return all.filter((column) => operates || column.id !== "default-budget")
-  }, [manages, isOnlyWorkspace, defaultBudgetName, operates])
+    return all.filter(
+      (column) =>
+        (operates || column.id !== "default-budget") &&
+        (manages || column.id !== "provider-keys"),
+    )
+  }, [manages, isOnlyWorkspace, defaultBudgetName, operates, providerKeys.data])
 
   return (
     <div className="flex flex-col">

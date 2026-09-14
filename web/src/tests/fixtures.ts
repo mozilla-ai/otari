@@ -637,6 +637,8 @@ export function workspaceProviderKeyOverride(
     disabled: false,
     is_effective_default: true,
     is_effective_enabled: true,
+    // Empty is the answer "every model this key serves", never "no model".
+    allowed_models: [],
     ...overrides,
   }
 }
