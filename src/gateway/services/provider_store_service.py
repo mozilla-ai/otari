@@ -125,7 +125,15 @@ async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set
     """Reload the overlay from the database, apply it, and return shadowed names."""
     global _cached_at  # noqa: PLW0603
 
-    rows = (await db.execute(select(ProviderCredential))).scalars().all()
+    # `populate_existing`: the session factory sets `expire_on_commit=False`,
+    # so a row already in the identity map keeps the values it was loaded
+    # with and this SELECT would hand them straight back. The rotation
+    # endpoint refreshes on the same session it just re-encrypted on, where
+    # that means a credential a concurrent PATCH replaced can return to the
+    # cache. Today nothing holds those rows alive that long, which makes it
+    # a garbage-collection timing question rather than a guarantee
+    # (CodeRabbit).
+    rows = (await db.execute(select(ProviderCredential).execution_options(populate_existing=True))).scalars().all()
     overlay: dict[str, dict[str, Any]] = {}
     for row in rows:
         try:
