@@ -571,14 +571,9 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited, not assumed: two of these rows declare `operatorOnly`, so neither
-    // exists until `GET /api/v1/organizations/me` answers. Taking the snapshot
-    // without waiting is a race that passes on a fast machine and fails on CI,
-    // which is what it did. One await covers both, because the caller axis is
-    // one read and they appear in the same paint.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
-    ).findByRole("link", { name: "Accounts" })
+    ).findByRole("link", { name: "Org settings" })
 
     expect(
       within(screen.getByRole("navigation", { name: "Sidebar" }))
@@ -591,13 +586,20 @@ describe("AppShell surface gating", () => {
       "Spend & budgets",
       "Model pricing",
       "Org settings",
-      "Settings",
-      // Present because this harness signs in as an operator by default. It is
-      // the one row gated `operatorOnly: "unlisted"`, so a member does not see
-      // it, and unlike the three above it stays absent when the context read
-      // fails rather than falling open.
-      "Accounts",
     ])
+    // Settings and Accounts are registered under this rail's General section and
+    // are deliberately not in that list: both are drawn in the account menu
+    // instead, which is `rendersIn`. They stay registry entries so the routes
+    // keep their gating, so their absence here is a statement about the rail and
+    // not about the destinations.
+    expect(
+      within(screen.getByRole("navigation", { name: "Sidebar" })).queryByRole(
+        "link",
+        { name: "Accounts" },
+      ),
+    ).toBeNull()
+    // No heading over Org settings now that it is the section's only row.
+    expect(screen.queryByText("General")).toBeNull()
     // The design's rail has two more rows (the organization's own Providers and
     // Guardrails), and each is gated on a surface a standalone gateway does not
     // report, so neither is here. The Gateway group is their worst case: its one
@@ -733,15 +735,17 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     // The other half of the same split: the row is what the axis hides, and it
     // is absent by default in every test above because they answer the gate no.
-    await renderShell(bootstrap(), {
-      url: "/organization/members",
-      operator: true,
-    })
+    //
+    // Providers, on the workspace rail, because it is the only row left that
+    // declares the axis at all: the two that declared it here are drawn in the
+    // account menu now. So this covers `"refused"`, and `"unlisted"` is covered
+    // where its one destination is drawn (`nav/AccountMenu.test.tsx`).
+    await renderShell(bootstrap(), { operator: true })
 
     expect(
       await within(
         screen.getByRole("navigation", { name: "Sidebar" }),
-      ).findByRole("link", { name: "Accounts" }),
+      ).findByRole("link", { name: "Providers" }),
     ).toBeInTheDocument()
   })
 

@@ -408,7 +408,9 @@ const ORGANIZATION_NAV_SECTIONS = [
   },
   {
     id: "org-general",
-    label: "General",
+    // No heading. The two deployment rows below are drawn in the account menu
+    // rather than on this rail, which leaves Org settings alone here, and a
+    // heading over one row names a category with one member.
     items: [
       {
         to: "/organization",
@@ -416,28 +418,29 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "organizations",
         icon: FiSliders,
       },
-      // No slot in the design, which has no gateway of its own to configure: this
-      // is the process's runtime settings (the master key, the safety toggles,
-      // the defaults), and it is the tenant's in the only sense that matters here,
-      // because the tenant is the deployment.
+      // The process's runtime settings (the master key, the safety toggles, the
+      // defaults), which is the deployment talking about itself rather than the
+      // tenant. That is why it is drawn in the account menu: this rail is where
+      // a tenant reads, and these two were the only rows in it that were not
+      // the tenant's.
       {
         to: "/settings",
         label: "Settings",
         surface: "settings",
         icon: FiSliders,
         operatorOnly: "refused",
+        rendersIn: "account-menu",
       },
       // Every account on the deployment, which is not the Members & roles row
       // above: that one is this organization's roster and stops at its
       // boundary, while this reaches an account in any organization, or in none
-      // that still admits it. The only row in either rail that declares
-      // `operatorOnly`, and it sits beside Settings because both are the
-      // deployment talking about itself rather than the tenant.
+      // that still admits it.
       {
         to: "/admin/accounts",
         label: "Accounts",
         surface: "admin",
         operatorOnly: "unlisted",
+        rendersIn: "account-menu",
         icon: FiUserCheck,
       },
     ],
@@ -740,6 +743,28 @@ export function visibleNavSections(
   isVisible: (item: NavItem) => boolean,
 ): VisibleNavSection[] {
   return sections
-    .map((section) => ({ section, items: section.items.filter(isVisible) }))
+    .map((section) => ({
+      // `rendersIn` before `isVisible`, because the two answer different
+      // questions and only this one is about the rail: a row drawn in the
+      // account menu is still a destination this caller may have, and
+      // `isVisible` is the predicate that says so for the menu as well.
+      section,
+      items: section.items.filter(
+        (item) => item.rendersIn === undefined && isVisible(item),
+      ),
+    }))
     .filter(({ items }) => items.length > 0)
 }
+
+/**
+ * The destinations the account menu draws, in registry order.
+ *
+ * Derived rather than listed a second time: the menu's rows and the entries
+ * that gate those routes are then the same objects, so a row cannot end up
+ * offering a page whose surface this deployment does not serve. Ungated here on
+ * purpose; the menu runs them through `useNavVisibility` exactly as the rail
+ * does its own.
+ */
+export const ACCOUNT_MENU_ITEMS: readonly NavItem[] = NAV_ITEMS.filter(
+  (item) => item.rendersIn === "account-menu",
+)

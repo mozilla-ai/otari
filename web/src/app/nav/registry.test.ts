@@ -5,6 +5,7 @@ import { HOSTED_SURFACES } from "@/tests/fixtures"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
 import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
 import {
+  ACCOUNT_MENU_ITEMS,
   applyNavLabelOverrides,
   composeNavItems,
   composeNavSections,
@@ -123,6 +124,48 @@ describe("nav registry", () => {
     // both would resolve to whichever came first and be gated by that one.
     const paths = NAV_ITEMS.map((item) => item.to)
     expect(paths).toEqual([...new Set(paths)])
+  })
+
+  it("draws the deployment destinations in the account menu, not on a rail", () => {
+    expect(ACCOUNT_MENU_ITEMS.map((item) => item.to)).toEqual([
+      "/settings",
+      "/admin/accounts",
+    ])
+    // Every section of both rails, with the caller and deployment axes wide
+    // open, so what is missing is missing because of `rendersIn` and not
+    // because a gate happened to close.
+    const drawn = visibleNavSections(
+      [...NAV_SECTIONS, ...ORG_NAV_SECTIONS],
+      () => true,
+    ).flatMap(({ items }) => items.map((item) => item.to))
+    expect(drawn).not.toContain("/settings")
+    expect(drawn).not.toContain("/admin/accounts")
+    // The section they left still renders, with the row that stayed.
+    expect(drawn).toContain("/organization")
+  })
+
+  it("keeps an account-menu destination registered, and therefore gated", () => {
+    // The failure this exists to catch: expressing "not on the rail" by
+    // deleting the entry. `NAV_ITEMS` is what `navItemForPath` answers from, so
+    // an unregistered path is an *ungated* one, and the shell would render
+    // these pages on a deployment that serves neither surface instead of
+    // refusing them. Nothing about the rail being empty says so, which is why
+    // it is asserted here rather than left to the rail tests.
+    for (const [to, surface, operatorOnly] of [
+      ["/settings", "settings", "refused"],
+      ["/admin/accounts", "admin", "unlisted"],
+    ] as const) {
+      const item = navItemForPath(to)
+      expect(item?.to).toBe(to)
+      expect(item?.surface).toBe(surface)
+      // The two values encode which refusal the server gives, 403 against 404.
+      // Flattening them would make the menu lie about one of the two.
+      expect(item?.operatorOnly).toBe(operatorOnly)
+      // Still an organization destination: `ORG_PATHS` is flattened from
+      // `ORG_NAV_SECTIONS`, so an entry that left them would open the workspace
+      // rail instead and file its visit under the other context's history key.
+      expect(navContextForPath(to)).toBe("organization")
+    }
   })
 
   it("sorts a pathname onto the rail that declares it", () => {
@@ -354,10 +397,14 @@ describe("nav registry", () => {
     const gateway = NAV_SECTIONS.find((section) => section.id === "gateway")
     expect(gateway?.label).toBe("Build")
     expect(gateway?.items.map((item) => item.label)).toContain("Routing")
+    // `org-general` keeps its id, which is what an overlay addresses, and has
+    // no heading of its own to rename: the two deployment rows are drawn in the
+    // account menu, and a heading over the one row left names a category with
+    // one member.
     const general = ORG_NAV_SECTIONS.find(
       (section) => section.id === "org-general",
     )
-    expect(general?.label).toBe("General")
+    expect(general?.label).toBeUndefined()
     expect(general?.items.map((item) => item.label)).toContain("Org settings")
   })
 
