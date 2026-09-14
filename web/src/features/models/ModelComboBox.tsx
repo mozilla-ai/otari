@@ -134,7 +134,10 @@ export function ModelComboBox({
       description={
         hintPlacement === "detached" ? undefined : (hint ?? description)
       }
-      describedBy={describedBy}
+      // Only while the hint exists: `SectionRow` renders the span carrying this
+      // id conditionally, so passing it unconditionally pointed five inputs at
+      // nothing in the ordinary state, where the catalog lists cleanly.
+      describedBy={hint ? describedBy : undefined}
       placeholder={placeholder}
       autoFocus={autoFocus}
       isRequired={isRequired}

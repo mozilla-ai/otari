@@ -15,6 +15,11 @@ describe("providerDisplayName", () => {
     // would otherwise read lowercase beside correctly cased third parties.
     expect(providerDisplayName("mzai")).toBe("Mozilla AI")
     expect(providerDisplayName("otari")).toBe("Otari")
+    // Two different any-llm providers, so two different names: given one label
+    // they produced two identical options in the Models provider filter.
+    expect(providerDisplayName("azure")).not.toBe(
+      providerDisplayName("azureopenai"),
+    )
   })
 
   it("never title-cases an id it does not know", () => {

@@ -28,7 +28,10 @@
 const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   anthropic: "Anthropic",
   atlascloud: "AtlasCloud",
-  azure: "Azure OpenAI",
+  // Two different any-llm providers, and they must not read the same: `azure`
+  // is the models Azure sells directly, `azureopenai` is Azure OpenAI. Given one
+  // label they produced two identical options in the Models provider filter.
+  azure: "Azure AI Foundry",
   azureanthropic: "Azure Anthropic",
   azureopenai: "Azure OpenAI",
   bedrock: "Amazon Bedrock",
