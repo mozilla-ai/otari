@@ -297,6 +297,14 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         with pytest.raises(ValidationError, match="query string"):
             GatewayConfig(ui_base_url="https://app.example.com?trace=1")
 
+    def test_an_at_sign_in_the_path_is_not_userinfo(self) -> None:
+        # '@' delimits userinfo only in the authority. A handle-shaped path is an
+        # ordinary URL, so the check has to read the parsed authority rather than
+        # the whole string.
+        assert GatewayConfig(ui_base_url="https://app.example.com/@tenant").ui_base_url == (
+            "https://app.example.com/@tenant"
+        )
+
     def test_userinfo_is_refused(self) -> None:
         # This value travels in a redirect, into browser history and into
         # everybody's inbox, so a credential written here is not one the config

@@ -2035,15 +2035,15 @@ class GatewayConfig(BaseSettings):
             # unset. Refused rather than silently answered by public_base_url.
             msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
-        if "@" in normalized:
-            msg = "ui_base_url must carry no username or password"
-            raise ValueError(msg)
         if "?" in normalized or "#" in normalized:
             msg = "ui_base_url must carry no query string or fragment"
             raise ValueError(msg)
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        if parsed.username is not None or parsed.password is not None:
+            msg = "ui_base_url must carry no username or password"
             raise ValueError(msg)
         return normalized
 
