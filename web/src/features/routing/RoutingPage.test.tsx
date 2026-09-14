@@ -839,12 +839,59 @@ describe("RoutingPage", () => {
     )
     expect(screen.getByText("If that fails, try")).toBeInTheDocument()
     // Adding another one belongs inside the section it extends, not in the row of
-    // links that start a section.
-    const section = screen.getByText("If that fails, try").closest("div")!
-      .parentElement!
+    // links that start a section. Walked up to the bordered section rather than
+    // a fixed number of parents: the heading now sits in a row of its own with
+    // the section's Remove, so counting levels would pin the markup instead of
+    // the rule.
+    const section = screen
+      .getByText("If that fails, try")
+      .closest<HTMLElement>("div.border")!
     expect(
       within(section).getByRole("button", { name: /Another fallback/ }),
     ).toBeInTheDocument()
+  })
+
+  it("takes a whole section away in one press, whatever it holds", async () => {
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await user.click(
+      screen.getByRole("button", { name: /Let a router pick the cheapest/ }),
+    )
+    // Two rows from one press, so the row control could never be a one-press
+    // way out of this section: that is the asymmetry the section control fixes.
+    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(2)
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove the routed pool" }),
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Remove" }),
+    ).not.toBeInTheDocument()
+    // The affordance that summons it is back, which is what says the section is
+    // gone rather than merely emptied.
+    expect(
+      screen.getByRole("button", { name: /Let a router pick the cheapest/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers a section control beside every section that can be summoned", async () => {
+    mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    for (const [summon, remove] of [
+      [/Tier down when the budget fills up/, "Remove the budget tier-down"],
+      [/Add a fallback chain/, "Remove the fallback chain"],
+      [/Add guardrails/, "Remove the guardrails"],
+    ] as const) {
+      await user.click(screen.getByRole("button", { name: summon }))
+      expect(screen.getByRole("button", { name: remove })).toBeInTheDocument()
+    }
   })
 
   it("disables the guardrails affordance when no guardrails service is configured", async () => {

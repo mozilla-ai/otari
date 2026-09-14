@@ -12,6 +12,58 @@ import { useDiscoverableModels } from "@/shared/api/models"
 const MAX_VISIBLE = 50
 
 /**
+ * The catalog state behind the picker: the options to offer and what to say
+ * about them.
+ *
+ * Exported because the hint is a sentence, and a sentence cannot live inside a
+ * control row: a field whose message wraps is taller than its siblings, and a
+ * row laid out `items-end` then floats that field's input line above theirs.
+ * `web/design/forms.md` names that break and its remedy, which is to put the
+ * message under the row rather than inside one of its fields. A caller doing
+ * that reads the hint from here and renders it itself.
+ */
+export function useModelCatalog(value: string) {
+  const discoverable = useDiscoverableModels()
+
+  const { visible, total, failed, isCatalogEmpty } = useMemo(() => {
+    const query = value.trim().toLowerCase()
+    const providers = discoverable.data?.providers ?? []
+    // Provider order is preserved, so rows still cluster by provider even
+    // without section headers.
+    const all: ComboBoxOption[] = providers.flatMap((provider) =>
+      provider.models.map((model) => ({ value: model.key, label: model.key })),
+    )
+    const hits = query
+      ? all.filter((option) => option.value.toLowerCase().includes(query))
+      : all
+    return {
+      visible: hits.slice(0, MAX_VISIBLE),
+      total: hits.length,
+      failed: providers.filter((provider) => !provider.ok),
+      isCatalogEmpty: all.length === 0,
+    }
+  }, [discoverable.data, value])
+
+  const hint = ((): ReactNode => {
+    if (discoverable.isLoading) {
+      return "Loading models from your providers…"
+    }
+    // A failed provider is worth saying out loud: its models are simply absent
+    // from the list, which is indistinguishable from a provider that has none.
+    if (failed.length > 0) {
+      const names = failed.map((provider) => provider.provider).join(", ")
+      return `Could not list models for ${names}. Check that provider's credentials, or type the model key directly.`
+    }
+    if (total > visible.length) {
+      return `Showing ${visible.length} of ${total} matches. Keep typing to narrow them.`
+    }
+    return undefined
+  })()
+
+  return { visible, isCatalogEmpty, isLoading: discoverable.isLoading, hint }
+}
+
+/**
  * Model selector backed by GET /v1/models/discoverable.
  *
  * Free text is always allowed: discovery only sees what the configured
@@ -47,6 +99,8 @@ export function ModelComboBox({
   placeholder = "provider:model",
   autoFocus,
   isRequired,
+  hint: hintPlacement = "field",
+  describedBy,
 }: {
   label: string
   value: string
@@ -55,43 +109,18 @@ export function ModelComboBox({
   placeholder?: string
   autoFocus?: boolean
   isRequired?: boolean
+  /**
+   * Where the catalog hint goes. `"field"` renders it under the input, which is
+   * right for a field standing on its own. `"detached"` renders nothing and
+   * leaves the caption line empty, for a caller inside a control row that
+   * renders the hint under the whole row instead; it reads the text from
+   * `useModelCatalog`.
+   */
+  hint?: "field" | "detached"
+  /** Id of the detached hint, so it is still announced with this input. */
+  describedBy?: string
 }) {
-  const discoverable = useDiscoverableModels()
-
-  const { visible, total, failed, isCatalogEmpty } = useMemo(() => {
-    const query = value.trim().toLowerCase()
-    const providers = discoverable.data?.providers ?? []
-    // Provider order is preserved, so rows still cluster by provider even
-    // without section headers.
-    const all: ComboBoxOption[] = providers.flatMap((provider) =>
-      provider.models.map((model) => ({ value: model.key, label: model.key })),
-    )
-    const hits = query
-      ? all.filter((option) => option.value.toLowerCase().includes(query))
-      : all
-    return {
-      visible: hits.slice(0, MAX_VISIBLE),
-      total: hits.length,
-      failed: providers.filter((provider) => !provider.ok),
-      isCatalogEmpty: all.length === 0,
-    }
-  }, [discoverable.data, value])
-
-  const hint = ((): ReactNode => {
-    if (discoverable.isLoading) {
-      return "Loading models from your providers…"
-    }
-    // A failed provider is worth saying out loud: its models are simply absent
-    // from the list, which is indistinguishable from a provider that has none.
-    if (failed.length > 0) {
-      const names = failed.map((provider) => provider.provider).join(", ")
-      return `Could not list models for ${names}. Check that provider's credentials, or type the model key directly.`
-    }
-    if (total > visible.length) {
-      return `Showing ${visible.length} of ${total} matches. Keep typing to narrow them.`
-    }
-    return description
-  })()
+  const { visible, isCatalogEmpty, isLoading, hint } = useModelCatalog(value)
 
   return (
     <ComboBoxField
@@ -99,7 +128,10 @@ export function ModelComboBox({
       value={value}
       onChange={onChange}
       options={visible}
-      description={hint}
+      description={
+        hintPlacement === "detached" ? undefined : (hint ?? description)
+      }
+      describedBy={describedBy}
       placeholder={placeholder}
       autoFocus={autoFocus}
       isRequired={isRequired}
@@ -112,7 +144,7 @@ export function ModelComboBox({
       menuTrigger="input"
       isSourceEmpty={isCatalogEmpty}
       emptyMessage={
-        discoverable.isLoading
+        isLoading
           ? "Looking for models…"
           : "No models discovered yet. Add a provider credential and the models it serves appear here; until then, type the selector."
       }

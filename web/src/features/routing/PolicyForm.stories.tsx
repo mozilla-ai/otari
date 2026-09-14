@@ -40,6 +40,16 @@ const CATALOG = {
   ],
 }
 
+/** The same catalog with one provider that could not be listed, which is what
+ *  puts the picker's hint on screen: a sentence rather than a caption, and the
+ *  state that used to lift a row's picker clear of the controls beside it. */
+const CATALOG_WITH_A_FAILED_PROVIDER = {
+  providers: [
+    CATALOG.providers[0],
+    { ...CATALOG.providers[1], models: [], ok: false },
+  ],
+}
+
 const GUARDRAILS_ON = {
   fields: [{ key: "guardrails_url", value: "https://guardrails.internal" }],
 }
@@ -150,6 +160,26 @@ export const WithoutGuardrailsService: Story = {
     api: {
       [`${API_ROOT}/models/discoverable`]: CATALOG,
       [`${API_ROOT}/tool-settings`]: { fields: [] },
+      [`${API_ROOT}/users`]: OWNERS,
+      [`${API_ROOT}/organizations/me/members`]: ROSTER,
+    },
+  },
+}
+
+/**
+ * The longest policy again, with a provider the gateway could not list.
+ *
+ * The hint that reports it is a sentence, so it wraps at this dialog's width.
+ * It renders under each row rather than under the picker inside one, which is
+ * what keeps every control in the row on one line; `web/design/forms.md`
+ * ("Control rows") says why a field cannot hold it.
+ */
+export const CatalogPartlyUnavailable: Story = {
+  ...LongestPolicy,
+  parameters: {
+    api: {
+      [`${API_ROOT}/models/discoverable`]: CATALOG_WITH_A_FAILED_PROVIDER,
+      [`${API_ROOT}/tool-settings`]: GUARDRAILS_ON,
       [`${API_ROOT}/users`]: OWNERS,
       [`${API_ROOT}/organizations/me/members`]: ROSTER,
     },
