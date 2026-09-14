@@ -55,6 +55,94 @@ class TestRedactSecretLikeValues:
         assert redact_secret_like_values(None) is None
 
 
+class TestNestedRedaction:
+    """otari#1125: the walk stopped at depth one, so a credential one level down
+    was returned in clear. Every cell here pairs the new masking with the restore
+    that has to move with it — a mask that reaches a nested entry while the
+    restore still walks one level writes ``***`` over the credential on the next
+    PATCH, which is worse than the leak it was fixing."""
+
+    def test_a_nested_credential_is_masked(self) -> None:
+        assert redact_secret_like_values({"headers": {"api_key": "secret"}, "region_name": "eu-west-1"}) == {
+            "headers": {"api_key": REDACTED_VALUE},
+            "region_name": "eu-west-1",
+        }
+
+    def test_a_credential_inside_a_list_of_objects_is_masked(self) -> None:
+        assert redact_secret_like_values({"extra_headers": [{"name": "x", "token": "live"}, {"name": "y"}]}) == {
+            "extra_headers": [{"name": "x", "token": REDACTED_VALUE}, {"name": "y"}]
+        }
+
+    def test_a_matching_key_masks_its_whole_subtree(self) -> None:
+        # Same thing a matching top-level key has always done to a non-scalar:
+        # the name is the signal, so nothing under it is shown either.
+        assert redact_secret_like_values({"credentials": {"user": "bob", "passphrase": "p"}}) == {
+            "credentials": REDACTED_VALUE
+        }
+
+    def test_a_bare_mask_in_a_list_is_never_produced(self) -> None:
+        # A list element has no key to match on, so masking one would be a guess.
+        # `restore` leans on this: an element that looks like the mask came from
+        # the caller and means itself.
+        assert redact_secret_like_values({"values": ["***", "plain"]}) == {"values": ["***", "plain"]}
+
+    def test_deep_nesting_is_masked_rather_than_walked_forever(self) -> None:
+        # Fail closed past the bound: the alternatives are a RecursionError
+        # turning a read into a 500, or a depth the masking never reaches.
+        deep: dict[str, object] = {"leaf": "visible"}
+        for _ in range(40):
+            deep = {"nest": deep}
+
+        assert redact_secret_like_values(deep) != deep
+        assert REDACTED_VALUE in str(redact_secret_like_values(deep))
+
+
+class TestNestedRoundTrip:
+    def test_a_nested_credential_survives_an_edit_of_its_sibling(self) -> None:
+        # The failure this prevents: the dashboard loads a row, changes one
+        # visible field, and saves the whole object back.
+        stored = {"headers": {"api_key": "live-secret", "trace": "off"}}
+        echoed = redact_secret_like_values(stored)
+        assert echoed is not None
+        echoed["headers"]["trace"] = "on"
+
+        assert restore_redacted_values(echoed, stored) == {
+            "headers": {"api_key": "live-secret", "trace": "on"}
+        }
+
+    def test_a_masked_subtree_is_restored_whole(self) -> None:
+        stored = {"credentials": {"user": "bob", "passphrase": "p"}}
+        echoed = redact_secret_like_values(stored)
+
+        assert restore_redacted_values(echoed, stored) == stored
+
+    def test_a_credential_inside_a_list_survives_the_round_trip(self) -> None:
+        stored = {"extra_headers": [{"name": "x", "token": "live"}, {"name": "y"}]}
+        echoed = redact_secret_like_values(stored)
+
+        assert restore_redacted_values(echoed, stored) == stored
+
+    def test_a_resized_list_is_a_rewrite_and_not_paired_off_by_index(self) -> None:
+        # Splicing stored values into positions that no longer mean the same
+        # thing would put a credential under a different header.
+        stored = {"extra_headers": [{"token": "live-a"}, {"token": "live-b"}]}
+        submitted = {"extra_headers": [{"token": REDACTED_VALUE}]}
+
+        assert restore_redacted_values(submitted, stored) == {"extra_headers": [{"token": REDACTED_VALUE}]}
+
+    def test_a_real_nested_value_still_replaces_the_stored_one(self) -> None:
+        # The control for the whole pairing: restoring must not mean "the caller
+        # can never change a nested credential".
+        stored = {"headers": {"api_key": "old"}}
+
+        assert restore_redacted_values({"headers": {"api_key": "new"}}, stored) == {"headers": {"api_key": "new"}}
+
+    def test_a_nested_entry_the_caller_dropped_stays_dropped(self) -> None:
+        stored = {"headers": {"api_key": "live", "trace": "on"}}
+
+        assert restore_redacted_values({"headers": {"trace": "on"}}, stored) == {"headers": {"trace": "on"}}
+
+
 class TestRestoreRedactedValues:
     def test_the_mask_echoed_back_keeps_the_stored_value(self) -> None:
         stored = {"region_name": "us-east-1", "aws_secret_access_key": "wJalrXUtnFEMI"}
