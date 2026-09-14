@@ -73,9 +73,12 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
+  // The deployment's own two pages, reached from the account menu rather than
+  // from a rail, and covered here all the same for the reason /account below
+  // is: this matrix is about how a page renders, not about which control opens
+  // it. Accounts is not the members roster above, which stops at this
+  // organization's boundary.
   { route: "/settings", name: "settings", heading: /settings/i },
-  // Deployment-wide accounts, on the organization rail beside Settings. Not the
-  // members roster above: that one stops at this organization's boundary.
   {
     route: "/admin/accounts",
     name: "admin-accounts",

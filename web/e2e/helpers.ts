@@ -59,6 +59,23 @@ export async function openOrganization(page: Page): Promise<void> {
 }
 
 /**
+ * Open the account menu at the foot of the sidebar.
+ *
+ * The one way to the deployment's own pages: they are registry entries like any
+ * other, but the shell draws them here rather than as rail rows, so a spec that
+ * only walks the rails never reaches them.
+ *
+ * The trigger's accessible name carries whoever is signed in, so it is matched
+ * on the prefix it always starts with rather than in full.
+ */
+export async function openAccountMenu(page: Page): Promise<Locator> {
+  await page.getByRole("button", { name: /^Account:/ }).click()
+  const menu = page.getByRole("dialog", { name: "Account" })
+  await expect(menu).toBeVisible()
+  return menu
+}
+
+/**
  * Expand a sidebar group and open one of the destinations nested under it.
  *
  * Routing and Tools nest their pages, so their sidebar row expands rather than

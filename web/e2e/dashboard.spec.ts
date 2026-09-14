@@ -5,6 +5,7 @@ import {
   login,
   MASTER_KEY,
   nav,
+  openAccountMenu,
   openNested,
   openOrganization,
   pageHeading,
@@ -123,11 +124,21 @@ test.describe("dashboard core flows", () => {
     for (const [link, heading] of [
       ["Spend & budgets", "Budgets"],
       ["Model pricing", "Model pricing"],
-      // Exact, because this rail also carries "Org settings" and the default
-      // match is a substring one.
-      ["Settings", "Settings"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
+      await expect(pageHeading(page, heading)).toBeVisible()
+    }
+
+    // The deployment's own pages, which hang off the account menu rather than
+    // either rail. Neither loop above can reach them, and the menu closes on
+    // the way to a destination, so each is opened from scratch. Exact, because
+    // the organization rail also carries "Org settings" and "Members & roles".
+    for (const [link, heading] of [
+      ["Settings", "Settings"],
+      ["Accounts", "Accounts"],
+    ]) {
+      const menu = await openAccountMenu(page)
+      await menu.getByRole("link", { name: link, exact: true }).click()
       await expect(pageHeading(page, heading)).toBeVisible()
     }
   })
