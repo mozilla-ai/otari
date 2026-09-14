@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 
 import { PricingOverrideDialog } from "./PricingOverrideDialog"
 
@@ -47,6 +48,25 @@ const EXISTING: OrganizationPricingOverride[] = [
   }),
 ]
 
+// What the model-key picker offers. The catalog rather than discovery, because
+// this dialog answers to an organization admin who is refused the
+// deployment-operator read; `fast` is an alias, and is left out of the list.
+const CATALOG = {
+  object: "list",
+  data: [
+    "openai:gpt-4o-mini",
+    "anthropic:claude-haiku-4-5",
+    "anthropic:claude-sonnet-5",
+    "fast",
+  ].map((id) => ({
+    id,
+    object: "model",
+    created: 0,
+    owned_by: id.split(":")[0],
+    pricing_source: "none",
+  })),
+}
+
 const meta = {
   title: "Dashboard/Organization/PricingOverrideDialog",
   component: PricingOverrideDialog,
@@ -56,6 +76,7 @@ const meta = {
     existing: EXISTING,
     onSaved: () => {},
   },
+  parameters: { api: { [`${API_ROOT}/models`]: CATALOG } },
 } satisfies Meta<typeof PricingOverrideDialog>
 
 export default meta

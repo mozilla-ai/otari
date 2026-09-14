@@ -1287,9 +1287,9 @@ describe("ActivityPage", () => {
     await user.click(screen.getByRole("button", { name: "Price this model" }))
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Model key")).toHaveValue(
-      "vllm:mistral-small",
-    )
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("vllm:mistral-small")
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
     // Trigger and submit say the same string, so this is scoped to the dialog.
@@ -1378,9 +1378,9 @@ describe("ActivityPage", () => {
     await user.click(screen.getByRole("button", { name: "Price this model" }))
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Model key")).toHaveValue(
-      "vllm:mistral-small",
-    )
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("vllm:mistral-small")
   })
 
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {

@@ -3,7 +3,8 @@ import {
   ComboBoxField,
   type ComboBoxOption,
 } from "@/design-system/forms/ComboBoxField"
-import { useDiscoverableModels } from "@/shared/api/models"
+import { isPrefixedSelector } from "@/features/models/modelKey"
+import { useDiscoverableModels, useModels } from "@/shared/api/models"
 
 // How many matches to render at once. A single provider can report a few hundred
 // models, and past this the popover is a wall of text nobody scrolls; typing one
@@ -12,12 +13,13 @@ import { useDiscoverableModels } from "@/shared/api/models"
 const MAX_VISIBLE = 50
 
 /**
- * Model selector backed by GET /v1/models/discoverable.
+ * Model selector backed by the deployment's model discovery or by the catalog.
  *
- * Free text is always allowed: discovery only sees what the configured
- * credentials expose, so a model behind an unconfigured provider, a brand-new
- * release, or a backend that cannot list must stay typeable. The dropdown is a
- * shortcut, never a whitelist.
+ * Free text is always allowed: neither source is authoritative. Discovery only
+ * sees what the configured credentials expose and the catalog only what this
+ * caller could route to, so a model behind an unconfigured provider, a
+ * brand-new release, or a backend that cannot list must stay typeable. The
+ * dropdown is a shortcut, never a whitelist.
  *
  * Everything a provider reports is offered, unfiltered. any-llm's model type
  * carries no capability field, so there is no honest way to tell a chat model
@@ -47,6 +49,9 @@ export function ModelComboBox({
   placeholder = "provider:model",
   autoFocus,
   isRequired,
+  isInvalid,
+  errorMessage,
+  source = "discovery",
 }: {
   label: string
   value: string
@@ -55,17 +60,47 @@ export function ModelComboBox({
   placeholder?: string
   autoFocus?: boolean
   isRequired?: boolean
+  isInvalid?: boolean
+  /**
+   * The correction, announced on the input and rendered under it beside the
+   * hint rather than in place of it: the hint line is already spoken for while
+   * a search is being narrowed ("Showing 50 of 210 matches"), and a form that
+   * put the correction there would lose it exactly when the operator is typing.
+   */
+  errorMessage?: string
+  /**
+   * Where the suggestions come from.
+   *
+   * `"discovery"` reads GET /v1/models/discoverable, which is a
+   * deployment-operator read: an organization admin who does not operate the
+   * deployment is refused it (#821). `"catalog"` reads GET /v1/models, which
+   * answers any signed-in caller and is already narrowed server-side to what
+   * that caller could route to, so it is what a tenant-facing form asks for.
+   * The two are composed with `enabled` rather than branched on at the call
+   * site, so only the chosen one is ever requested.
+   */
+  source?: "discovery" | "catalog"
 }) {
-  const discoverable = useDiscoverableModels()
+  const isDiscovery = source === "discovery"
+  const discoverable = useDiscoverableModels(isDiscovery)
+  const catalog = useModels(!isDiscovery)
 
-  const { visible, total, failed, isCatalogEmpty } = useMemo(() => {
+  const { visible, total, failed, isSourceEmpty } = useMemo(() => {
     const query = value.trim().toLowerCase()
-    const providers = discoverable.data?.providers ?? []
+    const providers = isDiscovery ? (discoverable.data?.providers ?? []) : []
     // Provider order is preserved, so rows still cluster by provider even
-    // without section headers.
-    const all: ComboBoxOption[] = providers.flatMap((provider) =>
-      provider.models.map((model) => ({ value: model.key, label: model.key })),
-    )
+    // without section headers. The catalog arrives already sorted by key,
+    // which clusters it the same way.
+    const all: ComboBoxOption[] = isDiscovery
+      ? providers.flatMap((provider) =>
+          provider.models.map((model) => ({
+            value: model.key,
+            label: model.key,
+          })),
+        )
+      : (catalog.data?.data ?? [])
+          .filter((model) => isPrefixedSelector(model.id))
+          .map((model) => ({ value: model.id, label: model.id }))
     const hits = query
       ? all.filter((option) => option.value.toLowerCase().includes(query))
       : all
@@ -73,13 +108,39 @@ export function ModelComboBox({
       visible: hits.slice(0, MAX_VISIBLE),
       total: hits.length,
       failed: providers.filter((provider) => !provider.ok),
-      isCatalogEmpty: all.length === 0,
+      isSourceEmpty: all.length === 0,
     }
-  }, [discoverable.data, value])
+  }, [catalog.data, discoverable.data, isDiscovery, value])
+
+  // `isLoading` rather than the `isPending && !data` the rest of the dashboard
+  // guards on, and for the property that rules it out there: it is false for a
+  // disabled query. The other source is always disabled, so `isPending` would
+  // have this saying "Loading" about a read it is deliberately not making.
+  const isLoading = isDiscovery ? discoverable.isLoading : catalog.isLoading
+  // A refused or failed read leaves the same empty list as a gateway with no
+  // provider, and the two want opposite things said: one is filled by adding a
+  // credential, the other by nothing the operator can do from this form.
+  const isRefused = isDiscovery ? discoverable.isError : catalog.isError
+
+  // Four states behind one empty popover, and each wants a different sentence:
+  // the list is still coming, it could not be read, nothing has been configured
+  // to fill it, or nothing this caller can route to fills it.
+  const emptyMessage = isLoading
+    ? "Looking for models…"
+    : isRefused
+      ? "The model list could not be read. Type the selector; it is sent exactly as typed either way."
+      : isDiscovery
+        ? "No models discovered yet. Add a provider credential and the models it serves appear here; until then, type the selector."
+        : "No models to offer yet. Models this deployment serves appear here once a provider is configured; until then, type the selector."
 
   const hint = ((): ReactNode => {
-    if (discoverable.isLoading) {
-      return "Loading models from your providers…"
+    if (isLoading) {
+      return isDiscovery
+        ? "Loading models from your providers…"
+        : "Loading the model catalog…"
+    }
+    if (isRefused) {
+      return "Could not read the model list. Type the selector directly."
     }
     // A failed provider is worth saying out loud: its models are simply absent
     // from the list, which is indistinguishable from a provider that has none.
@@ -103,6 +164,8 @@ export function ModelComboBox({
       placeholder={placeholder}
       autoFocus={autoFocus}
       isRequired={isRequired}
+      isInvalid={isInvalid}
+      errorMessage={errorMessage}
       // Discovery is not authoritative, so anything typed stands on its own.
       allowsCustomValue
       // Not "focus", which with autoFocus drops the whole list open as soon as
@@ -110,12 +173,8 @@ export function ModelComboBox({
       // aria-hidden, so the price fields and Save button would be unreachable
       // to a screen reader before a single keystroke.
       menuTrigger="input"
-      isSourceEmpty={isCatalogEmpty}
-      emptyMessage={
-        discoverable.isLoading
-          ? "Looking for models…"
-          : "No models discovered yet. Add a provider credential and the models it serves appear here; until then, type the selector."
-      }
+      isSourceEmpty={isSourceEmpty}
+      emptyMessage={emptyMessage}
       noMatchesMessage="No model matches. Type a provider:model selector to use it anyway."
     />
   )

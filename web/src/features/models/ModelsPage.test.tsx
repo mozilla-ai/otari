@@ -1093,9 +1093,9 @@ describe("ModelsPage", () => {
     )
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Model key")).toHaveValue(
-      "vllm:mistral-small",
-    )
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("vllm:mistral-small")
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
     // The submit says what its trigger said, word for word (actions.md), so it
@@ -1167,6 +1167,36 @@ describe("ModelsPage", () => {
     expect(within(reopened).getByLabelText("Input $ / 1M")).toHaveValue("")
   })
 
+  it("offers what discovery found, so the key need not be typed at all", async () => {
+    // The dialog exists for a model the catalog does not list, which is why the
+    // field still takes free text. It is not a reason to make an operator
+    // retype a selector the gateway already knows about.
+    mockApi()
+    const user = userEvent.setup()
+
+    renderWithClient(<ModelsPage />)
+    await screen.findByText("openai:gpt-4o")
+
+    await user.type(screen.getByRole("searchbox"), "mistral")
+    await user.click(
+      await screen.findByRole("button", { name: "Price a model by hand" }),
+    )
+
+    const dialog = await screen.findByRole("dialog")
+    // The trigger, not the input: the field opens on typing so that an
+    // autofocused list does not hide the rest of the form from a screen reader.
+    await user.click(
+      within(dialog).getByRole("button", { name: /show suggestions/i }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: "anthropic:claude-sonnet-4" }),
+    )
+
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("anthropic:claude-sonnet-4")
+  })
+
   it("rejects a model key with no provider prefix", async () => {
     mockApi()
     const user = userEvent.setup()
@@ -1181,7 +1211,10 @@ describe("ModelsPage", () => {
     )
 
     const dialog = await screen.findByRole("dialog")
-    await user.type(within(dialog).getByLabelText("Model key"), "mistral-small")
+    await user.type(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+      "mistral-small",
+    )
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
 
@@ -1215,7 +1248,9 @@ describe("ModelsPage", () => {
     await user.click(screen.getByRole("button", { name: "Price a model" }))
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:")
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("vllm:")
     // A bare prefix is not yet a key, so the price cannot be submitted. The
     // submit carries the banner trigger's own label.
     expect(
@@ -1252,7 +1287,9 @@ describe("ModelsPage", () => {
     await user.click(screen.getByRole("button", { name: "Price a model" }))
 
     expect(
-      within(await screen.findByRole("dialog")).getByLabelText("Model key"),
+      within(await screen.findByRole("dialog")).getByRole("combobox", {
+        name: "Model key",
+      }),
     ).toHaveValue("")
   })
 

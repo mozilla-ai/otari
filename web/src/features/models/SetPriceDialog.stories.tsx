@@ -2,15 +2,35 @@ import { Button } from "@heroui/react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
+import { API_ROOT } from "@/shared/api/client"
+
 import { SetPriceDialog } from "./SetPriceDialog"
 
 /**
  * Manual per-million rates for a model the pricing catalog does not cover.
  *
- * Fully controlled and entirely offline: it takes `isPending` and `error` as props
- * and reports a submit, so the page owns the mutation. That is what makes it the
- * easiest dialog in the tree to put in a catalog.
+ * Fully controlled: it takes `isPending` and `error` as props and reports a
+ * submit, so the page owns the mutation. Its one read is the model picker's,
+ * over what discovery found, and only on the `collectModelKey` path.
  */
+const DISCOVERED = {
+  providers: [
+    {
+      provider: "openai",
+      ok: true,
+      models: [
+        { id: "gpt-4o", key: "openai:gpt-4o" },
+        { id: "gpt-4o-mini", key: "openai:gpt-4o-mini" },
+      ],
+    },
+    {
+      provider: "anthropic",
+      ok: true,
+      models: [{ id: "claude-sonnet-4", key: "anthropic:claude-sonnet-4" }],
+    },
+  ],
+}
+
 const meta = {
   title: "Dashboard/Models/SetPriceDialog",
   component: SetPriceDialog,
@@ -19,6 +39,7 @@ const meta = {
     onOpenChange: () => {},
     onSubmit: async () => {},
   },
+  parameters: { api: { [`${API_ROOT}/models/discoverable`]: DISCOVERED } },
 } satisfies Meta<typeof SetPriceDialog>
 
 export default meta

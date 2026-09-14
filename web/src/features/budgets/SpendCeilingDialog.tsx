@@ -9,6 +9,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { ProviderInstanceComboBox } from "@/features/providers/ProviderInstanceComboBox"
 import {
   useCreateOrganizationSpendCeiling,
   useUpdateOrganizationSpendCeiling,
@@ -217,7 +218,7 @@ export function SpendCeilingDialog({
             options={targetOptions}
             reserveMessage={false}
           />
-          <Field
+          <ProviderInstanceComboBox
             label="Provider instance"
             value={provider}
             onChange={setProvider}

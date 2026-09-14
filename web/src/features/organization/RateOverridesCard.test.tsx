@@ -46,16 +46,29 @@ function pricingOverride(
 // Mocked at the `@/client` boundary (a real `fetch`), which is what the standards
 // call for: the hooks and their invalidation are part of what is under test, so
 // stubbing them would leave the interesting half uncovered.
+function catalogModel(id: string) {
+  return {
+    id,
+    object: "model",
+    created: 0,
+    owned_by: id.split(":")[0],
+    pricing_source: "none",
+  }
+}
+
 function mockApi({
   context = organizationContext(),
   overrides = [] as OrganizationPricingOverride[],
   writeStatus = 201,
   writeBody = pricingOverride() as unknown,
+  models = [] as string[],
 }: {
   context?: OrganizationContext
   overrides?: OrganizationPricingOverride[]
   writeStatus?: number
   writeBody?: unknown
+  /** What GET /v1/models serves, which is where the model-key picker looks. */
+  models?: string[]
 } = {}) {
   const requests: RecordedRequest[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -71,6 +84,9 @@ function mockApi({
         return jsonResponse({ data: overrides, count: overrides.length })
       }
       return jsonResponse(writeBody, writeStatus)
+    }
+    if (url.endsWith(`${API_ROOT}/models`)) {
+      return jsonResponse({ object: "list", data: models.map(catalogModel) })
     }
     return jsonResponse(context)
   })
@@ -174,7 +190,7 @@ describe("RateOverridesCard", () => {
       await screen.findByRole("button", { name: /add override/i }),
     )
     await user.type(
-      await screen.findByLabelText(/model key/i),
+      await screen.findByRole("combobox", { name: /model key/i }),
       "anthropic:claude-sonnet-5",
     )
     await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
@@ -191,6 +207,44 @@ describe("RateOverridesCard", () => {
         model_key: "anthropic:claude-sonnet-5",
         input_price_per_million: 3,
         output_price_per_million: 15,
+      })
+    })
+  })
+
+  it("fills the model key from the catalog, so a rate is not stored under a typo", async () => {
+    // The catalog rather than /v1/models/discoverable: this card answers to an
+    // organization admin, who is refused the deployment-operator read.
+    const requests = mockApi({
+      overrides: [],
+      models: ["anthropic:claude-sonnet-5"],
+    })
+    const user = userEvent.setup()
+
+    await renderPage()
+
+    await user.click(
+      await screen.findByRole("button", { name: /add override/i }),
+    )
+    // The trigger, not the input: the field opens on typing, so that an
+    // autofocused list does not hide the rest of the form from a screen reader.
+    await user.click(
+      await screen.findByRole("button", { name: /show suggestions/i }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: "anthropic:claude-sonnet-5" }),
+    )
+    await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
+    await user.type(screen.getByLabelText(/output, per 1m tokens/i), "15")
+    await user.click(screen.getByRole("button", { name: /^add override$/i }))
+
+    await waitFor(() => {
+      const write = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/pricing`),
+      )
+      expect(write?.body).toMatchObject({
+        model_key: "anthropic:claude-sonnet-5",
       })
     })
   })
@@ -228,7 +282,7 @@ describe("RateOverridesCard", () => {
       await screen.findByRole("button", { name: /add override/i }),
     )
     await user.type(
-      await screen.findByLabelText(/model key/i),
+      await screen.findByRole("combobox", { name: /model key/i }),
       "anthropic:claude-sonnet-5",
     )
     await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
@@ -245,7 +299,9 @@ describe("RateOverridesCard", () => {
 
     const reopened = await screen.findByRole("dialog")
     expect(within(reopened).queryByRole("alert")).toBeNull()
-    expect(within(reopened).getByLabelText(/model key/i)).toHaveValue("")
+    expect(
+      within(reopened).getByRole("combobox", { name: /model key/i }),
+    ).toHaveValue("")
   })
 
   it("refuses a model key with no provider prefix before sending it", async () => {
@@ -257,7 +313,10 @@ describe("RateOverridesCard", () => {
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),
     )
-    await user.type(await screen.findByLabelText(/model key/i), "gpt-4o")
+    await user.type(
+      await screen.findByRole("combobox", { name: /model key/i }),
+      "gpt-4o",
+    )
     await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
     await user.type(screen.getByLabelText(/output, per 1m tokens/i), "15")
 
@@ -286,7 +345,10 @@ describe("RateOverridesCard", () => {
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),
     )
-    await user.type(await screen.findByLabelText(/model key/i), "openai:gpt-4o")
+    await user.type(
+      await screen.findByRole("combobox", { name: /model key/i }),
+      "openai:gpt-4o",
+    )
     await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
     await user.type(screen.getByLabelText(/output, per 1m tokens/i), "15")
 
@@ -366,7 +428,9 @@ describe("RateOverridesCard", () => {
     expect(await screen.findByLabelText(/input, per 1m tokens/i)).toHaveValue(
       "",
     )
-    expect(await screen.findByLabelText(/model key/i)).toHaveValue("")
+    expect(
+      await screen.findByRole("combobox", { name: /model key/i }),
+    ).toHaveValue("")
   })
 
   it("deletes an override after a confirmation", async () => {
@@ -432,7 +496,10 @@ describe("RateOverridesCard", () => {
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),
     )
-    await user.type(await screen.findByLabelText(/model key/i), "openai:gpt-4o")
+    await user.type(
+      await screen.findByRole("combobox", { name: /model key/i }),
+      "openai:gpt-4o",
+    )
     await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
     await user.type(screen.getByLabelText(/output, per 1m tokens/i), "15")
     await user.click(screen.getByRole("button", { name: /^add override$/i }))

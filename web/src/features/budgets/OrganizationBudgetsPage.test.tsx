@@ -48,15 +48,28 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 // Mocked at the `@/client` boundary (a real `fetch`), per the standards: the
 // hooks and their invalidation are part of what is under test.
+function catalogModel(id: string) {
+  return {
+    id,
+    object: "model",
+    created: 0,
+    owned_by: id.split(":")[0],
+    pricing_source: "none",
+  }
+}
+
 function mockApi({
   budgets = [organizationBudget()],
   ceilings = [] as OrganizationSpendCeiling[],
   writeStatus = 201,
   budgetsGate,
+  models = [] as string[],
 }: {
   budgets?: OrganizationBudget[]
   ceilings?: OrganizationSpendCeiling[]
   writeStatus?: number
+  /** What GET /v1/models serves, which is where the provider picker looks. */
+  models?: string[]
   // Holds the budget list in flight, so a dialog can be opened before it
   // lands: that is when a default arriving after mount is observable.
   budgetsGate?: Promise<unknown>
@@ -84,6 +97,9 @@ function mockApi({
       }
       if (method === "DELETE") return jsonResponse({ message: "deleted" })
       return jsonResponse(organizationBudget(), writeStatus)
+    }
+    if (url.endsWith(`${API_ROOT}/models`)) {
+      return jsonResponse({ object: "list", data: models.map(catalogModel) })
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
       return jsonResponse({
@@ -291,6 +307,38 @@ describe("OrganizationBudgetsPage", () => {
       name: "New spend ceiling",
     })
     expect(within(reopened).queryByRole("alert")).toBeNull()
+  })
+
+  it("narrows a ceiling to a provider picked from the ones served here", async () => {
+    // The instance is free text on the wire (a provider configured in
+    // config.yml has no row to point at), so a typo used to store a cap that
+    // narrowed to nothing and then quietly never bit. The list is read off the
+    // catalog because /v1/providers is operator-only and this page is the one
+    // an admin who is not an operator lands on.
+    const requests = mockApi({ models: ["openai-eu:gpt-4o"] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add ceiling" }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "New spend ceiling",
+    })
+    await user.click(
+      within(dialog).getByRole("button", { name: /show suggestions/i }),
+    )
+    await user.click(await screen.findByRole("option", { name: "openai-eu" }))
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add ceiling" }),
+    )
+
+    await waitFor(() => {
+      const write = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      )
+      expect(write?.body).toMatchObject({ provider_key_id: "openai-eu" })
+    })
   })
 
   it("warns that deleting a held budget will be refused, before trying", async () => {
