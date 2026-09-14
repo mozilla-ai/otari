@@ -138,6 +138,16 @@ function ModelAllowList({
   // What the list could ever offer, which is what tells "this provider has no
   // catalog entry" from "nothing matches what you typed".
   const available = suggestions.filter((model) => !models.includes(model))
+  // Four ways to have nothing left to suggest, and only the last is a fact
+  // about the provider rather than about this workspace or the read.
+  const emptyMessage =
+    catalogState === "pending"
+      ? "Reading the catalog…"
+      : catalogState === "failed"
+        ? "The model catalog could not be read. Type the model id as the provider spells it."
+        : suggestions.length > 0
+          ? "Every model the catalog lists for this provider is already allowed."
+          : "No catalog entry for this provider. Type the model id as the provider spells it."
   const options: ComboBoxOption[] = available
     .filter((model) => model.toLowerCase().includes(trimmed.toLowerCase()))
     .slice(0, MODEL_SUGGESTION_LIMIT)
@@ -172,7 +182,7 @@ function ModelAllowList({
           models this control exists to add back. An organization owner or admin
           reads it unfiltered (`resolve_session_catalog_scope` answers them from
           the organization's keys), which is who this form usually belongs to. */}
-      <div className="flex items-end gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <ComboBoxField
           // Short and visible, with the key only in the accessible name: at one
           // key the repetition is invisible and at five it is the loudest thing
@@ -195,13 +205,7 @@ function ModelAllowList({
           errorMessage={invalidReason}
           reserveMessage={false}
           isSourceEmpty={available.length === 0}
-          emptyMessage={
-            catalogState === "pending"
-              ? "Reading the catalog…"
-              : catalogState === "failed"
-                ? "The model catalog could not be read. Type the model id as the provider spells it."
-                : "No catalog entry for this provider. Type the model id as the provider spells it."
-          }
+          emptyMessage={emptyMessage}
           noMatchesMessage="No catalog entry matches. Type the model id to allow it anyway."
         />
         <Button

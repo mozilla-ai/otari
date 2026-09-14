@@ -238,6 +238,23 @@ describe("WorkspaceProviderKeys", () => {
     expect(screen.queryByRole("option", { name: "gpt-4o-mini" })).toBeNull()
   })
 
+  it("says an exhausted list is exhausted, not that the provider has no models", async () => {
+    mockApi({
+      catalog: ["openai:gpt-4o"],
+      overrides: [workspaceProviderKeyOverride({ allowed_models: ["gpt-4o"] })],
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.type(await allowField(), "z")
+
+    expect(
+      await screen.findByText(
+        "Every model the catalog lists for this provider is already allowed.",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("says a refused catalog was refused, not that the provider has no models", async () => {
     // Both leave the same empty popover behind, and only one of them is a fact
     // about the provider.
