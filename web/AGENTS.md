@@ -112,6 +112,15 @@ Import API shapes from `@/client`, not directly from the generated schema.
 `src/client/schema.ts` is generated from `docs/public/openapi.json` and
 committed. Keep `src/client/local.ts` limited to shapes OpenAPI cannot own.
 
+A field added to a gateway response model without a default lands in OpenAPI's
+`required`, so it is non-optional in the regenerated client, and every
+hand-written call site that builds that shape literally stops typechecking until
+it carries the field. The generated file is where the diff stops, not where the
+change stops, so a clean regeneration of a few added lines is not evidence that
+the change is contained. `pnpm run lint` is Biome and does not typecheck, so
+`pnpm run typecheck` is the gate that catches this; the usual call sites are the
+builders in `src/tests/fixtures.ts` and the per-feature test files.
+
 `apiFetch` in `shared/api/client.ts` prepends `API_ROOT` to every request. A
 call site passes the resource only, `apiFetch("/keys")`, and never spells
 `/api/v1`. A test that stubs `fetch` sees the whole URL; one that spies on
