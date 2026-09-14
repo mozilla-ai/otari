@@ -62,9 +62,9 @@ describe("Tooltip", () => {
         <span>x</span>
       </Tooltip>,
     )
-    const delay = root.mock.calls[0]?.[0]?.delay
-    expect(delay).toBeTypeOf("number")
-    expect(delay).toBeLessThanOrEqual(500)
+    // The exact value, not a band: `design/overlays.md` states it, so a change
+    // to it should have to change the sentence that documents it as well.
+    expect(root.mock.calls[0]?.[0]?.delay).toBe(300)
     root.mockRestore()
   })
 })
