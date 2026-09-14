@@ -13,6 +13,11 @@ import { Button } from "@/design-system/actions/Button"
  * Each control sits under the column it votes for, centred in that column's
  * half, so which model a press is about is read from position rather than from
  * the label. The labels still say it, for anyone not reading positionally.
+ *
+ * Three verdicts, not two: the stored vocabulary has always had a tie, and the
+ * history list renders one, so offering only the two thumbs made an outcome the
+ * dataset can hold unreachable from the page that fills it. It sits in the
+ * middle, where the question is, because a tie is not about either column.
  */
 export function ComparisonRatingBar({
   isAcknowledged,
@@ -33,7 +38,7 @@ export function ComparisonRatingBar({
   }
 
   return (
-    <div className="relative flex shrink-0 items-center gap-4 py-2">
+    <div className="flex shrink-0 items-center gap-4 py-2">
       <div className="flex min-w-0 flex-1 justify-center">
         <Button
           size="sm"
@@ -44,9 +49,17 @@ export function ComparisonRatingBar({
           <FiThumbsUp aria-hidden className="size-4" />
         </Button>
       </div>
-      <span className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 text-caption">
-        Which is better?
-      </span>
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <span className="text-caption">Which is better?</span>
+        <Button
+          size="sm"
+          aria-label="Both answered equally well"
+          onPress={() => onRate("tie")}
+          isDisabled={isPending}
+        >
+          Tie
+        </Button>
+      </div>
       <div className="flex min-w-0 flex-1 justify-center">
         <Button
           size="sm"

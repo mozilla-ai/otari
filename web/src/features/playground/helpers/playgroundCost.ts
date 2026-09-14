@@ -39,9 +39,11 @@ export function formatTurnCost(costUsd: number): string {
 export function formatTurnDuration(ms: number): string {
   if (ms < 100) return "<0.1s"
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  const minutes = Math.floor(ms / 60_000)
-  const seconds = Math.round((ms % 60_000) / 1000)
-  return `${minutes}m ${seconds}s`
+  // The total is rounded first and then split, rather than splitting and
+  // rounding the remainder: the latter renders 119_600ms as "1m 60s", because
+  // 59.6 rounds to 60 with the minute already taken.
+  const totalSeconds = Math.round(ms / 1000)
+  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`
 }
 
 /**

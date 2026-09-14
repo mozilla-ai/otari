@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -15,7 +15,10 @@ import type {
 } from "@/client"
 import { PlaygroundPage } from "@/features/playground/PlaygroundPage"
 import * as apiClient from "@/shared/api/client"
-import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
+import {
+  SelectedWorkspaceProvider,
+  useSelectedWorkspace,
+} from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -71,6 +74,42 @@ function context(): OrganizationContext {
   }) as OrganizationContext
 }
 
+const SECOND_WORKSPACE_ID = "55555555-5555-5555-5555-555555555555"
+
+function twoWorkspaces(): OrganizationContext {
+  return organizationContext({
+    workspace_memberships: [
+      { workspace_id: WORKSPACE_ID, name: "Default", role: "owner" },
+      { workspace_id: SECOND_WORKSPACE_ID, name: "Second", role: "owner" },
+    ],
+  }) as OrganizationContext
+}
+
+/**
+ * The switcher's own `select`, exposed as buttons.
+ *
+ * The real `SelectedWorkspaceProvider` and the real `select` the sidebar's
+ * switcher calls, so this drives the actual code path rather than a stub of it;
+ * what it skips is the switcher's popover, which belongs to the shell and has
+ * its own tests.
+ */
+function WorkspacePicker() {
+  const { memberships, select } = useSelectedWorkspace()
+  return (
+    <div>
+      {memberships.map((membership) => (
+        <button
+          key={membership.workspace_id}
+          type="button"
+          onClick={() => select(membership.workspace_id)}
+        >
+          Select {membership.name}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface ApiState {
   consent?: PlaygroundConsent
   conversations?: PlaygroundConversations
@@ -78,6 +117,7 @@ interface ApiState {
   favorites?: PlaygroundFavoriteModels
   catalog?: ModelListResponse
   messages?: PlaygroundMessages
+  context?: OrganizationContext
 }
 
 /**
@@ -101,7 +141,9 @@ function mockApi(state: ApiState = {}) {
           body: init?.body ? JSON.parse(String(init.body)) : undefined,
         })
       }
-      if (path.startsWith("/organizations/me")) return context() as never
+      if (path.startsWith("/organizations/me")) {
+        return (state.context ?? context()) as never
+      }
       if (path.startsWith("/models")) {
         return (state.catalog ?? CATALOG) as never
       }
@@ -168,6 +210,74 @@ function sseResponse(frames: string[], signal?: AbortSignal | null): Response {
   })
 }
 
+/**
+ * A stream the test drives frame by frame.
+ *
+ * What a self-closing stream cannot test: anything about a reply still in
+ * flight, which is every cancellation rule below. `push` delivers one frame and
+ * resolves once the page has folded it in, so a test can put a frame *after* a
+ * transition and assert it never lands. The abort signal is honored the way
+ * fetch honors it.
+ */
+function openStream() {
+  const queue: string[] = []
+  let closed = false
+  let wake = () => {}
+  const wait = () =>
+    new Promise<void>((resolve) => {
+      wake = resolve
+    })
+  let pending = wait()
+
+  const spy = vi
+    .spyOn(apiClient, "apiStream")
+    .mockImplementation(async (_path, init) => {
+      const encoder = new TextEncoder()
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          while (queue.length === 0 && !closed) {
+            if (init?.signal?.aborted) break
+            await pending
+            pending = wait()
+          }
+          if (init?.signal?.aborted) {
+            controller.error(new DOMException("Aborted", "AbortError"))
+            return
+          }
+          const frame = queue.shift()
+          if (frame === undefined) {
+            controller.close()
+            return
+          }
+          controller.enqueue(encoder.encode(`data: ${frame}\n\n`))
+        },
+      })
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    })
+
+  return {
+    spy,
+    async push(frame: string) {
+      queue.push(frame)
+      wake()
+      // Let the reader drain it and React commit the fragment.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      })
+    },
+    async close() {
+      closed = true
+      wake()
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      })
+    },
+  }
+}
+
 function mockStream(frames: string[]) {
   return vi
     .spyOn(apiClient, "apiStream")
@@ -186,6 +296,7 @@ function renderPage() {
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
+        <WorkspacePicker />
         <PlaygroundPage />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
@@ -324,6 +435,29 @@ describe("sending a question", () => {
     expect(screen.queryByText(/Aborted/)).not.toBeInTheDocument()
   })
 
+  it("offers Regenerate on a reply that failed before its first token", async () => {
+    // The moment somebody most wants to retry. Gating the action row on the
+    // response alone hid it exactly then, because a failure before the first
+    // token leaves the content empty.
+    mockApi()
+    mockStream([JSON.stringify({ error: "Upstream refused" })])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+
+    expect(await screen.findByText("Upstream refused")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Regenerate response" }),
+    ).toBeInTheDocument()
+    // And no Copy, because there is nothing to copy.
+    expect(
+      screen.queryByRole("button", { name: "Copy response" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("reports a mid-stream failure on the conversation", async () => {
     // A failure after the headers arrives as a frame, because the status is
     // already 200 by then. It belongs where the answer would have been.
@@ -448,6 +582,31 @@ describe("comparing two models", () => {
     ).toBeInTheDocument()
   })
 
+  it("can record a tie, which the stored vocabulary has always had", async () => {
+    const { writes } = mockApi({
+      consent: { store_conversations: false, store_comparisons: true },
+    })
+    mockStream([delta("an answer"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.click(screen.getByRole("button", { name: "Compare two models" }))
+    await user.type(screen.getByLabelText("Message"), "which?")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Both answered equally well",
+      }),
+    )
+
+    await waitFor(() => {
+      expect(
+        writes.find((write) => write.url === "/playground/comparisons")?.body,
+      ).toMatchObject({ preference: "tie" })
+    })
+  })
+
   it("records the rating with both answers", async () => {
     const { writes } = mockApi({
       consent: { store_conversations: false, store_comparisons: true },
@@ -519,6 +678,133 @@ describe("comparing two models", () => {
     expect(
       screen.queryByRole("button", { name: "Save conversation" }),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe("state that must not outlive what produced it", () => {
+  it("does not start a second reply when Enter is pressed mid-stream", async () => {
+    // The send control becomes Stop while a reply is in flight, so the button
+    // path is safe and Enter is the one that is not. Two streams into one panel
+    // interleave their fragments into a single turn.
+    mockApi()
+    const stream = openStream()
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await stream.push(delta("still going"))
+    await screen.findByText("still going")
+    // The reply is in flight: the composer offers Stop rather than Send.
+    expect(
+      screen.getByRole("button", { name: "Stop generating" }),
+    ).toBeInTheDocument()
+
+    // Re-queried, not reused: the welcome screen and the conversation render
+    // their own composer, so the node captured before the first reply is
+    // detached by now and typing into it would reach nothing. That is what made
+    // an earlier version of this test pass against the missing guard.
+    await user.type(screen.getByLabelText("Message"), "again")
+    await user.keyboard("{Enter}")
+
+    expect(stream.spy).toHaveBeenCalledTimes(1)
+    await stream.close()
+  })
+
+  it("cancels a reply in flight before it can land in another layout", async () => {
+    // A fragment arriving after the switch would repopulate a column that
+    // entering comparison had just cleared.
+    mockApi()
+    const stream = openStream()
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await stream.push(delta("mid-flight"))
+    await screen.findByText("mid-flight")
+
+    await user.click(screen.getByRole("button", { name: "Compare two models" }))
+    await screen.findByRole("button", { name: "Model A" })
+
+    // The frame that matters: one delivered *after* the switch. An uncancelled
+    // stream folds it into the panel that was just cleared.
+    await stream.push(delta(" and more"))
+    await stream.close()
+
+    expect(screen.queryByText(/mid-flight/)).not.toBeInTheDocument()
+    expect(screen.getAllByText("Send a message to start.")).toHaveLength(2)
+  })
+
+  it("starts over when the selected workspace changes", async () => {
+    // A transcript belongs to the workspace whose credentials answered it.
+    // Carrying it across would save it under the new workspace and send its
+    // history to a model the new catalog may not serve.
+    mockApi({ context: twoWorkspaces() })
+    mockStream([delta("first workspace answer"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("first workspace answer")
+
+    await user.click(screen.getByRole("button", { name: "Select Second" }))
+
+    expect(await screen.findByText("What can I help with?")).toBeInTheDocument()
+    expect(screen.queryByText("first workspace answer")).not.toBeInTheDocument()
+  })
+
+  it("asks before switching model with a transcript on screen", async () => {
+    // Each request carries the panel's whole history, so the new model would be
+    // answering the old one's conversation, and a save would label that
+    // transcript with one model when two answered it.
+    mockApi()
+    mockStream([delta("first answer"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("first answer")
+
+    await user.click(screen.getByLabelText("Model", { exact: true }))
+    await user.click(await screen.findByText("claude-sonnet-4"))
+
+    expect(
+      await screen.findByText("Switch model and start over?"),
+    ).toBeInTheDocument()
+    // Still the old model until they confirm.
+    expect(screen.getByLabelText("Model", { exact: true })).toHaveTextContent(
+      "openai:gpt-4o",
+    )
+
+    await user.click(screen.getByRole("button", { name: "Switch model" }))
+    expect(screen.getByLabelText("Model", { exact: true })).toHaveTextContent(
+      "anthropic:claude-sonnet-4",
+    )
+    expect(screen.queryByText("first answer")).not.toBeInTheDocument()
+  })
+
+  it("switches straight away on an empty panel", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.click(await screen.findByLabelText("Model", { exact: true }))
+    await user.click(await screen.findByText("claude-sonnet-4"))
+
+    expect(
+      screen.queryByText("Switch model and start over?"),
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Model", { exact: true })).toHaveTextContent(
+      "anthropic:claude-sonnet-4",
+    )
   })
 })
 

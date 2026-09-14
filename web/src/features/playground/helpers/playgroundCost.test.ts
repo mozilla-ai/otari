@@ -44,6 +44,18 @@ describe("formatTurnDuration", () => {
   it("uses minutes and seconds above one", () => {
     expect(formatTurnDuration(65_000)).toBe("1m 5s")
   })
+
+  it("carries a rounded-up remainder into the minute", () => {
+    // Splitting first and rounding the remainder renders this as "1m 60s",
+    // which is not a time.
+    expect(formatTurnDuration(119_600)).toBe("2m 0s")
+    expect(formatTurnDuration(59_500)).toBe("59.5s")
+    expect(formatTurnDuration(60_500)).toBe("1m 1s")
+  })
+
+  it("reports a bound rather than no time at all", () => {
+    expect(formatTurnDuration(4)).toBe("<0.1s")
+  })
 })
 
 describe("computeTokensPerSecond", () => {

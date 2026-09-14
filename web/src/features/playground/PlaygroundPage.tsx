@@ -85,9 +85,7 @@ export function PlaygroundPage() {
         models={playground.models}
         pinnedKeys={playground.pinnedKeys}
         onTogglePin={playground.togglePin}
-        onModelAChange={(key) =>
-          playground.setPanelA((prev) => ({ ...prev, model: key }))
-        }
+        onModelAChange={playground.selectPanelAModel}
         conversationCount={playground.conversations.length}
         onOpenHistory={() => playground.setIsHistoryOpen(true)}
         onSaveConversation={playground.requestSaveConversation}
@@ -172,6 +170,23 @@ export function PlaygroundPage() {
           </div>
         </>
       )}
+
+      {/* Switching model with a transcript on screen. Its own dialog rather
+          than the New chat one, because the copy has to say what is being
+          traded: each request carries the panel's history, so the new model
+          would answer the old one's conversation. */}
+      <ConfirmDialog
+        isOpen={playground.pendingModelChange !== undefined}
+        onOpenChange={(next) => {
+          if (!next) playground.cancelModelChange()
+        }}
+        heading="Switch model and start over?"
+        body="A conversation is sent to one model, so switching clears what is on screen. Save it first if you want to keep it."
+        confirmLabel="Switch model"
+        confirmVariant="primary"
+        isPending={false}
+        onConfirm={playground.confirmModelChange}
+      />
 
       <ConfirmDialog
         isOpen={playground.isNewChatConfirmOpen}

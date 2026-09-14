@@ -113,12 +113,18 @@ export function MessageBubble({
       {turn.usage ? (
         <p className="text-caption">{formatTurnStats(turn.usage)}</p>
       ) : null}
-      {areActionsVisible && response ? (
+      {/* Shown for a failed turn too, not only a successful one. A stream that
+          died before its first token leaves `content` empty, so gating on the
+          response alone hid the whole row at the one moment somebody wants
+          Regenerate. Copy still needs something to copy. */}
+      {areActionsVisible && (response || turn.errorMessage) ? (
         // Always visible on a touch screen and revealed on hover from `md` up:
         // a hover-only control is unreachable on a phone, which the
         // responsiveness rule forbids outright.
         <div className="flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-          <CopyButton value={response} label="Copy response" />
+          {response ? (
+            <CopyButton value={response} label="Copy response" />
+          ) : null}
           {onRegenerate ? (
             <Tooltip content="Regenerate">
               <IconButton label="Regenerate response" onPress={onRegenerate}>

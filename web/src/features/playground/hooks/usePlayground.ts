@@ -1,5 +1,5 @@
 import type { FormEvent, KeyboardEvent } from "react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { PlaygroundComparisonPreference } from "@/client"
 import { useModels } from "@/shared/api/models"
@@ -116,11 +116,52 @@ export function usePlayground() {
   // has no mutation state to read: it is kept here and reported beside the
   // page's other write failures.
   const [loadError, setLoadError] = useState<unknown>(undefined)
+  // The model a reader picked while a transcript was on screen, held until they
+  // confirm losing it.
+  const [pendingModelChange, setPendingModelChange] = useState<
+    string | undefined
+  >(undefined)
 
   const { streamReply, stop } = usePlaygroundStream({
     workspaceId: workspaceId ?? "",
     tools: toolSelection.selection,
   })
+
+  /** Anything that makes the on-screen exchange different from the saved one. */
+  const invalidateSavedState = useCallback(() => {
+    setRatingState("none")
+    setIsConversationSaved(false)
+    setSavedConversationId(undefined)
+  }, [])
+
+  /** Put both panels back to empty, keeping whichever models they hold. */
+  const clearPanels = useCallback(() => {
+    stop()
+    setPanelA((prev) => ({ ...prev, turns: [] }))
+    setPanelB((prev) => ({ ...prev, turns: [] }))
+    invalidateSavedState()
+  }, [stop, invalidateSavedState])
+
+  // Switching workspace in the sidebar starts over. Nothing on screen survives
+  // it, and it cannot: a transcript belongs to the workspace whose credentials
+  // answered it, so carrying it across would save it under the new workspace
+  // and send its history to a model the new catalog may not even serve. The
+  // pinned models and the saved history are per workspace too, and their
+  // queries are already keyed on it.
+  //
+  // Keyed on the id rather than done in the seeding effect below, because that
+  // one runs whenever the catalog does and this must run only on the change.
+  const previousWorkspaceRef = useRef(workspaceId)
+  useEffect(() => {
+    if (previousWorkspaceRef.current === workspaceId) return
+    previousWorkspaceRef.current = workspaceId
+    stop()
+    setPanelA(EMPTY_PANEL)
+    setPanelB(EMPTY_PANEL)
+    setDraft("")
+    setIsComparing(false)
+    invalidateSavedState()
+  }, [workspaceId, stop, invalidateSavedState])
 
   // Seed each panel's model once the catalog answers: A from what this browser
   // last used here, B from the first model that is not A's, so opening compare
@@ -143,17 +184,16 @@ export function usePlayground() {
     if (panelA.model && workspaceId) rememberModel(workspaceId, panelA.model)
   }, [panelA.model, workspaceId])
 
-  /** Anything that makes the on-screen exchange different from the saved one. */
-  const invalidateSavedState = useCallback(() => {
-    setRatingState("none")
-    setIsConversationSaved(false)
-    setSavedConversationId(undefined)
-  }, [])
+  const isBusy = isAnyPanelBusy(panelA, panelB)
 
   const send = useCallback(
     async (question: string) => {
       const trimmed = question.trim()
       if (!trimmed || !workspaceId || !panelA.model) return
+      // The send *button* becomes Stop while a reply is in flight, so the only
+      // way in here is the Enter key, and a second stream into the same panel
+      // interleaves two replies into one turn.
+      if (isBusy) return
       const turn: ChatTurn = { role: "user", content: trimmed }
 
       setDraft("")
@@ -175,6 +215,7 @@ export function usePlayground() {
       panelA,
       panelB,
       isComparing,
+      isBusy,
       streamReply,
       invalidateSavedState,
     ],
@@ -205,12 +246,7 @@ export function usePlayground() {
     }
   }
 
-  const clearConversation = useCallback(() => {
-    stop()
-    setPanelA((prev) => ({ ...prev, turns: [] }))
-    setPanelB((prev) => ({ ...prev, turns: [] }))
-    invalidateSavedState()
-  }, [stop, invalidateSavedState])
+  const clearConversation = clearPanels
 
   const performSaveConversation = useCallback(() => {
     if (!workspaceId || panelA.turns.length === 0) return
@@ -310,6 +346,9 @@ export function usePlayground() {
 
   const loadConversation = async (conversationId: string) => {
     setLoadError(undefined)
+    // Before the fetch, not after: a reply still streaming would otherwise
+    // patch its next fragment onto the transcript that replaced it.
+    stop()
     let loaded: Awaited<ReturnType<typeof fetchPlaygroundConversation>>
     try {
       loaded = await fetchPlaygroundConversation(conversationId)
@@ -349,6 +388,9 @@ export function usePlayground() {
 
   const toggleCompare = () => {
     const next = !isComparing
+    // Either direction: a stream in flight belongs to the layout that started
+    // it, and letting it land would repopulate a column this just cleared.
+    stop()
     setIsComparing(next)
     if (next) {
       // Both columns start empty, and this is the one place the port departs
@@ -366,6 +408,33 @@ export function usePlayground() {
     }
   }
 
+  /**
+   * Point panel A at another model.
+   *
+   * With a transcript on screen this asks first, because switching is not a
+   * free action: each request carries the panel's whole history, so the new
+   * model would be answering the old one's conversation, and a save labels that
+   * transcript with one model when two answered it. Confirming clears it, which
+   * is what makes the stored row true. An empty panel switches straight away,
+   * which is the ordinary case.
+   */
+  const selectPanelAModel = (modelKey: string) => {
+    if (panelA.turns.length === 0) {
+      setPanelA((prev) => ({ ...prev, model: modelKey }))
+      return
+    }
+    setPendingModelChange(modelKey)
+  }
+
+  const confirmModelChange = () => {
+    if (pendingModelChange === undefined) return
+    stop()
+    setPanelA({ ...EMPTY_PANEL, model: pendingModelChange })
+    setPanelB((prev) => ({ ...prev, turns: [] }))
+    invalidateSavedState()
+    setPendingModelChange(undefined)
+  }
+
   const togglePin = (modelKey: string) => {
     replacePinned.mutate(togglePinnedModel(pinnedKeys, modelKey))
   }
@@ -376,8 +445,6 @@ export function usePlayground() {
     hasWorkspace: workspaceId !== undefined,
     modelCount: models.length,
   })
-
-  const isBusy = isAnyPanelBusy(panelA, panelB)
 
   return {
     // Where the page stands
@@ -415,6 +482,10 @@ export function usePlayground() {
     models,
     pinnedKeys,
     togglePin,
+    selectPanelAModel,
+    pendingModelChange,
+    confirmModelChange,
+    cancelModelChange: () => setPendingModelChange(undefined),
 
     // Tools
     tools: tools.data,
