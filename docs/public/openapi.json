@@ -65,12 +65,24 @@
               }
             ],
             "title": "Key Prefix"
+          },
+          "key_suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Suffix"
           }
         },
         "required": [
           "key",
           "key_id",
           "key_prefix",
+          "key_suffix",
           "key_name"
         ],
         "title": "ActivationApiKeyPublic",
@@ -3159,6 +3171,17 @@
             ],
             "title": "Key Prefix"
           },
+          "key_suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Suffix"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -3191,6 +3214,7 @@
           "id",
           "key",
           "key_prefix",
+          "key_suffix",
           "key_name",
           "user_id",
           "created_at",
@@ -5421,6 +5445,17 @@
             ],
             "title": "Key Prefix"
           },
+          "key_suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Suffix"
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -5468,6 +5503,7 @@
         "required": [
           "id",
           "key_prefix",
+          "key_suffix",
           "key_name",
           "user_id",
           "created_at",

@@ -46,7 +46,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.usage_source import integration_traffic, served_here
 from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
@@ -199,6 +199,7 @@ class ActivationApiKeyPublic(BaseModel):
     key: str
     key_id: str
     key_prefix: str | None
+    key_suffix: str | None
     key_name: str | None
 
 
@@ -306,6 +307,7 @@ class WorkspaceActivationService:
                 workspace_id=workspace.id,
                 key_hash=hash_key(plaintext),
                 key_prefix=key_prefix(plaintext),
+                key_suffix=key_suffix(plaintext),
                 key_name=ACTIVATION_KEY_NAME,
                 user_id=owner.user_id,
             )
@@ -313,6 +315,7 @@ class WorkspaceActivationService:
         else:
             record.key_hash = hash_key(plaintext)
             record.key_prefix = key_prefix(plaintext)
+            record.key_suffix = key_suffix(plaintext)
             # The owner moves with the rotation. Whoever asked last is the only
             # person holding a plaintext that still authenticates, so leaving the
             # first issuer's id on the row would bill a second manager's requests
@@ -332,6 +335,7 @@ class WorkspaceActivationService:
             key=plaintext,
             key_id=record.id,
             key_prefix=record.key_prefix,
+            key_suffix=record.key_suffix,
             key_name=record.key_name,
         )
 

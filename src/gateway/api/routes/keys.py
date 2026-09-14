@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db, require_deployment_operator
-from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
 from gateway.models.tenancy import Workspace
@@ -141,9 +141,10 @@ class CreateKeyResponse(BaseModel):
 
     id: str
     key: str
-    # Leading characters of the key, echoed so the client can key its show-once
-    # reveal to the same fingerprint the list will display afterward.
+    # Leading and trailing characters of the key, echoed so the client can key its
+    # show-once reveal to the same fingerprint the list will display afterward.
     key_prefix: str | None
+    key_suffix: str | None
     key_name: str | None
     user_id: str | None
     created_at: str
@@ -160,9 +161,11 @@ class KeyInfo(BaseModel):
     """Response model for key information."""
 
     id: str
-    # Display-only fingerprint (leading characters of the plaintext key). Null for
-    # keys minted before the prefix was recorded; the full key is never returned.
+    # Display-only fingerprint (leading and trailing characters of the plaintext
+    # key). Either is null for keys minted before that half was recorded, and neither
+    # can be back-filled; the full key is never returned.
     key_prefix: str | None
+    key_suffix: str | None
     key_name: str | None
     user_id: str | None
     created_at: str
@@ -182,6 +185,7 @@ class KeyInfo(BaseModel):
             id=str(key.id),
             workspace_id=key.workspace_id,
             key_prefix=str(key.key_prefix) if key.key_prefix else None,
+            key_suffix=str(key.key_suffix) if key.key_suffix else None,
             key_name=str(key.key_name) if key.key_name else None,
             user_id=str(key.user_id) if key.user_id else None,
             created_at=key.created_at.isoformat(),
@@ -312,6 +316,7 @@ async def create_key(
         workspace_id=workspace_id,
         key_hash=key_hash,
         key_prefix=key_prefix(api_key),
+        key_suffix=key_suffix(api_key),
         key_name=request.key_name,
         user_id=user_id,
         expires_at=request.expires_at,
@@ -464,6 +469,7 @@ async def rotate_key(
     new_api_key = generate_api_key()
     key.key_hash = hash_key(new_api_key)
     key.key_prefix = key_prefix(new_api_key)
+    key.key_suffix = key_suffix(new_api_key)
     key.last_used_at = None
 
     try:

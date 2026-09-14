@@ -468,6 +468,8 @@ def test_the_workspace_filter_narrows_and_never_widens(client: TestClient, world
 def test_a_member_updates_rotates_and_revokes_their_own_key(client: TestClient, world: _World) -> None:
     code, created = _create(client, world, "alpha_member", {"key_name": "lifecycle"})
     assert code == status.HTTP_200_OK
+    assert created["key_prefix"] == created["key"][:10]
+    assert created["key_suffix"] == created["key"][-4:]
 
     code, updated = _request(
         client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"key_name": "renamed"}
@@ -479,6 +481,10 @@ def test_a_member_updates_rotates_and_revokes_their_own_key(client: TestClient, 
     assert code == status.HTTP_200_OK, rotated
     assert rotated["id"] == created["id"]
     assert rotated["key"] != created["key"]
+    # The member-facing rotate re-fingerprints too, the same guard the operator's
+    # rotate carries: the displayed halves must name the secret that now works.
+    assert rotated["key_prefix"] == rotated["key"][:10]
+    assert rotated["key_suffix"] == rotated["key"][-4:]
 
     code, _ = _request(client, world, "alpha_member", "DELETE", f"{_PREFIX}/{created['id']}")
     assert code == status.HTTP_204_NO_CONTENT

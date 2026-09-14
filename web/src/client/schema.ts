@@ -4856,6 +4856,8 @@ export interface components {
             key_name: string | null;
             /** Key Prefix */
             key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
         };
         /**
          * ActivationAttemptPublic
@@ -6194,6 +6196,8 @@ export interface components {
             key_name: string | null;
             /** Key Prefix */
             key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -7328,6 +7332,8 @@ export interface components {
             key_name: string | null;
             /** Key Prefix */
             key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
             /** Last Used At */
             last_used_at: string | null;
             /** Metadata */

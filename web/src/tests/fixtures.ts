@@ -431,6 +431,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     // NOT NULL on the server: a key always belongs to exactly one workspace.
     workspace_id: "11111111-1111-1111-1111-111111111111",
     key_prefix: "gw-AbC3dE",
+    key_suffix: "7xKp",
     key_name: "ci-bot",
     user_id: "alice",
     created_at: "2026-01-01T00:00:00+00:00",

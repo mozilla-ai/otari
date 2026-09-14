@@ -81,6 +81,13 @@ class APIKey(Base):
     # recognize a key after its one-time reveal. Nullable: keys minted before this
     # column existed cannot be back-filled (the plaintext is unrecoverable).
     key_prefix: Mapped[str | None] = mapped_column()
+    # Display-only trailing characters, stored so the dashboard can tell two keys
+    # apart when they share a prefix. Nullable for the same reason as ``key_prefix``
+    # and for one more: every key minted before this column will show prefix-only
+    # forever, because the plaintext is unrecoverable. Named ``key_suffix`` rather
+    # than the ``last4`` its provider-credential counterpart uses, so that the pair
+    # on this table reads as a pair.
+    key_suffix: Mapped[str | None] = mapped_column()
     key_name: Mapped[str | None] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -121,6 +128,7 @@ class APIKey(Base):
         return {
             "id": self.id,
             "key_prefix": self.key_prefix,
+            "key_suffix": self.key_suffix,
             "key_name": self.key_name,
             "user_id": self.user_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
