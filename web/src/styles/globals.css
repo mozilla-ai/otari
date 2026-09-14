@@ -440,6 +440,18 @@
   --field-background: #ffffff;
   --field-border: rgb(0 0 0 / 0.48);
   --field-border-width: 1px;
+  /* The placeholder's own rung, and the one field variable whose default is
+     wrong rather than merely unmapped. `@heroui/styles` aliases
+     `--field-placeholder` to `--muted`, which this block points at
+     `--color-text-muted`: the secondary text role, tuned to carry captions at
+     4.5:1. That leaves a hint 1.47:1 from a typed value, so it reads as a
+     default already filled in rather than as a hint. The tertiary rung is
+     3.12:1 from the value and still 6.39:1 on the field, which a placeholder
+     needs because it often carries the only example of the format a field
+     wants. It also paints the trigger chevrons and the field addons, so the
+     ratio against the field matters as much as the one against the value; the
+     select's chevron is already pinned to this same rung further down. */
+  --field-placeholder: var(--color-text-subtle);
   /* Four HeroUI variables the mapping above never claimed. Without them a token
      change reaches most of the screen but not these: HeroUI's own values are
      literals, so a Select's value text, a field's shadow and every table and
@@ -649,6 +661,10 @@
   --field-background: rgb(255 255 255 / 0.05);
   --field-border: rgb(255 255 255 / 0.345);
   --field-border-width: 1px;
+  /* Same repair as the light block, which carries the reasoning. The dark ramp
+     is the same shape: muted leaves a hint 1.58:1 from a typed value, subtle
+     takes it to 3.05:1. */
+  --field-placeholder: var(--color-text-subtle);
 
   /* Mirror of the light block: own the `@theme` alias values directly
    * so each theme is self-contained and doesn't inherit from a sibling

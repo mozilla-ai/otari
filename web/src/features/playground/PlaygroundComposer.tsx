@@ -84,7 +84,7 @@ export function PlaygroundComposer({
           // `field-sizing-content` grows the box with what is typed and caps it,
           // which is what a chat composer does; without the cap a pasted essay
           // pushes the conversation off the screen.
-          className="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none disabled:cursor-not-allowed [field-sizing:content]"
+          className="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed [field-sizing:content]"
         />
         <div className="flex items-center justify-between gap-2 px-1">
           <ToolsMenu

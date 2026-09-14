@@ -186,6 +186,51 @@ describe("text on every ground it can land on", () => {
   })
 })
 
+describe("a placeholder does not read as a typed value", () => {
+  // `@heroui/styles` aliases `--field-placeholder` to `--muted`, and this file's
+  // mapping points `--muted` at the SECONDARY text role, which is tuned to carry
+  // captions at 4.5:1. Inheriting that default put a hint 1.47:1 from a typed
+  // value in the light theme and 1.58:1 in the dark one, so `New policy` looked
+  // like a form somebody had already filled in. The alias to the tertiary rung is
+  // the whole fix, and it is one line in each theme block: easy to drop in a
+  // palette edit, and invisible until somebody opens a dialog and misreads it.
+  //
+  // 3:1 is WCAG's floor for telling two non-text UI elements apart, which is the
+  // job here. It is deliberately not 4.5: the placeholder is meant to look
+  // secondary, and driving it further from the value would push it off the field.
+  const UI_COMPONENT = 3
+
+  it.each([
+    ["light", LIGHT],
+    ["dark", DARK],
+  ] as const)(
+    "is a rung below the value ink in the %s theme",
+    (theme, tokens) => {
+      const alias = tokens.get("--field-placeholder")
+      expect(
+        alias,
+        `--field-placeholder is unmapped in the ${theme} theme, so HeroUI's own \`var(--muted)\` wins`,
+      ).toBeDefined()
+      // A hex here would stop tracking the ramp, the same way the HeroUI mapping
+      // above refuses one.
+      expect(
+        alias,
+        `--field-placeholder bypasses the tokens in the ${theme} theme`,
+      ).toMatch(/^var\(--color-[a-z0-9-]+\)$/)
+
+      const placeholder = tokens.get(
+        (alias as string).slice("var(".length, -1),
+      ) as string
+      const value = tokens.get("--color-text") as string
+      const ratio = contrast(value, placeholder)
+      expect(
+        ratio,
+        `a placeholder is ${ratio.toFixed(2)}:1 from a typed value in the ${theme} theme, under the ${UI_COMPONENT}:1 needed to tell them apart`,
+      ).toBeGreaterThanOrEqual(UI_COMPONENT)
+    },
+  )
+})
+
 describe("the type scale's two halves", () => {
   // The scale is split on purpose and the split is easy to undo by accident, so
   // it is pinned from both sides. `@heroui/styles` is a prebuilt Tailwind
