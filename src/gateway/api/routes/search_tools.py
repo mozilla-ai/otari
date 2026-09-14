@@ -170,6 +170,13 @@ class ReencryptSearchToolsResponse(BaseModel):
 
     reencrypted: int = Field(description="Number of stored search-tool keys re-encrypted.")
     unreadable: int = Field(description="Number of encrypted keys left untouched because they could not be decrypted.")
+    skipped: int = Field(
+        default=0,
+        description=(
+            "Number of rows whose stored key changed between the read and the write, so the "
+            "re-encryption was not applied. They already hold whoever wrote them last."
+        ),
+    )
 
 
 def _is_decryptable(row: SearchToolCredential) -> bool:
@@ -302,7 +309,7 @@ async def reencrypt_stored_search_tool_keys(
     tool's key.
     """
     try:
-        reencrypted, unreadable = await reencrypt_search_tools(db)
+        reencrypted, unreadable, skipped = await reencrypt_search_tools(db)
         await db.commit()
     except SecretBoxUnavailableError as exc:
         await db.rollback()
@@ -314,7 +321,7 @@ async def reencrypt_stored_search_tool_keys(
         await refresh_search_tool_cache(db, config)
     except SQLAlchemyError:
         logger.warning("Search tool overlay refresh failed after re-encrypting keys; converges within TTL")
-    return ReencryptSearchToolsResponse(reencrypted=reencrypted, unreadable=unreadable)
+    return ReencryptSearchToolsResponse(reencrypted=reencrypted, unreadable=unreadable, skipped=skipped)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
