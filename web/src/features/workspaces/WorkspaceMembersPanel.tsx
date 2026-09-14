@@ -109,13 +109,16 @@ export function AddWorkspaceMemberDialog({
               {/* Underlined, not colored alone: the link ink on this banner's
                   muted prose is under the contrast floor, so the underline is
                   what carries it. */}
-              <Link to="/organization/members" className="text-link underline">
+              <Link
+                to="/organization/members"
+                className="text-link underline hover:text-link-hover"
+              >
                 Members &amp; roles
               </Link>
               .
             </>
           ) : (
-            "an organization owner or admin has to add them to the organization first."
+            "an organization owner or admin has to add someone to the organization first."
           )}
         </InfoBanner>
       ) : (

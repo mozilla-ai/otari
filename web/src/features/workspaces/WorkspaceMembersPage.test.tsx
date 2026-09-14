@@ -188,7 +188,7 @@ describe("WorkspaceMembersPage", () => {
     )
     const dialog = within(await screen.findByRole("dialog"))
     expect(
-      dialog.getByText(/an organization owner or admin has to add them/),
+      dialog.getByText(/an organization owner or admin has to add someone/),
     ).toBeInTheDocument()
     expect(dialog.queryByRole("link")).toBeNull()
   })
