@@ -193,14 +193,19 @@ describe("shortPeriodLabel", () => {
     )
   })
 
-  it("counts a rolling duration in whole days or hours", () => {
+  it("counts a rolling duration rather than naming it, whatever its length", () => {
+    // A count, never a calendar word: "30 days" is the deployment form's
+    // "Monthly" preset, and it is not the calendar month `calendar_month` is, so
+    // the two must not read alike in a picker. That makes one day "1 day" too,
+    // since a lone singular reading "day" beside "7 days" is arbitrary.
     const rolling = (seconds: number) =>
       shortPeriodLabel(
         budget({ reset_alignment: null, budget_duration_sec: seconds }),
       )
-    expect(rolling(86_400)).toBe("day")
+    expect(rolling(86_400)).toBe("1 day")
     expect(rolling(7 * 86_400)).toBe("7 days")
-    expect(rolling(3_600)).toBe("hour")
+    expect(rolling(30 * 86_400)).toBe("30 days")
+    expect(rolling(3_600)).toBe("1 hour")
     expect(rolling(12 * 3_600)).toBe("12 hours")
     expect(rolling(90)).toBe("90s")
   })

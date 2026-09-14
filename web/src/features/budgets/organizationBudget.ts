@@ -107,6 +107,13 @@ export function periodLabel(
  * has to fit beside a figure (`$50.00 / month`), so it takes the unit alone.
  * `undefined` where a budget never resets, which is a label with no rate at all
  * rather than one reading "never".
+ *
+ * A calendar boundary is a word (`month`) and a rolling duration is a count
+ * (`30 days`). They are not the same product: a duration restarts on the first
+ * request after the last reset, so it walks, and 30 days is 1.5 percent more
+ * generous than the calendar month the deployment form's "Monthly" preset
+ * suggests. That form also takes a custom day count, which has no calendar word
+ * at all, so a count is the only spelling every period has.
  */
 export function shortPeriodLabel(
   budget: Pick<OrganizationBudget, "reset_alignment" | "budget_duration_sec">,
@@ -118,11 +125,11 @@ export function shortPeriodLabel(
   if (seconds === null || seconds === undefined) return undefined
   if (seconds % DAY === 0) {
     const days = seconds / DAY
-    return days === 1 ? "day" : `${days} days`
+    return `${days} ${days === 1 ? "day" : "days"}`
   }
   if (seconds % HOUR === 0) {
     const hours = seconds / HOUR
-    return hours === 1 ? "hour" : `${hours} hours`
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`
   }
   return `${seconds}s`
 }
