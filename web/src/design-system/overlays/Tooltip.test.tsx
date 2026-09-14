@@ -1,6 +1,6 @@
 import { Tooltip as HeroTooltip } from "@heroui/react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 /**
@@ -13,6 +13,10 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
  * props onto the control instead, so there is one element playing both parts.
  */
 describe("Tooltip", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("wraps a plain node in the library's own trigger", () => {
     render(
       <Tooltip content="An exact timestamp">
@@ -62,9 +66,8 @@ describe("Tooltip", () => {
         <span>x</span>
       </Tooltip>,
     )
-    // The exact value, not a band: `design/overlays.md` states it, so a change
-    // to it should have to change the sentence that documents it as well.
+    // The exact value: `design/overlays.md` states it, so moving it has to move
+    // the sentence that documents it too.
     expect(root.mock.calls[0]?.[0]?.delay).toBe(300)
-    root.mockRestore()
   })
 })

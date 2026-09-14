@@ -5,17 +5,15 @@ import type { JSX, ReactElement, ReactNode } from "react"
 export type TooltipTriggerProps = JSX.IntrinsicElements["button"]
 
 /**
- * How long a pointer has to rest on a trigger before the label appears.
+ * How long a pointer rests on a trigger before the label appears.
  *
- * HeroUI reads `--tooltip-delay` off the document root and ships it at 1.5s,
- * which is react-aria's warmup default: long enough that a row of icon actions
- * reads as having no labels at all, because nobody holds a cursor still for a
- * second and a half to find out what a glyph does. A third of a second is short
- * enough to feel like an answer and long enough that sweeping the pointer
- * across a row of them does not flash four labels on the way past. Set as a
- * prop rather than in the theme so it travels with the component that depends
- * on it; react-aria still opens the next tooltip in a group instantly once one
- * has been seen.
+ * Left unset, HeroUI reads `--tooltip-delay` off the document root and ships it
+ * at react-aria's 1.5s warmup, which is long enough that a lane of icon actions
+ * reads as having no labels at all. A third of a second answers without
+ * flashing a label at every glyph a pointer crosses on the way past. A prop
+ * rather than an override of that variable, so the behavior travels with the
+ * component rather than with the app's stylesheet; react-aria still opens the
+ * next tooltip in a group instantly once one has been seen.
  */
 const OPEN_DELAY_MS = 300
 
