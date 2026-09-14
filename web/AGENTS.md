@@ -266,6 +266,19 @@ test files included. Use the command in Checks above. The tell that found this:
 an `@ts-expect-error` whose error had been deliberately removed still reported
 success, where `pnpm --dir web run typecheck` reports `TS2578`.
 
+**Every data table here is `table-layout: auto` with 16px cell padding and no
+declared column widths anywhere**, so the browser re-solves every column from its
+content on each render. Any plan of the form "take the width from column X" is
+therefore a guess rather than a specification: the solver decides which column
+pays, and the stylesheet does not say. Measure a column change by injecting the
+new cell into the live table and reading the result back.
+
+- Give every part of an injected cell `flex: 0 0 auto`. Without it the parts
+  shrink to fit and overflow their own element with no error, leaving column
+  widths that look plausible and are not.
+- Overwrite `last_used` with a real timestamp first. Every row in the seed says
+  "never", and that one substitution moves a measured overflow from 0 to 23px.
+
 **And absence from the built CSS proves nothing on its own.** Tailwind emits
 only the utilities something in the tree asks for, so checking whether a
 `@utility` or a token survived the build needs a consumer inside `src` that
