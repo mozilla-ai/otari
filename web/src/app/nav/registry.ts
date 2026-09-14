@@ -408,9 +408,14 @@ const ORGANIZATION_NAV_SECTIONS = [
   },
   {
     id: "org-general",
-    // No heading. The two deployment rows below are drawn in the account menu
-    // rather than on this rail, which leaves Org settings alone here, and a
-    // heading over one row names a category with one member.
+    // Keeps its heading with one row in it, where the index section at the top
+    // of the workspace rail has none. That is the same rule read in different
+    // surroundings rather than an exception to it: the index is first, with
+    // nothing above it to be absorbed into, and General is last under two
+    // labelled siblings, so a row with no heading here reads as the tail of
+    // Cost & billing. A heading earns its place when the section has labelled
+    // siblings, which is also why the deployment rail's one section has none.
+    label: "General",
     items: [
       {
         to: "/organization",
@@ -418,29 +423,44 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "organizations",
         icon: FiSliders,
       },
-      // The process's runtime settings (the master key, the safety toggles, the
-      // defaults), which is the deployment talking about itself rather than the
-      // tenant. That is why it is drawn in the account menu: this rail is where
-      // a tenant reads, and these two were the only rows in it that were not
-      // the tenant's.
+    ],
+  },
+] as const satisfies readonly NavSection[]
+
+/**
+ * The deployment's own rail: what the gateway process is, rather than what any
+ * tenant on it has.
+ *
+ * A third context rather than a section in either rail, because that is the
+ * distinction these two pages were always making and neither other rail could
+ * hold. `/settings` is the running process (its master key, its safety toggles,
+ * its defaults) and `/admin/accounts` reaches an account in any organization on
+ * it, or in none that still admits it, which is a wider scope than the
+ * organization rail's own roster.
+ *
+ * Headingless on purpose. One section with no siblings needs nothing to
+ * separate it from, and a heading inside a context already named Deployment
+ * would read as "Deployment, Deployment, Settings".
+ *
+ * Both rows keep the refusal they declare, which is the axis the server
+ * enforces and not a property of which rail draws them.
+ */
+const DEPLOYMENT_SECTIONS = [
+  {
+    id: "deployment-general",
+    items: [
       {
         to: "/settings",
         label: "Settings",
         surface: "settings",
         icon: FiSliders,
         operatorOnly: "refused",
-        rendersIn: "account-menu",
       },
-      // Every account on the deployment, which is not the Members & roles row
-      // above: that one is this organization's roster and stops at its
-      // boundary, while this reaches an account in any organization, or in none
-      // that still admits it.
       {
         to: "/admin/accounts",
         label: "Accounts",
         surface: "admin",
         operatorOnly: "unlisted",
-        rendersIn: "account-menu",
         icon: FiUserCheck,
       },
     ],
@@ -587,14 +607,27 @@ export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
 )
 
 /**
- * Every registered entry, across both contexts.
+ * The deployment rail as the shell reads it.
  *
- * Flattened over both because this is what answers "which entry is this
+ * Deliberately not composed through the overlay seams the other two rails use.
+ * Nothing contributes a deployment-scoped destination and its one section has
+ * no heading to rename, so composing here would buy an overlay nothing and
+ * leave a seam in the tree inviting the next reader to wonder what fills it.
+ * Adding one when a destination actually wants it is a two-line change.
+ */
+export const DEPLOYMENT_NAV_SECTIONS: readonly NavSection[] =
+  DEPLOYMENT_SECTIONS
+
+/**
+ * Every registered entry, across all three contexts.
+ *
+ * Flattened over all of them because this is what answers "which entry is this
  * pathname", and a route is gated the same way whichever sidebar links to it.
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   ...NAV_SECTIONS,
   ...ORG_NAV_SECTIONS,
+  ...DEPLOYMENT_NAV_SECTIONS,
 ].flatMap((section) => section.items)
 
 /**
@@ -618,36 +651,22 @@ const NAV_CHILD_PARENTS: ReadonlyMap<string, NavItem> = new Map(
   ),
 )
 
-/** Where a destination lives: the workspace sidebar, or the organization one. */
-export type NavContext = "workspace" | "organization"
+/**
+ * Which sidebar a destination lives under.
+ *
+ * Three rather than two since the deployment's own pages stopped being a
+ * section inside the organization's: they describe the process every tenant
+ * shares, so neither tenant-shaped rail could hold them truthfully.
+ */
+export type NavContext = "workspace" | "organization" | "deployment"
 
-// The organization rail's own destinations, which is not every entry declared
-// under it: a row the shell draws in the account menu left this rail when it
-// stopped being a row on it, and it takes the default context the way `/docs`
-// and `/account` do (see web/AGENTS.md, "chrome destinations"). Declared here
-// rather than moved to a workspace section, because the entry does belong to
-// this registry: what changed is where it is drawn, not who serves it. Without
-// the filter the page opens the organization rail and the breadcrumb names an
-// organization that does not own it.
 const ORG_PATHS: readonly string[] = ORG_NAV_SECTIONS.flatMap((section) =>
-  section.items
-    .filter((item) => item.rendersIn === undefined)
-    .map((item) => item.to),
+  section.items.map((item) => item.to),
 )
 
-/**
- * Whether the shell draws this pathname's destination outside both rails.
- *
- * The registered half of what `web/AGENTS.md` calls a chrome destination:
- * `/docs` and `/account` are unregistered and get this for free, while these
- * are real entries that keep their gating and are simply drawn somewhere else.
- * What the two have in common is the thing a reader cares about, that no rail
- * owns the page, which is why the breadcrumb stops short of naming it inside a
- * scope.
- */
-export function isChromeDestination(pathname: string): boolean {
-  return navItemForPath(pathname)?.rendersIn !== undefined
-}
+const DEPLOYMENT_PATHS: readonly string[] = DEPLOYMENT_NAV_SECTIONS.flatMap(
+  (section) => section.items.map((item) => item.to),
+)
 
 /**
  * What to call the destination at this pathname, as a breadcrumb would.
@@ -666,16 +685,18 @@ export function navLabelForPath(pathname: string): string | undefined {
 /**
  * Which sidebar a pathname belongs under.
  *
- * Derived from the registry rather than from a path prefix, because the two
- * contexts do not split cleanly by URL: `/workspaces` and `/settings` are
- * organization destinations whose paths look like anything else, and
- * `/members` is a workspace one that sits directly under the root. Anything
+ * Derived from the registry rather than from a path prefix, because the three
+ * contexts do not split cleanly by URL: `/workspaces` is an organization
+ * destination and `/settings` a deployment one, both of which look like
+ * anything else, and `/members` is a workspace one that sits directly under the
+ * root. Anything
  * unregistered (the guide, the 404 splat) belongs to the workspace context,
  * which is the one the shell opens in.
  */
 export function navContextForPath(pathname: string): NavContext {
   const item = navItemForPath(pathname)
   if (!item) return "workspace"
+  if (DEPLOYMENT_PATHS.includes(item.to)) return "deployment"
   return ORG_PATHS.includes(item.to) ? "organization" : "workspace"
 }
 
@@ -767,28 +788,6 @@ export function visibleNavSections(
   isVisible: (item: NavItem) => boolean,
 ): VisibleNavSection[] {
   return sections
-    .map((section) => ({
-      // `rendersIn` before `isVisible`, because the two answer different
-      // questions and only this one is about the rail: a row drawn in the
-      // account menu is still a destination this caller may have, and
-      // `isVisible` is the predicate that says so for the menu as well.
-      section,
-      items: section.items.filter(
-        (item) => item.rendersIn === undefined && isVisible(item),
-      ),
-    }))
+    .map((section) => ({ section, items: section.items.filter(isVisible) }))
     .filter(({ items }) => items.length > 0)
 }
-
-/**
- * The destinations the account menu draws, in registry order.
- *
- * Derived rather than listed a second time: the menu's rows and the entries
- * that gate those routes are then the same objects, so a row cannot end up
- * offering a page whose surface this deployment does not serve. Ungated here on
- * purpose; the menu runs them through `useNavVisibility` exactly as the rail
- * does its own.
- */
-export const ACCOUNT_MENU_ITEMS: readonly NavItem[] = NAV_ITEMS.filter(
-  (item) => item.rendersIn === "account-menu",
-)

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { lastLocation, rememberLocation } from "./navigationHistory"
+import {
+  lastLocation,
+  lastRailContext,
+  rememberLocation,
+} from "./navigationHistory"
 import type { NavItem } from "./types"
 
 const WORKSPACE_KEY = "otari.dashboard.lastWorkspaceLocation"
@@ -96,15 +100,49 @@ describe("rail location memory", () => {
     })
   })
 
-  it("never remembers a destination the account menu draws", () => {
-    // `/settings` is registered under the organization rail and drawn in the
-    // account menu, so no rail offers it. Returning to a rail has to land on a
-    // page that rail actually shows, which is the rule the guide and the 404
-    // splat already follow by being unregistered.
+  it("remembers a deployment page under its own rail, and only there", () => {
     rememberLocation("/settings", showsEverything)
 
+    expect(lastLocation("deployment", showsEverything)).toEqual({
+      to: "/settings",
+    })
     expect(lastLocation("workspace", showsEverything)).toBeUndefined()
     expect(lastLocation("organization", showsEverything)).toBeUndefined()
+  })
+
+  it("does not let a deployment page become the rail it returns to", () => {
+    // The guard that matters, and the one an obvious implementation gets wrong:
+    // written on every navigation, landing on a deployment page would record
+    // "deployment" as the place to come back to, which is the answer the back
+    // link is about to read. A state that destroys its own input.
+    rememberLocation("/organization/members", showsEverything)
+    rememberLocation("/settings", showsEverything)
+
+    expect(lastRailContext(showsEverything)).toBe("organization")
+  })
+
+  it("returns to the workspace rail when nothing has been recorded", () => {
+    // A bookmark straight to a deployment page in a fresh browser. Real, not a
+    // theoretical branch.
+    expect(lastRailContext(showsEverything)).toBe("workspace")
+  })
+
+  it("returns to the workspace rail when the remembered one has been gated off", () => {
+    // Asked of `lastLocation` rather than re-checked here, so the two answers
+    // cannot disagree. Back into a rail someone can no longer use is worse than
+    // back somewhere merely unexpected.
+    rememberLocation("/organization/members", showsEverything)
+
+    expect(lastRailContext(showsEverything)).toBe("organization")
+    expect(lastRailContext(withoutSurface("organizations"))).toBe("workspace")
+  })
+
+  it("ignores a remembered context that is not one", () => {
+    // A key left by an older build, or edited by hand, would otherwise arrive as
+    // a NavContext the compiler believes.
+    window.localStorage.setItem("otari.dashboard.lastRailContext", "billing")
+
+    expect(lastRailContext(showsEverything)).toBe("workspace")
   })
 
   it("drops a stored value that belongs to the other rail", () => {

@@ -129,18 +129,19 @@ test.describe("dashboard core flows", () => {
       await expect(pageHeading(page, heading)).toBeVisible()
     }
 
-    // The deployment's own pages, which hang off the account menu rather than
-    // either rail. Neither loop above can reach them, and the menu closes on
-    // the way to a destination, so each is opened from scratch. Exact, because
-    // the organization rail also carries "Org settings" and "Members & roles".
-    for (const [link, heading] of [
-      ["Settings", "Settings"],
-      ["Accounts", "Accounts"],
-    ]) {
-      const menu = await openAccountMenu(page)
-      await menu.getByRole("link", { name: link, exact: true }).click()
-      await expect(pageHeading(page, heading)).toBeVisible()
-    }
+    // The deployment's own rail, which neither loop above reaches: it is entered
+    // from the account menu rather than from a row, and the menu closes on the
+    // way, so the rail is what carries you between its two pages once you are
+    // in. Exact, because the organization rail also carries "Org settings".
+    const menu = await openAccountMenu(page)
+    await menu.getByRole("link", { name: "Deployment" }).click()
+    await expect(pageHeading(page, "Settings")).toBeVisible()
+    await nav(page).getByRole("link", { name: "Accounts", exact: true }).click()
+    await expect(pageHeading(page, "Accounts")).toBeVisible()
+    // The way out names where it goes. Queried on the page rather than inside
+    // the Sidebar landmark: the back row is in the scope band above the nav, the
+    // same place the workspace switcher sits on the other rail.
+    await expect(page.getByRole("link", { name: /^Back to / })).toBeVisible()
   })
 
   test("create a budget", async ({ page }) => {

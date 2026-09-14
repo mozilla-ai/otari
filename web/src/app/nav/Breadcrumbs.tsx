@@ -1,10 +1,6 @@
 import { Fragment } from "react"
 
-import {
-  isChromeDestination,
-  navContextForPath,
-  navLabelForPath,
-} from "@/app/nav/registry"
+import { navContextForPath, navLabelForPath } from "@/app/nav/registry"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -18,7 +14,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
  * does belong to a second, the scope switcher above the rail names the active
  * one. A hosted deployment can hold several, so there it leads.
  *
- * The two contexts have different scopes to show: the workspace rail is inside
+ * The three contexts have different scopes to show: the workspace rail is inside
  * one workspace, and the organization rail is not inside any.
  */
 export function Breadcrumbs({ pathname }: { pathname: string }) {
@@ -40,16 +36,18 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
   // no workspace selected (a first run has none), leaving a reader with neither
   // a crumb nor a highlighted rail row, and no location at all is worse than a
   // location that is merely brief.
-  const ownedByNoRail = isChromeDestination(pathname)
-  const inOrganization = navContextForPath(pathname) === "organization"
+  const context = navContextForPath(pathname)
 
   const trail = [
-    deployment_type === "standalone" || ownedByNoRail
+    deployment_type === "standalone" || context === "deployment"
       ? undefined
       : organizationName,
-    ownedByNoRail
-      ? undefined
-      : inOrganization
+    // The deployment has no name to show. The other two scopes are data (a
+    // workspace's name, an organization's), and the process is the one every
+    // tenant shares, so the word is the scope: "Deployment / Settings".
+    context === "deployment"
+      ? "Deployment"
+      : context === "organization"
         ? organizationName
         : selected?.name,
     page,

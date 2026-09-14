@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react"
+import { act, cleanup, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -588,19 +588,17 @@ describe("AppShell surface gating", () => {
       "Model pricing",
       "Org settings",
     ])
-    // Settings and Accounts are registered under this rail's General section and
-    // are deliberately not in that list: both are drawn in the account menu
-    // instead, which is `rendersIn`. They stay registry entries so the routes
-    // keep their gating, so their absence here is a statement about the rail and
-    // not about the destinations.
+    // Settings and Accounts are on the deployment rail now, not this one.
     expect(
       within(screen.getByRole("navigation", { name: "Sidebar" })).queryByRole(
         "link",
         { name: "Accounts" },
       ),
     ).toBeNull()
-    // No heading over Org settings now that it is the section's only row.
-    expect(screen.queryByText("General")).toBeNull()
+    // General keeps its heading over its one row: it is last, under two
+    // labelled siblings, so without one its row reads as the tail of the
+    // section above.
+    expect(screen.getByText("General")).toBeInTheDocument()
     // The design's rail has two more rows (the organization's own Providers and
     // Guardrails), and each is gated on a surface a standalone gateway does not
     // report, so neither is here. The Gateway group is their worst case: its one
@@ -1161,12 +1159,56 @@ describe("AppShell entitlement gating", () => {
     )
   })
 
-  it("names a page no rail owns without naming a scope for it", async () => {
+  it("offers no way into the deployment rail to a caller who operates nothing there", async () => {
     mockMatchMedia(false)
-    // The deployment's own settings, reached from the account menu. Naming it
-    // under a scope would file it inside a workspace that does not own it, so
-    // the trail stops short and the page names itself in its heading, which is
-    // what `/account` already does from the same menu.
+    // The control and the rail agree because the shell resolves one through the
+    // same predicate as the other: a non-operator sees no Deployment row, and
+    // would find no rows if they reached it. Absent rather than disabled, since
+    // `/admin/accounts` is gated `unlisted` precisely so the shell does not
+    // admit it exists.
+    await renderShell(bootstrap(), { operator: false })
+
+    await screen.findByRole("button", { name: /^Account:/ })
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /^Account:/ }))
+
+    expect(
+      await screen.findByRole("link", { name: "Account settings" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Deployment" })).toBeNull()
+  })
+
+  it("offers the Organization switch on the workspace rail and on neither other", async () => {
+    mockMatchMedia(false)
+    // Stated as a rule about the workspace rail rather than as "not the
+    // organization one". Written as a negation, a third rail inherits the row by
+    // being merely not-the-organization, and the deployment rail would carry a
+    // way into a context it is a sibling of rather than a way out of itself.
+    // Queried on the whole shell, not inside the Sidebar landmark: the switch
+    // row sits in the rail's footer, below the nav rather than in it.
+    const rail = () => screen.getByRole("navigation", { name: "Sidebar" })
+    await renderShell(bootstrap(), { url: "/" })
+    expect(
+      await screen.findByRole("link", { name: "Organization" }),
+    ).toBeInTheDocument()
+
+    cleanup()
+    await renderShell(bootstrap(), { url: "/settings", operator: true })
+    await within(rail()).findByRole("link", { name: "Accounts" })
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+
+    cleanup()
+    await renderShell(bootstrap(), { url: "/organization/members" })
+    await within(rail()).findByRole("link", { name: "Members & roles" })
+    expect(screen.queryByRole("link", { name: "Organization" })).toBeNull()
+  })
+
+  it("names the deployment as the scope of its own pages", async () => {
+    mockMatchMedia(false)
+    // The deployment has no name to show, unlike the other two scopes, which
+    // are data. The word is the scope, and it is the same word the control that
+    // reaches these pages carries.
     // With a workspace selected, so the scope crumb is one this case could
     // fail on: with none, "does not name a scope" is trivially true and the
     // assertion proves nothing.
@@ -1185,27 +1227,24 @@ describe("AppShell entitlement gating", () => {
       context: inWorkspace,
     })
 
-    // Names the page and no scope. Not the other way round: dropping the page
-    // instead would leave nothing at all on a deployment with no workspace
-    // selected, and the rail highlights no row here either.
     const crumb = await screen.findByLabelText("Breadcrumb")
+    expect(crumb).toHaveTextContent("Deployment")
     expect(crumb).toHaveTextContent("Settings")
     expect(crumb).not.toHaveTextContent(/workspace/i)
     expect(crumb).not.toHaveTextContent(/organization/i)
-    // The rail it opens is the workspace one, not the organization rail it is
-    // registered under: a destination drawn in the menu belongs to neither, so
-    // it takes the default rather than swinging the shell to a scope that does
-    // not own it.
+    // Its own rail, and the row is marked: these are ordinary rail rows now, so
+    // the highlight comes from the path every other row is on rather than from
+    // anything built here.
+    const rail = screen.getByRole("navigation", { name: "Sidebar" })
+    const row = await within(rail).findByRole("link", { name: "Settings" })
+    expect(row).toHaveAttribute("aria-current", "page")
     expect(
-      await within(
-        screen.getByRole("navigation", { name: "Sidebar" }),
-      ).findByRole("link", { name: "Overview" }),
+      within(rail).getByRole("link", { name: "Accounts" }),
     ).toBeInTheDocument()
+    // And neither of the other two rails is showing.
+    expect(within(rail).queryByRole("link", { name: "Overview" })).toBeNull()
     expect(
-      within(screen.getByRole("navigation", { name: "Sidebar" })).queryByRole(
-        "link",
-        { name: "Members & roles" },
-      ),
+      within(rail).queryByRole("link", { name: "Members & roles" }),
     ).toBeNull()
   })
 

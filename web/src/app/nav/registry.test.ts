@@ -5,11 +5,10 @@ import { HOSTED_SURFACES } from "@/tests/fixtures"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
 import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
 import {
-  ACCOUNT_MENU_ITEMS,
   applyNavLabelOverrides,
   composeNavItems,
   composeNavSections,
-  isChromeDestination,
+  DEPLOYMENT_NAV_SECTIONS,
   isPathVisible,
   NAV_ITEMS,
   NAV_SECTIONS,
@@ -127,25 +126,22 @@ describe("nav registry", () => {
     expect(paths).toEqual([...new Set(paths)])
   })
 
-  it("draws the deployment destinations in the account menu, not on a rail", () => {
-    expect(ACCOUNT_MENU_ITEMS.map((item) => item.to)).toEqual([
-      "/settings",
-      "/admin/accounts",
-    ])
-    // Every section of both rails, with the caller and deployment axes wide
-    // open, so what is missing is missing because of `rendersIn` and not
-    // because a gate happened to close.
-    const drawn = visibleNavSections(
-      [...NAV_SECTIONS, ...ORG_NAV_SECTIONS],
-      () => true,
-    ).flatMap(({ items }) => items.map((item) => item.to))
-    expect(drawn).not.toContain("/settings")
-    expect(drawn).not.toContain("/admin/accounts")
-    // The section they left still renders, with the row that stayed.
-    expect(drawn).toContain("/organization")
+  it("puts the deployment destinations on their own rail", () => {
+    expect(
+      DEPLOYMENT_NAV_SECTIONS.flatMap((section) =>
+        section.items.map((item) => item.to),
+      ),
+    ).toEqual(["/settings", "/admin/accounts"])
+    // And on neither of the others. A destination drawn on two rails would
+    // resolve to whichever came first in NAV_ITEMS and be gated by that one.
+    const others = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].flatMap((section) =>
+      section.items.map((item) => item.to),
+    )
+    expect(others).not.toContain("/settings")
+    expect(others).not.toContain("/admin/accounts")
   })
 
-  it("keeps an account-menu destination registered, and therefore gated", () => {
+  it("keeps a deployment destination registered, and therefore gated", () => {
     // The failure this exists to catch: expressing "not on the rail" by
     // deleting the entry. `NAV_ITEMS` is what `navItemForPath` answers from, so
     // an unregistered path is an *ungated* one, and the shell would render
@@ -162,14 +158,12 @@ describe("nav registry", () => {
       // The two values encode which refusal the server gives, 403 against 404.
       // Flattening them would make the menu lie about one of the two.
       expect(item?.operatorOnly).toBe(operatorOnly)
-      // And owned by no rail, which is the other half: `rendersIn` has to reach
-      // `ORG_PATHS` as well as the rail rows, or the page opens the
-      // organization rail under a breadcrumb naming an organization that does
-      // not own it. Asserted as the rule rather than as the value, because the
-      // first version of this line pinned "organization" on the strength of it
-      // being what the code returned.
-      expect(navContextForPath(to)).toBe("workspace")
-      expect(isChromeDestination(to)).toBe(true)
+      // And owned by the deployment rail, not the organization one it used to
+      // sit inside. Asserted as the rule rather than as the value: the first
+      // version of this line pinned "organization" on the strength of it being
+      // what the code returned, and that is how a page ended up opening a rail
+      // whose scope did not own it.
+      expect(navContextForPath(to)).toBe("deployment")
     }
   })
 
@@ -179,12 +173,11 @@ describe("nav registry", () => {
     // workspace one directly under the root.
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navContextForPath("/workspaces")).toBe("organization")
-    // Not "organization", though `/settings` is declared under that rail. It is
-    // drawn in the account menu, so no rail owns it and it takes the default
-    // context, which is the rule `/docs` and `/account` already follow. This
-    // line said "organization" while that was merely what the code did, and an
-    // asserted value is indistinguishable from a considered one.
-    expect(navContextForPath("/settings")).toBe("workspace")
+    // Its own context, not the organization's: the deployment's pages describe
+    // the process every tenant shares. This line said "organization" while that
+    // was merely what the code did, and an asserted value is indistinguishable
+    // from a considered one.
+    expect(navContextForPath("/settings")).toBe("deployment")
     expect(navContextForPath("/organization/members")).toBe("organization")
     // Unregistered paths open in the context the shell starts in.
     expect(navContextForPath("/docs")).toBe("workspace")
@@ -407,14 +400,18 @@ describe("nav registry", () => {
     const gateway = NAV_SECTIONS.find((section) => section.id === "gateway")
     expect(gateway?.label).toBe("Build")
     expect(gateway?.items.map((item) => item.label)).toContain("Routing")
-    // `org-general` keeps its id, which is what an overlay addresses, and has
-    // no heading of its own to rename: the two deployment rows are drawn in the
-    // account menu, and a heading over the one row left names a category with
-    // one member.
+    // `org-general` keeps its heading with one row in it, where the index
+    // section at the top of the workspace rail has none with one row in it. The
+    // registry's comment there is about a section that is *first*, with nothing
+    // above it to be absorbed into; General is last, under two labelled
+    // siblings, so without a heading its row reads as the tail of the section
+    // above rather than as a group of its own. Same rule, different
+    // surroundings: a heading earns its place when the section has labelled
+    // siblings.
     const general = ORG_NAV_SECTIONS.find(
       (section) => section.id === "org-general",
     )
-    expect(general?.label).toBeUndefined()
+    expect(general?.label).toBe("General")
     expect(general?.items.map((item) => item.label)).toContain("Org settings")
   })
 

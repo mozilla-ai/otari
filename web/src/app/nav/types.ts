@@ -91,20 +91,6 @@ interface NavItemBase {
    * own refusal.
    */
   operatorOnly?: "unlisted" | "refused"
-  /**
-   * That the shell draws this destination somewhere other than a rail row.
-   *
-   * Not a gate, and deliberately not expressed by leaving the entry out of the
-   * registry. `NAV_ITEMS` is what `navItemForPath` answers from, so an
-   * unregistered path is an *ungated* one: dropping these two entries would
-   * stop the shell refusing them on a deployment that does not host their
-   * surface, and would move them to the workspace context, since `ORG_PATHS` is
-   * flattened from the organization sections. The entry therefore stays where
-   * it is, carrying its `surface` and `operatorOnly`, and only the drawing
-   * moves. `visibleNavSections` is the one place a rail row is produced, so
-   * that is the one place this is read.
-   */
-  rendersIn?: "account-menu"
 }
 
 /** One sidebar link with its deployment and entitlement gating. */
