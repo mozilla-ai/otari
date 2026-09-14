@@ -186,6 +186,14 @@ pnpm --dir web test
 pnpm --dir web run build
 ```
 
+**A CI green and a local green answer different questions.** CI builds the pull
+request's merge ref, so its run is the branch merged into `main` as it stood when
+the run was created; a local run is the branch alone. The suites are therefore
+different sets, CI's result can move with no change on the branch, and a test can
+fail there against a combination nobody has run here. Before reading a CI green as
+a statement about what you wrote, `git fetch origin main` and count
+`HEAD..origin/main`: that is how far the tested thing is from the written thing.
+
 Playwright behavioral tests run against a real built gateway and scope
 assertions to the rows they create. Dismiss React Aria popovers before asserting
 outside them.
