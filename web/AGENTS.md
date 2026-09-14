@@ -291,15 +291,11 @@ test files included. Use the command in Checks above. The tell that found this:
 an `@ts-expect-error` whose error had been deliberately removed still reported
 success, where `pnpm --dir web run typecheck` reports `TS2578`.
 
-**A trailing action in a flex row needs `shrink-0`.** The row hands a sentence
-the width it asks for and the control gives up its own, so an icon button beside
-a field description keeps its 36px height and loses half its width. On a ghost
-button that is visible rather than merely wrong, because its hover fill is its
-own box: what lights up is a tall narrow slab around the glyph, which reads as a
-clipped rectangle and sends you looking for an overflow rule that is not there.
-The detector is that two instances of the same control measure differently, each
-following the length of the prose beside it. A control sized by its neighbor's
-wording was never sized.
+**Two instances of one control measuring differently is a sizing bug, not a
+measurement.** Each is following the length of the prose beside it, so a control
+sized by its neighbor's wording was never sized. The rule that prevents it is
+`design/layout.md`, "Repeated rows": a trailing action takes `shrink-0` in any
+flex row.
 
 **Every data table here is `table-layout: auto` with 16px cell padding and no
 declared column widths anywhere**, so the browser re-solves every column from its

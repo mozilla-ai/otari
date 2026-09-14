@@ -213,6 +213,13 @@ fixed-width slot with `flex-shrink-0` for icons, indicators and trailing actions
 **even when the slot is empty in some rows.** Never rely on `gap` alone to align a
 column across rows whose content differs in length.
 
+**A trailing action needs `shrink-0` in any flex row, repeated or not**, and most
+of all beside prose. A field description is a sentence, the row hands it the
+width it asks for, and the action gives up its own: an icon button beside one
+keeps its 36px height and loses half its width. On a ghost button that is visible
+rather than merely wrong, because the hover fill is the button's own box, so what
+lights up is a tall slab around the glyph and reads as a clipped rectangle.
+
 ## Public authentication
 
 Public auth and invitation pages use `features/auth/LoginPageShell`: one square,
