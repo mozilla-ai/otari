@@ -291,6 +291,58 @@ describe("WorkspaceProviderKeys", () => {
     expect(requests.filter((request) => request.method === "POST")).toEqual([])
   })
 
+  it("refuses another provider's prefix, not just this key's own", async () => {
+    // `anthropic:claude` on an openai key is the same mistake one step further
+    // along: stored as written, it narrows the workspace to a model that does
+    // not exist, and it is not this key's to allow either way.
+    const requests = mockApi({
+      keys: [
+        orgProviderKey(),
+        orgProviderKey({
+          id: ANTHROPIC_KEY,
+          provider: "anthropic",
+          name: "Backup",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.type(await allowField(), "anthropic:claude")
+
+    expect(
+      await screen.findByText(
+        '"anthropic:" names another provider. Name a model this key serves.',
+      ),
+    ).toBeInTheDocument()
+    expect(requests.filter((request) => request.method === "POST")).toEqual([])
+  })
+
+  it("accepts a model whose own name carries a colon", async () => {
+    // `llama3:8b` is a whole model name on Ollama, not a prefixed one, so the
+    // check matches the providers this deployment names rather than any text
+    // before a colon.
+    const requests = mockApi({
+      keys: [orgProviderKey({ provider: "ollama", name: "Local" })],
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.type(
+      await screen.findByRole("combobox", {
+        name: "Allow a model on ollama / Local",
+      }),
+      "llama3:8b",
+    )
+    await user.keyboard("{Escape}")
+    await user.click(
+      screen.getByRole("button", { name: "Allow a model on ollama / Local" }),
+    )
+
+    const added = requests.find((request) => request.method === "POST")
+    expect(added?.body).toEqual({ model: "llama3:8b" })
+  })
+
   it("refuses a model the key already allows", async () => {
     mockApi({
       overrides: [workspaceProviderKeyOverride({ allowed_models: ["gpt-4o"] })],

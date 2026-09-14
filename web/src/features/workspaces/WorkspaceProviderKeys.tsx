@@ -99,6 +99,7 @@ function ModelAllowList({
   provider,
   models,
   suggestions,
+  knownProviders,
   catalogState,
 }: {
   workspaceId: string
@@ -110,6 +111,8 @@ function ModelAllowList({
   models: string[]
   /** Every model the catalog lists for this provider, already narrowed to it. */
   suggestions: string[]
+  /** Every provider this deployment names, which is what a typed prefix is matched against. */
+  knownProviders: ReadonlySet<string>
   catalogState: CatalogState
 }) {
   const add = useAddWorkspaceProviderKeyModel()
@@ -123,14 +126,22 @@ function ModelAllowList({
   // that looks right and narrows the workspace to a model that does not exist.
   // Named rather than silently stripped: the two spellings mean different
   // things elsewhere, and a control that quietly rewrote one would teach that
-  // they are interchangeable. Only the colon form, which is how the catalog
-  // spells it: a slash is part of a real model name on a provider that routes
-  // to others, where `openrouter/auto` is the model rather than a prefix.
-  const prefix = provider === undefined ? undefined : `${provider}:`
-  const isPrefixed = prefix !== undefined && trimmed.startsWith(prefix)
+  // they are interchangeable.
+  //
+  // Matched against the providers this deployment actually names rather than
+  // against any text before a colon, because a colon is not always a prefix:
+  // `llama3:8b` is a whole model name on Ollama, and a blanket rule would
+  // refuse it. Only the colon form is checked at all, since a slash is part of
+  // a real name on a provider that routes to others (`openrouter/auto`).
+  const separator = trimmed.indexOf(":")
+  const typedPrefix = separator === -1 ? undefined : trimmed.slice(0, separator)
+  const isPrefixed =
+    typedPrefix !== undefined && knownProviders.has(typedPrefix)
   const isDuplicate = models.includes(trimmed)
   const invalidReason = isPrefixed
-    ? `Name the model without its "${prefix}" prefix.`
+    ? typedPrefix === provider
+      ? `Name the model without its "${typedPrefix}:" prefix.`
+      : `"${typedPrefix}:" names another provider. Name a model this key serves.`
     : isDuplicate
       ? "This model is already allowed on this key."
       : undefined
@@ -263,6 +274,14 @@ export function WorkspaceProviderKeys({
     else catalogByProvider.set(provider, [model.id.slice(separator + 1)])
   }
 
+  // Every provider this deployment names, from the catalog and from the
+  // organization's own keys, which is what tells a pasted `openai:` prefix from
+  // a model whose real name carries a colon.
+  const knownProviders = new Set([
+    ...catalogByProvider.keys(),
+    ...(orgKeys.data ?? []).map((key) => key.provider),
+  ])
+
   const choose = (keyId: string, next: Departure) => {
     if (next === "inherited") {
       resetOverride.mutate({ workspaceId, keyId })
@@ -362,6 +381,7 @@ export function WorkspaceProviderKeys({
                     suggestions={
                       key ? (catalogByProvider.get(key.provider) ?? []) : []
                     }
+                    knownProviders={knownProviders}
                     catalogState={catalogState}
                   />
                 )}
