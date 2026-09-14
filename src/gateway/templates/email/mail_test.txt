@@ -1,6 +1,6 @@
 Your Otari mail settings work
 
-An operator sent this from the Otari dashboard at {{PUBLIC_BASE_URL}} to check that
+An operator sent this from the Otari dashboard at {{UI_BASE_URL}} to check that
 outgoing mail is configured. It was delivered over {{TRANSPORT}}.
 
 Nothing else is needed. If you weren't expecting this, someone with administrative

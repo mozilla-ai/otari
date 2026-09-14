@@ -7442,7 +7442,7 @@ export interface components {
             missing: string[];
             /**
              * Public Base Url
-             * @description This deployment's own externally-reachable URL, used to build links in outgoing mail.
+             * @description This deployment's own externally-reachable URL, which mail needs before it can send. The links themselves are built from ui_base_url, or from this when that is unset.
              */
             public_base_url: string | null;
             /**
