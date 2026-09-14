@@ -6,7 +6,7 @@ import type {
   GatewayHealth,
   UpdateDeploymentUserRequest,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, DASHBOARD_BUILD_PATH, siteFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   BUILD,
@@ -21,7 +21,10 @@ import {
 export function useDashboardBuild() {
   return useQuery({
     queryKey: [BUILD],
-    queryFn: () => apiFetch<DashboardBuild>("/dashboard-build.json"),
+    // `siteFetch`, not `apiFetch`: the gateway serves this beside the dashboard
+    // at its own root rather than under `API_ROOT`, so the helper that prepends
+    // the root asks for a path nothing mounts.
+    queryFn: () => siteFetch<DashboardBuild>(DASHBOARD_BUILD_PATH),
     refetchInterval: BUILD_POLL_MS,
     // A tab left open in the background is the one most likely to be stale, so
     // check again the moment someone comes back to it.

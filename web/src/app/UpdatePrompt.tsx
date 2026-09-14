@@ -43,10 +43,17 @@ export function UpdatePrompt() {
         role="status"
         // Square, and it took a named class to get there: `rounded-full` is one of
         // the four spellings the `--radius` change is documented as unable to
-        // reach, so this stayed a pill through the whole teardown. The shadow
-        // class goes with it, since the elevation tokens are zero and it was
-        // painting nothing.
-        className="pointer-events-auto mt-1.5 flex items-center gap-3 border border-accent bg-primary-subtle py-1.5 pr-1.5 pl-4 text-sm text-primary-subtle-foreground"
+        // reach, so this stayed a pill through the whole teardown.
+        //
+        // `bg-surface`, not `bg-primary-subtle`. The brand tint is 14% alpha: it
+        // is a fill to lay *on* a surface, which is what a chip and an active
+        // nav row do with it. This floats over the top bar, so the breadcrumbs
+        // read straight through it. Nobody saw that because the poll behind this
+        // prompt asked for the wrong path and it never rendered; it appears the
+        // moment that is fixed. The accent stays as the border, which is what
+        // carries the signal, and the ink becomes the ordinary foreground since
+        // `text-primary-subtle-foreground` is the ink for the tint.
+        className="pointer-events-auto mt-1.5 flex items-center gap-3 border border-accent bg-surface py-1.5 pr-1.5 pl-4 text-sm text-foreground shadow-elevation-md"
       >
         <span>
           <strong className="font-semibold">An update is available.</strong>{" "}
