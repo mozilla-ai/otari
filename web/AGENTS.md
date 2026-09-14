@@ -186,6 +186,14 @@ pnpm --dir web test
 pnpm --dir web run build
 ```
 
+**`nav[aria-label="Sidebar"]` is not the whole rail.** The scope band above it
+(the workspace switcher, the back row) and the footer below it (the Organization
+switch, the account control) are siblings of the landmark inside the `<aside>`,
+not children of it. A query scoped to the landmark misses them while they sit
+visibly in the rail, and the failure reads as the element not rendering rather
+than as the query looking in the wrong place. Query the page for anything in the
+band or the footer.
+
 **A CI green and a local green answer different questions.** CI builds the pull
 request's merge ref, so its run is the branch merged into `main` as it stood when
 the run was created; a local run is the branch alone. The suites are therefore
