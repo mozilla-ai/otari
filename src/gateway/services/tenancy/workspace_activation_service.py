@@ -48,7 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.core.config import GatewayConfig
-from gateway.core.usage_source import served_here
+from gateway.core.usage_source import integration_traffic, served_here
 from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace
@@ -464,12 +464,21 @@ class WorkspaceActivationService:
         else's traffic recorded here for cost reporting, so a workspace whose only
         rows came from an import has still never called this gateway, and the guide
         would be lying to close.
+
+        Two exclusions, not one, and the second is a different kind of thing.
+        Imported usage is traffic this deployment did not serve; a Playground
+        request is traffic it served for its own UI. The guide exists to mark the
+        moment somebody's own code first reached this gateway, so a message typed
+        into the product is the demo rather than the integration, and closing on
+        one would retire the guide for a workspace that has not integrated
+        anything. See :func:`~gateway.core.usage_source.integration_traffic`.
         """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
+                integration_traffic(UsageLog.endpoint),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -482,14 +491,18 @@ class WorkspaceActivationService:
     async def _latest_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
         """The most recent gateway request in the workspace, successful or not.
 
-        Scoped to what this deployment served, for the reason in
-        :meth:`_first_successful_request`.
+        Scoped the same two ways as :meth:`_first_successful_request`, and the
+        Playground exclusion matters here for a second reason: this row is what
+        the guide shows as "your last attempt", so a Playground message would
+        otherwise report the product talking to itself as the caller's most
+        recent try and hide the failing request they are actually debugging.
         """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
+                integration_traffic(UsageLog.endpoint),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())

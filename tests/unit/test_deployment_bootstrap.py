@@ -290,6 +290,11 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     organization-scoped one is the other way around. ``organization_usage`` is
     the row that exists only where tenants do: standalone's organization is the
     deployment, so ``/usage`` already answers it whole (otari-ai#1963).
+
+    ``playground`` is the one row dropped for a reason that is not about
+    credentials or scope at all: the page dispatches a completion, and a control
+    plane serves no inference (otari#822), so the whole feature is missing rather
+    than mis-scoped.
     """
     app = create_app(_hosted(tmp_path))
 
@@ -303,11 +308,13 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     assert "organization_providers" in answered["surfaces"]
     assert "organization_usage" in answered["surfaces"]
     assert "providers" not in answered["surfaces"]
+    assert "playground" not in answered["surfaces"]
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
         "organization_providers",
         "organization_usage",
+        "playground",
         "providers",
     }
 

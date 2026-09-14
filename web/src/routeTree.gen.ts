@@ -21,6 +21,7 @@ import { Route as KeysRouteImport } from './routes/keys'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
+import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -99,6 +100,11 @@ const ModelsRoute = ModelsRouteImport.update({
 const OrganizationRoute = OrganizationRouteImport.update({
   id: '/organization',
   path: '/organization',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaygroundRoute = PlaygroundRouteImport.update({
+  id: '/playground',
+  path: '/playground',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProvidersRoute = ProvidersRouteImport.update({
@@ -211,6 +217,7 @@ export interface FileRoutesByFullPath {
   '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
   '/organization': typeof OrganizationRouteWithChildren
+  '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
@@ -243,6 +250,7 @@ export interface FileRoutesByTo {
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
+  '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
@@ -276,6 +284,7 @@ export interface FileRoutesById {
   '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
   '/organization': typeof OrganizationRouteWithChildren
+  '/playground': typeof PlaygroundRoute
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
@@ -311,6 +320,7 @@ export interface FileRouteTypes {
     | '/members'
     | '/models'
     | '/organization'
+    | '/playground'
     | '/providers'
     | '/routing'
     | '/settings'
@@ -343,6 +353,7 @@ export interface FileRouteTypes {
     | '/keys'
     | '/members'
     | '/models'
+    | '/playground'
     | '/providers'
     | '/routing'
     | '/settings'
@@ -375,6 +386,7 @@ export interface FileRouteTypes {
     | '/members'
     | '/models'
     | '/organization'
+    | '/playground'
     | '/providers'
     | '/routing'
     | '/settings'
@@ -409,6 +421,7 @@ export interface RootRouteChildren {
   MembersRoute: typeof MembersRoute
   ModelsRoute: typeof ModelsRoute
   OrganizationRoute: typeof OrganizationRouteWithChildren
+  PlaygroundRoute: typeof PlaygroundRoute
   ProvidersRoute: typeof ProvidersRoute
   RoutingRoute: typeof RoutingRoute
   SettingsRoute: typeof SettingsRoute
@@ -502,6 +515,13 @@ declare module '@tanstack/react-router' {
       path: '/organization'
       fullPath: '/organization'
       preLoaderRoute: typeof OrganizationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playground': {
+      id: '/playground'
+      path: '/playground'
+      fullPath: '/playground'
+      preLoaderRoute: typeof PlaygroundRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/providers': {
@@ -695,6 +715,7 @@ const rootRouteChildren: RootRouteChildren = {
   MembersRoute: MembersRoute,
   ModelsRoute: ModelsRoute,
   OrganizationRoute: OrganizationRouteWithChildren,
+  PlaygroundRoute: PlaygroundRoute,
   ProvidersRoute: ProvidersRoute,
   RoutingRoute: RoutingRoute,
   SettingsRoute: SettingsRoute,

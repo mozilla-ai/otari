@@ -83,6 +83,26 @@ GET /api/v1/files/{file_id}              # not yet wrapped
 GET /api/v1/files/{file_id}/content      # not yet wrapped
 DELETE /api/v1/files/{file_id}           # not yet wrapped
 
+# The Playground, which is the dashboard's own chat page and is excluded on a
+# stronger ground than "not yet wrapped": its completion endpoint is authorized
+# by a dashboard session cookie, so an SDK holding an API key cannot call it at
+# all, and the surrounding reads store what that page remembers for the signed-in
+# person. An SDK caller wanting a completion has POST /api/v1/chat/completions,
+# which this one delegates to.
+POST /api/v1/playground/chat/completions                        # session-authorized, not an SDK surface
+GET /api/v1/playground/tools                                    # session-authorized, not an SDK surface
+GET /api/v1/playground/consent                                  # session-authorized, not an SDK surface
+PUT /api/v1/playground/consent                                  # session-authorized, not an SDK surface
+GET /api/v1/playground/conversations                            # session-authorized, not an SDK surface
+POST /api/v1/playground/conversations                           # session-authorized, not an SDK surface
+GET /api/v1/playground/conversations/{conversation_id}/messages  # session-authorized, not an SDK surface
+DELETE /api/v1/playground/conversations/{conversation_id}       # session-authorized, not an SDK surface
+GET /api/v1/playground/comparisons                              # session-authorized, not an SDK surface
+POST /api/v1/playground/comparisons                             # session-authorized, not an SDK surface
+DELETE /api/v1/playground/comparisons/{comparison_id}           # session-authorized, not an SDK surface
+GET /api/v1/playground/favorite-models                          # session-authorized, not an SDK surface
+PUT /api/v1/playground/favorite-models                          # session-authorized, not an SDK surface
+
 # Dashboard / admin management surface: present in the gateway spec, not yet
 # wrapped by any SDK shell. Deferred here so the drift gate stays green; move to
 # [covered] when a shell surfaces them. Kept identical across all four SDKs.

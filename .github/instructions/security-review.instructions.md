@@ -35,6 +35,16 @@ let any signed-in organization member spend that default workspace's provider
 credentials and budget without holding a data-plane key.
 Read-only catalog routes use `verify_catalog_reader`.
 
+The Playground's completion endpoint (`api/routes/playground.py`) is the single
+exception, and what makes it one is the work it does before the pipeline: it
+derives the billed user from the session (never from the request), resolves the
+named workspace through `resolve_workspace_in_organization` so one the caller
+does not belong to answers 404, and reads that user's own `allowed_models` as
+the effective allow-list. Review a change here against those three. A session
+principal that took a `user_id` from the body, defaulted the workspace without
+the membership check, or left the allow-list unset would each reopen exactly the
+escalation the rule above describes.
+
 Using the operator gate on a tenant route is also wrong; it prevents members
 from managing resources their role permits.
 

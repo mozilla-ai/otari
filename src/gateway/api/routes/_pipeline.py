@@ -119,7 +119,7 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_inline_cost_settlement, record_tokens
 from gateway.model_labeling import relabel_model
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.entities import APIKey, ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
@@ -212,6 +212,7 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
@@ -1494,6 +1495,73 @@ async def _compile_request_plan(
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
 
+async def _resolve_keyed_user_id(
+    *,
+    adapter: FormatAdapter[Any, Any],
+    db: AsyncSession,
+    log_writer: LogWriter,
+    config: GatewayConfig,
+    raw_request: Request,
+    api_key: APIKey | None,
+    api_key_id: str | None,
+    is_master_key: bool,
+    user_id_from_request: str | None,
+    model: str,
+    master_key_user_required_detail: str,
+    user_forbidden_detail: str,
+    started_at: float,
+) -> str:
+    """The billed user for a key- or master-key-authenticated request.
+
+    :func:`resolve_user_id` with this endpoint's error shapes, plus the one
+    rejection row it owes. Split out of :func:`resolve_request_context` so the
+    two ways into that preamble read as two branches rather than one branch
+    wrapped around thirty lines of logging.
+    """
+    try:
+        return resolve_user_id(
+            user_id_from_request=user_id_from_request,
+            api_key=api_key,
+            is_master_key=is_master_key,
+            master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
+            no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
+            no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
+            forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
+            reject_mismatch=config.reject_user_mismatch,
+        )
+    except HTTPException as exc:
+        # Only the user/key mismatch (403) is recorded: spend always binds to
+        # the key's own user, so that rejection has a user to attribute the
+        # drop to. resolve_user_id's other refusals (a master key with no
+        # `user` field, a key with no user) name no existing user, and
+        # usage_logs.user_id is a foreign key, so they stay unlogged.
+        # This row carries the raw selector and no provider, unlike the gates
+        # after it: nothing has been resolved this early, and resolving a
+        # selector purely to shape a log row is not worth the work on a path
+        # that is refusing the request anyway.
+        # This gate is the only one that fires before check_rate_limit, so
+        # the write is charged to the key's own bucket and skipped once
+        # throttled; see throttle_early_rejection. The response stays 403.
+        if (
+            exc.status_code == status.HTTP_403_FORBIDDEN
+            and api_key is not None
+            and not throttle_early_rejection(raw_request, str(api_key.user_id))
+        ):
+            await log_gateway_rejection(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                user_id=api_key.user_id,
+                model=model,
+                provider=None,
+                endpoint=adapter.endpoint,
+                detail=user_forbidden_detail,
+                status_code=exc.status_code,
+                started_at=started_at,
+            )
+        raise
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -1509,6 +1577,7 @@ async def resolve_request_context(
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
+    session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[
         [str, LLMProvider | None, str, str | None, uuid.UUID | None],
@@ -1526,6 +1595,13 @@ async def resolve_request_context(
     before the missing-pricing gate so user/blocked/budget rejections
     (404/403) take precedence over the 402; it is refunded if the request is
     then rejected for missing pricing.
+
+    ``session_principal`` (standalone only) replaces that credential step for a
+    route that authenticated and authorized the caller itself, which today is
+    the Playground's own completions endpoint. See :class:`SessionPrincipal` for
+    what the route owes before it may build one; everything after the step it
+    substitutes, the rate limit, the plan compile, both allow-list gates,
+    pricing and the reservation, runs exactly as it does for a keyed request.
 
     ``routing_signal`` (standalone only) builds what a policy's router backend
     reads: the prompt text plus the routing headers, in a format-neutral value the
@@ -1594,67 +1670,56 @@ async def resolve_request_context(
     else:
         if db is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
-        # No session cookie is consulted, and that is the point: this plane calls
-        # a provider with somebody's credentials and writes a usage row against
-        # somebody's budget. ``is_master_key`` below sends both through the
-        # deployment's *default* workspace, so honoring a cookie here let any
-        # signed-in member of any organization spend the default organization's
-        # BYO credential and bill it (otari-ai#1880). A completion is authorized
-        # by an API key or the deployment's own master key, nothing else.
-        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
-        api_key_id = api_key.id if api_key else None
-        # Zero I/O for a keyed request: `api_key.workspace_id` is already an
-        # in-memory attribute on the row just loaded. Only a master-key request
-        # pays a lookup, which `resolve_workspace_id` itself accepts as
-        # operator traffic (see its docstring). Used below to resolve
-        # organization-scoped provider keys for a bare provider selector; an
-        # instance-addressed one never consults it (`provider_kwargs.py`). A
-        # master-key call therefore only ever reaches the *default* workspace's
-        # organization's keys, not every organization the deployment holds
-        # (`workspace_scope.py`'s docstring).
-        workspace_id = await resolve_workspace_id(db, api_key)
-        try:
-            user_id = resolve_user_id(
-                user_id_from_request=user_id_from_request,
+        # No session cookie is consulted *here*, and that is the point: this
+        # plane calls a provider with somebody's credentials and writes a usage
+        # row against somebody's budget. ``is_master_key`` below sends both
+        # through the deployment's *default* workspace, so honoring a cookie
+        # here let any signed-in member of any organization spend the default
+        # organization's BYO credential and bill it (otari-ai#1880). A
+        # completion is authorized by an API key, the deployment's own master
+        # key, or a ``SessionPrincipal`` a route built after resolving the
+        # caller's own user and proving their membership of the workspace it
+        # names, which is the work this rule exists to force rather than a way
+        # around it.
+        api_key: APIKey | None = None
+        is_master_key = False
+        if session_principal is not None:
+            workspace_id = session_principal.workspace_id
+            user_id = session_principal.user_id
+            key_allowlist = session_principal.allowed_models
+        else:
+            api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
+            api_key_id = api_key.id if api_key else None
+            # Zero I/O for a keyed request: `api_key.workspace_id` is already an
+            # in-memory attribute on the row just loaded. Only a master-key request
+            # pays a lookup, which `resolve_workspace_id` itself accepts as
+            # operator traffic (see its docstring). Used below to resolve
+            # organization-scoped provider keys for a bare provider selector; an
+            # instance-addressed one never consults it (`provider_kwargs.py`). A
+            # master-key call therefore only ever reaches the *default* workspace's
+            # organization's keys, not every organization the deployment holds
+            # (`workspace_scope.py`'s docstring).
+            workspace_id = await resolve_workspace_id(db, api_key)
+            user_id = await _resolve_keyed_user_id(
+                adapter=adapter,
+                db=db,
+                log_writer=log_writer,
+                config=config,
+                raw_request=raw_request,
                 api_key=api_key,
+                api_key_id=api_key_id,
                 is_master_key=is_master_key,
-                master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
-                no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
-                no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
-                forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
-                reject_mismatch=config.reject_user_mismatch,
+                user_id_from_request=user_id_from_request,
+                model=model,
+                master_key_user_required_detail=master_key_user_required_detail,
+                user_forbidden_detail=user_forbidden_detail,
+                started_at=started_at,
             )
-        except HTTPException as exc:
-            # Only the user/key mismatch (403) is recorded: spend always binds to
-            # the key's own user, so that rejection has a user to attribute the
-            # drop to. resolve_user_id's other refusals (a master key with no
-            # `user` field, a key with no user) name no existing user, and
-            # usage_logs.user_id is a foreign key, so they stay unlogged.
-            # This row carries the raw selector and no provider, unlike the gates
-            # below it: nothing has been resolved this early, and resolving a
-            # selector purely to shape a log row is not worth the work on a path
-            # that is refusing the request anyway.
-            # This gate is the only one that fires before check_rate_limit, so
-            # the write is charged to the key's own bucket and skipped once
-            # throttled; see throttle_early_rejection. The response stays 403.
-            if (
-                exc.status_code == status.HTTP_403_FORBIDDEN
-                and api_key is not None
-                and not throttle_early_rejection(raw_request, str(api_key.user_id))
-            ):
-                await log_gateway_rejection(
-                    db=db,
-                    log_writer=log_writer,
-                    api_key_id=api_key_id,
-                    user_id=api_key.user_id,
-                    model=model,
-                    provider=None,
-                    endpoint=adapter.endpoint,
-                    detail=user_forbidden_detail,
-                    status_code=exc.status_code,
-                    started_at=started_at,
-                )
-            raise
+            # Resolved before the plan rather than with the gate below, because the
+            # compiler must drop candidates this caller may not use: a chain that fell
+            # over to a forbidden model would be an access-control bypass. The gate
+            # itself stays where it was, so a plain model name is unaffected.
+            key_allowlist = await resolve_request_allowlist(db, api_key)
         rate_limit_info = check_rate_limit(raw_request, user_id)
 
         # Tolerate an unparseable / unknown-provider selector here: the budget
@@ -1664,11 +1729,6 @@ async def resolve_request_context(
         # capability detection needs the underlying implementation, so keep both.
         gate_instance: str | None
         gate_impl: LLMProvider | None
-        # Resolved before the plan rather than with the gate below, because the
-        # compiler must drop candidates this caller may not use: a chain that fell
-        # over to a forbidden model would be an access-control bypass. The gate
-        # itself stays where it was, so a plain model name is unaffected.
-        key_allowlist = await resolve_request_allowlist(db, api_key)
         # A policy name resolves to a plan rather than to one selector. The head
         # candidate is what everything below keys on (allow-list, pricing,
         # reservation), exactly as a plain model would be, so a one-candidate
@@ -1711,8 +1771,9 @@ async def resolve_request_context(
         # non-null list restricts. Fail closed: a selector we could not resolve is
         # denied under a restriction rather than dispatched unchecked. Master-key
         # callers have api_key None, so the allow-list is None and this is skipped.
-        # A key with no list of its own inherits its user's default here.
-        # (Resolved above, before the plan compile, which needs it.)
+        # A key with no list of its own inherits its user's default here, and a
+        # ``SessionPrincipal`` carries that same user default (it holds no key to
+        # narrow it with). (Resolved above, before the plan compile, which needs it.)
         if key_allowlist is not None and not (
             gate_instance is not None and is_model_allowed(key_allowlist, f"{gate_instance}:{gate_model}")
         ):

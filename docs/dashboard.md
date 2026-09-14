@@ -67,7 +67,10 @@ The [Quickstart](quickstart.md) includes a complete request example.
 ## The setup guide
 
 Overview offers a short setup flow until the selected workspace serves its first
-successful gateway request. The key it creates is an ordinary workspace API key.
+successful gateway request from outside the product. A message sent in the
+Playground does not close it: the guide marks the moment somebody's own code
+first reached the gateway, which is the point of the flow. The key it creates is
+an ordinary workspace API key.
 Skipping the guide hides it for that workspace; it does not revoke a key already
 created. Set `activation_guide: false` to disable the flow for the deployment.
 
@@ -76,7 +79,7 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Models and Routing
+- Playground, Models, and Routing
 - Tools
 - API keys, providers, and workspace members
 
@@ -114,6 +117,32 @@ recent requests. An organization owner or admin also gets a budget-health
 figure, read from the spend ceilings holding their organization, while a
 deployment operator gets provider health and the deployment's own budgets
 instead.
+
+## Playground
+
+The Playground is the in-product chat page: pick a model the gateway serves and
+talk to it, or put two side by side and record which answered better. Requests
+run through the same path as any other completion, so routing policies,
+guardrails, budgets and the tool loop all apply, and every request appears in
+Activity and Usage.
+
+Two things are worth knowing about how it is billed and what it stores.
+
+A Playground request carries no API key. It is authorized by the dashboard
+session and billed to whoever sent it, in the workspace the switcher has
+selected, against that person's own budget and rate limit; its usage row
+therefore has no key attached. Picking a different model changes which provider
+credential the gateway resolves, never who pays. A request made here also does
+not count as the workspace's first request, so the setup guide keeps waiting for
+one from outside the product, which is the milestone it exists to mark.
+
+Nothing is stored until asked for. Saving a conversation or recording a
+comparison prompts once for content retention, and the flags are per person and
+revocable; withdrawing one blocks new saves and deletes nothing. Saved
+transcripts, recorded comparisons and pinned models are visible only to the
+person who created them, even to colleagues in the same workspace, and each can
+be deleted from the page. Hosted control planes serve no inference, so they do
+not offer the page at all.
 
 ## Observability
 

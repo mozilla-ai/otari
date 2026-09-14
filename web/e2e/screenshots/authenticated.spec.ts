@@ -16,6 +16,15 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   readonly heading: RegExp
 }> = [
   { route: "/", name: "overview", heading: /overview/i },
+  // The one page in this matrix with no page title, which is why its heading
+  // regex names the greeting instead: a chat surface heads with the composer
+  // and its own empty state, not with a title band, and the seeded deployment
+  // serves a mock provider so that state is what renders.
+  {
+    route: "/playground",
+    name: "playground",
+    heading: /what can i help with/i,
+  },
   { route: "/models", name: "models", heading: /models/i },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/providers", name: "providers", heading: /provider/i },

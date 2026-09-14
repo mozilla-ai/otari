@@ -5146,6 +5146,415 @@
     {
       "item": [
         {
+          "name": "Playground Chat Completions",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
+            },
+            "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "chat",
+                "completions"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/chat/completions?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "List Playground Comparisons",
+          "request": {
+            "description": "The caller's own rated comparisons in one workspace, newest first.\n\nWithout the two answer bodies: the list shows a dozen rows and renders\nneither, and there is no detail endpoint because the page has no screen that\nreads one back. A comparison is a judgment that was recorded, not a\ntranscript to resume.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "comparisons"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/comparisons?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Save Playground Comparison",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"user_question\": \"string\",\n  \"model_a\": \"string\",\n  \"model_b\": \"string\",\n  \"model_a_answer\": \"string\",\n  \"model_b_answer\": \"string\",\n  \"preference\": \"model_a\"\n}"
+            },
+            "description": "Record which of two models answered a question better.\n\n403 when comparison retention has not been granted; this is the flag with\nthe wider disclosure, because the row keeps both models' full answers.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "comparisons"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/comparisons"
+            }
+          }
+        },
+        {
+          "name": "Delete Playground Comparison",
+          "request": {
+            "description": "Delete one of the caller's saved comparisons.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "comparisons",
+                ":comparison_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/comparisons/:comparison_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "comparison_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Read Playground Consent",
+          "request": {
+            "description": "What the caller has agreed the Playground may store.\n\nBoth flags false for a caller who has never answered, and nothing is\nwritten: the page asks at the moment it needs the grant, so recording an\nanswer on a page load would record one nobody gave.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "consent"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/consent"
+            }
+          }
+        },
+        {
+          "name": "Update Playground Consent",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"store_comparisons\": false,\n  \"store_conversations\": false\n}"
+            },
+            "description": "Grant or withdraw content retention, one flag at a time.\n\nAn omitted flag is left as it was. Withdrawing blocks new saves and deletes\nnothing: what was stored with consent stays until its owner deletes it, which\nis what keeps a withdrawal from being a destructive action nobody asked for.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "consent"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/consent"
+            }
+          }
+        },
+        {
+          "name": "List Playground Conversations",
+          "request": {
+            "description": "The caller's own saved transcripts in one workspace, newest first.\n\nNot gated on consent: withdrawing it stops new saves, so a transcript saved\nwhile it was granted has to stay listable and deletable by its owner.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "conversations"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/conversations?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Save Playground Conversation",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"model\": \"string\",\n  \"title\": \"string\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"string\"\n    }\n  ]\n}"
+            },
+            "description": "Save one transcript whole, for the caller, in a workspace they belong to.\n\n403 when content retention has not been granted. The page asks first, so\nreaching that is a client that skipped the prompt: a consent gate enforced\nonly in the browser is not a consent gate.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "conversations"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/conversations"
+            }
+          }
+        },
+        {
+          "name": "Delete Playground Conversation",
+          "request": {
+            "description": "Delete one of the caller's saved transcripts, and its turns with it.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "conversations",
+                ":conversation_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/conversations/:conversation_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "conversation_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Read Playground Conversation Messages",
+          "request": {
+            "description": "One saved transcript's turns, in order.\n\n404 for a transcript belonging to somebody else, the same answer an\nunknown id gets: the owner predicate is in the query, so the two are\nindistinguishable from here. An empty transcript is not a state a save can\nproduce (the request requires at least one turn), so no rows means no row\nfor this caller.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "conversations",
+                ":conversation_id",
+                "messages"
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/conversations/:conversation_id/messages",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "conversation_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Read Playground Favorite Models",
+          "request": {
+            "description": "The caller's pinned model keys in one workspace, in pinned order.\n\nStored rather than kept in the browser, so a pin follows the person to their\nother devices; that is what the hosted original did and what makes the\nFavorites group in every picker worth having.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "favorite-models"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/favorite-models?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Replace Playground Favorite Models",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model_keys\": [\n    \"string\"\n  ]\n}"
+            },
+            "description": "Replace the caller's pin list for one workspace.\n\nA replace rather than a toggle, because the order is part of the value and\nthe client already holds the list it is rendering. Two tabs racing therefore\nresolve to one of the two lists rather than to an interleaving neither of\nthem showed. Model keys are not validated against the catalog: a pinned model\nthat leaves the catalog simply stops appearing in the picker, and refusing\nthe write would make a stale pin unremovable.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "favorite-models"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/favorite-models?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Read Playground Tools",
+          "request": {
+            "description": "The gateway-run tools the caller's workspace may attach to a message.\n\nOne read rather than the three the dashboard would otherwise make (the\ndeployment's tool settings, the workspace's web-search row, its\ncode-execution row), because the answer is a composition of them in a fixed\ndirection: the deployment decides whether a tool exists and the workspace may\nonly narrow that. Composing it here is what keeps the menu from offering\nsomething the request path would refuse.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "tools"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/tools?workspace_id="
+            }
+          }
+        }
+      ],
+      "name": "playground"
+    },
+    {
+      "item": [
+        {
           "name": "List Pricing",
           "request": {
             "description": "List all model pricing.",

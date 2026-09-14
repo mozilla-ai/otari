@@ -84,6 +84,11 @@ STANDALONE_SURFACES: tuple[str, ...] = (
     "keys",
     "models",
     "organizations",
+    # The dashboard's own chat page. On the surface axis rather than the
+    # capability one because what decides it is topology: the page both reads a
+    # management session and dispatches a completion, so it exists exactly where
+    # this process serves both planes.
+    "playground",
     "pricing",
     "providers",
     "routing",
@@ -124,8 +129,15 @@ STANDALONE_SURFACES: tuple[str, ...] = (
 # the organization is the deployment and ``/usage`` already answers it whole, so
 # the dashboard's organization-wide Usage page is a destination only where "my
 # organization" is narrower than "everything" (otari-ai#1963).
+# ``playground`` drops for the third reason, which is not about credentials or
+# tenancy at all: a hosted control plane serves no inference (otari#822), so the
+# page's whole point is missing rather than its scope being wrong. Its prefix is
+# in ``hosted_mode.DATA_PLANE_PREFIXES``, so a browser that reaches the URL
+# anyway is told which host does serve it.
+_HOSTED_DROPS = frozenset({"providers", "playground"})
+
 HOSTED_SURFACES: tuple[str, ...] = (
-    *(surface for surface in STANDALONE_SURFACES if surface != "providers"),
+    *(surface for surface in STANDALONE_SURFACES if surface not in _HOSTED_DROPS),
     "organization_providers",
     "organization_usage",
 )

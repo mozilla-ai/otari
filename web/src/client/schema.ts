@@ -2586,6 +2586,266 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playground/chat/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Playground Chat Completions
+         * @description Run one chat completion for the signed-in caller.
+         *
+         *     Streaming and non-streaming both, identically to ``POST
+         *     /api/v1/chat/completions``: this resolves the principal and then calls the
+         *     very same handler. The request is billed to the caller's own attribution
+         *     user in the workspace they named (or their organization's default), against
+         *     that user's budget, and writes the ordinary usage row with no ``api_key_id``,
+         *     because there was no key.
+         *
+         *     The body is ``ChatCompletionRequest`` unchanged, so the page sends the same
+         *     request an SDK would and a model, tool or parameter the gateway gains is
+         *     available here the day it lands. The workspace rides in the query string
+         *     rather than in the body for that reason: a field added to the body would
+         *     also have to be added to the pipeline's strip list, and a gateway-internal
+         *     field that is not stripped is forwarded to the provider as a call kwarg.
+         *
+         *     ``user`` in the body is the one field the pipeline will not read here: spend
+         *     binds to the session's own attribution user, derived and never accepted.
+         */
+        post: operations["playground-playground_chat_completions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/comparisons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Playground Comparisons
+         * @description The caller's own rated comparisons in one workspace, newest first.
+         *
+         *     Without the two answer bodies: the list shows a dozen rows and renders
+         *     neither, and there is no detail endpoint because the page has no screen that
+         *     reads one back. A comparison is a judgment that was recorded, not a
+         *     transcript to resume.
+         */
+        get: operations["playground-list_playground_comparisons"];
+        put?: never;
+        /**
+         * Save Playground Comparison
+         * @description Record which of two models answered a question better.
+         *
+         *     403 when comparison retention has not been granted; this is the flag with
+         *     the wider disclosure, because the row keeps both models' full answers.
+         */
+        post: operations["playground-save_playground_comparison"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/comparisons/{comparison_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Playground Comparison
+         * @description Delete one of the caller's saved comparisons.
+         */
+        delete: operations["playground-delete_playground_comparison"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Playground Consent
+         * @description What the caller has agreed the Playground may store.
+         *
+         *     Both flags false for a caller who has never answered, and nothing is
+         *     written: the page asks at the moment it needs the grant, so recording an
+         *     answer on a page load would record one nobody gave.
+         */
+        get: operations["playground-read_playground_consent"];
+        /**
+         * Update Playground Consent
+         * @description Grant or withdraw content retention, one flag at a time.
+         *
+         *     An omitted flag is left as it was. Withdrawing blocks new saves and deletes
+         *     nothing: what was stored with consent stays until its owner deletes it, which
+         *     is what keeps a withdrawal from being a destructive action nobody asked for.
+         */
+        put: operations["playground-update_playground_consent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Playground Conversations
+         * @description The caller's own saved transcripts in one workspace, newest first.
+         *
+         *     Not gated on consent: withdrawing it stops new saves, so a transcript saved
+         *     while it was granted has to stay listable and deletable by its owner.
+         */
+        get: operations["playground-list_playground_conversations"];
+        put?: never;
+        /**
+         * Save Playground Conversation
+         * @description Save one transcript whole, for the caller, in a workspace they belong to.
+         *
+         *     403 when content retention has not been granted. The page asks first, so
+         *     reaching that is a client that skipped the prompt: a consent gate enforced
+         *     only in the browser is not a consent gate.
+         */
+        post: operations["playground-save_playground_conversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Playground Conversation
+         * @description Delete one of the caller's saved transcripts, and its turns with it.
+         */
+        delete: operations["playground-delete_playground_conversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/conversations/{conversation_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Playground Conversation Messages
+         * @description One saved transcript's turns, in order.
+         *
+         *     404 for a transcript belonging to somebody else, the same answer an
+         *     unknown id gets: the owner predicate is in the query, so the two are
+         *     indistinguishable from here. An empty transcript is not a state a save can
+         *     produce (the request requires at least one turn), so no rows means no row
+         *     for this caller.
+         */
+        get: operations["playground-read_playground_conversation_messages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/favorite-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Playground Favorite Models
+         * @description The caller's pinned model keys in one workspace, in pinned order.
+         *
+         *     Stored rather than kept in the browser, so a pin follows the person to their
+         *     other devices; that is what the hosted original did and what makes the
+         *     Favorites group in every picker worth having.
+         */
+        get: operations["playground-read_playground_favorite_models"];
+        /**
+         * Replace Playground Favorite Models
+         * @description Replace the caller's pin list for one workspace.
+         *
+         *     A replace rather than a toggle, because the order is part of the value and
+         *     the client already holds the list it is rendering. Two tabs racing therefore
+         *     resolve to one of the two lists rather than to an interleaving neither of
+         *     them showed. Model keys are not validated against the catalog: a pinned model
+         *     that leaves the catalog simply stops appearing in the picker, and refusing
+         *     the write would make a stale pin unremovable.
+         */
+        put: operations["playground-replace_playground_favorite_models"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Playground Tools
+         * @description The gateway-run tools the caller's workspace may attach to a message.
+         *
+         *     One read rather than the three the dashboard would otherwise make (the
+         *     deployment's tool settings, the workspace's web-search row, its
+         *     code-execution row), because the answer is a composition of them in a fixed
+         *     direction: the deployment decides whether a tool exists and the workspace may
+         *     only narrow that. Composing it here is what keeps the menu from offering
+         *     something the request path would refuse.
+         */
+        get: operations["playground-read_playground_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing": {
         parameters: {
             query?: never;
@@ -8515,6 +8775,280 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
+        };
+        /**
+         * PlaygroundComparisonCreate
+         * @description One rated A/B exchange.
+         *
+         *     Both answers in full, which is the disclosure the comparison consent flag
+         *     covers: a preference with no answers attached is a datum nobody can later
+         *     check, and the page's own history list shows the question and the two model
+         *     ids from these columns.
+         */
+        PlaygroundComparisonCreate: {
+            /** Model A */
+            model_a: string;
+            /** Model A Answer */
+            model_a_answer: string;
+            /** Model B */
+            model_b: string;
+            /** Model B Answer */
+            model_b_answer: string;
+            /**
+             * Preference
+             * @enum {string}
+             */
+            preference: "model_a" | "model_b" | "tie";
+            /** User Question */
+            user_question: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * PlaygroundComparisonSummary
+         * @description A row in the comparison history: the question, the pair, the verdict.
+         *
+         *     Deliberately without the two answers. The list shows a dozen rows at once
+         *     and none of them renders an answer body, so sending them would move
+         *     megabytes to draw a few lines of text. There is no detail endpoint either,
+         *     because the page has no screen that reads one back: a comparison is a
+         *     judgment that was recorded, not a transcript to resume.
+         */
+        PlaygroundComparisonSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Model A */
+            model_a: string;
+            /** Model B */
+            model_b: string;
+            /** Preference */
+            preference: string;
+            /** User Question */
+            user_question: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** PlaygroundComparisonsPublic */
+        PlaygroundComparisonsPublic: {
+            /** Data */
+            data: components["schemas"]["PlaygroundComparisonSummary"][];
+        };
+        /**
+         * PlaygroundConsentPublic
+         * @description What this identity has agreed the Playground may store.
+         *
+         *     Two flags rather than one, matching what the page asks for at the moment it
+         *     asks: saving a transcript and recording a model preference are different
+         *     disclosures (the second stores *both* models' full answers), and the old
+         *     page asked about each separately at the point of use. An identity with no
+         *     stored row reads back as both false.
+         */
+        PlaygroundConsentPublic: {
+            /**
+             * Store Comparisons
+             * @default false
+             */
+            store_comparisons: boolean;
+            /**
+             * Store Conversations
+             * @default false
+             */
+            store_conversations: boolean;
+        };
+        /**
+         * PlaygroundConsentUpdate
+         * @description A partial update: an omitted flag is left as it was.
+         *
+         *     Tri-state on purpose. The page grants one flag at a time, just in time, so a
+         *     request that carried both would silently re-assert the other, which is the
+         *     wrong direction for a consent record to move on its own.
+         */
+        PlaygroundConsentUpdate: {
+            /** Store Comparisons */
+            store_comparisons?: boolean | null;
+            /** Store Conversations */
+            store_conversations?: boolean | null;
+        };
+        /**
+         * PlaygroundConversationCreate
+         * @description A transcript to save, whole: there is no append-a-turn endpoint.
+         *
+         *     The page saves on an explicit click, with the conversation it currently
+         *     shows, so the write is one row plus its turns and a resave is a new
+         *     conversation rather than a mutation of the old one. That is also what keeps
+         *     the ordering column honest: ``position`` is assigned here, from the list's
+         *     own order, and never negotiated with a client over several requests.
+         */
+        PlaygroundConversationCreate: {
+            /** Messages */
+            messages: components["schemas"]["PlaygroundMessageCreate"][];
+            /** Model */
+            model: string;
+            /** Title */
+            title: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * PlaygroundConversationSummary
+         * @description A row in the history list: enough to recognize, not the transcript.
+         */
+        PlaygroundConversationSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Message Count */
+            message_count: number;
+            /** Model */
+            model: string;
+            /** Title */
+            title: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** PlaygroundConversationsPublic */
+        PlaygroundConversationsPublic: {
+            /** Data */
+            data: components["schemas"]["PlaygroundConversationSummary"][];
+        };
+        /**
+         * PlaygroundFavoriteModelsPublic
+         * @description The pin list, most recently pinned first.
+         */
+        PlaygroundFavoriteModelsPublic: {
+            /** Model Keys */
+            model_keys: string[];
+        };
+        /**
+         * PlaygroundFavoriteModelsUpdate
+         * @description The whole pin list, replacing whatever was stored.
+         *
+         *     A replace rather than a toggle endpoint, because the client already holds
+         *     the list it is rendering and the order is part of it (a newly pinned model
+         *     leads). Two tabs racing therefore resolve to one of the two lists rather
+         *     than to an interleaving neither of them showed.
+         */
+        PlaygroundFavoriteModelsUpdate: {
+            /** Model Keys */
+            model_keys: string[];
+        };
+        /**
+         * PlaygroundMcpServer
+         * @description One of the workspace's MCP servers, as the tools menu lists it.
+         */
+        PlaygroundMcpServer: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Purpose Hint */
+            purpose_hint?: string | null;
+        };
+        /**
+         * PlaygroundMessageCreate
+         * @description One turn in a transcript being saved.
+         */
+        PlaygroundMessageCreate: {
+            /** Content */
+            content: string;
+            /** Reasoning */
+            reasoning?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+        };
+        /**
+         * PlaygroundMessagePublic
+         * @description One stored turn, in the order it was saved.
+         */
+        PlaygroundMessagePublic: {
+            /** Content */
+            content: string;
+            /** Reasoning */
+            reasoning?: string | null;
+            /** Role */
+            role: string;
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** PlaygroundMessagesPublic */
+        PlaygroundMessagesPublic: {
+            /** Data */
+            data: components["schemas"]["PlaygroundMessagePublic"][];
+        };
+        /**
+         * PlaygroundToolStatus
+         * @description Whether one gateway-run tool can be attached right now, and why not.
+         *
+         *     Three states from two fields, which is what the composer's menu draws: a
+         *     tool the deployment never configured is not offered, one the deployment
+         *     configured and this workspace turned off is shown disabled with the reason,
+         *     and an available one is a plain checkbox. A single boolean would collapse
+         *     the first two, which is how a checkbox comes to look attachable and then
+         *     fail at request time (otari-ai#1419).
+         */
+        PlaygroundToolStatus: {
+            /**
+             * Configured
+             * @description Whether this deployment has a backend for the tool at all.
+             */
+            configured: boolean;
+            /**
+             * Enabled
+             * @description Whether the caller's workspace may attach it.
+             */
+            enabled: boolean;
+            /**
+             * Reason
+             * @description Why it cannot be attached. Null when it can.
+             */
+            reason?: string | null;
+        };
+        /**
+         * PlaygroundToolsResponse
+         * @description What the caller's workspace may attach to a Playground message.
+         */
+        PlaygroundToolsResponse: {
+            code_execution: components["schemas"]["PlaygroundToolStatus"];
+            /** Mcp Servers */
+            mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
+            web_search: components["schemas"]["PlaygroundToolStatus"];
         };
         /**
          * PolicyRequest
@@ -15609,6 +16143,414 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-playground_chat_completions": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatCompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-list_playground_comparisons": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundComparisonsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-save_playground_comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaygroundComparisonCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundComparisonSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-delete_playground_comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                comparison_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-read_playground_consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundConsentPublic"];
+                };
+            };
+        };
+    };
+    "playground-update_playground_consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaygroundConsentUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundConsentPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-list_playground_conversations": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundConversationsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-save_playground_conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaygroundConversationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundConversationSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-delete_playground_conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-read_playground_conversation_messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundMessagesPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-read_playground_favorite_models": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundFavoriteModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-replace_playground_favorite_models": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaygroundFavoriteModelsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundFavoriteModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-read_playground_tools": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundToolsResponse"];
                 };
             };
             /** @description Validation Error */

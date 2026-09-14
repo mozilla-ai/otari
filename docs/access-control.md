@@ -138,6 +138,22 @@ Sessions are revocable and expire after `dashboard_session_ttl_hours`. Password
 changes, master-key rotation, sign-out, and identity deactivation revoke relevant
 sessions.
 
+A session authorizes the management API. It does not authorize
+`/api/v1/chat/completions` or any other data-plane path, which take an API key
+or the master key and nothing else: a keyless request resolves to the
+deployment's default workspace, so honoring a cookie there would let any member
+of any organization spend that workspace's provider credential.
+
+The Playground is the one surface that runs a completion from a session, and it
+is a separate endpoint rather than a relaxation of that rule.
+`POST /api/v1/playground/chat/completions` resolves the caller's own attribution
+user and proves their membership of the workspace it will bill before the
+request reaches the pipeline, so the request is billed to the person who sent it
+in a workspace that is theirs. No credential is minted for the browser and none
+is held there. The usage row it writes carries no `api_key_id` and its own
+endpoint label, which is what keeps in-product traffic separable from a
+customer's integration.
+
 ### Passkeys
 
 Passkeys are optional and additive to password sign-in. Set

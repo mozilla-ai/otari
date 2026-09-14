@@ -80,6 +80,14 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   no `make openapi` target; `make openapi-check` only validates. Verify with
   `make openapi-check` and `make postman-check`. The same `openapi-spec` CI job runs both
   checks, so missing this fails CI even when `openapi-check` passes.
+- **A new route also owes `scripts/sdk_codegen/sdk-endpoints.txt`**, which is a
+  hand-maintained manifest rather than a generated file, and the one artifact in
+  this list that a spec regeneration does not fix.
+  `tests/unit/test_sdk_endpoint_coverage.py` fails until every `METHOD path` the
+  spec exposes appears under `[covered]` or `[excluded]` with a reason, which is
+  deliberate: the codegen workflow pushes the file into all four SDK repos, so
+  classifying a new endpoint here is what keeps them in step, and the drift
+  fails in the repo that caused it.
 - `docs/public/code-execution-openapi.yaml` is the exception in that directory: it is
   **hand-maintained**, not generated. It specifies a backend Otari calls, so no app here
   serves those paths and `generate_openapi.py` neither reads nor writes it. Edit it

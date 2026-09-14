@@ -41,9 +41,11 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
+from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -55,6 +57,7 @@ from gateway.services.mcp_loop import (
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -62,12 +65,17 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # it is so new rows compare with old ones.
 USAGE_ENDPOINT = "/v1/chat/completions"
 
+# The label a Playground request carries instead, declared in
+# ``core/usage_source`` because the activation guide filters on it and a service
+# may not import this layer. That module says which readers care and why.
+
 __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
     "log_usage",
     "rate_limit_headers",
     "router",
+    "run_chat_completion",
 ]
 
 
@@ -156,9 +164,14 @@ class _ChatAdapter:
     """
 
     name = "chat"
-    endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
+
+    def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
+        # The only thing that varies between instances, and the only reason
+        # there is more than one: the Playground's rows carry their own label.
+        # Everything else about the format is identical, which is the point.
+        self.endpoint = endpoint
 
     def error(
         self,
@@ -321,6 +334,7 @@ class _ChatAdapter:
 
 
 _ADAPTER = _ChatAdapter()
+_PLAYGROUND_ADAPTER = _ChatAdapter(PLAYGROUND_USAGE_ENDPOINT)
 
 
 def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | None) -> int | None:
@@ -379,6 +393,48 @@ async def chat_completions(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
+    return await run_chat_completion(
+        raw_request=raw_request,
+        response=response,
+        background_tasks=background_tasks,
+        request=request,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+        model_provider=model_provider,
+    )
+
+
+async def run_chat_completion(
+    *,
+    raw_request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    request: ChatCompletionRequest,
+    db: AsyncSession | None,
+    config: GatewayConfig,
+    log_writer: LogWriter,
+    model_provider: ModelProviderPort,
+    session_principal: SessionPrincipal | None = None,
+) -> ChatCompletion | StreamingResponse:
+    """Serve one chat completion, from the resolved preamble to the response.
+
+    The body of :func:`chat_completions`, as a plain function so a second route
+    can serve the same request shape under a different credential rule without
+    either copying this or loosening that one. The Playground is that route
+    (``api/routes/playground.py``): it authenticates a dashboard session,
+    resolves the caller's own user and workspace, and passes the result down as
+    ``session_principal``. Everything from the budget gate onward is shared, so
+    the two paths cannot drift on routing, tools, pricing or settlement.
+
+    ``session_principal`` is standalone-only and left ``None`` by the public
+    endpoint, which keeps its API-key-or-master-key rule exactly as it was; see
+    :class:`SessionPrincipal` for what a caller owes before building one. It is
+    also what picks the usage row's endpoint label, so a Playground request is
+    countable separately from a customer's; ``PLAYGROUND_USAGE_ENDPOINT`` says
+    who reads that distinction and why.
+    """
+    adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
     if not request.model.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -413,7 +469,7 @@ async def chat_completions(
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
 
     ctx = await resolve_request_context(
-        adapter=_ADAPTER,
+        adapter=adapter,
         raw_request=raw_request,
         response=response,
         db=db,
@@ -425,6 +481,7 @@ async def chat_completions(
         estimate_max_output_tokens=output_cap,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        session_principal=session_principal,
         routing_signal=lambda: routing_signal_from_messages(
             request.messages, raw_request, has_tools=bool(request.tools)
         ),
@@ -432,7 +489,7 @@ async def chat_completions(
     )
 
     tool_ctx = await prepare_gateway_tools(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         response=response,
         guardrails=request.guardrails,
@@ -481,7 +538,7 @@ async def chat_completions(
                 )
             try:
                 return await run_streaming_with_fallback(
-                    adapter=_ADAPTER,
+                    adapter=adapter,
                     route=route,
                     base_request_fields=request_fields,
                     config=config,
@@ -494,17 +551,17 @@ async def chat_completions(
                 raise
             except Exception as exc:
                 # Every attempt failed before any bytes were flushed.
-                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
+                raise_all_streaming_attempts_failed(adapter, exc, route)
 
         # Standalone path: single attempt, no fallback (no `route.attempts`).
         # Resolve the instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+            ctx, config, request.model, adapter=adapter, model_provider=model_provider
         )
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
-            adapter=_ADAPTER,
+            adapter=adapter,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
@@ -528,7 +585,7 @@ async def chat_completions(
                 detail="Internal error: missing route context",
             )
         return await run_platform_non_stream(
-            adapter=_ADAPTER,
+            adapter=adapter,
             route=route,
             base_request_fields=request_fields,
             tool_ctx=tool_ctx,
@@ -540,11 +597,11 @@ async def chat_completions(
         )
 
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+        ctx, config, request.model, adapter=adapter, model_provider=model_provider
     )
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     return await run_standalone_non_stream(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,

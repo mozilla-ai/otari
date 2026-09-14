@@ -97,6 +97,7 @@ const STANDALONE_SURFACES = [
   "keys",
   "models",
   "organizations",
+  "playground",
   "pricing",
   "providers",
   "routing",
@@ -109,11 +110,14 @@ const STANDALONE_SURFACES = [
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
 // HOSTED_SURFACES beside it: the process-global provider page drops, the
-// organization-scoped one takes its place, and the organization-wide Usage page
-// appears, being a destination only where "my organization" is narrower than
-// "everything" (otari-ai#1963).
+// organization-scoped one takes its place, the Playground drops because a
+// control plane serves no inference (otari#822), and the organization-wide
+// Usage page appears, being a destination only where "my organization" is
+// narrower than "everything" (otari-ai#1963).
+const HOSTED_DROPS = new Set(["providers", "playground"])
+
 export const HOSTED_SURFACES = [
-  ...STANDALONE_SURFACES.filter((surface) => surface !== "providers"),
+  ...STANDALONE_SURFACES.filter((surface) => !HOSTED_DROPS.has(surface)),
   "organization_providers",
   "organization_usage",
 ]

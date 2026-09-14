@@ -61,6 +61,7 @@ describe("nav registry", () => {
       "Overview",
       "Activity",
       "Usage",
+      "Playground",
       "Models",
       "Routing",
       "Tools",

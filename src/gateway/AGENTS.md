@@ -75,7 +75,13 @@ dashboard session. It does not prove that the session may act deployment-wide.
 - Tenant routes authenticate, resolve `CurrentIdentity`, and authorize the
   organization or workspace in `services/tenancy/authorization.py`.
 - Data-plane routes use `verify_api_key_or_master_key`, which never accepts a
-  dashboard cookie.
+  dashboard cookie. The Playground's own completion endpoint
+  (`routes/playground.py`) is the one surface that runs a completion from a
+  session, and it is a separate route rather than a relaxation of that one: it
+  resolves the caller's attribution user and proves their workspace membership
+  itself, then hands the pipeline a `SessionPrincipal`
+  (`types/session_principal.py`). Adding a second such route means doing all
+  three, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
 
 Tenant lookups include the tenant predicate and return 404 for a foreign ID.
@@ -189,7 +195,10 @@ and use the shared renderer and header sanitization.
 ## Activation guide
 
 `workspace_activation_service.py` derives activation from the first successful
-usage row served by this deployment. Imported and absorbed rows do not count.
+usage row served by this deployment. Imported and absorbed rows do not count,
+and neither does a Playground row: the guide marks somebody integrating Otari
+from their own code, so it filters on the endpoint label as well as the source
+(`core/usage_source.integration_traffic`).
 The activation-state table stores only dismissal and setup-key state.
 
 Key issuance requires workspace management authority and rotates the existing
@@ -199,8 +208,11 @@ endpoints.
 ## Data and migrations
 
 Gateway ORM entities live in `models/entities.py`. Reconciled control-plane
-SQLModel tables live in `models/tenancy.py`. Both share `SQLModel.metadata`;
-`models/__init__.py` imports every table module before Alembic uses it.
+SQLModel tables live in `models/tenancy.py`, and the newer tenancy-scoped
+gateway tables whose `Public` schemas are endpoint contracts follow its style in
+their own modules (`models/provider_keys.py`, `models/playground.py`). All of
+them share `SQLModel.metadata`; `models/__init__.py` imports every table module
+before Alembic uses it.
 
 Request code gets a session through `get_db`; non-request code uses
 `create_session()`; the usage-log writer uses `create_log_session()`, which

@@ -572,6 +572,46 @@ export type CreateWorkspaceMcpServerRequest =
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
 
+// ---------------------------------------------------------------------------
+// Playground
+//
+// The dashboard's own chat page; see `src/gateway/api/routes/playground.py`.
+// Its completion endpoint takes the ordinary chat request body, so the shapes
+// named here are the page's memory (consent, saved transcripts, rated
+// comparisons, pinned models) and the tools menu's availability read.
+// ---------------------------------------------------------------------------
+export type PlaygroundConsent = Schemas["PlaygroundConsentPublic"]
+export type PlaygroundConsentUpdate = Schemas["PlaygroundConsentUpdate"]
+
+// Three states from two fields: a tool the deployment never configured, one a
+// workspace turned off (with the reason), and one that can be attached.
+export type PlaygroundToolStatus = Schemas["PlaygroundToolStatus"]
+export type PlaygroundTools = Schemas["PlaygroundToolsResponse"]
+export type PlaygroundMcpServer = Schemas["PlaygroundMcpServer"]
+
+// A saved transcript. The list carries a turn count and not the turns, so
+// loading one back into the page is a second request.
+export type PlaygroundConversation = Schemas["PlaygroundConversationSummary"]
+export type PlaygroundConversations = Schemas["PlaygroundConversationsPublic"]
+export type SavePlaygroundConversationRequest =
+  Schemas["PlaygroundConversationCreate"]
+export type PlaygroundMessage = Schemas["PlaygroundMessagePublic"]
+export type PlaygroundMessages = Schemas["PlaygroundMessagesPublic"]
+
+// A rated A/B exchange. The summary deliberately carries no answer bodies;
+// there is no endpoint that reads one back, because a comparison is a recorded
+// judgment rather than a transcript to resume.
+export type PlaygroundComparison = Schemas["PlaygroundComparisonSummary"]
+export type PlaygroundComparisons = Schemas["PlaygroundComparisonsPublic"]
+export type SavePlaygroundComparisonRequest =
+  Schemas["PlaygroundComparisonCreate"]
+export type PlaygroundComparisonPreference =
+  SavePlaygroundComparisonRequest["preference"]
+
+export type PlaygroundFavoriteModels = Schemas["PlaygroundFavoriteModelsPublic"]
+export type PlaygroundFavoriteModelsUpdate =
+  Schemas["PlaygroundFavoriteModelsUpdate"]
+
 // The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
 // here rather than hand-written at the call site so the authorization response
 // and the callback body cannot drift from the spec without a type error.

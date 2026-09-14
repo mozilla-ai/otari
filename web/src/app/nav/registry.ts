@@ -10,6 +10,7 @@ import {
   FiHome,
   FiKey,
   FiLayers,
+  FiMessageSquare,
   FiRepeat,
   FiServer,
   FiShield,
@@ -102,6 +103,25 @@ const BASE_NAV_SECTIONS = [
       // carries: a row leaves the list by its page ceasing to refuse anyone
       // (otari-ai#1942). Models reads the catalog any session may read, and
       // Routing reads the tenant-scoped policy list for a non-operator.
+      // First in the section, and the only row here that is not configuration:
+      // "Build" is what the gateway serves, and the Playground is the one place
+      // you use what you built rather than change it. The roles matrix has it at
+      // full access for every role (otari-ai#1947), which is why it carries no
+      // `operatorOnly`: a completion here is billed to whoever sent it, in their
+      // own workspace, so the page serves every signed-in identity something
+      // true.
+      //
+      // Gated on the `playground` surface, which a hosted control plane does not
+      // report: the page dispatches a completion and that plane serves no
+      // inference (otari#822). The surface axis rather than the capability one
+      // for the reason the registry's own note gives, that a capability a base
+      // entry names must be granted.
+      {
+        to: "/playground",
+        label: "Playground",
+        surface: "playground",
+        icon: FiMessageSquare,
+      },
       {
         to: "/models",
         label: "Models",

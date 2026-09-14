@@ -81,6 +81,20 @@ export const WORKSPACES = "workspaces"
 // every one of those ticks invalidate (or be invalidated by) the workspace list
 // and its rosters.
 export const ACTIVATION = "workspace-activation"
+// The Playground's own reads, all four of them under one key because they are
+// one page's state and nothing outside that page reads or writes them: the
+// caller's retention consent, their saved transcripts, their rated comparisons,
+// their pinned models, and the tools menu's availability. Scoped per workspace
+// below the root where the answer is per workspace (consent is not: it is about
+// what this deployment stores about a person, so it is asked once).
+//
+// Deliberately not nested under WORKSPACES, which the workspace tool-policy
+// reads are: those are the same rows the Tools pages edit, so a save there has
+// to invalidate them, while nothing an operator edits changes a transcript
+// somebody saved. Nesting would make every workspace write refetch the page's
+// whole history.
+export const PLAYGROUND = "playground"
+
 // The signed-in identity's own passkeys. Its own key and not a child of any
 // organization key: a passkey belongs to a person, not to the organization they
 // happen to be acting in, and switching organizations does not change the list.
