@@ -110,16 +110,6 @@ function tabNameForPath(to: NavPath): string {
 }
 
 /**
- * Which rail a `TAB_CHANGED` belongs to, in the platform's own vocabulary.
- *
- * `otari-ai/frontend/src/app/nav/registry.ts` sends `"workspace_sidebar"` and
- * `"organization_settings"` for this property, so those are the values sent
- * here. A value used as a breakdown is as much a shared vocabulary as the event
- * name over it: `context: "workspace"` beside a historical
- * `context: "workspace_sidebar"` splits one funnel exactly the way a renamed
- * event would.
- */
-/**
  * Which sections each rail draws. A record rather than a ternary, so adding a
  * context is a line here instead of an edit at every site that asks which rail
  * is showing.
@@ -130,6 +120,16 @@ const RAIL_SECTIONS: Record<NavContext, readonly NavSection[]> = {
   deployment: DEPLOYMENT_NAV_SECTIONS,
 }
 
+/**
+ * Which rail a `TAB_CHANGED` belongs to, in the platform's own vocabulary.
+ *
+ * `otari-ai/frontend/src/app/nav/registry.ts` sends `"workspace_sidebar"` and
+ * `"organization_settings"` for this property, so those are the values sent
+ * here. A value used as a breakdown is as much a shared vocabulary as the event
+ * name over it: `context: "workspace"` beside a historical
+ * `context: "workspace_sidebar"` splits one funnel exactly the way a renamed
+ * event would.
+ */
 function navTrackContext(to: NavPath): string {
   return navContextForPath(to) === "organization"
     ? "organization_settings"
