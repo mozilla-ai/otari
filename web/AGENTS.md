@@ -194,6 +194,15 @@ visibly in the rail, and the failure reads as the element not rendering rather
 than as the query looking in the wrong place. Query the page for anything in the
 band or the footer.
 
+**After resolving a conflict, go looking by name for every fix that landed in
+that file since the merge base.** A conflict resolution reverts a review fix more
+easily than anything else in the file: it is typically one line, it has no test
+behind it, and it lives in a state no test reaches, while whoever is resolving is
+holding the structural change in their head. Re-reading the diff does not catch
+it, because an absent line has no shape. Grep the resolved file for the guard, the
+flag or the narrowing you know should be there, and then re-run whatever
+established it in the first place.
+
 **A CI green and a local green answer different questions.** CI builds the pull
 request's merge ref, so its run is the branch merged into `main` as it stood when
 the run was created; a local run is the branch alone. The suites are therefore
