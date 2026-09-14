@@ -48,6 +48,18 @@ import { formatDate } from "@/shared/helpers/format"
 // string back to it.
 const getWorkspaceRowKey = (workspace: Workspace): string => workspace.id
 
+/**
+ * How many workspaces the provider-key column will fan out across.
+ *
+ * The summary costs one read per workspace, and the list above it is a
+ * `fetchAllPaged` walk whose own ceiling is 100 pages of 1000, so nothing else
+ * here bounds the fan-out. The column is a convenience, which is not worth tens
+ * of thousands of requests to a large tenant: past this many workspaces it is
+ * dropped rather than fetched, until an organization-scoped batch read exists
+ * to answer it in one.
+ */
+const PROVIDER_KEY_SUMMARY_LIMIT = 25
+
 const LAST_WORKSPACE_REASON =
   "An organization keeps at least one workspace; create another first"
 
@@ -138,7 +150,8 @@ function NarrowedDefaults({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-body">Per-provider defaults</span>
+      {/* The section head role, as the provider-keys group below it uses. */}
+      <span className="text-title">Per-provider defaults</span>
       <ErrorBanner error={createDefault.error ?? updateDefault.error} />
       {narrowed.length === 0 ? (
         <span className="text-caption">
@@ -741,7 +754,11 @@ export function WorkspacesPage() {
   // failure is not surfaced for the same reason the defaults' is not: a column
   // that could not be read says nothing rather than turning the list into an
   // error page.
-  const providerKeys = useAllWorkspaceProviderKeys(manages ? workspaceIds : [])
+  const providerKeys = useAllWorkspaceProviderKeys(
+    manages && workspaceIds.length <= PROVIDER_KEY_SUMMARY_LIMIT
+      ? workspaceIds
+      : [],
+  )
   // And dropped again where no workspace has a key to depart from, which is
   // every standalone deployment: organization-owned provider keys are a hosted
   // surface (`organization_providers`), so the column would otherwise be a

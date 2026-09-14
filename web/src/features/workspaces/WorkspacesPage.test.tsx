@@ -653,6 +653,28 @@ describe("WorkspacesPage", () => {
     ).toBeNull()
   })
 
+  it("stops fanning out across a tenant with many workspaces", async () => {
+    // The column costs one read per workspace and the list walk above it is
+    // bounded only at 100k, so past a sane count the column is dropped rather
+    // than fetched.
+    const many = Array.from({ length: 26 }, (_, i) =>
+      workspace({
+        id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`,
+        name: `Workspace ${i}`,
+      }),
+    )
+    const requests = mockApi({ workspaces: many })
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Workspace 25")
+    expect(
+      screen.queryByRole("columnheader", { name: "Provider keys" }),
+    ).toBeNull()
+    expect(
+      requests.filter((request) => request.url.includes("provider-keys")),
+    ).toEqual([])
+  })
+
   it("says a workspace that departs from nothing inherits every key", async () => {
     // Distinct from the empty cell an organization holding no keys gets: this
     // workspace could depart and has not.

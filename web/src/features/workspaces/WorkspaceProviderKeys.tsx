@@ -304,7 +304,10 @@ export function WorkspaceProviderKeys({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <span className="text-body">Provider keys</span>
+        {/* `text-title` is the role for a group of fields, which is what this
+            is inside the edit dialog. On `text-body` it was the same 14/400 as
+            the prose under it, so nothing said a new section had started. */}
+        <span className="text-title">Provider keys</span>
         <span className="max-w-md text-caption">
           This workspace inherits every provider key the organization holds.
           Where a provider has more than one, say which of them this workspace
