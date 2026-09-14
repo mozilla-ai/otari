@@ -5,6 +5,21 @@ import type { JSX, ReactElement, ReactNode } from "react"
 export type TooltipTriggerProps = JSX.IntrinsicElements["button"]
 
 /**
+ * How long a pointer has to rest on a trigger before the label appears.
+ *
+ * HeroUI reads `--tooltip-delay` off the document root and ships it at 1.5s,
+ * which is react-aria's warmup default: long enough that a row of icon actions
+ * reads as having no labels at all, because nobody holds a cursor still for a
+ * second and a half to find out what a glyph does. A third of a second is short
+ * enough to feel like an answer and long enough that sweeping the pointer
+ * across a row of them does not flash four labels on the way past. Set as a
+ * prop rather than in the theme so it travels with the component that depends
+ * on it; react-aria still opens the next tooltip in a group instantly once one
+ * has been seen.
+ */
+const OPEN_DELAY_MS = 300
+
+/**
  * A short label revealed by hovering or focusing the thing it describes.
  *
  * **A tooltip is never the only channel.** motion-and-access.md's rule about
@@ -47,7 +62,7 @@ export function Tooltip({
   children: ReactNode | ((props: TooltipTriggerProps) => ReactElement)
 }) {
   return (
-    <HeroTooltip.Root>
+    <HeroTooltip.Root delay={OPEN_DELAY_MS}>
       {typeof children === "function" ? (
         // The generic is what types the render function for a `button` rather
         // than for the `div` HeroUI's trigger defaults to. A control wanting a

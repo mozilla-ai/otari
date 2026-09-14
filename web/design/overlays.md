@@ -43,6 +43,11 @@ It takes its trigger as `children` rather than as a prop, so the trigger keeps
 its own type: an `IconButton` inside one is still an `IconButton`, with its
 required label and its 44px box intact.
 
+**It opens after 300ms, not HeroUI's 1.5s.** The library reads `--tooltip-delay`
+off the document root and ships it at react-aria's warmup default, which is long
+enough that a lane of icon actions reads as having no labels at all. The
+component sets the delay itself, so a call site never has to.
+
 **Which of the two forms you want depends on whether the trigger takes DOM
 props.** HeroUI's own trigger is a `div` the library gives `role="button"` and
 `tabIndex=0`, which is what makes a non-interactive trigger reachable at all and

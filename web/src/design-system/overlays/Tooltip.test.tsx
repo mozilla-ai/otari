@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
@@ -44,5 +47,25 @@ describe("Tooltip", () => {
       "data-slot",
       "tooltip-trigger",
     )
+  })
+
+  /**
+   * A source sweep rather than a hover: react-aria's hover never fires under
+   * jsdom, so a test that waits for the label to open waits forever whatever
+   * the delay is. The prop is what is worth guarding. Without it HeroUI falls
+   * back to `--tooltip-delay` on the document root, which it ships at
+   * react-aria's 1.5s warmup, and every icon action in every table goes back to
+   * reading as unlabeled. Same shape as the globals.css sweeps in
+   * `styles/foundation.test.ts`: the file is the artifact under test.
+   */
+  it("sets its own open delay rather than inheriting HeroUI's 1.5s", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src", "design-system", "overlays", "Tooltip.tsx"),
+      "utf8",
+    )
+    expect(source).toMatch(/HeroTooltip\.Root[^>]*\bdelay=\{OPEN_DELAY_MS\}/)
+    const declared = source.match(/const OPEN_DELAY_MS = (\d+)/)
+    expect(declared).not.toBeNull()
+    expect(Number(declared?.[1])).toBeLessThanOrEqual(500)
   })
 })
