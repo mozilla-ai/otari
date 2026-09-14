@@ -136,6 +136,25 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05)
 }
 
+/**
+ * The hex behind a one-level alias, for the variables that are declared as
+ * `var(--color-…)` rather than as a color. Deliberately one level and not a
+ * resolver: every alias in these blocks is one hop, and a general one would
+ * quietly keep passing if a chain grew a cycle.
+ */
+function alias1(tokens: Map<string, string>, name: string): string {
+  const value = tokens.get(name)
+  expect(value, `${name} is not declared`).toBeDefined()
+  const target = /^var\((--[a-z0-9-]+)\)$/.exec(value as string)?.[1]
+  if (!target) return value as string
+  const resolved = tokens.get(target)
+  expect(
+    resolved,
+    `${name} aliases ${target}, which is not declared`,
+  ).toBeDefined()
+  return resolved as string
+}
+
 describe("text on every ground it can land on", () => {
   // The repair in this change was measured against all six grounds each theme
   // declares, and the measurement is the assertion. Without it the WCAG AA fix
@@ -218,11 +237,13 @@ describe("a placeholder does not read as a typed value", () => {
         `--field-placeholder bypasses the tokens in the ${theme} theme`,
       ).toMatch(/^var\(--color-[a-z0-9-]+\)$/)
 
-      const placeholder = tokens.get(
-        (alias as string).slice("var(".length, -1),
-      ) as string
-      const value = tokens.get("--color-text") as string
-      const ratio = contrast(value, placeholder)
+      // Both sides resolved through the mapping rather than named directly, so
+      // this keeps measuring the two inks a field actually paints with if either
+      // is ever repointed at a different rung.
+      const ratio = contrast(
+        alias1(tokens, "--field-foreground"),
+        alias1(tokens, "--field-placeholder"),
+      )
       expect(
         ratio,
         `a placeholder is ${ratio.toFixed(2)}:1 from a typed value in the ${theme} theme, under the ${UI_COMPONENT}:1 needed to tell them apart`,
