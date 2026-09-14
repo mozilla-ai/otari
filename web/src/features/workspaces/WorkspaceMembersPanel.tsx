@@ -108,7 +108,7 @@ export function AddWorkspaceMemberDialog({
               add someone to the organization first, on{" "}
               {/* Underlined, not colored alone: the link ink on this banner's
                   muted prose is under the contrast floor, so the underline is
-                  what carries it. No `font-medium`, which resolves to 400. */}
+                  what carries it. */}
               <Link to="/organization/members" className="text-link underline">
                 Members &amp; roles
               </Link>
