@@ -265,3 +265,45 @@ export function buildValidateKwargs(
   }
   return Object.keys(kwargs).length > 0 ? kwargs : null
 }
+
+/**
+ * Assemble the typed fields into the `create_kwargs` map a definition is stored
+ * with.
+ *
+ * Here rather than beside the form that calls it, because the mask rule above
+ * is the thing it has to get right and that rule lives in this file. Three ways
+ * it differs from `buildValidateKwargs`:
+ *
+ * A blank secret that is already stored sends the mask rather than nothing. A
+ * PATCH **replaces** `create_kwargs` instead of merging into it, so a key left
+ * out is a key deleted: saving an endpoint would otherwise take the credential
+ * with it.
+ *
+ * An argument the catalog marks unstorable is dropped. Upstream types it as a
+ * live client or session object, the gateway refuses it with a 400, and the form
+ * offers no value to send.
+ *
+ * And an empty result is an empty map rather than null, because a guardrail that
+ * takes no constructor arguments is ordinary rather than unconfigured.
+ */
+export function buildCreateKwargs(
+  specs: GuardrailParameterSpec[],
+  values: ParameterValues,
+  /** Secret names the row already holds. Undefined while creating a new one. */
+  storedSecrets?: readonly string[],
+): Record<string, unknown> {
+  const stored = new Set(storedSecrets ?? [])
+  const kwargs: Record<string, unknown> = {}
+  for (const spec of specs) {
+    if (spec.storable === false) continue
+    const value = values[spec.name]
+    if (isBlank(value)) {
+      if (spec.secret && stored.has(spec.name)) {
+        kwargs[spec.name] = REDACTED_SECRET
+      }
+      continue
+    }
+    kwargs[spec.name] = coerce(spec, value)
+  }
+  return kwargs
+}

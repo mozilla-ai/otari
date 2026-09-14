@@ -27,12 +27,33 @@ function placeholderFor(spec: GuardrailParameterSpec): string | undefined {
   return `default: ${shown}`
 }
 
+/**
+ * What a secret's field says about the value behind it.
+ *
+ * `SecretField` is never prefilled, so on an edit the only way to tell a stored
+ * credential from an absent one is to say so. `storedSecrets` is undefined while
+ * creating, where there is nothing to report and the schema's own help is what
+ * the operator needs.
+ */
+function secretNote(
+  spec: GuardrailParameterSpec,
+  storedSecrets: readonly string[] | undefined,
+): string | undefined {
+  const help = spec.description ?? undefined
+  if (!spec.secret || storedSecrets === undefined) return help
+  const status = storedSecrets.includes(spec.name)
+    ? "Set already, and never shown again. Leave blank to keep it."
+    : "Not set."
+  return help ? `${status} ${help}` : status
+}
+
 function ParameterControl({
   spec,
   scopeName,
   value,
   error,
   disabled,
+  storedSecrets,
   onChange,
 }: {
   spec: GuardrailParameterSpec
@@ -41,10 +62,30 @@ function ParameterControl({
   value: ParameterValues[string]
   error: string | undefined
   disabled: boolean
+  /** See `secretNote`. Undefined for a form that is creating rather than editing. */
+  storedSecrets?: readonly string[]
   onChange: (next: ParameterValues[string]) => void
 }) {
   const label = parameterLabel(spec.name)
-  const description = spec.description ?? undefined
+  // An unstorable argument is rendered rather than hidden, disabled and saying
+  // why: upstream types it as a live client or session object, so no database
+  // can hold one and the gateway refuses it. An absent field would leave the
+  // operator looking for the credential argument it is not.
+  if (spec.storable === false) {
+    return (
+      <Field
+        label={label}
+        value=""
+        onChange={() => undefined}
+        isDisabled
+        description="Cannot be stored: this argument takes a live client object. Use the credential arguments beside it."
+        reserveMessage
+      />
+    )
+  }
+  const description = spec.secret
+    ? secretNote(spec, storedSecrets)
+    : (spec.description ?? undefined)
 
   if (spec.type === "boolean") {
     return (
@@ -163,6 +204,7 @@ export function GuardrailParameterFields({
   values,
   errors,
   disabled,
+  storedSecrets,
   onChange,
 }: {
   specs: GuardrailParameterSpec[]
@@ -170,6 +212,8 @@ export function GuardrailParameterFields({
   values: ParameterValues
   errors: ParameterErrors
   disabled: boolean
+  /** Secret names the entry already holds, which marks this an edit. See `secretNote`. */
+  storedSecrets?: readonly string[]
   onChange: (name: string, next: ParameterValues[string]) => void
 }) {
   return (
@@ -182,6 +226,7 @@ export function GuardrailParameterFields({
           value={values[spec.name]}
           error={errors[spec.name]}
           disabled={disabled}
+          storedSecrets={storedSecrets}
           onChange={(next) => onChange(spec.name, next)}
         />
       ))}

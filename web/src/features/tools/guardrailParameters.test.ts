@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import type { GuardrailCatalog, GuardrailParameterSpec } from "@/client"
 import {
+  buildCreateKwargs,
   buildValidateKwargs,
   parameterErrors,
   parameterLabel,
@@ -312,5 +313,76 @@ describe("a stored secret parameter", () => {
     expect(buildValidateKwargs([booleanSecret], seeded.values, "")).toEqual({
       use_api_key: REDACTED_SECRET,
     })
+  })
+})
+
+describe("buildCreateKwargs", () => {
+  const specs: GuardrailParameterSpec[] = [
+    {
+      name: "api_key",
+      type: "string",
+      required: true,
+      secret: true,
+      storable: true,
+    },
+    {
+      name: "endpoint",
+      type: "string",
+      required: false,
+      secret: false,
+      storable: true,
+    },
+    {
+      name: "threshold",
+      type: "number",
+      required: false,
+      secret: false,
+      storable: true,
+    },
+    {
+      name: "api_client",
+      type: "json",
+      required: false,
+      secret: true,
+      storable: false,
+    },
+  ]
+
+  it("coerces what was typed and drops what was not", () => {
+    expect(
+      buildCreateKwargs(specs, {
+        api_key: "lakera-live-1",
+        endpoint: "",
+        threshold: "0.8",
+      }),
+    ).toEqual({ api_key: "lakera-live-1", threshold: 0.8 })
+  })
+
+  it("sends the mask for a stored secret left blank", () => {
+    // The PATCH replaces the whole map, so omitting the key would delete the
+    // credential on a save that only changed the endpoint.
+    expect(
+      buildCreateKwargs(
+        specs,
+        { api_key: "", endpoint: "https://api.lakera.ai" },
+        ["api_key"],
+      ),
+    ).toEqual({ api_key: REDACTED_SECRET, endpoint: "https://api.lakera.ai" })
+  })
+
+  it("sends a typed secret rather than the mask, which is how one rotates", () => {
+    expect(
+      buildCreateKwargs(specs, { api_key: "lakera-live-2" }, ["api_key"]),
+    ).toEqual({ api_key: "lakera-live-2" })
+  })
+
+  it("leaves out a secret that is blank and was never stored", () => {
+    expect(buildCreateKwargs(specs, { api_key: "" })).toEqual({})
+  })
+
+  it("never sends an argument the catalog cannot store", () => {
+    expect(
+      buildCreateKwargs(specs, { api_client: '{"a": 1}', api_key: "k" }),
+    ).toEqual({ api_key: "k" })
   })
 })

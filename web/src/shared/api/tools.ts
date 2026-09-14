@@ -1,16 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  BuiltInGuardrailCatalog,
+  CreateGuardrailRequest,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
+  GuardrailCredentialsResponse,
   OrganizationGuardrail,
   SearchProviderInfo,
   SearchToolsResponse,
+  StoredGuardrail,
   StoredSearchTool,
+  TestGuardrailRequest,
+  TestGuardrailResponse,
   TestServiceResponse,
   ToolSettingsResponse,
   ToolsResponse,
+  UpdateGuardrailRequest,
   UpdateOrganizationGuardrailRequest,
   UpdateSearchToolRequest,
   UpdateToolSettingsRequest,
@@ -25,6 +32,8 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  GUARDRAIL_BUILTINS,
+  GUARDRAIL_CREDENTIALS,
   GUARDRAIL_PROFILES,
   ORGANIZATION_GUARDRAILS,
   SEARCH_PROVIDERS,
@@ -179,6 +188,103 @@ export function useGuardrailProfiles(enabled = true) {
       apiFetch<GuardrailCatalog>("/tool-settings/guardrails/profiles"),
     staleTime: 300_000,
     enabled,
+  })
+}
+
+// The guardrails this build can construct and run in its own process, with the
+// constructor and per-call arguments each one takes. Unlike the profile list
+// above, this is not a remote service's answer: it is a fact about the packages
+// installed here, so it moves only when the process is redeployed. Hence the
+// five-minute window `useSearchProviders` takes for the same reason.
+//
+// Operator-only, like every route on the guardrail store, so it takes `enabled`
+// rather than firing and catching the 403.
+export function useBuiltInGuardrails(enabled = true) {
+  return useQuery({
+    queryKey: [GUARDRAIL_BUILTINS],
+    queryFn: () =>
+      apiFetch<BuiltInGuardrailCatalog>("/tool-settings/guardrails/catalog"),
+    staleTime: 300_000,
+    enabled,
+  })
+}
+
+// Every guardrail a caller's `profile` field can name: the rows an operator
+// stored here, plus the read-only entries declared in config.yml, so the card
+// shows both sources the way the search-tools card does.
+export function useGuardrailCredentials(enabled = true) {
+  return useQuery({
+    queryKey: [GUARDRAIL_CREDENTIALS],
+    queryFn: () =>
+      apiFetch<GuardrailCredentialsResponse>("/guardrail-credentials"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useCreateGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateGuardrailRequest) =>
+      apiFetch<StoredGuardrail>("/guardrail-credentials", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_CREDENTIALS] }),
+  })
+}
+
+// A PATCH replaces `create_kwargs` rather than merging into it, so the caller
+// sends the whole map every time, with `***` standing in for a secret it means
+// to keep. See `LocalGuardrailDialog` for how the form maps onto that.
+export function useUpdateGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: UpdateGuardrailRequest
+    }) =>
+      apiFetch<StoredGuardrail>(
+        `/guardrail-credentials/${encodeURIComponent(name)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_CREDENTIALS] }),
+  })
+}
+
+export function useDeleteGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<void>(`/guardrail-credentials/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_CREDENTIALS] }),
+  })
+}
+
+// Run a stored guardrail once against a sample input. Read-only, so it
+// invalidates nothing, like `useTestService` above. A guardrail that cannot run
+// answers `ok: false` with the reason rather than failing the request.
+export function useTestGuardrail() {
+  return useMutation({
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: TestGuardrailRequest
+    }) =>
+      apiFetch<TestGuardrailResponse>(
+        `/guardrail-credentials/${encodeURIComponent(name)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

@@ -138,15 +138,22 @@ Otari can also build a guardrail and run it in its own process, with no second
 container. A guardrail defined this way is a row Otari owns rather than an entry
 in a file the guardrails service reads, so adding one takes no restart.
 
+The dashboard does all of this under Tools and guardrails, in "Guardrails Otari
+runs itself". Pick what you want checked, such as prompt injection, and the
+second list narrows to the guardrails that check it, with whatever each one
+needs below. A guardrail whose packages are not installed is shown anyway,
+dimmed, naming the extra that would make it runnable. The rest of this section
+is the same thing through the API.
+
 `GET /api/v1/tool-settings/guardrails/catalog` lists every guardrail this build
 ships, with both stages of arguments: `create` for the constructor, where a
 vendor API key lives, and `validate` for the per-call ones. A guardrail whose
 packages are not installed reports `runnable: false` and names the extra that
 would fix it.
 
-`POST /api/v1/guardrail-credentials` defines one. It is operator-only and
-standalone-only, so a hosted or hybrid deployment does not serve it. The name is
-what a request sends as its `profile`:
+`POST /api/v1/guardrail-credentials` defines one. It is operator-only, and a
+hybrid gateway does not serve it at all, because a hybrid deployment keeps no
+local database. The name is what a request sends as its `profile`:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/guardrail-credentials \

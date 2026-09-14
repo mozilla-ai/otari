@@ -10,7 +10,9 @@ import type {
   ActivationAttempt,
   ApiKey,
   Budget,
+  BuiltInGuardrailSpec,
   CallerOrganizationMembership,
+  ConfigGuardrail,
   DeploymentBootstrap,
   DeploymentUser,
   Organization,
@@ -23,6 +25,7 @@ import type {
   PendingOrganizationInvitation,
   PricingResponse,
   ScopedBudget,
+  StoredGuardrail,
   UsageSeriesPoint,
   UsageTotals,
   User,
@@ -702,6 +705,79 @@ export function workspaceMcpServer(
     has_token: false,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+// A guardrail this build can run itself, as the built-in catalog reports it.
+// Defaults to the ordinary hosted-API shape: runnable here, one required key.
+export function builtInGuardrail(
+  overrides: Partial<BuiltInGuardrailSpec> = {},
+): BuiltInGuardrailSpec {
+  return {
+    guardrail_name: "lakera_guard",
+    display_name: "Lakera Guard",
+    description: "Checks a prompt against Lakera's detectors.",
+    vendor: "Lakera",
+    backend: "hosted_api",
+    alternate_backends: [],
+    primary_category: "prompt_injection",
+    categories: ["prompt_injection"],
+    stages: ["input"],
+    output_shapes: ["binary"],
+    requires_api_key: true,
+    multilingual: true,
+    multimodal: false,
+    supports_batch: false,
+    default_license: "proprietary",
+    variant_licenses: [],
+    runnable: true,
+    missing_extra: null,
+    create_parameters: [
+      {
+        name: "api_key",
+        type: "string",
+        required: true,
+        default: null,
+        choices: null,
+        secret: true,
+        storable: true,
+        description: "The Lakera API key.",
+      },
+    ],
+    validate_parameters: [],
+    ...overrides,
+  }
+}
+
+// A stored guardrail definition. Secrets appear only as the names that are set.
+export function storedGuardrail(
+  overrides: Partial<StoredGuardrail> = {},
+): StoredGuardrail {
+  return {
+    name: "prompt-injection",
+    guardrail_name: "lakera_guard",
+    create_kwargs: {},
+    create_secrets: { api_key: "***" },
+    validate_kwargs: {},
+    enabled: true,
+    created_at: "2026-09-01T00:00:00+00:00",
+    updated_at: "2026-09-01T00:00:00+00:00",
+    decryptable: true,
+    shadows_config: false,
+    ...overrides,
+  }
+}
+
+// A guardrail declared in config.yml, which the card shows but cannot edit.
+export function configGuardrail(
+  overrides: Partial<ConfigGuardrail> = {},
+): ConfigGuardrail {
+  return {
+    name: "from-file",
+    guardrail_name: "any_llm",
+    enabled: true,
+    shadowed: false,
     ...overrides,
   }
 }

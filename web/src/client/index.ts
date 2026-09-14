@@ -387,6 +387,22 @@ export type GuardrailProfileSpec = Schemas["GuardrailProfileSpec"]
 export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
 export type GuardrailParameterType = GuardrailParameterSpec["type"]
 
+// The guardrails this build can construct and run itself, and the definitions
+// stored against them. See `src/gateway/services/guardrail_catalog.py` and
+// `src/gateway/api/routes/guardrail_credentials.py`.
+export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
+export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
+export type GuardrailCategory = BuiltInGuardrailSpec["primary_category"]
+export type GuardrailBackend = BuiltInGuardrailSpec["backend"]
+export type StoredGuardrail = Schemas["StoredGuardrailSchema"]
+export type ConfigGuardrail = Schemas["ConfigGuardrailSchema"]
+export type GuardrailCredentialsResponse =
+  Schemas["GuardrailCredentialsResponse"]
+export type CreateGuardrailRequest = Schemas["CreateGuardrailRequest"]
+export type UpdateGuardrailRequest = Schemas["UpdateGuardrailRequest"]
+export type TestGuardrailRequest = Schemas["TestGuardrailRequest"]
+export type TestGuardrailResponse = Schemas["TestGuardrailResponse"]
+
 // ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------

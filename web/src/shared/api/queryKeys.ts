@@ -28,6 +28,12 @@ export const SEARCH_PROVIDERS = "search-providers"
 // remote service's answer, so a settings save that changes that URL invalidates
 // it, while every other tool-settings write must not re-dial the sidecar.
 export const GUARDRAIL_PROFILES = "guardrail-profiles"
+// The guardrails this build can run in its own process, and the definitions an
+// operator has stored for them. Two keys rather than one: the catalog is a fact
+// about the installed packages and moves only on a redeploy, while a stored
+// definition moves on every write from the card that edits it.
+export const GUARDRAIL_BUILTINS = "guardrail-builtins"
+export const GUARDRAIL_CREDENTIALS = "guardrail-credentials"
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
 // The tenant-scoped sibling of ROUTING_POLICIES. Its own key: the two lists
