@@ -1,6 +1,10 @@
 import logging
+import os
+import subprocess
 import sys
+import textwrap
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import uvicorn
@@ -42,7 +46,7 @@ def serve_stubs(monkeypatch: pytest.MonkeyPatch) -> ServeCapture:
 
     monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
     monkeypatch.setattr(gateway_cli, "setup_logger", fake_setup_logger)
-    monkeypatch.setattr(gateway_cli, "create_app", fake_create_app)
+    monkeypatch.setattr("gateway.main.create_app", fake_create_app)
     monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
     return captured
 
@@ -99,6 +103,69 @@ def test_main_invokes_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     gateway_cli.main()
 
     assert called
+
+
+def test_cli_import_does_not_load_server_application() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import gateway.cli, sys; assert 'gateway.main' not in sys.modules"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="The extraction address-space limit is enforced on Linux")
+def test_serve_can_spawn_memory_bounded_extraction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Spawn reloads the launcher in the child, including its top-level CLI import.
+    launcher = tmp_path / "extraction_cli.py"
+    launcher.write_text(
+        textwrap.dedent(
+            """\
+            from gateway.cli import main
+
+            if __name__ == "__main__":
+                import asyncio
+                import uvicorn
+                from gateway.services.web_extraction import ExtractionSupervisor
+
+                async def extract():
+                    supervisor = ExtractionSupervisor()
+                    try:
+                        result = await supervisor.extract_html(
+                            "<html><body><article><h1>CLI extraction probe</h1>"
+                            "<p>The real worker must extract this document within its "
+                            "unchanged memory limit.</p></article></body></html>"
+                        )
+                        assert "CLI extraction probe" in result.text, result.text
+                    finally:
+                        supervisor.close()
+
+                def run_extraction(app, **kwargs):
+                    asyncio.run(extract())
+                    print("CLI_EXTRACTION_OK")
+
+                uvicorn.run = run_extraction
+                main()
+            """
+        )
+    )
+    config = tmp_path / "config.yml"
+    config.write_text("mode: standalone\nmaster_key: test-master-key\ndatabase_url: 'sqlite:///:memory:'\n")
+    for name in list(os.environ):
+        if name.startswith(("OTARI_", "GATEWAY_")):
+            monkeypatch.delenv(name)
+    result = subprocess.run(
+        [sys.executable, str(launcher), "serve", "--config", str(config)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CLI_EXTRACTION_OK" in result.stdout
 
 
 def test_gateway_config_defaults_to_sqlite() -> None:
