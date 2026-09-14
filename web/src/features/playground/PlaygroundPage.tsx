@@ -2,6 +2,7 @@ import { FiArrowDown } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 
 import { ComparisonHistoryDialog } from "./ComparisonHistoryDialog"
@@ -105,6 +106,14 @@ export function PlaygroundPage() {
         isNewChatDisabled={!hasTranscript}
       />
 
+      {/* Under the toolbar, where the controls that can fail are: a refused
+          save, a refused rating, or a transcript that would not load. */}
+      {playground.actionError ? (
+        <div className="pt-4">
+          <ErrorBanner error={playground.actionError} />
+        </div>
+      ) : null}
+
       {playground.isShowingWelcome ? (
         <PlaygroundWelcome
           composerProps={composerProps}
@@ -199,6 +208,7 @@ export function PlaygroundPage() {
         confirmLabel="Save"
         confirmVariant="primary"
         isPending={playground.isConfirmingConsent}
+        error={playground.consentError}
         onConfirm={() => {
           void playground.confirmPendingConsent()
         }}
@@ -211,6 +221,7 @@ export function PlaygroundPage() {
         onLoad={(id) => void playground.loadConversation(id)}
         onDelete={playground.removeConversation}
         isDeleting={playground.isDeletingConversation}
+        deleteError={playground.deleteConversationError}
       />
 
       <ComparisonHistoryDialog
@@ -219,6 +230,7 @@ export function PlaygroundPage() {
         comparisons={playground.comparisons}
         onDelete={playground.removeComparison}
         isDeleting={playground.isDeletingComparison}
+        deleteError={playground.deleteComparisonError}
       />
     </div>
   )

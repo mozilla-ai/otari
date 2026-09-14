@@ -31,12 +31,15 @@ export function ComparisonHistoryDialog({
   comparisons,
   onDelete,
   isDeleting,
+  deleteError,
 }: {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
   comparisons: readonly PlaygroundComparison[]
   onDelete: (comparisonId: string) => void
   isDeleting: boolean
+  /** The last delete's failure, shown in the confirm dialog. */
+  deleteError?: unknown
 }) {
   const [pendingDelete, setPendingDelete] = useState<
     PlaygroundComparison | undefined
@@ -94,6 +97,7 @@ export function ComparisonHistoryDialog({
         body="This permanently deletes the saved rating and both answers. It cannot be undone."
         confirmLabel="Delete"
         isPending={isDeleting}
+        error={deleteError}
         onConfirm={() => {
           if (!pendingDelete) return
           onDelete(pendingDelete.id)

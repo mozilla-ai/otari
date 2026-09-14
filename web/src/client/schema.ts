@@ -8994,6 +8994,11 @@ export interface components {
         /**
          * PlaygroundMessagePublic
          * @description One stored turn, in the order it was saved.
+         *
+         *     No usage figures, matching what the save accepts: tokens, cost and timing
+         *     describe the request that ran rather than the conversation, and a resumed
+         *     transcript reporting an old request's latency as this session's would be
+         *     lying. The billing record for that request is its ``usage_logs`` row.
          */
         PlaygroundMessagePublic: {
             /** Content */
@@ -9002,10 +9007,6 @@ export interface components {
             reasoning?: string | null;
             /** Role */
             role: string;
-            /** Usage */
-            usage?: {
-                [key: string]: unknown;
-            } | null;
         };
         /** PlaygroundMessagesPublic */
         PlaygroundMessagesPublic: {

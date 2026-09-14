@@ -317,6 +317,50 @@ def test_the_list_carries_a_turn_count_and_not_the_transcript(client: TestClient
     assert "messages" not in row
 
 
+def test_the_turn_count_is_this_conversation_s_own(client: TestClient, world: _World) -> None:
+    """The count is a correlated per-conversation read, not a table-wide aggregate.
+
+    Written with a second identity's transcripts in the table because that is
+    the shape a grouped-and-joined count gets wrong if its predicate slips: the
+    aggregate would be computed over everybody's turns before the join narrowed
+    it, and a mistake there reads as a plausible number rather than as an error.
+    """
+    _grant(client, world, "member", store_conversations=True)
+    _grant(client, world, "colleague", store_conversations=True)
+
+    long_body = _conversation_body(world)
+    long_body["messages"] = [{"role": "user", "content": f"turn {i}"} for i in range(7)]
+    assert _request(client, world, "colleague", "POST", f"{_PREFIX}/conversations", json=long_body)[0] == (
+        status.HTTP_201_CREATED
+    )
+    assert _request(client, world, "member", "POST", f"{_PREFIX}/conversations", json=_conversation_body(world))[0] == (
+        status.HTTP_201_CREATED
+    )
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/conversations", params=_ws(world))
+    assert code == status.HTTP_200_OK
+    assert [row["message_count"] for row in body["data"]] == [2]
+
+
+def test_a_saved_turn_carries_no_usage_figures(client: TestClient, world: _World) -> None:
+    """Tokens, cost and timing describe the request, not the conversation.
+
+    So the save accepts none and the read returns none, and there is no column
+    holding them: a resumed transcript reporting an old request's latency as
+    this session's would be lying, and the billing record for that request is
+    its ``usage_logs`` row.
+    """
+    _grant(client, world, "member", store_conversations=True)
+    code, created = _request(
+        client, world, "member", "POST", f"{_PREFIX}/conversations", json=_conversation_body(world)
+    )
+    assert code == status.HTTP_201_CREATED
+
+    code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
+    assert code == status.HTTP_200_OK
+    assert set(messages["data"][0]) == {"role", "content", "reasoning"}
+
+
 def test_reasoning_survives_a_save(client: TestClient, world: _World) -> None:
     """A resumed transcript that lost its thinking block reads as a different answer."""
     _grant(client, world, "member", store_conversations=True)

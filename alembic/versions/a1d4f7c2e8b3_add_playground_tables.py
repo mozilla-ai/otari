@@ -102,7 +102,6 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=16), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("reasoning", sa.Text(), nullable=True),
-        sa.Column("usage", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["conversation_id"], ["playground_conversation.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),

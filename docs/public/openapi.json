@@ -8899,7 +8899,7 @@
         "type": "object"
       },
       "PlaygroundMessagePublic": {
-        "description": "One stored turn, in the order it was saved.",
+        "description": "One stored turn, in the order it was saved.\n\nNo usage figures, matching what the save accepts: tokens, cost and timing\ndescribe the request that ran rather than the conversation, and a resumed\ntranscript reporting an old request's latency as this session's would be\nlying. The billing record for that request is its ``usage_logs`` row.",
         "properties": {
           "content": {
             "title": "Content",
@@ -8919,18 +8919,6 @@
           "role": {
             "title": "Role",
             "type": "string"
-          },
-          "usage": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usage"
           }
         },
         "required": [

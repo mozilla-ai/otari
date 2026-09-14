@@ -53,9 +53,9 @@ on an ``AsyncSession``), so the routes join explicitly.
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from sqlalchemy import JSON, Column, Index, Text, UniqueConstraint
+from sqlalchemy import Column, Index, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin
@@ -191,12 +191,17 @@ class PlaygroundConversationsPublic(SQLModel):
 
 
 class PlaygroundMessagePublic(SQLModel):
-    """One stored turn, in the order it was saved."""
+    """One stored turn, in the order it was saved.
+
+    No usage figures, matching what the save accepts: tokens, cost and timing
+    describe the request that ran rather than the conversation, and a resumed
+    transcript reporting an old request's latency as this session's would be
+    lying. The billing record for that request is its ``usage_logs`` row.
+    """
 
     role: str
     content: str
     reasoning: str | None = None
-    usage: dict[str, Any] | None = None
 
 
 class PlaygroundMessagesPublic(SQLModel):
@@ -246,11 +251,6 @@ class PlaygroundMessage(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
     role: str = Field(max_length=16)
     content: str = Field(sa_column=Column(Text, nullable=False))
     reasoning: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    # The tokens/cost/timing line the page renders under an assistant turn.
-    # Opaque JSON rather than columns: it is presentational, the page owns its
-    # shape, and nothing here queries inside it. The billing record for the same
-    # request is the ``usage_logs`` row, which is not this and is authoritative.
-    usage: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
 
 # ==============================================================================

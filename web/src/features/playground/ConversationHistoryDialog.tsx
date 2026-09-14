@@ -28,6 +28,7 @@ export function ConversationHistoryDialog({
   onLoad,
   onDelete,
   isDeleting,
+  deleteError,
 }: {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
@@ -35,6 +36,8 @@ export function ConversationHistoryDialog({
   onLoad: (conversationId: string) => void
   onDelete: (conversationId: string) => void
   isDeleting: boolean
+  /** The last delete's failure, shown in the confirm dialog. */
+  deleteError?: unknown
 }) {
   const [pendingDelete, setPendingDelete] = useState<
     PlaygroundConversation | undefined
@@ -98,6 +101,7 @@ export function ConversationHistoryDialog({
         }
         confirmLabel="Delete"
         isPending={isDeleting}
+        error={deleteError}
         onConfirm={() => {
           if (!pendingDelete) return
           onDelete(pendingDelete.id)

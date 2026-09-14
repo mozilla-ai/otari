@@ -368,23 +368,25 @@ async def list_conversations(
 ) -> list[PlaygroundConversationSummary]:
     """This identity's saved transcripts in one workspace, newest first.
 
-    The turn count comes from a grouped subquery rather than from loading each
-    transcript's turns: the list renders a count and nothing else from them, and
-    a per-row count would be one query per conversation on a page that shows a
-    hundred.
+    The turn count is a **correlated** subquery, not a grouped one joined in.
+    Both are one round trip, and the difference is what they read: grouping
+    every row of ``playground_message`` aggregates the whole table, including
+    every other person's transcripts, before the join throws almost all of it
+    away. Correlated, each of the at-most-hundred rows is one seek on
+    ``ix_playground_message_conversation_id``. Loading the turns themselves is
+    the option neither of these is: the list renders a count and nothing else
+    from them.
     """
-    counts = (
-        select(
-            col(PlaygroundMessage.conversation_id).label("conversation_id"),
-            func.count().label("message_count"),
-        )
-        .group_by(col(PlaygroundMessage.conversation_id))
-        .subquery()
+    message_count = (
+        select(func.count())
+        .select_from(PlaygroundMessage)
+        .where(col(PlaygroundMessage.conversation_id) == col(PlaygroundConversation.id))
+        .correlate(PlaygroundConversation)
+        .scalar_subquery()
     )
     rows = (
         await db.execute(
-            select(PlaygroundConversation, func.coalesce(counts.c.message_count, 0))
-            .outerjoin(counts, counts.c.conversation_id == col(PlaygroundConversation.id))
+            select(PlaygroundConversation, message_count)
             .where(
                 col(PlaygroundConversation.user_id) == user_id,
                 col(PlaygroundConversation.workspace_id) == workspace_id,
@@ -492,12 +494,7 @@ async def read_conversation_messages(
         .all()
     )
     return [
-        PlaygroundMessagePublic(
-            role=row.role,
-            content=row.content,
-            reasoning=row.reasoning,
-            usage=row.usage,
-        )
+        PlaygroundMessagePublic(role=row.role, content=row.content, reasoning=row.reasoning)
         for row in rows
     ]
 
@@ -616,15 +613,16 @@ async def _prune_oldest(
 ) -> None:
     """Drop this owner's oldest rows in this workspace past ``keep``.
 
-    Called with the new row already staged but not flushed for a comparison, and
-    flushed for a conversation (its turns need its id), so the count this reads
-    differs by one between the two callers. That does not matter: the cap is a
-    storage bound rather than an exact ledger, and being off by one row either
-    way is invisible. What it must not do is prune somebody else's rows, which is
-    why the owner predicate is on the subquery and not only on the delete.
+    The new row is included in the count, whichever caller this is: autoflush
+    runs on the ``SELECT`` below, so a row staged but not yet flushed is written
+    before it is read. So ``keep`` is the total kept and not the total plus the
+    one being added.
 
-    Deleted by id rather than with a correlated ``ORDER BY ... LIMIT`` on the
-    delete itself, which PostgreSQL does not accept and SQLite accepts only when
+    What this must not do is prune somebody else's rows, which is why the owner
+    predicate is on the select and not only on the delete.
+
+    Deleted by id rather than with an ``ORDER BY ... LIMIT`` on the delete
+    itself, which PostgreSQL does not accept and SQLite accepts only when
     compiled for it.
     """
     stale = (

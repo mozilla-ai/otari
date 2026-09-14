@@ -112,6 +112,10 @@ export function usePlayground() {
   const [pendingConsent, setPendingConsent] = useState<
     PendingConsent | undefined
   >(undefined)
+  // Loading a saved transcript is an action rather than a query, so a failure
+  // has no mutation state to read: it is kept here and reported beside the
+  // page's other write failures.
+  const [loadError, setLoadError] = useState<unknown>(undefined)
 
   const { streamReply, stop } = usePlaygroundStream({
     workspaceId: workspaceId ?? "",
@@ -279,21 +283,43 @@ export function usePlayground() {
     performRate(preference)
   }
 
-  /** Grant the flag the pending action needs, then run the action. */
+  /**
+   * Grant the flag the pending action needs, then run the action.
+   *
+   * A refused grant leaves the dialog open with its own error showing, because
+   * the action behind it must not run: saving without consent is the one thing
+   * the prompt exists to prevent. `mutateAsync` rejects, so the rejection is
+   * caught here rather than escaping a click handler.
+   */
   const confirmPendingConsent = async () => {
     if (!pendingConsent) return
-    if (pendingConsent.kind === "conversation") {
-      await updateConsent.mutateAsync({ store_conversations: true })
-      performSaveConversation()
-    } else {
-      await updateConsent.mutateAsync({ store_comparisons: true })
-      performRate(pendingConsent.preference)
+    try {
+      if (pendingConsent.kind === "conversation") {
+        await updateConsent.mutateAsync({ store_conversations: true })
+        performSaveConversation()
+      } else {
+        await updateConsent.mutateAsync({ store_comparisons: true })
+        performRate(pendingConsent.preference)
+      }
+    } catch {
+      // `updateConsent.error` is what the dialog renders; nothing to add.
+      return
     }
     setPendingConsent(undefined)
   }
 
   const loadConversation = async (conversationId: string) => {
-    const loaded = await fetchPlaygroundConversation(conversationId)
+    setLoadError(undefined)
+    let loaded: Awaited<ReturnType<typeof fetchPlaygroundConversation>>
+    try {
+      loaded = await fetchPlaygroundConversation(conversationId)
+    } catch (error) {
+      // Reported rather than thrown: the caller is a click handler, so a
+      // rejection here would be an unhandled one and the reader would be left
+      // with a dialog that did nothing.
+      setLoadError(error)
+      return
+    }
     setPanelA((prev) => ({
       ...prev,
       turns: loaded.data.map((message) => ({
@@ -356,6 +382,11 @@ export function usePlayground() {
   return {
     // Where the page stands
     gate,
+    // Every failure with no control of its own to report it: a save, a rating,
+    // and loading a transcript back. The deletes report inside their confirm
+    // dialogs and the consent grant inside its own, so neither is here.
+    actionError:
+      saveConversation.error ?? saveComparison.error ?? loadError ?? undefined,
     // The catalog read's own error, so the gate notice can report the failure
     // rather than a generic one: it is the only gate with something to say.
     catalogError: catalog.error,
@@ -399,6 +430,7 @@ export function usePlayground() {
     isConversationSaved,
     removeConversation,
     isDeletingConversation: deleteConversation.isPending,
+    deleteConversationError: deleteConversation.error ?? undefined,
 
     // New chat
     isNewChatConfirmOpen,
@@ -417,11 +449,13 @@ export function usePlayground() {
     setIsComparisonHistoryOpen,
     removeComparison: deleteComparison.mutate,
     isDeletingComparison: deleteComparison.isPending,
+    deleteComparisonError: deleteComparison.error ?? undefined,
 
     // Just-in-time retention consent
     pendingConsent,
     confirmPendingConsent,
     cancelPendingConsent: () => setPendingConsent(undefined),
     isConfirmingConsent: updateConsent.isPending,
+    consentError: updateConsent.error ?? undefined,
   }
 }

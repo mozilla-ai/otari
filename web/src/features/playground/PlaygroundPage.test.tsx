@@ -522,6 +522,80 @@ describe("comparing two models", () => {
   })
 })
 
+describe("when a write fails", () => {
+  it("reports a refused save rather than doing nothing", async () => {
+    // The Save control has no state of its own to report a failure with, so
+    // without this the press looks like it worked.
+    const { fetchSpy } = mockApi({
+      consent: { store_conversations: true, store_comparisons: false },
+    })
+    mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    const previous = fetchSpy.getMockImplementation()
+    fetchSpy.mockImplementation(async (path, init) => {
+      if (path === "/playground/conversations" && init?.method === "POST") {
+        throw new apiClient.ApiError(
+          403,
+          "Saving conversations requires consent.",
+        )
+      }
+      return previous?.(path, init) as never
+    })
+
+    await user.click(screen.getByRole("button", { name: "Save conversation" }))
+
+    expect(
+      await screen.findByText("Saving conversations requires consent."),
+    ).toBeInTheDocument()
+  })
+
+  it("reports a transcript that would not load", async () => {
+    // The click handler cannot throw: it would be an unhandled rejection and
+    // the dialog would simply do nothing.
+    const SAVED = {
+      id: "conv-1",
+      workspace_id: WORKSPACE_ID,
+      title: "How does OAuth work",
+      model: "openai:gpt-4o",
+      message_count: 2,
+      created_at: "2026-01-01T00:00:00Z",
+    }
+    const { fetchSpy } = mockApi({
+      consent: { store_conversations: true, store_comparisons: true },
+      conversations: { data: [SAVED] },
+    })
+    const previous = fetchSpy.getMockImplementation()
+    fetchSpy.mockImplementation(async (path, init) => {
+      if (path.includes("/messages")) {
+        throw new apiClient.ApiError(404, "Conversation not found")
+      }
+      return previous?.(path, init) as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("What can I help with?")
+
+    await user.click(
+      await screen.findByRole("button", { name: "Conversation history" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: /^How does OAuth work/ }),
+    )
+
+    expect(
+      await screen.findByText("Conversation not found"),
+    ).toBeInTheDocument()
+  })
+})
+
 describe("history", () => {
   it("hides the history control until there is history", async () => {
     mockApi()
