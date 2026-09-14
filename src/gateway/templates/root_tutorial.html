@@ -35,6 +35,7 @@
         font-family: "Mozilla Headline";
         src: url("/fonts/MozillaHeadline-Variable.woff2") format("woff2");
         font-weight: 200 700;
+        font-stretch: 75% 125%;
         font-display: swap;
       }
       @font-face {
@@ -396,8 +397,8 @@
         <span class="brand"><img src="/favicon.svg" alt="" />Otari</span>
         <nav class="nav-links" aria-label="Main navigation">
           <a href="/docs">API docs</a>
-          <a href="https://otari.ai">otari.ai ↗</a>
-          <a class="gh" href="https://github.com/mozilla-ai/otari">GitHub ↗</a>
+          <a href="https://otari.ai">otari.ai <span aria-hidden="true">↗</span></a>
+          <a class="gh" href="https://github.com/mozilla-ai/otari">GitHub <span aria-hidden="true">↗</span></a>
         </nav>
       </div>
     </header>
@@ -516,9 +517,9 @@ print(response.choices[0].message.content)</code></pre>
       <div class="footer-inner">
         <span>Otari, an open-source LLM gateway by mozilla.ai.</span>
         <nav class="footer-links" aria-label="Resources">
-          <a href="QUICKSTART_URL">Quickstart ↗</a>
+          <a href="QUICKSTART_URL">Quickstart <span aria-hidden="true">↗</span></a>
           <a href="/docs">API docs</a>
-          <a href="https://github.com/mozilla-ai/otari">GitHub ↗</a>
+          <a href="https://github.com/mozilla-ai/otari">GitHub <span aria-hidden="true">↗</span></a>
         </nav>
       </div>
     </footer>

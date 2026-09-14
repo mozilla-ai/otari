@@ -24,8 +24,8 @@ test("welcome copies each complete snippet and resets its feedback", async ({
       .textContent()
     await button.focus()
     await page.keyboard.press("Enter")
-    await expect(button).toHaveText("Copied")
     await expect(page.getByRole("status")).toHaveText(`Copied ${name}.`)
+    await expect(button).toHaveText("Copied")
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       snippet,
     )
@@ -64,9 +64,11 @@ test("welcome fits a phone while keeping long code scrollable", async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/welcome")
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
-    390,
-  )
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }))
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
   const snippet = page.getByLabel("Chat completion example", { exact: true })
   await snippet.focus()
   await page.keyboard.press("End")
