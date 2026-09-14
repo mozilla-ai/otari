@@ -17,6 +17,7 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { budgetLabeler, shortBudgetId } from "@/features/budgets/budgetLabel"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
 import { useBudgets } from "@/shared/api/budgets"
@@ -61,14 +62,11 @@ const LAST_WORKSPACE_REASON =
 // with a message telling the operator to come and change it.
 const NO_DEFAULT = ""
 
-function budgetLabel(budget: Budget): string {
-  return budget.name ?? budget.budget_id.split("-")[0]
-}
-
 function budgetChoices(budgets: Budget[]): { value: string; label: string }[] {
+  const nameBudget = budgetLabeler(budgets)
   return budgets.map((budget) => ({
     value: budget.budget_id,
-    label: budgetLabel(budget),
+    label: nameBudget(budget),
   }))
 }
 
@@ -711,18 +709,19 @@ export function WorkspacesPage() {
   // edit form sets, and a narrowed one is the budget's business, where it shows
   // under "Default for".
   const defaultBudgetName = useMemo(() => {
+    const known = budgets.data ?? []
+    const nameBudget = budgetLabeler(known)
     const names = new Map(
-      (budgets.data ?? []).map((budget) => [
-        budget.budget_id,
-        budget.name ?? budget.budget_id.split("-")[0],
-      ]),
+      known.map((budget) => [budget.budget_id, nameBudget(budget)]),
     )
     const byWorkspace = new Map<string, string>()
     for (const { workspaceId, default: row } of workspaceDefaults.data) {
       if (row.provider_key_id === null) {
+        // A default naming a budget this page did not read has nothing to derive
+        // a label from, so the id is all there is left to show.
         byWorkspace.set(
           workspaceId,
-          names.get(row.budget_id) ?? row.budget_id.split("-")[0],
+          names.get(row.budget_id) ?? shortBudgetId(row.budget_id),
         )
       }
     }

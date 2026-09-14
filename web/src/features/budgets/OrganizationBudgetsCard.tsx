@@ -9,8 +9,9 @@ import {
   useDeleteOrganizationBudget,
   useOrganizationBudgets,
 } from "@/shared/api/budgets"
+import { budgetLabeler } from "./budgetLabel"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
-import { budgetLabel, limitLabel, periodLabel } from "./organizationBudget"
+import { limitLabel, periodLabel } from "./organizationBudget"
 
 // The organization's own budgets: the figures, without yet saying where they
 // apply. The ceilings card below is what applies them.
@@ -47,12 +48,13 @@ export function OrganizationBudgetsCard() {
     setDialogOpen(true)
   }
 
+  const nameBudget = budgetLabeler(rows)
   const columns: DataTableColumn<OrganizationBudget>[] = [
     {
       id: "name",
       header: "Budget",
       isRowHeader: true,
-      cell: (row) => <span className="text-body">{budgetLabel(row)}</span>,
+      cell: (row) => <span className="text-body">{nameBudget(row)}</span>,
     },
     {
       id: "limit",
@@ -146,8 +148,8 @@ export function OrganizationBudgetsCard() {
         body={
           pendingDelete
             ? pendingDelete.ceiling_count > 0
-              ? `${budgetLabel(pendingDelete)} is held by ${pendingDelete.ceiling_count} spend ${pendingDelete.ceiling_count === 1 ? "ceiling" : "ceilings"}, so this will be refused. Remove or repoint them first.`
-              : `${budgetLabel(pendingDelete)} stops existing. Nothing holds it, so no cap changes.`
+              ? `${nameBudget(pendingDelete)} is held by ${pendingDelete.ceiling_count} spend ${pendingDelete.ceiling_count === 1 ? "ceiling" : "ceilings"}, so this will be refused. Remove or repoint them first.`
+              : `${nameBudget(pendingDelete)} stops existing. Nothing holds it, so no cap changes.`
             : null
         }
         confirmLabel="Delete budget"

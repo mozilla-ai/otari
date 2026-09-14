@@ -298,6 +298,29 @@ describe("BudgetsPage", () => {
     expect(bar).toHaveAttribute("aria-valuenow", "50")
   })
 
+  it("says what an unnamed budget will be called, before it is saved", async () => {
+    // The name is optional and a budget created without one is shown by what it
+    // caps (#2130). Said on the field as the form is filled in, so leaving it
+    // blank is a choice rather than a surprise.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    await screen.findByText("No budgets yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first budget" }),
+    )
+    expect(
+      screen.getByText(/Left blank, it is shown as "No limit"/),
+    ).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Spending limit (USD)"), "250")
+    await user.click(screen.getByRole("radio", { name: "Weekly" }))
+    expect(
+      screen.getByText(/Left blank, it is shown as "\$250.00 \/ 7 days"/),
+    ).toBeInTheDocument()
+  })
+
   it("creates a budget, posting the limit and chosen period", async () => {
     const fetchMock = mockApi({ budgets: [] })
     const user = userEvent.setup()

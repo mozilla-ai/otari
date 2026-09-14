@@ -150,7 +150,21 @@ describe("budgetHealth", () => {
     ])
     expect(result.status).toBe("warn")
     expect(result.nearCount).toBe(1)
-    expect(result.worst?.name).toBe("b")
+    // Neither is named, and both cap the same figure over the same period, so
+    // each carries its id to tell them apart.
+    expect(result.worst?.name).toBe("$100.00 (b)")
+  })
+
+  it("names an unnamed budget by its figure rather than by its id", () => {
+    const result = budgetHealth([
+      budget({
+        budget_id: "3f2a9c41-1111-2222-3333-444444444444",
+        max_budget: 100,
+        user_count: 1,
+        total_spend: 85,
+      }),
+    ])
+    expect(result.worst?.name).toBe("$100.00")
   })
 })
 

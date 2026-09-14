@@ -261,6 +261,58 @@ describe("WorkspacesPage", () => {
     ).toHaveTextContent("Team standard")
   })
 
+  it("offers an unnamed budget by what it caps, and tells two of them apart", async () => {
+    // A picker exists to let somebody choose, and the head of a uuid supports no
+    // choice: two unnamed budgets used to read as two opaque strings, and picking
+    // the wrong one silently hands every member the wrong ceiling (#2130).
+    mockApi({
+      budgets: [
+        budget({
+          budget_id: "04f2f38a-1111-1111-1111-111111111111",
+          name: null,
+          max_budget: 50,
+          budget_duration_sec: null,
+          reset_alignment: "calendar_month",
+        }),
+        budget({
+          budget_id: "9b71c0de-2222-2222-2222-222222222222",
+          name: null,
+          max_budget: 50,
+          budget_duration_sec: null,
+          reset_alignment: "calendar_month",
+        }),
+        budget({
+          budget_id: "c0ffee00-3333-3333-3333-333333333333",
+          name: null,
+          max_budget: 500,
+          budget_duration_sec: null,
+          reset_alignment: "calendar_month",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Default member budget/ }),
+    )
+
+    // The two that cap the same figure carry their ids; the one that does not
+    // needs no qualifier.
+    expect(
+      await screen.findByRole("option", { name: "$50.00 / month (04f2f38a)" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "$50.00 / month (9b71c0de)" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "$500.00 / month" }),
+    ).toBeInTheDocument()
+  })
+
   it("puts a refused create on the name that caused it, not in a banner", async () => {
     // A banner above the form resizes whatever frames it, and every way this
     // endpoint refuses is about the name: taken, empty, too long.

@@ -212,6 +212,21 @@ describe("OrganizationBudgetsPage", () => {
     })
   })
 
+  it("says what an unnamed budget will be called, before it is saved", async () => {
+    // The name is optional, and a budget saved without one is handed out under
+    // what it caps (#2130) rather than under the head of its id.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization budgets" })
+
+    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.type(screen.getByLabelText("Limit (USD)"), "75")
+    expect(
+      screen.getByText(/Left blank, that is "\$75.00 \/ month"/),
+    ).toBeInTheDocument()
+  })
+
   it("refuses a limit that is not an amount rather than sending it", async () => {
     mockApi({ budgets: [] })
     const user = userEvent.setup()
@@ -394,6 +409,30 @@ describe("OrganizationBudgetsPage", () => {
       scope_type: "organization",
       budget_id: organizationBudget().budget_id,
     })
+  })
+
+  it("offers an unnamed budget by what it caps, without saying the figure twice", async () => {
+    // The head of a uuid is not something an admin can pick by (#2130), and the
+    // option already carries the limit, so a derived label must not repeat it.
+    mockApi({
+      budgets: [
+        organizationBudget({
+          budget_id: "04f2f38a-1111-1111-1111-111111111111",
+          name: null,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization spend ceilings" })
+
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    await user.click(screen.getByRole("button", { name: /Budget/ }))
+
+    expect(
+      await screen.findByRole("option", { name: "$250.00 / month" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /04f2f38a/ })).toBeNull()
   })
 
   it("will not offer a ceiling with no budget to hold", async () => {

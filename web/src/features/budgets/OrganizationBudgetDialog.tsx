@@ -10,6 +10,7 @@ import {
   useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
 
+import { unnamedBudgetLabel } from "./budgetLabel"
 import {
   PERIOD_OPTIONS,
   periodValue,
@@ -104,18 +105,32 @@ export function OrganizationBudgetDialog({
     editing.budget_duration_sec !== undefined &&
     period === "none"
 
+  // What this budget is shown as while it has no name of its own, said on the
+  // field so the admin sees the label before saving rather than after. On the
+  // description rather than as the placeholder, which design/forms.md reserves
+  // for an example of what to type. The token and request caps come from the
+  // budget being edited: this form does not offer them, and a label derived
+  // without them would understate what it caps.
+  const selectedPeriod = PERIOD_OPTIONS.find(
+    (candidate) => candidate.value === period,
+  )
+  const unnamedLabel = unnamedBudgetLabel({
+    max_budget: amount ?? null,
+    token_limit: editing?.token_limit ?? null,
+    request_limit: editing?.request_limit ?? null,
+    reset_alignment: selectedPeriod?.alignment ?? null,
+    budget_duration_sec: null,
+  })
+
   const submit = () => {
     if (limitInvalid) return
-    const option = PERIOD_OPTIONS.find(
-      (candidate) => candidate.value === period,
-    )
     save({
       name: name.trim() === "" ? null : name.trim(),
       max_budget: amount ?? null,
       // Only ever one of the two is sent with a value, because a budget resets
       // on a duration or on a boundary and the database refuses both.
       budget_duration_sec: null,
-      reset_alignment: option?.alignment ?? null,
+      reset_alignment: selectedPeriod?.alignment ?? null,
     })
   }
 
@@ -138,7 +153,7 @@ export function OrganizationBudgetDialog({
         onChange={setName}
         placeholder="Engineering monthly"
         autoFocus
-        description="Optional. What this budget is called wherever it is handed out."
+        description={`Optional. What this budget is called wherever it is handed out. Left blank, that is "${unnamedLabel}".`}
       />
       <Field
         label="Limit (USD)"

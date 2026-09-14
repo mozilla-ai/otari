@@ -54,6 +54,12 @@ import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
+import {
+  budgetLabel,
+  budgetLabeler,
+  shortBudgetId,
+  unnamedBudgetLabel,
+} from "./budgetLabel"
 import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
 
@@ -235,6 +241,7 @@ function BudgetForm({
   description,
   submitLabel,
   initial,
+  uneditedLimits,
   error,
   isPending,
   onSubmit,
@@ -255,6 +262,10 @@ function BudgetForm({
     max_budget: number | null
     budget_duration_sec: number | null
   }
+  // The caps this form does not edit, so the label it offers an unnamed budget
+  // reads as the whole of what it caps rather than the dollar figure alone.
+  // Absent on create, where there are none yet.
+  uneditedLimits?: Pick<Budget, "token_limit" | "request_limit">
   error: unknown
   isPending: boolean
   onSubmit: (body: CreateBudgetRequest, userIds: string[]) => void
@@ -300,6 +311,18 @@ function BudgetForm({
     userIds: [...userIds].sort(),
   })
 
+  // What this budget is shown as while it has no name of its own, said on the
+  // field so the operator sees the label before saving rather than after. On the
+  // description rather than as the placeholder, which design/forms.md reserves
+  // for an example of what to type.
+  const unnamedLabel = unnamedBudgetLabel({
+    max_budget: parsed.valid ? parsed.value : null,
+    token_limit: uneditedLimits?.token_limit ?? null,
+    request_limit: uneditedLimits?.request_limit ?? null,
+    reset_alignment: null,
+    budget_duration_sec: durationSec,
+  })
+
   const submit = () => {
     if (!canSubmit) return
     // Send name as null (not "") when blank so it clears to unnamed on the wire.
@@ -336,7 +359,7 @@ function BudgetForm({
         onChange={setName}
         autoFocus
         placeholder="team-free-tier"
-        description="A label to recognize this budget later."
+        description={`A label to recognize this budget later. Left blank, it is shown as "${unnamedLabel}".`}
       />
       <Field
         label="Spending limit (USD)"
@@ -490,18 +513,8 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
 
 // ---------- page ----------
 
-// A short, stable fingerprint for a budget id (its leading segment), shown when a
-// budget has no name and used as a fallback label.
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
 const getBudgetRowKey = (b: Budget): string => b.budget_id
-
-function shortId(budgetId: string): string {
-  return budgetId.split("-")[0]
-}
-
-function budgetLabel(budget: Budget): string {
-  return budget.name ?? shortId(budget.budget_id)
-}
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
 // carries none. `/users` refuses to cap a gateway user at a tenant's
@@ -567,6 +580,7 @@ function DeploymentBudgetsPage() {
   const [bulkPending, setBulkPending] = useState(false)
 
   const rows = budgets.data ?? []
+  const nameBudget = budgetLabeler(rows)
   // The roster is part of the edit form's seed: `assignedUserIds` is read on
   // mount, and the form is keyed by budget id so it does not reseed when `users`
   // resolves. Opening Edit against an empty roster would therefore start the
@@ -657,7 +671,7 @@ function DeploymentBudgetsPage() {
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
               <code className="text-mono-micro" title={b.budget_id}>
-                {shortId(b.budget_id)}
+                {shortBudgetId(b.budget_id)}
               </code>
             </CopyableValue>
           </div>
@@ -945,7 +959,7 @@ function DeploymentBudgetsPage() {
         <Section className="border-y border-border">
           <div className="flex items-center justify-between border-b border-border py-2">
             <span className="text-body">
-              Reset history — {budgetLabel(historyBudget)}
+              Reset history — {nameBudget(historyBudget)}
             </span>
             <Button
               size="sm"
@@ -971,7 +985,7 @@ function DeploymentBudgetsPage() {
         heading="Delete budget"
         body={
           pendingDelete
-            ? `${budgetLabel(pendingDelete)} stops existing. Users on it keep the spend they have already recorded but lose this limit, so nothing caps them until another budget does.`
+            ? `${nameBudget(pendingDelete)} stops existing. Users on it keep the spend they have already recorded but lose this limit, so nothing caps them until another budget does.`
             : null
         }
         confirmLabel="Delete permanently"
@@ -1052,6 +1066,7 @@ function EditBudgetDialog({
         max_budget: row.max_budget,
         budget_duration_sec: row.budget_duration_sec,
       }}
+      uneditedLimits={row}
       error={updateBudget.error ?? assignmentError}
       isPending={updateBudget.isPending || assigningUsers}
       assignUsers={rosterReady && !isOrganizationOwned(row) ? users : undefined}
