@@ -8,7 +8,8 @@
     <style>
       :root {
         color-scheme: light;
-        /* Shared with the dashboard's light semantic palette. */
+        /* The dashboard's light semantic palette; only the two code-panel
+           accents (--code-muted, --code-success) are this page's own. */
         --brand: #0098a4;
         --brand-dark: #00747e;
         --primary-button: #00808a;
@@ -27,6 +28,20 @@
         --code-muted: #a1a8b2;
         --code-success: #4fbf95;
         --mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      /* The dashboard bundle ships these at /fonts/. Without a bundle the
+         requests 404 and the system fallbacks below stand. */
+      @font-face {
+        font-family: "Mozilla Headline";
+        src: url("/fonts/MozillaHeadline-Variable.woff2") format("woff2");
+        font-weight: 200 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Fira Code";
+        src: url("/fonts/FiraCode-VariableFont_wght.woff2") format("woff2");
+        font-weight: 300 700;
+        font-display: swap;
       }
       * {
         box-sizing: border-box;
@@ -257,6 +272,9 @@
       .copy:hover, .copy:active {
         background: var(--code-control);
       }
+      .copy:focus-visible {
+        outline-offset: -2px;
+      }
       .copy.ok {
         color: var(--code-success);
       }
@@ -432,7 +450,7 @@
                 <span class="copy-label" aria-hidden="true"></span>
               </button>
             </figcaption>
-            <pre tabindex="0" aria-label="Key export command"><code>export OTARI_API_KEY=YOUR_BOOTSTRAP_OTARI_KEY</code></pre>
+            <pre tabindex="0" role="region" aria-label="Key export command"><code>export OTARI_API_KEY=YOUR_BOOTSTRAP_OTARI_KEY</code></pre>
           </figure>
         </article>
 
@@ -453,7 +471,7 @@
                 <span class="copy-label" aria-hidden="true"></span>
               </button>
             </figcaption>
-            <pre tabindex="0" aria-label="Client install command"><code>pip install openai</code></pre>
+            <pre tabindex="0" role="region" aria-label="Client install command"><code>pip install openai</code></pre>
           </figure>
         </article>
 
@@ -474,7 +492,7 @@
                 <span class="copy-label" aria-hidden="true"></span>
               </button>
             </figcaption>
-            <pre tabindex="0" aria-label="Chat completion example"><code>import os
+            <pre tabindex="0" role="region" aria-label="Chat completion example"><code>import os
 
 from openai import OpenAI
 
@@ -508,11 +526,11 @@ print(response.choices[0].message.content)</code></pre>
 
     <script>
       document.querySelectorAll(".copy").forEach(function (btn) {
-        var resetTimer;
+        let resetTimer;
         btn.addEventListener("click", async function () {
-          var figure = btn.closest(".code");
-          var status = document.getElementById("copy-status");
-          var label = btn.querySelector(".copy-label");
+          const figure = btn.closest(".code");
+          const status = document.getElementById("copy-status");
+          const label = btn.querySelector(".copy-label");
           clearTimeout(resetTimer);
           btn.classList.remove("ok");
           label.textContent = "";
@@ -528,8 +546,8 @@ print(response.choices[0].message.content)</code></pre>
               btn.classList.remove("ok");
             }, 1500);
           } catch {
-            var message = "Could not copy. Select the code and copy it manually.";
-            var error = document.createElement("p");
+            const message = "Could not copy. Select the code and copy it manually.";
+            const error = document.createElement("p");
             error.className = "copy-error";
             error.textContent = message;
             figure.appendChild(error);
