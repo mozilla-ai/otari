@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
-
+import { Tooltip as HeroTooltip } from "@heroui/react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 /**
@@ -50,22 +48,23 @@ describe("Tooltip", () => {
   })
 
   /**
-   * A source sweep rather than a hover: react-aria's hover never fires under
-   * jsdom, so a test that waits for the label to open waits forever whatever
-   * the delay is. The prop is what is worth guarding. Without it HeroUI falls
+   * The delay is read off the props HeroUI is handed rather than from an open
+   * tooltip: react-aria's hover never fires under jsdom, so a test that waits
+   * for the label waits forever whatever the delay is. Left unset, HeroUI falls
    * back to `--tooltip-delay` on the document root, which it ships at
    * react-aria's 1.5s warmup, and every icon action in every table goes back to
-   * reading as unlabeled. Same shape as the globals.css sweeps in
-   * `styles/foundation.test.ts`: the file is the artifact under test.
+   * reading as unlabeled.
    */
-  it("sets its own open delay rather than inheriting HeroUI's 1.5s", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src", "design-system", "overlays", "Tooltip.tsx"),
-      "utf8",
+  it("opens on its own delay rather than HeroUI's 1.5s default", () => {
+    const root = vi.spyOn(HeroTooltip, "Root")
+    render(
+      <Tooltip content="Delete">
+        <span>x</span>
+      </Tooltip>,
     )
-    expect(source).toMatch(/HeroTooltip\.Root[^>]*\bdelay=\{OPEN_DELAY_MS\}/)
-    const declared = source.match(/const OPEN_DELAY_MS = (\d+)/)
-    expect(declared).not.toBeNull()
-    expect(Number(declared?.[1])).toBeLessThanOrEqual(500)
+    const delay = root.mock.calls[0]?.[0]?.delay
+    expect(delay).toBeTypeOf("number")
+    expect(delay).toBeLessThanOrEqual(500)
+    root.mockRestore()
   })
 })
