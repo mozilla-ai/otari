@@ -699,7 +699,18 @@ function AppShellChrome() {
           however tall that band is, taking the only control that closes it with
           it. The update prompt and the connection status are out of flow and
           carry their own fill, so they do not enter into this. */}
-      <div className="relative flex min-h-0 flex-1">
+      <div
+        className="relative flex min-h-0 flex-1"
+        // What the rail costs the content beside it, for a `position: fixed`
+        // overlay that has to centre on that content rather than on the
+        // viewport. `main` carries `container-type: inline-size`, which does not
+        // make it a containing block for a fixed descendant (measured: a fixed
+        // probe inside it lands at x=0 while `main` starts at 264), so the
+        // offset has to be published rather than inherited from the box.
+        // `globals.css` turns it into a width and zeroes it below `md`, where
+        // the rail is a drawer with no footprint.
+        data-rail={collapsed ? "collapsed" : "expanded"}
+      >
         <aside
           ref={asideRef}
           id="app-sidebar"

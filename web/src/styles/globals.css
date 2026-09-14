@@ -3180,8 +3180,27 @@ main {
 }
 /* The floating bulk bar slides up from the viewport edge; fixed positioning
    means it never reflows the table it acts on. */
+/* The rail's footprint, published by the shell (`data-rail`) so a fixed overlay
+ * can centre on the content beside the rail instead of on the viewport. Zero by
+ * default, which is what every surface without the shell gets and what the
+ * drawer breakpoint below `md` leaves it at. */
+[data-rail] {
+  --rail-width: 0px;
+}
+@media (min-width: 48rem) {
+  [data-rail="expanded"] {
+    --rail-width: 16.5rem;
+  }
+  [data-rail="collapsed"] {
+    --rail-width: 4.5rem;
+  }
+}
+
 .otari-bulk-bar {
   animation: otari-bulk-bar-in 160ms ease-out;
+  /* Centred on the content, not the viewport: `left-1/2` alone put the bar
+     132px left of the table it belongs to and over the last visible rows. */
+  left: calc(50% + var(--rail-width, 0px) / 2);
 }
 /* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
  * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and

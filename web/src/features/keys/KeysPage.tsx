@@ -1190,8 +1190,15 @@ export function KeysPage() {
               onPress={() => arm(k.id)}
             />
             {/* Permanent delete is only offered once a key is disabled, so a live
-              caller can't be broken (and its audit trail erased) in one click. */}
-            {k.is_active ? null : (
+              caller can't be broken (and its audit trail erased) in one click.
+              The slot is held open when it is not offered: the lane is
+              right-aligned, so a missing action slid every glyph beside it 48px
+              along and Edit sat in a different column on a live row than on a
+              disabled one. An empty span rather than a disabled control, because
+              there is nothing here to refuse. */}
+            {k.is_active ? (
+              <span aria-hidden="true" className="size-8 shrink-0" />
+            ) : (
               <RowAction
                 icon={FiTrash2}
                 label="Delete"

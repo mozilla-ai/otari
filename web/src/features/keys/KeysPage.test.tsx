@@ -781,6 +781,34 @@ describe("KeysPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps the action lane's slots the same on a live row and a disabled one", async () => {
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", is_active: true }),
+        apiKey({ id: "key-2", key_name: "legacy", is_active: false }),
+      ],
+    })
+    renderPage(<KeysPage />)
+
+    const slots = async (name: string) => {
+      const row = (await screen.findByText(name)).closest("tr")!
+      const lane = row.lastElementChild!.firstElementChild!
+      return lane.children.length
+    }
+
+    // Delete is only offered once a key is disabled, and the lane is
+    // right-aligned, so a lane one control shorter slid every glyph beside it
+    // along and put Edit in a different column on each row. The slot is held
+    // open instead.
+    expect(await slots("ci-bot")).toBe(await slots("legacy"))
+    expect(
+      within((await screen.findByText("ci-bot")).closest("tr")!).queryByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    ).not.toBeInTheDocument()
+  })
+
   it("permanently deletes a disabled key after confirm", async () => {
     const fetchMock = mockApi({
       keys: [apiKey({ id: "key-1", key_name: "legacy", is_active: false })],
