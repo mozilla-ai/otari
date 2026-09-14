@@ -96,7 +96,20 @@ function SectionRemove({
   onRemove: () => void
 }) {
   return (
-    <Button variant="ghost" isIconOnly aria-label={label} onPress={onRemove}>
+    // `shrink-0`, because this is a flex item beside a `ControlField` whose
+    // description is a sentence: the row hands the text the width it asks for
+    // and squeezes the button, which keeps its 36px height and loses its width.
+    // Measured at 19px in one section and 21px in another, each following that
+    // section's own wording. A ghost button's hover is its own box, so what an
+    // operator sees is not a square lighting up but a tall narrow slab around
+    // the glyph, which reads as a clipped rectangle.
+    <Button
+      variant="ghost"
+      isIconOnly
+      className="shrink-0"
+      aria-label={label}
+      onPress={onRemove}
+    >
       <FiTrash2 aria-hidden />
     </Button>
   )
