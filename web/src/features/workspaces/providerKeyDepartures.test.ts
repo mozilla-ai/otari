@@ -28,7 +28,7 @@ describe("departureSummary", () => {
       workspaceProviderKeyOverride({ disabled: true }),
     ])
     expect(summary).toEqual({
-      text: "1 pinned, 2 narrowed, 1 disabled",
+      text: "1 always used, 2 narrowed, 1 never used",
       hasDepartures: true,
     })
   })
@@ -43,6 +43,6 @@ describe("departureSummary", () => {
           allowed_models: ["gpt-4o"],
         }),
       ]),
-    ).toEqual({ text: "1 pinned, 1 narrowed", hasDepartures: true })
+    ).toEqual({ text: "1 always used, 1 narrowed", hasDepartures: true })
   })
 })

@@ -5,7 +5,9 @@ import type { WorkspaceProviderKeyOverride } from "@/client"
  *
  * The three departures are counted separately, because they cost a workspace
  * different things: a pin only chooses between keys, a narrowing takes models
- * off its catalog, and a disable takes a provider off it.
+ * off its catalog, and a disable takes a provider off it. Worded the way the
+ * picker in the edit form words them, so the summary and the setting it points
+ * at do not use two vocabularies for one state.
  *
  * Undefined when there is nothing to say, which covers both an organization
  * holding no keys and a read that has not answered. The summary is a pointer
@@ -17,9 +19,9 @@ export function departureSummary(
 ): { text: string; hasDepartures: boolean } | undefined {
   if (rows === undefined || rows.length === 0) return undefined
   const counts = [
-    [rows.filter((row) => row.is_default).length, "pinned"],
+    [rows.filter((row) => row.is_default).length, "always used"],
     [rows.filter((row) => row.allowed_models.length > 0).length, "narrowed"],
-    [rows.filter((row) => row.disabled).length, "disabled"],
+    [rows.filter((row) => row.disabled).length, "never used"],
   ] as const
   const parts = counts
     .filter(([count]) => count > 0)

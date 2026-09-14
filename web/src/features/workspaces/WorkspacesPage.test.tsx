@@ -637,7 +637,7 @@ describe("WorkspacesPage", () => {
     const row = (await screen.findByText("Bravo")).closest("tr")
     expect(row).not.toBeNull()
     expect(
-      within(row as HTMLElement).getByText("1 narrowed, 1 disabled"),
+      within(row as HTMLElement).getByText("1 narrowed, 1 never used"),
     ).toBeInTheDocument()
   })
 

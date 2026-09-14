@@ -45,12 +45,14 @@ import {
 /** What a row's picker is showing, which is the pair of stored flags named. */
 type Departure = "inherited" | "pinned" | "disabled"
 
+// What the gateway does with this key, rather than what the row is called.
+// "Workspace default" and then "Pinned as default" both failed the same way:
+// the setting is about which *credential* serves a request, and a reader asked
+// what it meant for a model (#2106). A sentence cannot be read that way.
 const DEPARTURE_OPTIONS: { value: Departure; label: string }[] = [
-  { value: "inherited", label: "Inherited" },
-  // "Workspace default" said which scope and not which direction, so it read as
-  // a default *given to* the workspace rather than a key pinned *by* it (#2106).
-  { value: "pinned", label: "Pinned as default" },
-  { value: "disabled", label: "Disabled" },
+  { value: "inherited", label: "Follow the organization" },
+  { value: "pinned", label: "Always use this key" },
+  { value: "disabled", label: "Never use this key" },
 ]
 
 function departureOf(row: WorkspaceProviderKeyOverride): Departure {
@@ -304,9 +306,11 @@ export function WorkspaceProviderKeys({
       <div className="flex flex-col gap-1">
         <span className="text-body">Provider keys</span>
         <span className="max-w-md text-caption">
-          This workspace inherits every provider key the organization holds. Pin
-          one as its default, opt out of one, or narrow a key to named models.
-          Narrowing hides every other model of that provider from this
+          This workspace inherits every provider key the organization holds.
+          Where a provider has more than one, say which of them this workspace
+          uses; that choice is about the credential a request is sent with, not
+          about models. Narrowing a key to named models is the separate control
+          below it, and it hides every other model of that provider from this
           workspace, including from its model list.
         </span>
       </div>
@@ -344,20 +348,14 @@ export function WorkspaceProviderKeys({
             const departure = departureOf(row)
             return (
               <li key={keyId} className="flex flex-col gap-2 py-3 first:pt-0">
+                {/* The name is 12px mono and a field is 36px, so the two never
+                    sat on one line without one dwarfing the other. Stacked, the
+                    name pairs with the marker beside it and the control reads
+                    as the answer to it. */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-mono-caption text-foreground">
                     {name}
                   </span>
-                  <FilterSelect
-                    ariaLabel={`This workspace's use of ${name}`}
-                    value={departure}
-                    onChange={(next) => {
-                      const chosen = asDeparture(next)
-                      if (chosen) choose(keyId, chosen)
-                    }}
-                    options={DEPARTURE_OPTIONS}
-                    disabled={pending}
-                  />
                   {/* Which key the provider actually resolves to, which the
                       flags alone do not say: an unpinned key is still the one
                       serving this workspace when it is the organization's
@@ -366,6 +364,16 @@ export function WorkspaceProviderKeys({
                     <span className="text-caption">In use</span>
                   ) : null}
                 </div>
+                <FilterSelect
+                  ariaLabel={`This workspace's use of ${name}`}
+                  value={departure}
+                  onChange={(next) => {
+                    const chosen = asDeparture(next)
+                    if (chosen) choose(keyId, chosen)
+                  }}
+                  options={DEPARTURE_OPTIONS}
+                  disabled={pending}
+                />
                 {departure === "disabled" ? (
                   // Not a control: the gateway refuses an allow-list write on a
                   // disabled key, and deletes the rows it already had when the

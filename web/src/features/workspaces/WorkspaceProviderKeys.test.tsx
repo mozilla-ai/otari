@@ -374,7 +374,7 @@ describe("WorkspaceProviderKeys", () => {
     await pickOption(
       user,
       "This workspace's use of openai / Production",
-      "Pinned as default",
+      "Always use this key",
     )
 
     const patch = requests.find((request) => request.method === "PATCH")
@@ -415,7 +415,7 @@ describe("WorkspaceProviderKeys", () => {
     await pickOption(
       user,
       "This workspace's use of openai / Production",
-      "Inherited",
+      "Follow the organization",
     )
 
     const reset = requests.find((request) => request.method === "DELETE")
@@ -439,7 +439,7 @@ describe("WorkspaceProviderKeys", () => {
     await pickOption(
       user,
       "This workspace's use of openai / Production",
-      "Disabled",
+      "Never use this key",
     )
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Not authorized/)
