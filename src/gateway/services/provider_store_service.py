@@ -21,9 +21,9 @@ only: the caller must not load or refresh this in the hybrid platform path.
 
 import asyncio
 import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -259,13 +259,25 @@ async def save_credential(
     return row
 
 
-async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
+async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int, int]:
     """Re-encrypt stored provider keys with the current primary OTARI_SECRET_KEY.
 
-    Returns ``(reencrypted, unreadable)``. Rows without a stored key are ignored.
-    If any encrypted key cannot be decrypted with the configured key set, it is
-    left untouched and counted as unreadable so the operator can recover it by
+    Returns ``(reencrypted, unreadable, skipped)``. Rows without a stored key are
+    ignored. A key that cannot be decrypted with the configured key set is left
+    untouched and counted as unreadable, so the operator can recover it by
     replacing that provider's key.
+
+    Each row is written with a conditional UPDATE matching the ciphertext that
+    was read. Rotation reads every row, decrypts and re-encrypts, and nothing
+    pinned the write to what it had seen: an edit committing in that window was
+    overwritten with a re-encryption of the value it replaced — a silent lost
+    update on a credential (otari#1127). Zero rows matched means someone else
+    got there first, and that row is counted as skipped rather than clobbered.
+
+    Skipped is reported rather than retried. A rotation is run by hand, the
+    operator is watching, and a row whose value changed under them is already
+    encrypted with the primary key by whoever wrote it — so the honest answer is
+    "these were not mine to rewrite", not a loop that races the same edit again.
     """
     rows = (
         (await db.execute(select(ProviderCredential).where(ProviderCredential.encrypted_api_key.is_not(None))))
@@ -274,17 +286,31 @@ async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
     )
     reencrypted = 0
     unreadable = 0
+    skipped = 0
     for row in rows:
-        if row.encrypted_api_key is None:
+        original = row.encrypted_api_key
+        if original is None:
             continue
         try:
-            plaintext = decrypt_secret(row.encrypted_api_key)
+            plaintext = decrypt_secret(original)
         except SecretDecryptionError:
             unreadable += 1
             continue
-        row.encrypted_api_key = encrypt_secret(plaintext)
-        reencrypted += 1
-    return reencrypted, unreadable
+        # Core UPDATE rather than a mutation on the loaded row: the whole point
+        # is the WHERE, and an ORM flush would carry no condition at all.
+        result = await db.execute(
+            update(ProviderCredential)
+            .where(ProviderCredential.instance == row.instance, ProviderCredential.encrypted_api_key == original)
+            .values(encrypted_api_key=encrypt_secret(plaintext))
+            .execution_options(synchronize_session=False)
+        )
+        # `execute` is typed as returning Result; an UPDATE always yields a
+        # CursorResult, which is where rowcount lives.
+        if cast(CursorResult[Any], result).rowcount == 1:
+            reencrypted += 1
+        else:
+            skipped += 1
+    return reencrypted, unreadable, skipped
 
 
 async def delete_credential(db: AsyncSession, instance: str) -> bool:
