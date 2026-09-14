@@ -505,6 +505,15 @@ class GatewayConfig(BaseSettings):
             "address, since every other reference is relative to the request."
         ),
     )
+    ui_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Where a browser reaches this deployment's user interface: an absolute http(s) URL "
+            "with no trailing slash (e.g. 'https://otari.example.com/ui'). Unset, public_base_url "
+            "answers for it. Set it when an edge serves the interface from an origin or path this "
+            "process does not answer on."
+        ),
+    )
     docs_url: str | None = Field(
         default=None,
         description=(
@@ -1314,6 +1323,14 @@ class GatewayConfig(BaseSettings):
         return self.effective_mode == "hosted"
 
     @property
+    def effective_ui_base_url(self) -> str:
+        """Where a browser reaches this deployment's interface, with no trailing slash.
+
+        ``ui_base_url`` when set, ``public_base_url`` otherwise, empty when neither is.
+        """
+        return (self.ui_base_url or "").strip().rstrip("/") or (self.public_base_url or "").strip().rstrip("/")
+
+    @property
     def effective_mail_transport(self) -> str:
         """Which transport a send would actually use: ``smtp``, ``console`` or ``none``.
 
@@ -1996,6 +2013,37 @@ class GatewayConfig(BaseSettings):
             # The value is left out of the message, as it is for
             # ``data_plane_url``: the offending part of it is the credential.
             msg = f"{info.field_name} must carry no username or password"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("ui_base_url")
+    @classmethod
+    def _validate_ui_base_url(cls, value: str | None) -> str | None:
+        """Reject an interface address a browser could not be sent to.
+
+        Absolute, so that what this builds is absolute too: the same value has to
+        survive a redirect and an inbox, and a relative reference means nothing
+        in the second. A path-prefixed interface writes the whole URL, the way
+        ``public_base_url`` already does.
+        """
+        stripped = (value or "").strip()
+        if not stripped:
+            return None
+        normalized = stripped.rstrip("/")
+        if not normalized:
+            # Slashes alone, which would otherwise strip to empty and read as
+            # unset. Refused rather than silently answered by public_base_url.
+            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        if "?" in normalized or "#" in normalized:
+            msg = "ui_base_url must carry no query string or fragment"
+            raise ValueError(msg)
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        if parsed.username is not None or parsed.password is not None:
+            msg = "ui_base_url must carry no username or password"
             raise ValueError(msg)
         return normalized
 

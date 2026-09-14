@@ -17,7 +17,9 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { budgetLabeler, shortBudgetId } from "@/features/budgets/budgetLabel"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { departureSummary } from "@/features/workspaces/providerKeyDepartures"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
 import { useBudgets } from "@/shared/api/budgets"
 import { ApiError } from "@/shared/api/client"
@@ -25,6 +27,7 @@ import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviders } from "@/shared/api/providers"
 import {
   useAllWorkspaceBudgetDefaults,
+  useAllWorkspaceProviderKeys,
   useCreateWorkspace,
   useCreateWorkspaceBudgetDefault,
   useDeleteWorkspace,
@@ -46,6 +49,18 @@ import { formatDate } from "@/shared/helpers/format"
 // string back to it.
 const getWorkspaceRowKey = (workspace: Workspace): string => workspace.id
 
+/**
+ * How many workspaces the provider-key column will fan out across.
+ *
+ * The summary costs one read per workspace, and the list above it is a
+ * `fetchAllPaged` walk whose own ceiling is 100 pages of 1000, so nothing else
+ * here bounds the fan-out. The column is a convenience, which is not worth tens
+ * of thousands of requests to a large tenant: past this many workspaces it is
+ * dropped rather than fetched, until an organization-scoped batch read exists
+ * to answer it in one.
+ */
+const PROVIDER_KEY_SUMMARY_LIMIT = 25
+
 const LAST_WORKSPACE_REASON =
   "An organization keeps at least one workspace; create another first"
 
@@ -61,14 +76,11 @@ const LAST_WORKSPACE_REASON =
 // with a message telling the operator to come and change it.
 const NO_DEFAULT = ""
 
-function budgetLabel(budget: Budget): string {
-  return budget.name ?? budget.budget_id.split("-")[0]
-}
-
 function budgetChoices(budgets: Budget[]): { value: string; label: string }[] {
+  const nameBudget = budgetLabeler(budgets)
   return budgets.map((budget) => ({
     value: budget.budget_id,
-    label: budgetLabel(budget),
+    label: nameBudget(budget),
   }))
 }
 
@@ -136,7 +148,8 @@ function NarrowedDefaults({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-body">Per-provider defaults</span>
+      {/* The section head role, as the provider-keys group below it uses. */}
+      <span className="text-title">Per-provider defaults</span>
       <ErrorBanner error={createDefault.error ?? updateDefault.error} />
       {narrowed.length === 0 ? (
         <span className="text-caption">
@@ -711,18 +724,19 @@ export function WorkspacesPage() {
   // edit form sets, and a narrowed one is the budget's business, where it shows
   // under "Default for".
   const defaultBudgetName = useMemo(() => {
+    const known = budgets.data ?? []
+    const nameBudget = budgetLabeler(known)
     const names = new Map(
-      (budgets.data ?? []).map((budget) => [
-        budget.budget_id,
-        budget.name ?? budget.budget_id.split("-")[0],
-      ]),
+      known.map((budget) => [budget.budget_id, nameBudget(budget)]),
     )
     const byWorkspace = new Map<string, string>()
     for (const { workspaceId, default: row } of workspaceDefaults.data) {
       if (row.provider_key_id === null) {
+        // A default naming a budget this page did not read has nothing to derive
+        // a label from, so the id is all there is left to show.
         byWorkspace.set(
           workspaceId,
-          names.get(row.budget_id) ?? row.budget_id.split("-")[0],
+          names.get(row.budget_id) ?? shortBudgetId(row.budget_id),
         )
       }
     }
@@ -732,6 +746,28 @@ export function WorkspacesPage() {
   // not one workspace, and disabling on it would flicker.
   const isOnlyWorkspace = workspaces.isSuccess && rows.length === 1
   const manages = canManage(context.data)
+  // Emptied for a caller who cannot manage the organization, and the column
+  // dropped with it below: this summarizes what the edit form holds, which is
+  // the one place a departure can be changed, so a caller who cannot open that
+  // form is neither offered the summary nor made to pay N reads for it. Its
+  // failure is not surfaced for the same reason the defaults' is not: a column
+  // that could not be read says nothing rather than turning the list into an
+  // error page.
+  const providerKeys = useAllWorkspaceProviderKeys(
+    manages && workspaceIds.length <= PROVIDER_KEY_SUMMARY_LIMIT
+      ? workspaceIds
+      : [],
+  )
+  // And dropped again where no workspace has a key to depart from, which is
+  // every standalone deployment: organization-owned provider keys are a hosted
+  // surface (`organization_providers`), so the column would otherwise be a
+  // header over blank cells on the single-tenant product. Read from the answer
+  // rather than from the surface, because the routes behind those keys are
+  // mounted on standalone too and an upgraded deployment can hold rows the
+  // dashboard never offered a page for.
+  const holdsProviderKeys = [...providerKeys.data.values()].some(
+    (rows) => rows.length > 0,
+  )
   const editingWorkspace = rows.find((row) => row.id === editing) ?? null
   // Not gated on `creating`: unmounting the empty state when the dialog opens
   // takes away the node react-aria restores focus to, so closing drops focus to
@@ -788,6 +824,21 @@ export function WorkspacesPage() {
         },
       },
       {
+        id: "provider-keys",
+        header: "Provider keys",
+        cell: (workspace) => {
+          const summary = departureSummary(providerKeys.data.get(workspace.id))
+          if (summary === undefined) return null
+          // The muted rung for "nothing to see", the foreground one for a
+          // departure, which is the same pairing the default-budget cell makes.
+          return summary.hasDepartures ? (
+            <span className="text-sm text-foreground">{summary.text}</span>
+          ) : (
+            <span className="text-xs text-subtle">{summary.text}</span>
+          )
+        },
+      },
+      {
         id: "actions",
         header: "Actions",
         align: "end",
@@ -824,8 +875,19 @@ export function WorkspacesPage() {
         ),
       },
     ]
-    return all.filter((column) => operates || column.id !== "default-budget")
-  }, [manages, isOnlyWorkspace, defaultBudgetName, operates])
+    return all.filter((column) => {
+      if (column.id === "default-budget") return operates
+      if (column.id === "provider-keys") return manages && holdsProviderKeys
+      return true
+    })
+  }, [
+    manages,
+    isOnlyWorkspace,
+    defaultBudgetName,
+    operates,
+    providerKeys.data,
+    holdsProviderKeys,
+  ])
 
   return (
     <div className="flex flex-col">

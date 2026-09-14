@@ -64,6 +64,10 @@ providers:
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
+
+# Where a browser reaches the dashboard, when an edge serves it somewhere this
+# process does not answer. Unset, public_base_url answers for it.
+# ui_base_url: "https://app.example.com/dashboard"
 # mail_transport: smtp
 # smtp_host: "smtp.example.com"
 # smtp_port: 587

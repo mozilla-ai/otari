@@ -5672,7 +5672,7 @@
                 "type": "null"
               }
             ],
-            "description": "This deployment's own externally-reachable URL, used to build links in outgoing mail.",
+            "description": "This deployment's own externally-reachable URL, which mail needs before it can send. The links themselves are built from ui_base_url, or from this when that is unset.",
             "title": "Public Base Url"
           },
           "ready": {
@@ -15777,6 +15777,13 @@
       "WorkspaceProviderKeyOverridePublic": {
         "description": "The effective view for one workspace+key: raw override flags plus the resolution.",
         "properties": {
+          "allowed_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Models",
+            "type": "array"
+          },
           "disabled": {
             "title": "Disabled",
             "type": "boolean"
@@ -15810,7 +15817,8 @@
           "is_default",
           "disabled",
           "is_effective_default",
-          "is_effective_enabled"
+          "is_effective_enabled",
+          "allowed_models"
         ],
         "title": "WorkspaceProviderKeyOverridePublic",
         "type": "object"

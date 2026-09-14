@@ -3,8 +3,8 @@ import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
-import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { ModelComboBox } from "@/features/models/ModelComboBox"
 import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
@@ -198,10 +198,18 @@ export function PricingOverrideDialog({
   // omitted one would otherwise be defaulted to now and move a stored period.
   const startRequired = editing !== undefined && from.trim() === ""
 
+  // Announced on the Model key control, beside the field it is about, rather
+  // than in the paragraph at the foot of the form that carries the period and
+  // overlap refusals. The edit path renders no such control, so there it stays
+  // in the paragraph instead of going unsaid.
+  const keyReason =
+    keyInvalid && modelKey.trim() !== ""
+      ? "A rate is stored under a 'provider:model' key, so it needs the provider prefix."
+      : undefined
   const blockedReason = keyInvalid
-    ? modelKey.trim() === ""
-      ? undefined
-      : "A rate is stored under a 'provider:model' key, so it needs the provider prefix."
+    ? editing
+      ? keyReason
+      : undefined
     : startRequired
       ? "An edit needs a start. Leaving it blank would move this override's period to now."
       : (periodReason ??
@@ -256,13 +264,18 @@ export function PricingOverrideDialog({
           </span>
         </div>
       ) : (
-        <Field
+        // Over the catalog rather than discovery: this page answers to an
+        // organization admin, who is refused the deployment-operator read
+        // (#821) and would get an empty list from it.
+        <ModelComboBox
           label="Model key"
           value={modelKey}
           onChange={setModelKey}
-          placeholder="provider:model"
           isRequired
           autoFocus
+          source="catalog"
+          isInvalid={keyReason !== undefined}
+          errorMessage={keyReason}
           description="For example openai:gpt-4o. A provider instance name works too."
         />
       )}

@@ -136,6 +136,25 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05)
 }
 
+/**
+ * The hex behind a one-level alias, for the variables that are declared as
+ * `var(--color-…)` rather than as a color. Deliberately one level and not a
+ * resolver: every alias in these blocks is one hop, and a general one would
+ * quietly keep passing if a chain grew a cycle.
+ */
+function alias1(tokens: Map<string, string>, name: string): string {
+  const value = tokens.get(name)
+  expect(value, `${name} is not declared`).toBeDefined()
+  const target = /^var\((--[a-z0-9-]+)\)$/.exec(value as string)?.[1]
+  if (!target) return value as string
+  const resolved = tokens.get(target)
+  expect(
+    resolved,
+    `${name} aliases ${target}, which is not declared`,
+  ).toBeDefined()
+  return resolved as string
+}
+
 describe("text on every ground it can land on", () => {
   // The repair in this change was measured against all six grounds each theme
   // declares, and the measurement is the assertion. Without it the WCAG AA fix
@@ -184,6 +203,53 @@ describe("text on every ground it can land on", () => {
       }
     }
   })
+})
+
+describe("a placeholder does not read as a typed value", () => {
+  // `@heroui/styles` aliases `--field-placeholder` to `--muted`, and this file's
+  // mapping points `--muted` at the SECONDARY text role, which is tuned to carry
+  // captions at 4.5:1. Inheriting that default put a hint 1.47:1 from a typed
+  // value in the light theme and 1.58:1 in the dark one, so `New policy` looked
+  // like a form somebody had already filled in. The alias to the tertiary rung is
+  // the whole fix, and it is one line in each theme block: easy to drop in a
+  // palette edit, and invisible until somebody opens a dialog and misreads it.
+  //
+  // 3:1 is WCAG's floor for telling two non-text UI elements apart, which is the
+  // job here. It is deliberately not 4.5: the placeholder is meant to look
+  // secondary, and driving it further from the value would push it off the field.
+  const UI_COMPONENT = 3
+
+  it.each([
+    ["light", LIGHT],
+    ["dark", DARK],
+  ] as const)(
+    "is a rung below the value ink in the %s theme",
+    (theme, tokens) => {
+      const alias = tokens.get("--field-placeholder")
+      expect(
+        alias,
+        `--field-placeholder is unmapped in the ${theme} theme, so HeroUI's own \`var(--muted)\` wins`,
+      ).toBeDefined()
+      // A hex here would stop tracking the ramp, the same way the HeroUI mapping
+      // above refuses one.
+      expect(
+        alias,
+        `--field-placeholder bypasses the tokens in the ${theme} theme`,
+      ).toMatch(/^var\(--color-[a-z0-9-]+\)$/)
+
+      // Both sides resolved through the mapping rather than named directly, so
+      // this keeps measuring the two inks a field actually paints with if either
+      // is ever repointed at a different rung.
+      const ratio = contrast(
+        alias1(tokens, "--field-foreground"),
+        alias1(tokens, "--field-placeholder"),
+      )
+      expect(
+        ratio,
+        `a placeholder is ${ratio.toFixed(2)}:1 from a typed value in the ${theme} theme, under the ${UI_COMPONENT}:1 needed to tell them apart`,
+      ).toBeGreaterThanOrEqual(UI_COMPONENT)
+    },
+  )
 })
 
 describe("the type scale's two halves", () => {

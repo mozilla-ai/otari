@@ -2,8 +2,8 @@ import { Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { ModelComboBox } from "@/features/models/ModelComboBox"
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
 // output are required; the cache rates are optional (blank folds those tokens
@@ -185,18 +185,20 @@ export function SetPriceDialog({
       error={failure}
     >
       {collectModelKey ? (
-        <Field
+        // Suggestions rather than a whitelist: a provider that serves no model
+        // listing is the whole reason this field exists, so what discovery has
+        // not seen still has to be typeable. Both call sites are gated on
+        // operating the deployment, which is what /v1/models/discoverable asks
+        // for.
+        <ModelComboBox
           label="Model key"
           value={modelKey}
           onChange={setModelKey}
-          placeholder="provider:model"
           isRequired
           autoFocus
-          description={
-            modelKey.trim() !== "" && keyInvalid
-              ? "Include the provider or instance prefix, as in ollama:llama3.2."
-              : "The selector callers send as model, prefix included (for example vllm:mistral-small)."
-          }
+          isInvalid={modelKey.trim() !== "" && keyInvalid}
+          errorMessage="Include the provider or instance prefix, as in ollama:llama3.2."
+          description="The selector callers send as model, prefix included (for example vllm:mistral-small)."
         />
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">

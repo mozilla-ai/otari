@@ -164,6 +164,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "terms_url",
             "privacy_url",
             "data_plane_url",
+            "ui_base_url",
             "bootstrap_api_key",
             "log_writer_strategy",
             "streaming_keepalive_interval_ms",
@@ -341,10 +342,12 @@ _REDACTED_URL_FIELDS = frozenset({"database_url", "sandbox_url", "guardrails_url
 
 
 def _field_value(config: GatewayConfig, name: str) -> bool | int | float | str | list[str] | None:
-    # ``mode`` is often unset (None) with the real mode derived from the platform
-    # token; show the effective mode so the viewer is not misleading.
+    # Both are often unset with the real value derived elsewhere; show what is
+    # in use so the viewer is not misleading.
     if name == "mode":
         return config.effective_mode
+    if name == "ui_base_url":
+        return config.effective_ui_base_url or None
     value: bool | int | float | str | list[str] | None = getattr(config, name)
     if name in _REDACTED_URL_FIELDS and isinstance(value, str):
         return redact_url_secrets(value)

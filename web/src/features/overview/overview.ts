@@ -4,6 +4,7 @@ import type {
   ProviderHealthResponse,
   UsageTotals,
 } from "@/client"
+import { budgetLabeler } from "@/features/budgets/budgetLabel"
 
 // Attention-routing status for an overview tile / the system-status strip.
 // "neutral" means "nothing to judge here" (no data, unlimited, none configured)
@@ -135,10 +136,11 @@ export function budgetHealth(budgets: Budget[]): BudgetHealth {
   if (budgets.length === 0) {
     return noneToJudge("No budgets configured")
   }
+  const nameBudget = budgetLabeler(budgets)
   const capped = budgets
     .filter((b) => b.max_budget !== null && b.user_count > 0)
     .map((b) => ({
-      name: b.name ?? b.budget_id,
+      name: nameBudget(b),
       spent: b.total_spend,
       allocated: (b.max_budget as number) * b.user_count,
     }))

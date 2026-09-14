@@ -160,6 +160,12 @@ Passkeys are optional and additive to password sign-in. Set
 `public_base_url` to establish the origin and relying-party ID. Use
 `webauthn_rp_id` only when passkeys must be bound to a parent domain.
 
+Where an edge serves the dashboard on a different host to the gateway, set
+`webauthn_rp_id` to a domain that is a parent of both and list the dashboard
+origin in `webauthn_allowed_origins`. The ID is not derived from `ui_base_url`,
+so without this the ceremony fails in the browser and nothing is logged here
+([#1134](https://github.com/mozilla-ai/otari/issues/1134)).
+
 Changing the relying-party ID makes existing passkeys unusable. The dashboard
 continues listing unusable credentials so the owner can remove them.
 
@@ -171,6 +177,10 @@ secret. Register this redirect URI with the provider:
 ```text
 {public_base_url}/auth/{provider}/callback
 ```
+
+The gateway answers that path itself and redirects the browser into the
+dashboard to finish. Where an edge serves the dashboard elsewhere, set
+`ui_base_url` too; see [Configuration](configuration.md#the-interface-address).
 
 OAuth signs in an existing Otari identity whose email the provider verifies. It
 does not provision arbitrary provider accounts.

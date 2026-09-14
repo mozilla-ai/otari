@@ -101,8 +101,15 @@ export function Select({
           adding one renders two. */}
       <Label className="text-body">{label}</Label>
       <HeroSelect.Trigger autoFocus={autoFocus}>
+        {/* `isPlaceholder` and not a nullish check on `selectedText`, which
+            reads as the same test and is not: react-aria reports an empty
+            selection as `""`, so `selectedText ?? placeholder` renders a blank
+            slot. HeroUI's `data-placeholder` comes off this same flag, so the
+            text and the ink that marks it as a hint always agree. */}
         <HeroSelect.Value>
-          {({ selectedText }) => selectedText ?? placeholder}
+          {({ isPlaceholder, selectedText }) =>
+            isPlaceholder ? placeholder : selectedText
+          }
         </HeroSelect.Value>
         <HeroSelect.Indicator />
       </HeroSelect.Trigger>

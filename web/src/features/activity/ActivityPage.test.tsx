@@ -4,10 +4,17 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client"
+import type {
+  InFlightRequest,
+  InFlightResponse,
+  OrganizationMember,
+  UsageEntry,
+} from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationMember } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
@@ -103,6 +110,8 @@ function mockApi(
     workspace?: string
     /** False for the tenant who does not operate the deployment (otari#837). */
     deploymentOperator?: boolean
+    /** The organization roster the User column names people from. */
+    members?: OrganizationMember[]
   } = {},
 ) {
   const rows = opts.rows ?? []
@@ -209,6 +218,13 @@ function mockApi(
         }
         return jsonResponse(rows)
       }
+      // The roster the User column names people from. Empty by default, which
+      // is the deployment nobody has invited anyone to: the rows then read the
+      // alias the log itself carries.
+      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
+        const members = opts.members ?? []
+        return jsonResponse({ data: members, total: members.length })
+      }
       // Seeds the switcher, and only when a test asks for it: the provider reads
       // `workspace_memberships` off this one response rather than listing
       // workspaces, so a test that leaves `workspace` unset renders the
@@ -256,10 +272,15 @@ function renderPage(ui: ReactElement, route = "/activity") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  // The log's User column asks the organization roster what to call each person,
+  // and that read is gated on the `organizations` surface, so the page needs the
+  // deployment context the shell always gives it.
   return render(
-    <QueryClientProvider client={client}>
-      <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
-    </QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>
+        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+      </QueryClientProvider>
+    </DeploymentProvider>,
     {
       wrapper: withRouter({ url: route }),
     },
@@ -1287,9 +1308,9 @@ describe("ActivityPage", () => {
     await user.click(screen.getByRole("button", { name: "Price this model" }))
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Model key")).toHaveValue(
-      "vllm:mistral-small",
-    )
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("vllm:mistral-small")
     await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2")
     await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6")
     // Trigger and submit say the same string, so this is scoped to the dialog.
@@ -1378,9 +1399,9 @@ describe("ActivityPage", () => {
     await user.click(screen.getByRole("button", { name: "Price this model" }))
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByLabelText("Model key")).toHaveValue(
-      "vllm:mistral-small",
-    )
+    expect(
+      within(dialog).getByRole("combobox", { name: "Model key" }),
+    ).toHaveValue("vllm:mistral-small")
   })
 
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
@@ -2059,6 +2080,84 @@ describe("ActivityPage table-scan avoidance", () => {
     renderPage(<ActivityPage />, "/activity?range=24h")
 
     expect(await screen.findByText("abcdef12…")).toBeInTheDocument()
+  })
+})
+
+describe("ActivityPage user naming", () => {
+  it("names the user from the row's alias rather than showing the billing id", async () => {
+    mockApi({
+      rows: [
+        entry({
+          user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          user_alias: "Alice Example",
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />, "/activity?range=24h")
+
+    expect(await screen.findByText("Alice Example")).toBeInTheDocument()
+    expect(
+      screen.queryByText("81e24d08-7d1e-4287-a074-54aa57d9debc"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("prefers the organization roster to the alias the row carries", async () => {
+    mockApi({
+      rows: [
+        entry({
+          user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          user_alias: "svc-alice",
+        }),
+      ],
+      members: [
+        organizationMember({
+          attribution_user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />, "/activity?range=24h")
+
+    expect(await screen.findByText("Alice Example")).toBeInTheDocument()
+    expect(screen.queryByText("svc-alice")).not.toBeInTheDocument()
+  })
+
+  it("leaves an id an operator chose as its own name", async () => {
+    // `ci-bot` is both the id and the alias, so naming it must not print it
+    // twice or replace it with a shortened form.
+    mockApi({
+      rows: [entry({ user_id: "ci-bot", user_alias: "ci-bot" })],
+    })
+    renderPage(<ActivityPage />, "/activity?range=24h")
+
+    expect(await screen.findByText("ci-bot")).toBeInTheDocument()
+  })
+
+  it("keeps the raw id copyable in the detail drawer", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      rows: [
+        entry({
+          user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+          user_alias: "Alice Example",
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />, "/activity?range=24h")
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!
+    await user.click(row)
+
+    // The one place an operator goes for the raw id, so naming the person must
+    // not take it away: the copy control still yields the id.
+    const detail = row.nextElementSibling as HTMLElement
+    expect(within(detail).getByText("Alice Example")).toBeInTheDocument()
+    await user.click(
+      within(detail).getByRole("button", { name: "Copy user id" }),
+    )
+    expect(await navigator.clipboard.readText()).toBe(
+      "81e24d08-7d1e-4287-a074-54aa57d9debc",
+    )
   })
 })
 

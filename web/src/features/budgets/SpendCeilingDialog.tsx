@@ -9,12 +9,14 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { ProviderInstanceComboBox } from "@/features/providers/ProviderInstanceComboBox"
 import {
   useCreateOrganizationSpendCeiling,
   useUpdateOrganizationSpendCeiling,
 } from "@/shared/api/budgets"
 
-import { budgetLabel, limitLabel, scopeLabel } from "./organizationBudget"
+import { budgetLabeler, hasBudgetName } from "./budgetLabel"
+import { limitLabel, scopeLabel } from "./organizationBudget"
 
 // The form behind both Add and Edit for a spend ceiling.
 //
@@ -112,10 +114,16 @@ export function SpendCeilingDialog({
     reseed({ target, budgetId: landed, provider, name })
   }
 
-  const ownOptions = budgets.map((budget) => ({
-    value: budget.budget_id,
-    label: `${budgetLabel(budget)} — ${limitLabel(budget)}`,
-  }))
+  const nameBudget = budgetLabeler(budgets)
+  const ownOptions = budgets.map((budget) => {
+    const label = nameBudget(budget)
+    return {
+      value: budget.budget_id,
+      // An unnamed budget's label already reads as what it caps, so appending
+      // the limit again would say the figure twice.
+      label: hasBudgetName(budget) ? `${label} — ${limitLabel(budget)}` : label,
+    }
+  })
   // A ceiling holding a budget set at the deployment level opens on an id no
   // option carries, and `Select` renders such a value as itself: a raw
   // uuid where the budget's name belongs. Carried as its own labelled option
@@ -217,7 +225,7 @@ export function SpendCeilingDialog({
             options={targetOptions}
             reserveMessage={false}
           />
-          <Field
+          <ProviderInstanceComboBox
             label="Provider instance"
             value={provider}
             onChange={setProvider}

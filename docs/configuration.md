@@ -296,6 +296,31 @@ owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
 addresses unauthenticated, so a credential in either is refused at startup, the
 way `data_plane_url` refuses one. The same check covers `docs_url`.
 
+## The interface address
+
+The gateway hands a browser absolute URLs in two places: the redirect that
+finishes an OAuth sign-in, and the links in verification, password-reset and
+invitation mail. Both point at `public_base_url`, which is right wherever this
+process serves its own dashboard.
+
+Where an edge serves the dashboard from another origin or path prefix, set
+`ui_base_url` or `OTARI_UI_BASE_URL` to where a browser reaches it:
+
+```yaml
+public_base_url: "https://api.example.com"
+ui_base_url: "https://app.example.com/dashboard"
+```
+
+Unset, `public_base_url` answers for it. Supply an absolute http(s) URL with no
+trailing slash; a relative one would survive the redirect and mean nothing in an
+inbox. Credentials, query strings and fragments are refused: this value travels
+in a redirect and into outgoing mail.
+
+Left unset on a split deployment, an OAuth callback lands the browser on an
+origin holding none of the sign-in state it started with, and the sign-in fails
+with the authorization code unspent. Passkeys need their own settings there; see
+[Access control](access-control.md#passkeys).
+
 ## The data-plane address
 
 A hosted control plane does not serve inference. Set `data_plane_url` or

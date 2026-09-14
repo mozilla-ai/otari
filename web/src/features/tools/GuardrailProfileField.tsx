@@ -49,10 +49,9 @@ export function GuardrailProfileField({
         isRequired
         onChange={onChange}
         options={[]}
-        // The waiting sentence is the description rather than the placeholder:
-        // HeroUI's trigger renders the selected option's text and treats an
-        // empty value as a selection of "", so a placeholder never reaches the
-        // trigger here. The description is rendered and announced either way.
+        // The waiting sentence is the description and not the placeholder: a
+        // description is announced and a trigger's value slot is not, so this
+        // way a screen reader is told the field is still loading.
         description="Reading the guardrails service…"
       />
     )

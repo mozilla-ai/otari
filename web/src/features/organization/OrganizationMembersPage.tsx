@@ -38,6 +38,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { budgetLabeler } from "@/features/budgets/budgetLabel"
 import {
   accessLabel,
   ModelScopeControl,
@@ -571,15 +572,19 @@ function MemberEditor({
   // "No ceiling" first, then every budget. A workspace's own default is labelled
   // so an operator can tell the inherited one from the rest without leaving the
   // form to look it up.
+  const nameBudget = budgetLabeler(budgets)
   const budgetOptions = (fallback: WorkspaceBudgetDefault | undefined) => [
     { value: "", label: "No ceiling" },
-    ...budgets.map((budget) => ({
-      value: budget.budget_id,
-      label:
-        budget.budget_id === fallback?.budget_id
-          ? `${budget.name ?? budget.budget_id.split("-")[0]} (workspace default)`
-          : (budget.name ?? budget.budget_id.split("-")[0]),
-    })),
+    ...budgets.map((budget) => {
+      const label = nameBudget(budget)
+      return {
+        value: budget.budget_id,
+        label:
+          budget.budget_id === fallback?.budget_id
+            ? `${label} (workspace default)`
+            : label,
+      }
+    }),
   ]
 
   const setRow = (

@@ -315,9 +315,10 @@ export function useDeleteWorkspaceBudgetDefault() {
  *
  * Every non-archived organization key, each carrying this workspace's departure
  * from it: `is_default`/`disabled` are the stored flags, `is_effective_*` the
- * resolution once the provider's other keys are taken into account. The response
- * names keys by id only, so the caller pairs it with `useOrgProviderKeys` for the
- * provider and the name.
+ * resolution once the provider's other keys are taken into account, and
+ * `allowed_models` the narrowing, where empty means every model the key serves
+ * rather than none of them. The response names keys by id only, so the caller
+ * pairs it with `useOrgProviderKeys` for the provider and the name.
  *
  * Not paged: the route serves the whole set in one body, because it is bounded by
  * the organization's key count rather than by anything a workspace accumulates.
@@ -337,43 +338,44 @@ export function useWorkspaceProviderKeys(workspaceId: string | null) {
 }
 
 /**
- * The model allow-list each of a workspace's keys carries, as one map.
+ * Every workspace's view of its organization's provider keys, as one map.
  *
- * A fan-out for the reason the two above are: the allow-list is only served per
- * key (`GET /v1/workspaces/{id}/provider-keys/{key}/models`), and an organization
- * holds a handful of keys, so N small cached reads beat adding a route. An empty
- * list is the common answer and a meaningful one: no rows means every model the
- * key serves is allowed, not that none is.
+ * A fan-out for the reason `useAllWorkspaceBudgetDefaults` is: the view is only
+ * served per workspace, and a deployment has few of them, so N small cached
+ * reads beat adding a route. Each shares the cache entry
+ * `useWorkspaceProviderKeys` uses, so opening a workspace afterwards costs
+ * nothing.
+ *
+ * This is what lets the workspaces list say a workspace departs from what its
+ * organization holds without the operator opening each one in turn (#2106).
  */
-export function useWorkspaceProviderKeyModels(
-  workspaceId: string | null,
-  keyIds: string[],
-) {
+export function useAllWorkspaceProviderKeys(workspaceIds: string[]) {
   return useQueries({
-    queries: (workspaceId === null ? [] : keyIds).map((keyId) => ({
-      queryKey: [WORKSPACES, workspaceId, "provider-keys", keyId, "models"],
+    queries: workspaceIds.map((workspaceId) => ({
+      queryKey: [WORKSPACES, workspaceId, "provider-keys"],
       queryFn: async () =>
         (
-          await apiFetch<{ models: string[] }>(
-            `/workspaces/${encodeURIComponent(workspaceId as string)}/provider-keys/${encodeURIComponent(keyId)}/models`,
+          await apiFetch<{ data: WorkspaceProviderKeyOverride[] }>(
+            `/workspaces/${encodeURIComponent(workspaceId)}/provider-keys`,
           )
-        ).models,
+        ).data,
       staleTime: 60_000,
     })),
     combine: (results) => ({
-      // Three states per key, not two. `models` is `undefined` rather than `[]`
-      // until the read answers, because an empty list is the answer "every model
-      // is allowed" and defaulting to one would report a narrowed workspace as
-      // open. `failed` is what separates a read still in flight from one that
-      // will never answer, so the caller can say which rather than showing a
-      // refusal as a wait that does not end.
+      // Keyed by workspace, and only for a read that answered: a workspace whose
+      // read failed is absent rather than empty, because an empty list is the
+      // answer "this organization holds no keys" and a caller must not show a
+      // refusal as one.
       data: new Map(
-        results.map((result, index) => [
-          keyIds[index],
-          { models: result.data, failed: result.error !== null },
-        ]),
+        results.flatMap((result, index) =>
+          result.data === undefined
+            ? []
+            : [[workspaceIds[index], result.data] as const],
+        ),
       ),
-      // The first failure rather than a swallowed one, as the fan-outs above do.
+      isLoading: results.some((result) => result.isLoading),
+      // The first failure, surfaced rather than swallowed, as the fan-outs
+      // above do.
       error: results.find((result) => result.error)?.error ?? null,
     }),
   })
@@ -382,8 +384,7 @@ export function useWorkspaceProviderKeyModels(
 // Pinning a key clears whichever of the provider's other keys this workspace had
 // pinned, and disabling one deletes its model allow-list server-side, so every
 // write here re-reads the workspace's whole provider-key subtree rather than
-// patching the row it acted on. The key is a prefix of each per-key allow-list
-// key, so invalidating it takes those with it.
+// patching the row it acted on.
 function invalidateWorkspaceProviderKeys(
   queryClient: ReturnType<typeof useQueryClient>,
   workspaceId: string,
