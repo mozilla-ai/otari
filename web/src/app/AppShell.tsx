@@ -110,11 +110,6 @@ function tabNameForPath(to: NavPath): string {
 }
 
 /**
- * Which sections each rail draws. A record rather than a ternary, so adding a
- * context is a line here instead of an edit at every site that asks which rail
- * is showing.
- */
-/**
  * The rails the drawer can open as a level inside itself, which is not every
  * context: the workspace rail is the one the drawer starts on, so it is
  * something you come back to rather than open into.
@@ -126,6 +121,11 @@ function tabNameForPath(to: NavPath): string {
  */
 type MobileLevel = Exclude<NavContext, "workspace">
 
+/**
+ * Which sections each rail draws. A record rather than a ternary, so adding a
+ * context is a line here instead of an edit at every site that asks which rail
+ * is showing.
+ */
 const RAIL_SECTIONS: Record<NavContext, readonly NavSection[]> = {
   workspace: NAV_SECTIONS,
   organization: ORG_NAV_SECTIONS,
@@ -133,14 +133,19 @@ const RAIL_SECTIONS: Record<NavContext, readonly NavSection[]> = {
 }
 
 /**
- * Which rail a `TAB_CHANGED` belongs to, in the platform's own vocabulary.
+ * Which rail a `TAB_CHANGED` belongs to.
  *
- * `otari-ai/frontend/src/app/nav/registry.ts` sends `"workspace_sidebar"` and
- * `"organization_settings"` for this property, so those are the values sent
- * here. A value used as a breakdown is as much a shared vocabulary as the event
- * name over it: `context: "workspace"` beside a historical
- * `context: "workspace_sidebar"` splits one funnel exactly the way a renamed
- * event would.
+ * These values are ours, not the platform's, which this comment used to claim
+ * the other way round. `otari-ai` fires `TAB_CHANGED` from `SidebarItems.tsx`
+ * with whatever `trackContext` its sections carry, and that field is an
+ * unconstrained `string?` that its own registry never sets; searching the org
+ * finds `"workspace_sidebar"` and `"organization_settings"` in this file and its
+ * test and nowhere else. So nothing outside this repo defines or validates them.
+ *
+ * That makes the vocabulary ours to extend and the cost of extending it ours
+ * too: the consumer is Mixpanel, which accepts any property value, so a new
+ * string is never dropped, and the only consequence is that a page moving to a
+ * new context ends one funnel line and starts another.
  *
  * A record rather than a ternary, for the reason the sections above are one: a
  * two-way answer over a three-way space does not fail when a third arrives, it
