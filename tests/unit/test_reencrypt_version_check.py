@@ -26,10 +26,11 @@ from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+from gateway.core.config import GatewayConfig
 from gateway.models.entities import ProviderCredential, SearchToolCredential
 from gateway.services import provider_store_service as provider_store
 from gateway.services import search_tool_store_service as search_tool_store
-from gateway.services.provider_store_service import reencrypt_credentials
+from gateway.services.provider_store_service import reencrypt_credentials, refresh_provider_cache, reset_provider_cache
 from gateway.services.search_tool_store_service import reencrypt_search_tools
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 
@@ -169,6 +170,55 @@ class TestProviderRotation:
         counts, stored_value = _run(scenario)
         assert counts == (0, 0, 1)
         assert stored_value == "sk-new-value"
+
+    def test_the_skipped_row_does_not_come_back_through_the_cache(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The database keeps the competing edit; the runtime cache must too.
+
+        The route re-encrypts, commits, and refreshes the overlay on the SAME
+        session, and the factory sets ``expire_on_commit=False`` — so a row the
+        identity map still holds would be handed back with the ciphertext read
+        BEFORE the race (CodeRabbit).
+
+        This cell asserts the route's outcome, not the mechanism: it passes with
+        and without ``populate_existing``, because the rotation's own row list
+        dies when it returns and the identity map is weak, so the reload happens
+        by collection timing rather than by rule. Measured directly, holding the
+        pre-race rows across the refresh does serve ``sk-old-value``. That is
+        why the refresh asks for ``populate_existing`` instead of depending on
+        when the garbage collector runs.
+
+        No ``expire_all()`` here, deliberately: the route does not call one, and
+        adding one to the test would hide the question entirely.
+        """
+
+        async def scenario(session: AsyncSession, db_path: str) -> str:
+            await _add_provider(session, "openai", "sk-old-value")
+            real_encrypt = provider_store.encrypt_secret
+            raced = False
+
+            def encrypt_and_let_someone_else_commit(plaintext: str) -> str:
+                nonlocal raced
+                if not raced:
+                    raced = True
+                    _commit_from_another_connection(
+                        db_path,
+                        update(ProviderCredential)
+                        .where(ProviderCredential.instance == "openai")
+                        .values(encrypted_api_key=encrypt_secret("sk-new-value")),
+                    )
+                return real_encrypt(plaintext)
+
+            monkeypatch.setattr(provider_store, "encrypt_secret", encrypt_and_let_someone_else_commit)
+
+            assert await reencrypt_credentials(session) == (0, 0, 1)
+            await session.commit()
+            reset_provider_cache()
+            await refresh_provider_cache(session, GatewayConfig(providers={}))
+            return str(provider_store._cache["openai"]["api_key"])
+
+        assert _run(scenario) == "sk-new-value"
 
     def test_an_undecryptable_row_is_left_alone(self) -> None:
         async def scenario(session: AsyncSession, _db: str) -> tuple[int, int, int]:
