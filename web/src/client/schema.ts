@@ -11877,6 +11877,8 @@ export interface components {
          * @description The effective view for one workspace+key: raw override flags plus the resolution.
          */
         WorkspaceProviderKeyOverridePublic: {
+            /** Allowed Models */
+            allowed_models: string[];
             /** Disabled */
             disabled: boolean;
             /** Is Default */

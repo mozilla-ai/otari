@@ -217,6 +217,11 @@ class WorkspaceProviderKeyOverridePublic(SQLModel):
     disabled: bool
     is_effective_default: bool
     is_effective_enabled: bool
+    # Carried on the row rather than left to the per-key route: a caller
+    # summarizing a workspace wants the narrowing alongside the flags, and
+    # fetching it per key turns one read into one per key. Empty is the common
+    # answer and means every model the key serves, never none of them.
+    allowed_models: list[str]
 
 
 class WorkspaceProviderKeyOverridesPublic(SQLModel):
