@@ -77,7 +77,12 @@ def redact_secret_like_values(values: dict[str, Any] | None) -> dict[str, Any] |
 def _restore_node(incoming: Any, stored: Any, depth: int) -> Any:
     """Prefer the stored value wherever the caller echoed the mask back, at any depth."""
     if depth >= _MAX_NESTING_DEPTH:
-        return incoming
+        # The bound is the one place a BARE list element gets masked — nothing
+        # else masks an element, because an element has no key to match on. The
+        # dict branch below restores a masked value by its key, and a list has
+        # no key, so without this a list sitting exactly at the bound came back
+        # as ``***`` and an unchanged PATCH wrote the mask over the credential.
+        return stored if incoming == REDACTED_VALUE else incoming
     if isinstance(incoming, dict):
         stored_map = stored if isinstance(stored, dict) else {}
         out: dict[Any, Any] = {}

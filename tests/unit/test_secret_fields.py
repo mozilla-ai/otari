@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 
 from gateway.models.entities import OrganizationGuardrail, ProviderCredential, SearchToolCredential
 from gateway.models.secret_fields import (
+    _MAX_NESTING_DEPTH,
     REDACTED_VALUE,
     redact_secret_like_values,
     restore_redacted_values,
@@ -106,9 +107,7 @@ class TestNestedRoundTrip:
         assert echoed is not None
         echoed["headers"]["trace"] = "on"
 
-        assert restore_redacted_values(echoed, stored) == {
-            "headers": {"api_key": "live-secret", "trace": "on"}
-        }
+        assert restore_redacted_values(echoed, stored) == {"headers": {"api_key": "live-secret", "trace": "on"}}
 
     def test_a_masked_subtree_is_restored_whole(self) -> None:
         stored = {"credentials": {"user": "bob", "passphrase": "p"}}
@@ -141,6 +140,26 @@ class TestNestedRoundTrip:
         stored = {"headers": {"api_key": "live", "trace": "on"}}
 
         assert restore_redacted_values({"headers": {"trace": "on"}}, stored) == {"headers": {"trace": "on"}}
+
+    def test_a_list_at_the_depth_bound_is_not_overwritten_by_its_own_mask(self) -> None:
+        # The depth bound is the ONLY thing that masks a bare list element —
+        # nothing else does, because an element has no key name to match on.
+        # The restore walk pairs a mask with its stored value BY KEY, so an
+        # element had no way back and an unchanged save wrote *** over the
+        # credential. The window is one level wide: a list one below the bound
+        # has its elements masked individually, a list AT the bound is masked
+        # whole as its parent's value and comes back through the key pairing.
+        def nest(depth: int, leaf: object) -> object:
+            node = leaf
+            for _ in range(depth):
+                node = {"a": node}
+            return node
+
+        for list_depth in (_MAX_NESTING_DEPTH - 2, _MAX_NESTING_DEPTH - 1, _MAX_NESTING_DEPTH):
+            stored = nest(list_depth, ["live-token", "second"])
+            echoed = redact_secret_like_values(stored)  # type: ignore[arg-type]
+
+            assert restore_redacted_values(echoed, stored) == stored, f"list at depth {list_depth}"
 
 
 class TestRestoreRedactedValues:
