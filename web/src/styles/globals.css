@@ -3181,9 +3181,14 @@ main {
 /* The floating bulk bar slides up from the viewport edge; fixed positioning
    means it never reflows the table it acts on. */
 /* The rail's footprint, published by the shell (`data-rail`) so a fixed overlay
- * can centre on the content beside the rail instead of on the viewport. Zero by
+ * can center on the content beside the rail instead of on the viewport. Zero by
  * default, which is what every surface without the shell gets and what the
- * drawer breakpoint below `md` leaves it at. */
+ * off-canvas drawer costs the content below `md`.
+ *
+ * The media query is belt and braces rather than the thing that makes this
+ * correct: the shell says `drawer` below `md`, so the zero above already
+ * answers that case. It is kept so a viewport change is right during the frame
+ * before the shell's own media listener has re-rendered. */
 [data-rail] {
   --rail-width: 0px;
 }
@@ -3198,7 +3203,7 @@ main {
 
 .otari-bulk-bar {
   animation: otari-bulk-bar-in 160ms ease-out;
-  /* Centred on the content, not the viewport: `left-1/2` alone put the bar
+  /* Centered on the content, not the viewport: `left-1/2` alone put the bar
      132px left of the table it belongs to and over the last visible rows. */
   left: calc(50% + var(--rail-width, 0px) / 2);
 }

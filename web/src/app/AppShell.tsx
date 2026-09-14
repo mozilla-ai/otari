@@ -702,14 +702,24 @@ function AppShellChrome() {
       <div
         className="relative flex min-h-0 flex-1"
         // What the rail costs the content beside it, for a `position: fixed`
-        // overlay that has to centre on that content rather than on the
+        // overlay that has to center on that content rather than on the
         // viewport. `main` carries `container-type: inline-size`, which does not
         // make it a containing block for a fixed descendant (measured: a fixed
         // probe inside it lands at x=0 while `main` starts at 264), so the
         // offset has to be published rather than inherited from the box.
-        // `globals.css` turns it into a width and zeroes it below `md`, where
-        // the rail is a drawer with no footprint.
-        data-rail={collapsed ? "collapsed" : "expanded"}
+        // `globals.css` turns it into `--rail-width`.
+        //
+        // Three states rather than two, and `drawer` is the reason: below `md`
+        // the rail is off-canvas and costs the content nothing, which is neither
+        // of the other two. Keying this on `collapsed` alone would let the
+        // attribute read "collapsed" while the rail was a drawer, and the only
+        // thing making that harmless is that the stylesheet's non-zero values
+        // sit inside a `md` media query. That would make the attribute and the
+        // media query each other's precondition, with nothing in either file
+        // saying so, and it would break the first time somebody lifted those
+        // declarations out. Saying which of the three it is keeps each end
+        // correct on its own.
+        data-rail={isMobile ? "drawer" : collapsed ? "collapsed" : "expanded"}
       >
         <aside
           ref={asideRef}
