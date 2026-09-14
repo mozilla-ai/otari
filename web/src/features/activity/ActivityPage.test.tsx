@@ -1700,6 +1700,53 @@ describe("ActivityPage gateway-run tools", () => {
     expect(screen.getByText(/3 at \$0\.01 each, \$0\.03/)).toBeInTheDocument()
   })
 
+  it.each([
+    {
+      name: "failed Fetch only",
+      tools: { web_fetch: { billed: 0, errors: 1 } },
+      expectedCost: "$0.00",
+    },
+    {
+      name: "failed Fetch and priced Search",
+      tools: {
+        web_fetch: { billed: 0, errors: 1 },
+        web_search: { billed: 1, errors: 0, unit_rate: 0.01 },
+      },
+      expectedCost: "$0.01",
+    },
+  ])(
+    "shows the billed tool cost for $name",
+    async ({ tools, expectedCost }) => {
+      mockApi({ rows: [entry({ billing_meters: { tools } })] })
+      renderPage(<ActivityPage />)
+
+      await userEvent.click(await screen.findByText("gpt-4o"))
+      const costField = (await screen.findByText("Tool cost")).closest("div")!
+      expect(within(costField).getByText(expectedCost)).toBeInTheDocument()
+      expect(screen.getByText(/web fetch, 1 failed/)).toBeInTheDocument()
+      expect(screen.queryByText("unpriced")).not.toBeInTheDocument()
+    },
+  )
+
+  it("does not hide an unpriced successful tool beside a priced tool", async () => {
+    mockApi({
+      rows: [
+        entry({
+          billing_meters: {
+            tools: {
+              web_fetch: { billed: 1, errors: 0 },
+              web_search: { billed: 1, errors: 0, unit_rate: 0.01 },
+            },
+          },
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    await userEvent.click(await screen.findByText("gpt-4o"))
+    expect(await screen.findByText("unpriced")).toBeInTheDocument()
+  })
+
   it("labels an unpriced tool instead of reporting it as free", async () => {
     // A tool with no rate records units at cost 0. Rendering that as "$0.0000"
     // would read as "this is free" when it means "nobody set a price".
