@@ -36,12 +36,14 @@ import {
 import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { ShareDialog } from "@/features/usage/ShareDialog"
 import {
   billedTokenTotal,
   cacheSums,
   formatLatency,
 } from "@/features/usage/usageTotals"
+import { type UserDisplay, userDisplay } from "@/features/users/userDisplay"
 import { ApiError } from "@/shared/api/client"
 import {
   NO_BREAKDOWNS,
@@ -207,6 +209,10 @@ interface BreakdownProps {
   // has gone missing (a deleted user); a dimension where NULL is a normal state
   // (gateway rows carry no session label) passes its own wording.
   unknownLabel?: string
+  // How a real group's key reads. The default names the two dimensions whose
+  // key is an opaque id from the label the server resolved in the same GROUP
+  // BY; the user dimension overrides it to prefer the organization roster.
+  rowName?: (row: UsageGroupRow) => UserDisplay
   // Turns a row key into the Activity-page filter to drill into. Absent on the
   // organization-wide page: Activity narrows to the sidebar's selected
   // workspace, so a jump from an organization-wide row would silently show a
@@ -222,12 +228,23 @@ interface BreakdownProps {
 const OTHER_KEY = "__other__"
 const UNKNOWN_KEY = "__unknown__"
 
+// Every dimension but `user` resolves without the organization roster: a model,
+// source or endpoint is already its own name, and a key carries the name the
+// server resolved in the same GROUP BY.
+const NO_ROSTER: ReadonlyMap<string, string> = new Map()
+
+// A row's key as it reads, through the same precedence a person reads by, so
+// the two dimensions whose key is an opaque id name themselves the one way.
+const serverRowName = (row: UsageGroupRow): UserDisplay =>
+  userDisplay(row.key as string, row.label, NO_ROSTER)
+
 function BreakdownTable({
   dimensionLabel,
   rows,
   totalCost,
   emptyLabel,
   unknownLabel = "(unknown)",
+  rowName = serverRowName,
   onDrill,
   loading,
 }: BreakdownProps) {
@@ -247,14 +264,21 @@ function BreakdownTable({
       isRowHeader: true,
       cell: (row) => {
         const share = totalCost > 0 ? row.cost / totalCost : 0
+        // The id is the title rather than a second line: the line under the
+        // name is the share bar, and a row that reads as a name here and as a
+        // UUID in the picker above reads as two different people (otari#1153).
+        const name = row.is_other
+          ? { label: `Other (${row.requests.toLocaleString()} req)` }
+          : row.key === null
+            ? { label: unknownLabel }
+            : rowName(row)
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate text-mono-caption text-foreground">
-              {row.is_other
-                ? `Other (${row.requests.toLocaleString()} req)`
-                : row.key === null
-                  ? unknownLabel
-                  : row.key}
+            <span
+              className="truncate text-mono-caption text-foreground"
+              title={name.id}
+            >
+              {name.label}
             </span>
             {/* 140px and square, not a full-width capsule: a share bar is a
                 fixed-length scale a reader compares rows against, and one that
@@ -476,6 +500,8 @@ interface BreakdownDimensionDef {
   rows: UsageGroupRow[]
   // How a group whose column was NULL reads (see BreakdownTable.unknownLabel).
   unknownLabel?: string
+  // How a group's key reads (see BreakdownTable.rowName).
+  rowName?: (row: UsageGroupRow) => UserDisplay
   drill: (key: string) => void
 }
 
@@ -491,6 +517,16 @@ interface BreakdownDimensionDef {
 export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   const orgWide = scope === "organization"
   const navigate = useNavigate()
+
+  // Who the people behind the owner ids are. The usage API already resolves an
+  // alias per group, so this only overrides it where the roster knows the
+  // person by a different name, and an empty map costs the pages nothing.
+  const memberLabels = useMemberAttributionLabels()
+  const userRowName = useMemo(
+    () => (row: UsageGroupRow) =>
+      userDisplay(row.key as string, row.label, memberLabels),
+    [memberLabels],
+  )
 
   // The share panel curates presentation only; the data it renders is whatever
   // the filter row above it currently selects, so there is no scope state here.
@@ -645,10 +681,16 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     true,
     scope,
   )
-  const userOptions = realGroups(entitySuggest.data?.by_user).map((r) => ({
-    value: r.key as string,
-    label: r.label ? `${r.label} (${r.key})` : (r.key as string),
-  }))
+  // Name first, id in parentheses: the id is what the row submits, and two
+  // people can share a name. Resolved the same way the breakdown table below
+  // resolves it, so the same person reads the same in both.
+  const userOptions = realGroups(entitySuggest.data?.by_user).map((r) => {
+    const name = userRowName(r)
+    return {
+      value: r.key as string,
+      label: name.id ? `${name.label} (${name.id})` : name.label,
+    }
+  })
   // API key options label by name (falling back to a short id), value is the id.
   const keyOptions = realGroups(entitySuggest.data?.by_api_key).map((r) => ({
     value: r.key as string,
@@ -900,7 +942,9 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
             ? "(unknown)"
             : effectiveGroupBy === "api_key_id"
               ? (row.label ?? `${row.key.slice(0, 8)}…`)
-              : row.key,
+              : effectiveGroupBy === "user_id"
+                ? userRowName(row).label
+                : row.key,
         color: row.is_other
           ? OTHER_COLOR
           : CAT_COLORS[index % CAT_COLORS.length],
@@ -973,8 +1017,9 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               : p.requests,
       })),
     }
-    // Group labels now come from the server on `grouped.data`, so this memo has
-    // no input outside its dependency list and needs no exhaustive-deps escape.
+    // Group labels come from the server on `grouped.data` and from the roster
+    // through `userRowName`, both of which are listed, so this memo has no
+    // input outside its dependency list and needs no exhaustive-deps escape.
   }, [
     series,
     effectiveGroupBy,
@@ -982,6 +1027,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     metric,
     hasComposition,
     hasErrors,
+    userRowName,
   ])
 
   const formatValue = metricFormatter(metric)
@@ -1026,6 +1072,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       key: "user",
       label: "User",
       rows: data?.by_user ?? [],
+      rowName: userRowName,
       drill: (key) =>
         drillTo({
           user_id: key,
@@ -1478,6 +1525,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                     : "No usage recorded yet."
                 }
                 unknownLabel={activePrimary.unknownLabel}
+                rowName={activePrimary.rowName}
                 onDrill={orgWide ? undefined : activePrimary.drill}
                 loading={summary.isLoading}
               />
@@ -1509,6 +1557,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                     : "No usage recorded yet."
                 }
                 unknownLabel={activeSecondary.unknownLabel}
+                rowName={activeSecondary.rowName}
                 onDrill={orgWide ? undefined : activeSecondary.drill}
                 loading={summary.isLoading}
               />

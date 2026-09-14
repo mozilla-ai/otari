@@ -915,6 +915,36 @@ describe("BudgetsPage", () => {
     expect(screen.getByText("$12.50")).toBeInTheDocument()
   })
 
+  it("names the person in the reset history instead of their billing id", async () => {
+    // The reset log carries only the raw owner id, unlike a usage row whose
+    // label the server resolves, so the page resolves it from the users list it
+    // already holds (otari#1153).
+    const uuid = "81e24d08-7d1e-4287-a074-54aa57d9debc"
+    mockApi({
+      budgets: [budget()],
+      users: [{ ...testUser(uuid), alias: "Alice Example" }],
+      resetLogs: [
+        {
+          id: 1,
+          user_id: uuid,
+          budget_id: "11111111-2222-3333-4444-555555555555",
+          previous_spend: 12.5,
+          reset_at: "2026-02-01T00:00:00+00:00",
+          next_reset_at: "2026-02-02T00:00:00+00:00",
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("11111111")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "History" }))
+
+    const named = await screen.findByText("Alice Example")
+    expect(named).toHaveAttribute("title", uuid)
+    expect(screen.queryByText(uuid)).not.toBeInTheDocument()
+  })
+
   it("deletes a budget after an explicit confirm", async () => {
     const fetchMock = mockApi({ budgets: [budget()] })
     const user = userEvent.setup()

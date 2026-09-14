@@ -9,7 +9,14 @@ import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
-import { organizationContext, seriesPoint, usageTotals } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import {
+  bootstrap,
+  organizationContext,
+  organizationMember,
+  seriesPoint,
+  usageTotals,
+} from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
@@ -210,6 +217,12 @@ function mockApi(
     // the organization-scoped ones (otari#837). After `extra`, so a test that
     // supplies its own context still wins, and on an exact match so it cannot
     // shadow /v1/organizations/me/usage.
+    // The roster the breakdowns name people from. Answered by default and
+    // empty, which is the deployment nobody has invited anyone to: the rows
+    // then read the alias the summary already carries.
+    if (url.includes(`${API_ROOT}/organizations/me/members`)) {
+      return jsonResponse({ data: [], total: 0 })
+    }
     if (url.endsWith(`${API_ROOT}/organizations/me`)) {
       return jsonResponse(organizationContext())
     }
@@ -310,8 +323,13 @@ function renderPage(ui: ReactElement, options: { scoped?: boolean } = {}) {
   ) : (
     ui
   )
+  // The breakdowns and the chart legend ask the organization roster what to call
+  // each person, and that read is gated on the `organizations` surface, so the
+  // page needs the deployment context the shell always gives it.
   return render(
-    <QueryClientProvider client={client}>{body}</QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>{body}</QueryClientProvider>
+    </DeploymentProvider>,
     {
       wrapper: withRouter({
         url: "/usage",
@@ -821,7 +839,9 @@ describe("UsagePage", () => {
     await user.keyboard("{Escape}")
 
     await user.click(screen.getByRole("button", { name: "User" }))
-    const row = (await screen.findByText("alice")).closest("tr")!
+    // The row reads as the name, not the billing id; the id is still what the
+    // drill-down filters on.
+    const row = (await screen.findByText("Alice")).closest("tr")!
     await user.click(row)
 
     const loc =
@@ -829,6 +849,68 @@ describe("UsagePage", () => {
     expect(loc.startsWith("/activity")).toBe(true)
     expect(loc).toContain("user_id=alice")
     expect(loc).toContain("model=gpt-5.6")
+  })
+
+  it("names the person in the user breakdown instead of their billing id", async () => {
+    const user = userEvent.setup()
+    mockApi(
+      summary({
+        by_user: [
+          {
+            key: "81e24d08-7d1e-4287-a074-54aa57d9debc",
+            label: "Alice Example",
+            cost: 900.5,
+            tokens: 8_000_000,
+            requests: 50_000,
+            is_other: false,
+          },
+        ],
+      }),
+    )
+    renderPage(<UsagePage />)
+    await screen.findByText("gpt-5.6")
+
+    await user.click(screen.getByRole("button", { name: "User" }))
+    const cell = await screen.findByText("Alice Example")
+    // The id is still there to hover, because two people can share a name.
+    expect(cell).toHaveAttribute(
+      "title",
+      "81e24d08-7d1e-4287-a074-54aa57d9debc",
+    )
+    expect(
+      screen.queryByText("81e24d08-7d1e-4287-a074-54aa57d9debc"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("prefers the organization roster's name to the alias the log carries", async () => {
+    const user = userEvent.setup()
+    mockApi(summary(), {
+      "/organizations/me/members": {
+        data: [
+          organizationMember({
+            attribution_user_id: "alice",
+            full_name: "Alice Example",
+          }),
+        ],
+        total: 1,
+      },
+    })
+    renderPage(<UsagePage />)
+    await screen.findByText("gpt-5.6")
+
+    await user.click(screen.getByRole("button", { name: "User" }))
+    expect(await screen.findByText("Alice Example")).toBeInTheDocument()
+    // "Alice" is the alias the summary shipped; the roster outranks it.
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument()
+  })
+
+  it("leaves a dimension that is already its own name alone", async () => {
+    mockApi(summary())
+    renderPage(<UsagePage />)
+
+    // A model carries no server label, so the cell is the key itself and gains
+    // no title to hover.
+    expect(await screen.findByText("gpt-5.6")).not.toHaveAttribute("title")
   })
 
   it("keeps an active API key filter when drilling into a model", async () => {

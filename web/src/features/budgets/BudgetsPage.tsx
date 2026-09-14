@@ -35,8 +35,10 @@ import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { SpendMeter, spendState } from "@/design-system/metrics/SpendMeter"
 import { Segmented } from "@/design-system/navigation/Segmented"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
+import { aliasesByUserId, userDisplay } from "@/features/users/userDisplay"
 import {
   useBudgetResetLogs,
   useBudgets,
@@ -443,8 +445,20 @@ function UsageCell({ budget }: { budget: Budget }) {
 
 // ---------- reset history drill-down ----------
 
-function ResetHistory({ budgetId }: { budgetId: string }) {
+// `BudgetResetLogResponse` carries only the raw owner id, unlike the usage rows
+// whose label the server resolves in the same query. The page already holds the
+// roster and the users list, so a reset reads as a person by resolving locally
+// rather than by growing a second way for the server to say the same thing.
+function ResetHistory({
+  budgetId,
+  users,
+}: {
+  budgetId: string
+  users: User[] | undefined
+}) {
   const logs = useBudgetResetLogs(budgetId)
+  const memberLabels = useMemberAttributionLabels()
+  const aliases = useMemo(() => aliasesByUserId(users), [users])
 
   if (logs.isLoading) {
     return (
@@ -489,22 +503,40 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((log: BudgetResetLog) => (
-            <tr key={log.id} className="border-t border-border">
-              <td className="py-1.5 pr-4">
-                <code>{log.user_id ?? "—"}</code>
-              </td>
-              <td className="py-1.5 pr-4 text-foreground">
-                {formatUSD(log.previous_spend)}
-              </td>
-              <td className="py-1.5 pr-4 text-muted">
-                {absolute(log.reset_at)}
-              </td>
-              <td className="py-1.5 text-muted">
-                {absolute(log.next_reset_at)}
-              </td>
-            </tr>
-          ))}
+          {rows.map((log: BudgetResetLog) => {
+            const owner =
+              log.user_id === null
+                ? null
+                : userDisplay(
+                    log.user_id,
+                    aliases.get(log.user_id),
+                    memberLabels,
+                  )
+            return (
+              <tr key={log.id} className="border-t border-border">
+                {/* Monospace only while it is still an id: a name in `code`
+                    reads as a value to paste somewhere. */}
+                <td className="py-1.5 pr-4">
+                  {owner === null ? (
+                    "—"
+                  ) : owner.id === undefined ? (
+                    <code>{owner.label}</code>
+                  ) : (
+                    <span title={owner.id}>{owner.label}</span>
+                  )}
+                </td>
+                <td className="py-1.5 pr-4 text-foreground">
+                  {formatUSD(log.previous_spend)}
+                </td>
+                <td className="py-1.5 pr-4 text-muted">
+                  {absolute(log.reset_at)}
+                </td>
+                <td className="py-1.5 text-muted">
+                  {absolute(log.next_reset_at)}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -969,7 +1001,9 @@ function DeploymentBudgetsPage() {
               Close
             </Button>
           </div>
-          <ResetHistory budgetId={historyBudget.budget_id} />
+          {/* The query's own array, not a defaulted copy: a fresh `[]` each
+              render would rebuild the alias map on every paint. */}
+          <ResetHistory budgetId={historyBudget.budget_id} users={users.data} />
         </Section>
       ) : null}
 
