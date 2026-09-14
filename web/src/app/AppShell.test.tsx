@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/AppShell"
+import { navItemForPath } from "@/app/nav/registry"
 import { Provider } from "@/app/provider"
 import type {
   CallerOrganizationMembership,
@@ -740,6 +741,15 @@ describe("AppShell entitlement gating", () => {
     // declares the axis at all: the two that declared it here are drawn in the
     // account menu now. So this covers `"refused"`, and `"unlisted"` is covered
     // where its one destination is drawn (`nav/AccountMenu.test.tsx`).
+    //
+    // Riding on one row makes this case only as good as that row's gate, and a
+    // row losing its gate is a registry edit that says nothing about this file.
+    // So the premise is asserted here rather than described: with the axis
+    // undeclared the row appears for everyone, this case passes on a shell that
+    // no longer gates anything, and nothing points back at it. Measured rather
+    // than supposed: removing the gate and running `src/app` fails one test, and
+    // it is not this one.
+    expect(navItemForPath("/providers")?.operatorOnly).toBeDefined()
     await renderShell(bootstrap(), { operator: true })
 
     expect(
@@ -1148,6 +1158,77 @@ describe("AppShell entitlement gating", () => {
 
     expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
       "Web search",
+    )
+  })
+
+  it("names a page no rail owns without naming a scope for it", async () => {
+    mockMatchMedia(false)
+    // The deployment's own settings, reached from the account menu. Naming it
+    // under a scope would file it inside a workspace that does not own it, so
+    // the trail stops short and the page names itself in its heading, which is
+    // what `/account` already does from the same menu.
+    // With a workspace selected, so the scope crumb is one this case could
+    // fail on: with none, "does not name a scope" is trivially true and the
+    // assertion proves nothing.
+    const inWorkspace = {
+      workspace_memberships: [
+        {
+          name: "Default workspace",
+          role: "owner",
+          workspace_id: "44444444-4444-4444-4444-444444444444",
+        },
+      ],
+    }
+    await renderShell(bootstrap(), {
+      url: "/settings",
+      operator: true,
+      context: inWorkspace,
+    })
+
+    // Names the page and no scope. Not the other way round: dropping the page
+    // instead would leave nothing at all on a deployment with no workspace
+    // selected, and the rail highlights no row here either.
+    const crumb = await screen.findByLabelText("Breadcrumb")
+    expect(crumb).toHaveTextContent("Settings")
+    expect(crumb).not.toHaveTextContent(/workspace/i)
+    expect(crumb).not.toHaveTextContent(/organization/i)
+    // The rail it opens is the workspace one, not the organization rail it is
+    // registered under: a destination drawn in the menu belongs to neither, so
+    // it takes the default rather than swinging the shell to a scope that does
+    // not own it.
+    expect(
+      await within(
+        screen.getByRole("navigation", { name: "Sidebar" }),
+      ).findByRole("link", { name: "Overview" }),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole("navigation", { name: "Sidebar" })).queryByRole(
+        "link",
+        { name: "Members & roles" },
+      ),
+    ).toBeNull()
+  })
+
+  it("still names the workspace on an ordinary page, which is what the case above turns off", async () => {
+    mockMatchMedia(false)
+    // The control for the assertion above. Same fixture, a page a rail does own,
+    // and the scope is in the trail: without this, "the trail names no scope"
+    // could pass because the harness never produces one.
+    await renderShell(bootstrap(), {
+      url: "/usage",
+      context: {
+        workspace_memberships: [
+          {
+            name: "Default workspace",
+            role: "owner",
+            workspace_id: "44444444-4444-4444-4444-444444444444",
+          },
+        ],
+      },
+    })
+
+    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
+      "Default workspace",
     )
   })
 

@@ -621,9 +621,33 @@ const NAV_CHILD_PARENTS: ReadonlyMap<string, NavItem> = new Map(
 /** Where a destination lives: the workspace sidebar, or the organization one. */
 export type NavContext = "workspace" | "organization"
 
+// The organization rail's own destinations, which is not every entry declared
+// under it: a row the shell draws in the account menu left this rail when it
+// stopped being a row on it, and it takes the default context the way `/docs`
+// and `/account` do (see web/AGENTS.md, "chrome destinations"). Declared here
+// rather than moved to a workspace section, because the entry does belong to
+// this registry: what changed is where it is drawn, not who serves it. Without
+// the filter the page opens the organization rail and the breadcrumb names an
+// organization that does not own it.
 const ORG_PATHS: readonly string[] = ORG_NAV_SECTIONS.flatMap((section) =>
-  section.items.map((item) => item.to),
+  section.items
+    .filter((item) => item.rendersIn === undefined)
+    .map((item) => item.to),
 )
+
+/**
+ * Whether the shell draws this pathname's destination outside both rails.
+ *
+ * The registered half of what `web/AGENTS.md` calls a chrome destination:
+ * `/docs` and `/account` are unregistered and get this for free, while these
+ * are real entries that keep their gating and are simply drawn somewhere else.
+ * What the two have in common is the thing a reader cares about, that no rail
+ * owns the page, which is why the breadcrumb stops short of naming it inside a
+ * scope.
+ */
+export function isChromeDestination(pathname: string): boolean {
+  return navItemForPath(pathname)?.rendersIn !== undefined
+}
 
 /**
  * What to call the destination at this pathname, as a breadcrumb would.

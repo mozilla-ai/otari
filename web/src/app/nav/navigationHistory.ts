@@ -31,6 +31,7 @@
  */
 
 import {
+  isChromeDestination,
   isPathVisible,
   NAV_ITEMS,
   type NavContext,
@@ -97,6 +98,12 @@ export function rememberLocation(
 ): void {
   const to = destinationAt(pathname)
   if (!to || !isPathVisible(to, isVisible)) return
+  // And a no-op for a destination no rail draws, for the same reason as the
+  // guide above it: it is reached from the account menu rather than from a
+  // rail, so returning to that rail should land on the last page that rail
+  // actually offered. Without this, opening the deployment's settings makes
+  // them the workspace's landing page, on a rail with no row for them.
+  if (isChromeDestination(to)) return
   try {
     window.localStorage.setItem(STORAGE_KEYS[navContextForPath(pathname)], to)
   } catch {

@@ -9,6 +9,7 @@ import {
   applyNavLabelOverrides,
   composeNavItems,
   composeNavSections,
+  isChromeDestination,
   isPathVisible,
   NAV_ITEMS,
   NAV_SECTIONS,
@@ -161,10 +162,14 @@ describe("nav registry", () => {
       // The two values encode which refusal the server gives, 403 against 404.
       // Flattening them would make the menu lie about one of the two.
       expect(item?.operatorOnly).toBe(operatorOnly)
-      // Still an organization destination: `ORG_PATHS` is flattened from
-      // `ORG_NAV_SECTIONS`, so an entry that left them would open the workspace
-      // rail instead and file its visit under the other context's history key.
-      expect(navContextForPath(to)).toBe("organization")
+      // And owned by no rail, which is the other half: `rendersIn` has to reach
+      // `ORG_PATHS` as well as the rail rows, or the page opens the
+      // organization rail under a breadcrumb naming an organization that does
+      // not own it. Asserted as the rule rather than as the value, because the
+      // first version of this line pinned "organization" on the strength of it
+      // being what the code returned.
+      expect(navContextForPath(to)).toBe("workspace")
+      expect(isChromeDestination(to)).toBe(true)
     }
   })
 
@@ -174,7 +179,12 @@ describe("nav registry", () => {
     // workspace one directly under the root.
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navContextForPath("/workspaces")).toBe("organization")
-    expect(navContextForPath("/settings")).toBe("organization")
+    // Not "organization", though `/settings` is declared under that rail. It is
+    // drawn in the account menu, so no rail owns it and it takes the default
+    // context, which is the rule `/docs` and `/account` already follow. This
+    // line said "organization" while that was merely what the code did, and an
+    // asserted value is indistinguishable from a considered one.
+    expect(navContextForPath("/settings")).toBe("workspace")
     expect(navContextForPath("/organization/members")).toBe("organization")
     // Unregistered paths open in the context the shell starts in.
     expect(navContextForPath("/docs")).toBe("workspace")

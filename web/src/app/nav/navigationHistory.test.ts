@@ -86,14 +86,25 @@ describe("rail location memory", () => {
     // The half a write-time check cannot cover: the entry was visible when it was
     // stored, and a gateway restarted against a config reporting fewer surfaces
     // changed the answer underneath it.
-    window.localStorage.setItem(ORGANIZATION_KEY, "/settings")
+    window.localStorage.setItem(ORGANIZATION_KEY, "/organization/pricing")
 
     expect(
-      lastLocation("organization", withoutSurface("settings")),
+      lastLocation("organization", withoutSurface("pricing")),
     ).toBeUndefined()
     expect(lastLocation("organization", showsEverything)).toEqual({
-      to: "/settings",
+      to: "/organization/pricing",
     })
+  })
+
+  it("never remembers a destination the account menu draws", () => {
+    // `/settings` is registered under the organization rail and drawn in the
+    // account menu, so no rail offers it. Returning to a rail has to land on a
+    // page that rail actually shows, which is the rule the guide and the 404
+    // splat already follow by being unregistered.
+    rememberLocation("/settings", showsEverything)
+
+    expect(lastLocation("workspace", showsEverything)).toBeUndefined()
+    expect(lastLocation("organization", showsEverything)).toBeUndefined()
   })
 
   it("drops a stored value that belongs to the other rail", () => {
