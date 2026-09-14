@@ -311,10 +311,10 @@ public_base_url: "https://api.example.com"
 ui_base_url: "https://app.example.com/dashboard"
 ```
 
-Unset, `public_base_url` answers for it. Supply an absolute http(s) URL or a
-root-relative path (`/dashboard`) with no trailing slash. Credentials, query
-strings and fragments are refused: this value travels in a redirect and into
-outgoing mail.
+Unset, `public_base_url` answers for it. Supply an absolute http(s) URL with no
+trailing slash; a relative one would survive the redirect and mean nothing in an
+inbox. Credentials, query strings and fragments are refused: this value travels
+in a redirect and into outgoing mail.
 
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails

@@ -305,11 +305,13 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         with pytest.raises(ValidationError, match="no username or password"):
             GatewayConfig(ui_base_url="https://user:secret@app.example.com")
 
-    def test_a_root_relative_path_is_accepted(self) -> None:
-        # Why this cannot simply demand an absolute URL: a deployment whose
-        # interface sits under a prefix of its own origin has nothing else to
-        # write, and the landing redirect resolves it correctly.
-        assert GatewayConfig(ui_base_url="/ui").effective_ui_base_url == "/ui"
+    @pytest.mark.parametrize("value", ["/ui", "/"])
+    def test_a_root_relative_path_is_refused(self, value: str) -> None:
+        # It would survive the redirect and mean nothing in an inbox, and '/'
+        # would strip to empty and read as unset. A deployment under a path
+        # prefix writes the whole URL, as public_base_url already does.
+        with pytest.raises(ValidationError, match="absolute"):
+            GatewayConfig(ui_base_url=value)
 
     def test_an_absolute_url_survives_with_its_trailing_slash_dropped(self) -> None:
         assert GatewayConfig(ui_base_url="https://app.example.com/ui/").ui_base_url == "https://app.example.com/ui"

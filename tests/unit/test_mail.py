@@ -412,6 +412,16 @@ def test_link_names_the_interface_when_an_edge_serves_it_elsewhere() -> None:
     assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/#/verify-email?token=abc"
 
 
+def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
+    # ``can_send_links`` gates the send, so it has to still imply an absolute
+    # link now that links are built from the interface address rather than from
+    # the one that flag reads.
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui"))
+
+    assert mailer.can_send_links is True
+    assert mailer.link("/#/verify-email?token=t") == "https://app.example.com/ui/#/verify-email?token=t"
+
+
 def test_link_does_not_double_a_trailing_slash() -> None:
     assert Mailer(_ready(public_base_url="https://otari.example.com/")).link("/x") == "https://otari.example.com/x"
 

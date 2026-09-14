@@ -508,10 +508,10 @@ class GatewayConfig(BaseSettings):
     ui_base_url: str | None = Field(
         default=None,
         description=(
-            "Where a browser reaches this deployment's user interface, with no trailing slash "
-            "(e.g. 'https://otari.example.com/ui'). Unset, public_base_url answers for it. Set it "
-            "when an edge serves the interface from an origin or path this process does not "
-            "answer on."
+            "Where a browser reaches this deployment's user interface: an absolute http(s) URL "
+            "with no trailing slash (e.g. 'https://otari.example.com/ui'). Unset, public_base_url "
+            "answers for it. Set it when an edge serves the interface from an origin or path this "
+            "process does not answer on."
         ),
     )
     docs_url: str | None = Field(
@@ -2021,13 +2021,20 @@ class GatewayConfig(BaseSettings):
     def _validate_ui_base_url(cls, value: str | None) -> str | None:
         """Reject an interface address a browser could not be sent to.
 
-        A host with no scheme is a relative reference, so a redirect built on it
-        would resolve against this deployment's own address. A root-relative path
-        ('/ui') is allowed, which is why this cannot demand an absolute URL.
+        Absolute, so that what this builds is absolute too: the same value has to
+        survive a redirect and an inbox, and a relative reference means nothing
+        in the second. A path-prefixed interface writes the whole URL, the way
+        ``public_base_url`` already does.
         """
-        normalized = (value or "").strip().rstrip("/")
-        if not normalized:
+        stripped = (value or "").strip()
+        if not stripped:
             return None
+        normalized = stripped.rstrip("/")
+        if not normalized:
+            # Slashes alone, which would otherwise strip to empty and read as
+            # unset. Refused rather than silently answered by public_base_url.
+            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
         if "@" in normalized:
             msg = "ui_base_url must carry no username or password"
             raise ValueError(msg)
@@ -2035,15 +2042,8 @@ class GatewayConfig(BaseSettings):
             msg = "ui_base_url must carry no query string or fragment"
             raise ValueError(msg)
         parsed = urlsplit(normalized)
-        if parsed.scheme:
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                msg = f"ui_base_url must be an absolute http(s) URL or a root-relative path, got '{value}'"
-                raise ValueError(msg)
-        elif parsed.netloc or not normalized.startswith("/"):
-            msg = (
-                f"ui_base_url must be an absolute http(s) URL (e.g. 'https://{normalized.lstrip('/')}') "
-                f"or a root-relative path (e.g. '/ui'), got '{value}'"
-            )
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         return normalized
 
