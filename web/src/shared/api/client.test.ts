@@ -143,6 +143,22 @@ describe("siteFetch", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).not.toContain(API_ROOT)
   })
 
+  it("sends no credential, which fetch would otherwise attach", async () => {
+    // `fetch` defaults to `credentials: "same-origin"`, so leaving it unset
+    // puts the session cookie on a public poll that runs once a minute for the
+    // life of every open tab. Nothing reads it there.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ build: "abc", version: "1.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+
+    await siteFetch(DASHBOARD_BUILD_PATH)
+
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ credentials: "omit" })
+  })
+
   it("reports a refusal as an ApiError rather than resolving with nothing", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("gone", { status: 404 }),

@@ -416,14 +416,17 @@ function isTimeout(error: unknown): boolean {
  * asked for `/api/v1/dashboard-build.json` ever since, which is a 404. Nothing
  * surfaced it, because the one caller treats a failed poll as "no answer yet".
  *
- * Unauthenticated by design, like the page it describes, so it sends no
- * credential and has no 401 sign-out path: there is nothing here that a session
- * could authorize.
+ * Unauthenticated by design, like the page it describes, so it has no 401
+ * sign-out path: there is nothing here a session could authorize. The
+ * credential is omitted explicitly rather than left to `fetch`, whose default
+ * is `same-origin` and would therefore attach the session cookie to every poll
+ * for the life of an open tab. Nothing reads it, so nothing should send it.
  */
 export async function siteFetch<T>(path: string): Promise<T> {
   let response: Response
   try {
     response = await fetch(path, {
+      credentials: "omit",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
