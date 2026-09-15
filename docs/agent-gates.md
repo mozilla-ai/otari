@@ -16,8 +16,11 @@ This is the first slice. It ships:
 
 - One gate type, `changed_path`.
 - `POST /api/v1/hooks/check`, evaluated against evidence the caller submits.
-- No native hook/harness wiring, no judge gate, no starter-policy generator,
-  no reusable packs.
+- `otari hook --harness claude-code`, a real installed command that reads a
+  Claude Code hook payload and calls the endpoint above. Registering it
+  (adding the hook entry to Claude Code's own settings) is still manual;
+  `otari setup` (automatic registration) does not exist yet, nor does a
+  judge gate, a starter-policy generator, or reusable packs.
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
@@ -139,125 +142,29 @@ HTTP status codes:
 build. A gate is only as useful as the evidence it is checked against, and
 evaluating that evidence is what this endpoint does.
 
-## Trying it against a real Claude Code session (manual, unsupported)
+## Trying it against a real Claude Code session
 
-Native hook registration (so this wires itself into an agent automatically)
-is not built yet. Until then, wiring this endpoint into Claude Code's
-`PreToolUse` protocol by hand shows a gate actually block a real tool call
-before it runs, rather than merely detect it afterward.
+`otari hook` ships with this package: it reads a Claude Code hook payload on
+stdin, collects the evidence that payload carries, and calls
+`POST /api/v1/hooks/check` for you. Registering it is still a manual step
+(`otari setup`, which would do that automatically, does not exist yet), but
+nothing here needs copying out of this document.
 
-`changed_path` needs a target path, not a finished diff, so this checks the
-tool call's own arguments before it executes rather than the Git working
-tree after: it covers `Edit`/`Write`/`NotebookEdit`, whose `tool_input`
-names the file they are about to touch. It does not cover `Bash` or any
-other tool: pre-blocking an arbitrary command needs `command_match`, not
-built yet. A `Stop`-hook variant is the same shape with one change: submit
-`git status --porcelain`'s output as `changed_paths` instead of a single
-tool call's target path. That trades the `PreToolUse` version's real
-prevention for coverage of shell-written changes (anything a `Bash` call
-touched), at the cost of only catching them after the fact.
+`changed_path` needs a target path, not a finished diff, so on a
+`PreToolUse` event it checks the tool call's own arguments before they
+execute rather than the Git working tree after: it covers
+`Edit`/`Write`/`NotebookEdit`, whose `tool_input` names the file they are
+about to touch. It does not cover `Bash` or any other tool: pre-blocking an
+arbitrary command needs `command_match`, not built yet. On a `Stop` event it
+instead submits `git status --porcelain`'s output, which does cover
+shell-written changes (anything a `Bash` call touched), at the cost of only
+catching them after the fact rather than preventing them.
 
-1. Save this script somewhere outside any repo (it is not part of Otari, and
-   nothing here should look like it owns hook wiring yet). It reads the
-   target path straight from the tool call (Otari does not read a
-   repository directly) and posts it to a running `otari serve`:
-
-   ```python
-   #!/usr/bin/env python3
-   """Manual PreToolUse-hook adapter for POST /api/v1/hooks/check. Not an Otari command."""
-
-   from __future__ import annotations
-
-   import json
-   import os
-   import sys
-   import urllib.error
-   import urllib.request
-   from pathlib import Path
-
-   OTARI_URL = os.environ.get("OTARI_URL", "http://localhost:8000")
-   OTARI_API_KEY = os.environ.get("OTARI_API_KEY", "")
-   GATES_FILENAME = ".otari-gates.yml"
-
-   # Claude Code's own edit tools and the tool_input field naming their target.
-   _EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
-
-
-   def find_repo_root(start: Path) -> Path | None:
-       current = start.resolve()
-       for candidate in (current, *current.parents):
-           if (candidate / ".git").exists():
-               return candidate
-       return None
-
-
-   def main() -> int:
-       try:
-           payload = json.load(sys.stdin)
-       except (json.JSONDecodeError, ValueError):
-           return 0
-
-       tool_name = payload.get("tool_name", "")
-       field = _EDIT_TOOL_PATH_FIELDS.get(tool_name)
-       if field is None:
-           return 0  # Not an edit tool: changed_path has nothing to pre-check here.
-
-       target = (payload.get("tool_input") or {}).get(field)
-       if not target:
-           return 0
-
-       cwd = Path(payload.get("cwd") or str(Path.cwd()))
-       root = find_repo_root(cwd)
-       if root is None:
-           return 0
-
-       gates_file = root / GATES_FILENAME
-       if not gates_file.is_file():
-           return 0
-
-       try:
-           relative = str(Path(target).resolve().relative_to(root))
-       except ValueError:
-           return 0  # Outside the repo: nothing this policy can name.
-
-       body = json.dumps(
-           {"policy_yaml": gates_file.read_text(encoding="utf-8"), "changed_paths": [relative]}
-       ).encode("utf-8")
-       request = urllib.request.Request(
-           f"{OTARI_URL.rstrip('/')}/api/v1/hooks/check",
-           data=body,
-           headers={"Content-Type": "application/json", "Otari-Key": f"Bearer {OTARI_API_KEY}"},
-           method="POST",
-       )
-       try:
-           with urllib.request.urlopen(request, timeout=15) as response:
-               result = json.loads(response.read())
-       except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-           print(f"Agent Gates: could not reach {OTARI_URL} ({exc}). Not blocking.", file=sys.stderr)
-           return 0
-       except urllib.error.HTTPError as exc:
-           print(f"Agent Gates: policy check refused ({exc.code}): {exc.read().decode()}", file=sys.stderr)
-           return 0
-
-       if not result.get("blocked"):
-           return 0
-
-       summary = "\n".join(
-           f"  [x] {r['gate_id']}: {r['message']}" for r in result["results"] if r["outcome"] != "pass"
-       )
-       print(f"Agent Gates: blocked before running ({tool_name} -> {relative}):\n{summary}", file=sys.stderr)
-       return 2
-
-
-   if __name__ == "__main__":
-       sys.exit(main())
-   ```
-
-2. Add a `PreToolUse` hook to `.claude/settings.local.json` (personal,
+1. Add a `PreToolUse` hook to `.claude/settings.local.json` (personal,
    usually gitignored by a global `~/.config/git/ignore`, so it never lands
-   in a PR) or `.claude/settings.json` (project-wide, committed, so do not
-   use it for a machine-specific key). The `matcher` limits which tool calls
-   invoke it at all, so `Bash`/`Read`/etc. never pay the round trip:
+   in a PR) or `.claude/settings.json` (project-wide, committed). The
+   `matcher` limits which tool calls invoke it at all, so `Bash`/`Read`/etc.
+   never pay the round trip:
 
    ```json
    {
@@ -268,7 +175,7 @@ touched), at the cost of only catching them after the fact.
            "hooks": [
              {
                "type": "command",
-               "command": "OTARI_URL=http://localhost:8000 OTARI_API_KEY=... python3 /path/to/agent_gates_pretooluse_hook.py"
+               "command": "otari hook"
              }
            ]
          }
@@ -277,22 +184,24 @@ touched), at the cost of only catching them after the fact.
    }
    ```
 
-3. Try to edit something a gate forbids (for the starter policy: `Edit`
+   With no `--url`/`--api-key`, `otari hook` resolves both from the same
+   `config.yml` (or `.env`) `otari serve` reads: the gateway's own
+   `host`/`port` and its `master_key`. That only works when the hook runs on
+   the same machine as the server; otherwise pass `--url`/`--api-key`
+   explicitly, or set `OTARI_URL`/`OTARI_API_KEY`.
+
+2. Try to edit something a gate forbids (for the starter policy: `Edit`
    `CHANGELOG.md`). The tool call itself is refused: `git status` shows
    nothing changed, because the edit never ran.
 
-What this proves and what it does not: this exercises the real
-`gateway.agent_runtime` evaluator through the real
-`POST /api/v1/hooks/check` endpoint and Claude Code's real `PreToolUse`
-protocol, so a genuine tool call gets genuinely refused before it executes,
-not simulated and not merely detected afterward. It does not prove a native
-dispatcher will behave the same way: that would own its own installation,
-uninstall, and probe story, none of which this script has, and it does not
-cover `Bash` or any non-edit tool.
+`otari hook` is a thin, harness-specific transport, not a second copy of the
+evaluator: it collects evidence and calls the endpoint above; every actual
+decision still comes from `gateway.agent_runtime`. What it does not do yet:
+install or uninstall itself (`otari setup`), probe whether it is correctly
+registered (`otari status`), or support a harness other than Claude Code.
 
 ## What's next
 
-Native hook registration, so a dispatcher collects evidence and calls this
-endpoint automatically instead of a hand-wired script, plus the
-`command_match`, `check_passed`, and `judge` gate types described above as
-not built yet.
+`otari setup`, so registering the hook above is not a manual JSON edit, plus
+the `command_match`, `check_passed`, and `judge` gate types described above
+as not built yet.
