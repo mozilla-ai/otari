@@ -55,12 +55,14 @@ def _identity(
     role: str = "member",
     workspace_ids: tuple[uuid.UUID, ...] = (),
     membership: bool = True,
+    is_superuser: bool = False,
 ) -> tuple[uuid.UUID, str]:
     """Create an identity with a live dashboard session, and return its cookie."""
     user = User(
         email=email,
         full_name=email.split("@")[0].title(),
         active_organization_id=organization_id,
+        is_superuser=is_superuser,
     )
     session.add(user)
     session.commit()
@@ -150,6 +152,17 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
             # In the organization, in none of its workspaces.
             "alpha_newcomer": _identity(session, email="new@alpha.test", organization_id=alpha.id),
             "beta_owner": _identity(session, email="owner@beta.test", organization_id=beta.id, role="owner"),
+            # The deployment operator, acting inside alpha. `/api/v1/users` is
+            # organization-scoped, and a header master key resolves the bootstrap
+            # operator and so acts in the *default* organization, which alpha is
+            # not; revoking alpha's identity is therefore this session's to do.
+            "alpha_operator": _identity(
+                session,
+                email="operator@alpha.test",
+                organization_id=alpha.id,
+                role="owner",
+                is_superuser=True,
+            ),
             # Points at alpha, belongs to nothing: the stale-pointer shape.
             "impostor": _identity(
                 session,
@@ -273,9 +286,7 @@ def test_an_omitted_workspace_refuses_a_caller_outside_the_default_one(client: T
     assert "workspace" in body["detail"]
 
 
-def test_a_revoked_spend_identity_cannot_mint_its_way_back(
-    client: TestClient, world: _World, master_key_header: dict[str, str]
-) -> None:
+def test_a_revoked_spend_identity_cannot_mint_its_way_back(client: TestClient, world: _World) -> None:
     """``DELETE /api/v1/users`` is the operator's revocation, and this surface must not undo it.
 
     That route soft-deletes the spend identity and deactivates every key it
@@ -289,20 +300,27 @@ def test_a_revoked_spend_identity_cannot_mint_its_way_back(
     code, first = _create(client, world, "alpha_member", {"key_name": "before", "workspace_id": workspace})
     assert code == status.HTTP_200_OK, first
 
-    revoke = client.delete(f"{API_ROOT}/users/{owner_id}", headers=master_key_header)
-    assert revoke.status_code == status.HTTP_204_NO_CONTENT, revoke.text
+    revoke_code, revoked = _request(client, world, "alpha_operator", "DELETE", f"{API_ROOT}/users/{owner_id}")
+    assert revoke_code == status.HTTP_204_NO_CONTENT, revoked
 
     code, body = _create(client, world, "alpha_member", {"key_name": "after", "workspace_id": workspace})
     assert code == status.HTTP_409_CONFLICT, body
 
     # The revocation still stands afterwards, which is what the operator surface
-    # refusing the same owner reports.
-    response = client.post(
+    # refusing the same owner reports. Asked as the operator inside alpha, and
+    # the detail is asserted, because that router is organization-scoped now: a
+    # master key would answer the same 404 for being in the wrong organization,
+    # which would pass this without saying anything about the revocation.
+    code, body = _request(
+        client,
+        world,
+        "alpha_operator",
+        "POST",
         f"{API_ROOT}/keys",
-        headers=master_key_header,
         json={"key_name": "operator", "user_id": owner_id, "workspace_id": workspace},
     )
-    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert code == status.HTTP_404_NOT_FOUND, body
+    assert "has been deleted" in body["detail"]
 
 
 def test_a_stale_organization_pointer_grants_nothing(client: TestClient, world: _World) -> None:

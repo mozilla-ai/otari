@@ -248,6 +248,28 @@ def test_one_identity_is_listed_in_every_organization_it_belongs_to(client: Test
     assert consultant in _listed(client, world, "beta_operator")
 
 
+def test_a_header_master_key_acts_in_the_default_organization(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    """The deployment credential is scoped too, which is a real narrowing.
+
+    A header master key names nobody, so it resolves the bootstrap operator and
+    acts in the *default* organization rather than in all of them. That is the
+    rule ``/api/v1/keys`` already follows (otari#817) and the reason this router
+    now matches it, but it means the master key alone no longer administers a
+    user in a tenant it did not provision: that is a session's to do, after
+    switching into the organization.
+    """
+    response = client.get(f"{API_ROOT}/users?limit=1000", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    listed = {row["user_id"] for row in response.json()}
+
+    assert ALPHA_KEYED not in listed
+    assert BETA_KEYED not in listed
+    # Shared, so the credential that mints the first key can still see its owner.
+    assert UNATTACHED in listed
+
+
 # =============================================================================
 # The by-id routes answer 404 outside the scope
 # =============================================================================
