@@ -304,6 +304,7 @@ export function TrendChart({
             />
           ) : null}
           <Tooltip
+            isAnimationActive={false}
             cursor={{ fill: "var(--color-border)", opacity: 0.35 }}
             content={
               <ChartTooltip

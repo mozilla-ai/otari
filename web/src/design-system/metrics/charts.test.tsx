@@ -18,6 +18,48 @@ const STACK_SERIES: SeriesDef[] = [
 ]
 
 describe("TrendChart", () => {
+  it("tracks hovered buckets without a tooltip movement transition", async () => {
+    const { container } = render(
+      <TrendChart
+        data={[
+          { x: "Jul 19", cost: 400 },
+          { x: "Jul 20", cost: 840.5 },
+        ]}
+        series={COST_SERIES}
+        formatValue={(value) => `$${value}`}
+        ariaLabel="cost per day"
+      />,
+    )
+    const chart = container.querySelector(".recharts-wrapper")!
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 800, 300),
+    )
+    try {
+      for (const [clientX, value] of [
+        [200, "$400"],
+        [600, "$840.5"],
+      ] as const) {
+        await act(async () => {
+          fireEvent.mouseMove(chart, { clientX, clientY: 40 })
+          await new Promise(requestAnimationFrame)
+        })
+        expect(screen.getByText(value)).toBeVisible()
+        // Recharts owns the positioned wrapper, outside our tooltip content.
+        expect(
+          container.querySelector(".recharts-tooltip-wrapper"),
+        ).toHaveStyle({
+          transition: "",
+        })
+      }
+      fireEvent.mouseLeave(chart)
+      expect(
+        container.querySelector(".recharts-tooltip-wrapper"),
+      ).not.toBeVisible()
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
   it("sets axis ticks from the type scale rather than a raw px size", () => {
     const { container } = render(
       <TrendChart
