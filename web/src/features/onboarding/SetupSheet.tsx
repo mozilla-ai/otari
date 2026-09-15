@@ -163,7 +163,7 @@ export function SetupSheet({
           <CopyField
             label="Your API key"
             value={apiKey}
-            concealed={CONCEALED_SECRET}
+            concealed={`${apiKey.slice(0, 8)}••••••••${apiKey.slice(-4)}`}
             isRevealed={isRevealed}
             onRevealChange={setIsRevealed}
           />

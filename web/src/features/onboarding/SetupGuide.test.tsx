@@ -300,13 +300,37 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    expect(await screen.findByLabelText("Your API key")).not.toHaveValue(KEY)
+    expect(await screen.findByLabelText("Your API key")).toHaveValue(
+      "gw-setup••••••••-key",
+    )
     await user.click(await screen.findByRole("button", { name: "cURL" }))
     expect(snippet("curl")).not.toHaveTextContent(KEY)
 
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
     expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
+
+    await user.click(screen.getByRole("button", { name: "Hide Your API key" }))
+    expect(screen.getByLabelText("Your API key")).toHaveValue(
+      "gw-setup••••••••-key",
+    )
+    expect(snippet("curl")).not.toHaveTextContent(KEY)
+  })
+
+  it("copies the full activation key while keeping its fingerprint on screen", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderGuide()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Copy Your API key" }),
+    )
+
+    expect(await navigator.clipboard.readText()).toBe(KEY)
+    expect(screen.getByLabelText("Your API key")).toHaveValue(
+      "gw-setup••••••••-key",
+    )
+    expect(await screen.findByText("Copied to clipboard.")).toBeInTheDocument()
   })
 
   it("offers an agent prompt, cURL, Python and TypeScript", async () => {

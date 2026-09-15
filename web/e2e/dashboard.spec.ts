@@ -66,7 +66,7 @@ test.describe("dashboard core flows", () => {
     // picks up the field's own "Show API key" toggle.
     const key = sheet.getByRole("textbox", { name: "Your API key" })
     await expect(key).toBeVisible()
-    await expect(key).not.toHaveValue(/^gw-/)
+    await expect(key).toHaveValue(/^gw-.{5}•{8}.{4}$/)
 
     // The examples are tabs, and the agent prompt is the one offered first.
     await expect(
@@ -81,6 +81,10 @@ test.describe("dashboard core flows", () => {
     await sheet.getByRole("button", { name: "Show Your API key" }).click()
     await expect(key).toHaveValue(/^gw-/)
     await expect(curl).toContainText(/Otari-Key: gw-/)
+    await expect(key).not.toHaveValue(/•/)
+    await sheet.getByRole("button", { name: "Hide Your API key" }).click()
+    await expect(key).toHaveValue(/^gw-.{5}•{8}.{4}$/)
+    await expect(curl).not.toContainText(/gw-/)
 
     // It is watching for the request while all of that is on screen.
     await expect(
