@@ -8,6 +8,7 @@ says so. The registry is empty today, so a probe package stands in for one.
 import ast
 import asyncio
 import importlib.util
+import logging
 from collections.abc import Generator
 from pathlib import Path
 from types import ModuleType
@@ -213,6 +214,32 @@ async def test_the_lifespan_leaves_a_disabled_worker_alone(tmp_path: Path, monke
         await asyncio.sleep(0)
 
     assert not probe.started.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_dies_is_reported_when_it_dies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Not only at shutdown, which is the one place the supervisor otherwise looks."""
+    died = asyncio.Event()
+
+    async def worker(_config: GatewayConfig) -> None:
+        died.set()
+        raise RuntimeError("probe worker blew up")
+
+    monkeypatch.setattr(packages, "CORE_PACKAGES", (_probe(enabled=True, worker=worker),))
+    app = FastAPI()
+    app.state.config = _standalone(tmp_path)
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        async with _create_lifespan()(app):
+            await asyncio.wait_for(died.wait(), timeout=5)
+            await asyncio.sleep(0)
+            assert "probe worker stopped with an unexpected error" in caplog.text
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
 
 
 @pytest.mark.asyncio
