@@ -1013,16 +1013,16 @@ describe("KeysPage", () => {
     // re-firing onInputChange. The keys API does not know that id, so it silently
     // created a second user aliased "User alice (Alice)" instead of reusing alice.
     const fetchMock = mockApi({
-      keys: [],
+      // The key is what puts alice in this organization, and so in the picker
+      // at all (otari-ai#2108).
+      keys: [apiKey({ id: "key-1", key_name: "existing", user_id: "alice" })],
       users: [user({ user_id: "alice", alias: "Alice" })],
     })
     const usr = userEvent.setup()
     renderPage(<KeysPage />)
 
-    await screen.findByText("No API keys yet")
-    await usr.click(
-      screen.getByRole("button", { name: "Create your first key" }),
-    )
+    await screen.findByText("existing")
+    await usr.click(screen.getByRole("button", { name: "Create key" }))
     await usr.click(screen.getByPlaceholderText(/Pick a user/))
     await usr.click(
       await screen.findByRole("option", { name: "alice (Alice)" }),
@@ -1042,6 +1042,45 @@ describe("KeysPage", () => {
         (init?.method ?? "") === "POST",
     )
     expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice")
+  })
+
+  it("offers this organization's users as owners, not the deployment's", async () => {
+    // `/api/v1/users` is deployment-wide, so on a deployment holding several
+    // tenants it answered with every tenant's people and the picker offered
+    // them all (otari-ai#2108).
+    const member = "33333333-3333-3333-3333-333333333333"
+    const otherTenant = "44444444-4444-4444-4444-444444444444"
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "ci", user_id: "ci-bot" })],
+      users: [
+        user({ user_id: member, alias: "alice@example.com" }),
+        user({ user_id: "ci-bot", alias: null }),
+        user({ user_id: otherTenant, alias: "someone@other.example" }),
+      ],
+      members: [
+        organizationMember({
+          attribution_user_id: member,
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("ci")
+    await usr.click(screen.getByRole("button", { name: "Create key" }))
+    await usr.click(screen.getByPlaceholderText(/Pick a user/))
+
+    // On the roster, and the owner of a key in this organization.
+    expect(
+      await screen.findByRole("option", { name: /Alice Example/ }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
+    // Neither: another organization's person, and nothing here names them.
+    expect(
+      screen.queryByRole("option", { name: /other\.example/ }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(otherTenant)).not.toBeInTheDocument()
   })
 
   it("blocks all models by posting an empty list", async () => {

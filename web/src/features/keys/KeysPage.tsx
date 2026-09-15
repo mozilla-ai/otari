@@ -43,6 +43,7 @@ import {
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import {
   useCreateKey,
@@ -425,6 +426,20 @@ function CreateKeyDialog({
   // on the deployment alone it ran that walk on every visit to the page. The
   // query's own `staleTime` makes a reopen free.
   const users = useUsers(isDeploymentWide && isOpen)
+  // Every key in the caller's organization, workspace filter deliberately unset:
+  // it is one half of what says a user belongs here (see `organizationUsers`),
+  // and the owner offered is the organization's rather than this workspace's,
+  // because that is the scope the key is billed in. Gated like the users read
+  // above, and it shares `useKeys`'s cache with the page's own workspace-scoped
+  // list rather than replacing it.
+  const organizationKeys = useKeys(undefined, isDeploymentWide && isOpen)
+  // What the picker may offer: the deployment's user list narrowed to this
+  // organization. An unfiltered one named every tenant's people (otari-ai#2108).
+  const ownerOptions = organizationUsers(
+    users.data ?? [],
+    memberLabels,
+    organizationKeys.data ?? [],
+  )
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")
@@ -628,7 +643,7 @@ function CreateKeyDialog({
         <UserComboBox
           value={userId}
           onChange={setUserId}
-          users={users.data ?? []}
+          users={ownerOptions}
         />
       ) : (
         <p className="text-caption">
@@ -646,7 +661,7 @@ function CreateKeyDialog({
       {showAdvanced ? (
         <div className="flex flex-col gap-4 border border-control-border p-4">
           {isDeploymentWide ? (
-            <OwnerAccessNote userId={userId} users={users.data ?? []} />
+            <OwnerAccessNote userId={userId} users={ownerOptions} />
           ) : null}
           <ModelScopeControl
             title="Restrict this key's models"

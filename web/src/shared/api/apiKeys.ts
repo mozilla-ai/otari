@@ -59,12 +59,14 @@ async function fetchAllKeys(
 // has to refetch rather than serve the previous one's keys from cache. Same for
 // the two below. An unset id keeps the whole-scope view, which is what the
 // organization context and a deployment with no workspace selected still want.
-export function useKeys(workspaceId?: string) {
+// `enabled` is for a caller that reads keys for something other than showing
+// them, and so should not pay the walk until it is on screen.
+export function useKeys(workspaceId?: string, enabled = true) {
   const scope = useKeysScope()
   return useQuery({
     queryKey: [KEYS, scope.base, workspaceId ?? null],
     queryFn: () => fetchAllKeys(scope.base, workspaceId),
-    enabled: scope.isReady,
+    enabled: scope.isReady && enabled,
     staleTime: 60_000,
   })
 }
