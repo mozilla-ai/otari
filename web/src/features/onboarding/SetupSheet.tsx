@@ -2,7 +2,11 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { Button } from "@/design-system/actions/Button"
-import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import {
+  CONCEALED_SECRET,
+  CopyField,
+  concealedFingerprint,
+} from "@/design-system/actions/CopyField"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -80,6 +84,9 @@ export function SetupSheet({
   // distinction with nothing behind it.
   const [isRevealed, setIsRevealed] = useState(false)
 
+  const concealedKey =
+    apiKey === undefined ? CONCEALED_SECRET : concealedFingerprint(apiKey)
+
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
   // Built from the stand-in whenever the key is not on screen, which includes
   // the moment before it exists: what is rendered needs no key, so the examples
@@ -90,8 +97,7 @@ export function SetupSheet({
       ? undefined
       : buildSetupSnippets({
           baseUrl,
-          apiKey:
-            isRevealed && apiKey !== undefined ? apiKey : CONCEALED_SECRET,
+          apiKey: isRevealed && apiKey !== undefined ? apiKey : concealedKey,
           model,
         })
   // What a copy yields, always the real key: an operator who copies without
@@ -163,7 +169,7 @@ export function SetupSheet({
           <CopyField
             label="Your API key"
             value={apiKey}
-            concealed={`${apiKey.slice(0, 8)}••••••••${apiKey.slice(-4)}`}
+            concealed={concealedKey}
             isRevealed={isRevealed}
             onRevealChange={setIsRevealed}
           />

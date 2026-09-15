@@ -52,7 +52,14 @@ test.describe("dashboard core flows", () => {
   test("the first-run sheet hands out a key, then skips for good", async ({
     page,
   }) => {
+    const mintedKey = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/activation/key") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    )
     await login(page)
+    const { key: fullKey } = await (await mintedKey).json()
 
     // A sheet over the Overview, not a panel on it: a workspace with no traffic
     // has nothing on that page worth reading yet.
@@ -67,6 +74,8 @@ test.describe("dashboard core flows", () => {
     const key = sheet.getByRole("textbox", { name: "Your API key" })
     await expect(key).toBeVisible()
     await expect(key).toHaveValue(/^gw-.{5}•{8}.{4}$/)
+    const concealedKey = await key.inputValue()
+    await expect(key).not.toHaveValue(fullKey)
 
     // The examples are tabs, and the agent prompt is the one offered first.
     await expect(
@@ -76,15 +85,16 @@ test.describe("dashboard core flows", () => {
     const curl = sheet.getByRole("region", { name: "curl code" })
     await expect(curl).toBeVisible()
     // Concealed in the example too, because it is the same secret.
-    await expect(curl).not.toContainText(/gw-/)
+    await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
+    await expect(curl).not.toContainText(fullKey)
 
     await sheet.getByRole("button", { name: "Show Your API key" }).click()
-    await expect(key).toHaveValue(/^gw-/)
-    await expect(curl).toContainText(/Otari-Key: gw-/)
-    await expect(key).not.toHaveValue(/•/)
+    await expect(key).toHaveValue(fullKey)
+    await expect(curl).toContainText(`Otari-Key: ${fullKey}`)
     await sheet.getByRole("button", { name: "Hide Your API key" }).click()
     await expect(key).toHaveValue(/^gw-.{5}•{8}.{4}$/)
-    await expect(curl).not.toContainText(/gw-/)
+    await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
+    await expect(curl).not.toContainText(fullKey)
 
     // It is watching for the request while all of that is on screen.
     await expect(
