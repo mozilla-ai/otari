@@ -255,6 +255,14 @@ rather than a page. A count that sizes a mutation applies the mutation's fixed
 scope and not only its filter set. Nothing else narrows it, and
 `UsageEntry.bulk_editable` is how a client learns which rows that scope admits.
 
+## Agent Gates
+
+`agent_runtime/` evaluates a caller-submitted `.otari-gates.yml` policy
+against caller-submitted evidence, served by the Hook Server
+(`POST /api/v1/hooks/check`, `routes/hooks.py`). Everything under it is pure:
+no filesystem, network, subprocess, or clock access. Otari never reads a
+caller's repository itself. See [docs/agent-gates.md](../../docs/agent-gates.md).
+
 ## Logging
 
 Use `gateway.log_config` with lazy `%s` formatting. Log opaque IDs, model,

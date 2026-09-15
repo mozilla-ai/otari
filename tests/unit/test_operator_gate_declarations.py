@@ -37,6 +37,7 @@ from gateway.api.routes import (
     aliases,
     budgets,
     catalog,
+    hooks,
     keys,
     mail,
     maintenance_mode,
@@ -88,6 +89,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
     ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
+    ("hooks", hooks.router, verify_api_key_or_master_key),
 ]
 
 

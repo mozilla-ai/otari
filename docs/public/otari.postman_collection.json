@@ -1976,6 +1976,45 @@
     {
       "item": [
         {
+          "name": "Check Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"policy_yaml\": \"string\"\n}"
+            },
+            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hooks",
+                "check"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hooks/check"
+            }
+          }
+        }
+      ],
+      "name": "hooks"
+    },
+    {
+      "item": [
+        {
           "name": "Create Image",
           "request": {
             "body": {
