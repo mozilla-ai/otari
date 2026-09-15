@@ -121,6 +121,46 @@ def test_record_abandoned_attempt_labels_by_reason_and_position() -> None:
     assert _sample("gateway_abandoned_attempts_total", upstream_labels) - before_upstream == 1.0
 
 
+# Every family the gateway registers, as (name, type, label names). A metric
+# may move to the module that increments it, but the scrape is an external
+# contract: dashboards, recording rules and alerts outside this repository
+# key on these names and labels.
+_EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
+    ("gateway_abandoned_attempts", "counter", ("provider", "model", "reason", "position")),
+    ("gateway_active_requests", "gauge", ()),
+    ("gateway_auth_failures", "counter", ("reason",)),
+    ("gateway_budget_exceeded", "counter", ()),
+    ("gateway_inline_cost_settlements", "counter", ("outcome",)),
+    ("gateway_rate_limit_hits", "counter", ()),
+    ("gateway_request_cost_dollars", "histogram", ("provider", "model")),
+    ("gateway_request_duration_seconds", "histogram", ("method", "endpoint", "api_version")),
+    ("gateway_requests", "counter", ("method", "endpoint", "api_version", "status")),
+    ("gateway_tokens", "counter", ("provider", "model", "type")),
+    ("gateway_usage_log_batch_size", "histogram", ("writer",)),
+    ("gateway_usage_log_flush_duration_seconds", "histogram", ("writer", "result")),
+    ("gateway_usage_log_queue_depth", "gauge", ()),
+    ("gateway_usage_log_rows", "counter", ("writer", "result")),
+}
+
+
+def test_scrape_exposes_the_pinned_families() -> None:
+    """The set of gateway metric families, with their types and label names, is fixed.
+
+    A labeled family with no series yet shows only its HELP and TYPE lines in a
+    scrape, so the label names are read off the collectors rather than the text.
+    """
+    import gateway.main  # noqa: F401  # imports every module that registers a metric
+
+    families: set[tuple[str, str, tuple[str, ...]]] = set()
+    for collector in REGISTRY._collector_to_names:
+        describe = getattr(collector, "describe", collector.collect)
+        for metric in describe():
+            if metric.name.startswith("gateway_"):
+                families.add((metric.name, metric.type, tuple(getattr(collector, "_labelnames", ()))))
+
+    assert families == _EXPOSED_FAMILIES
+
+
 def test_config_enable_metrics_defaults_to_false() -> None:
     config = GatewayConfig()
     assert config.enable_metrics is False
