@@ -317,8 +317,9 @@ async def create_organization_pricing(
     naming the period it collides with, rather than shadowing it. Refused with a
     403 when the deployment, not the caller's organization, holds the credential
     that serves the model, whether through one of its own provider instances or a
-    hosted credential the bound port supplies with no BYO key on file: either way
-    the deployment settles the upstream bill, so its rate is the deployment price
+    hosted credential the bound port supplies because no usable BYO credential of
+    the organization's own covers every one of its workspaces: either way the
+    deployment settles the upstream bill, so its rate is the deployment price
     list's rather than a tenant's.
 
     The key is normalized to its canonical ``instance:model`` form first, the same
