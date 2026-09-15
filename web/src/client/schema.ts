@@ -3998,9 +3998,12 @@ export interface paths {
          * List Builtin Guardrails
          * @description List the guardrails this gateway can run itself, for the form that defines one.
          *
-         *     Every guardrail ``any_guardrail`` ships, with the constructor and per-call
-         *     arguments each one takes, so a guardrail is configured by picking it and
-         *     filling typed fields. A parameter names the environment variable that fills it
+         *     Every guardrail ``any_guardrail`` reaches over a hosted API, with the
+         *     constructor and per-call arguments each one takes, so a guardrail is
+         *     configured by picking it and filling typed fields. It is not the whole
+         *     library: a guardrail that works by holding model weights in the process
+         *     running it belongs in the guardrails service the profiles read beside this one
+         *     describes, not here. A parameter names the environment variable that fills it
          *     where one exists, and ``requirement_groups`` carries the constraints satisfied
          *     by any of several parameters, which no single required flag can state. This is
          *     the counterpart of
@@ -5818,7 +5821,7 @@ export interface components {
         };
         /**
          * BuiltInGuardrailCatalog
-         * @description Every guardrail this gateway ships, whether or not it can currently run it.
+         * @description The guardrails this gateway can build and call itself.
          */
         BuiltInGuardrailCatalog: {
             /** Guardrails */

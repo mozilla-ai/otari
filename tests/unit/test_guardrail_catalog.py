@@ -17,6 +17,7 @@ import httpx
 import pytest
 from any_guardrail.base import GuardrailName
 from any_guardrail.parameters import ParameterType as UpstreamParameterType
+from any_guardrail.registry import GUARDRAIL_METADATA
 from any_guardrail.taxonomy import BackendType, OutputShape
 from any_guardrail.taxonomy import GuardrailCategory as UpstreamCategory
 from any_guardrail.taxonomy import GuardrailStage as UpstreamStage
@@ -297,10 +298,29 @@ def _clear_backend_cache() -> Iterator[None]:
     _backend_availability.cache_clear()
 
 
-def test_lists_every_guardrail_the_library_ships() -> None:
-    catalog = build_builtin_guardrail_catalog()
+def test_lists_only_the_guardrails_a_hosted_api_reaches() -> None:
+    """The set is derived from upstream's metadata, so an addition there reaches it."""
+    listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
 
-    assert {spec.guardrail_name for spec in catalog.guardrails} == {name.value for name in GuardrailName}
+    assert listed == {
+        name.value
+        for name, metadata in GUARDRAIL_METADATA.items()
+        if BackendType.HOSTED_API in ({metadata.backend} | metadata.alternate_backends)
+    }
+
+
+def test_omits_a_guardrail_that_would_load_model_weights() -> None:
+    """The whole point. Otari builds none of these, so offering them is offering nothing."""
+    listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
+
+    assert not listed & {"llama_guard", "prompt_guard", "injec_guard", "lettuce_detect"}
+
+
+def test_lists_a_local_guardrail_that_also_has_a_hosted_path() -> None:
+    """SusFactor is why the rule reads `alternate_backends` and not `backend` alone."""
+    listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
+
+    assert "susfactor" in listed
 
 
 def test_orders_the_catalog_for_a_picker() -> None:
@@ -423,7 +443,7 @@ def test_reports_a_second_way_to_run_the_same_guardrail() -> None:
 def test_a_guardrail_whose_backend_is_installed_is_runnable(monkeypatch: pytest.MonkeyPatch) -> None:
     _force_probe(monkeypatch, installed=True)
 
-    spec = _spec(build_builtin_guardrail_catalog(), "llama_guard")
+    spec = _spec(build_builtin_guardrail_catalog(), "azure_content_safety")
 
     assert spec.runnable
     assert spec.missing_extra is None
@@ -432,7 +452,7 @@ def test_a_guardrail_whose_backend_is_installed_is_runnable(monkeypatch: pytest.
 def test_a_guardrail_whose_backend_is_absent_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     _force_probe(monkeypatch, installed=False)
 
-    spec = _spec(build_builtin_guardrail_catalog(), "llama_guard")
+    spec = _spec(build_builtin_guardrail_catalog(), "azure_content_safety")
 
     assert not spec.runnable
     assert spec.missing_extra == LOCAL_GUARDRAILS_EXTRA
@@ -458,9 +478,11 @@ def test_a_guardrail_with_no_backend_information_is_a_gap_not_a_guess(monkeypatc
     assert spec.missing_extra is None
 
 
-def test_every_guardrail_has_backend_information() -> None:
+def test_every_listed_guardrail_has_backend_information() -> None:
     """A guardrail upstream adds must be given a probe, not left to the gap above."""
-    assert set(_BACKEND_PACKAGES) == set(GuardrailName)
+    listed = {GuardrailName(spec.guardrail_name) for spec in build_builtin_guardrail_catalog().guardrails}
+
+    assert listed <= set(_BACKEND_PACKAGES)
 
 
 def test_a_missing_module_is_not_installed() -> None:
