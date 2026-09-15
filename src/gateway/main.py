@@ -13,11 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
 
+from gateway import features
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
+from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
@@ -329,6 +331,20 @@ async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> 
             _log_refresher_stop(task, name)
 
 
+async def _run_feature_worker(name: str, worker: Worker, config: GatewayConfig) -> None:
+    """Run one feature worker, reporting a failure when it happens rather than at shutdown.
+
+    The refreshers above loop and catch their own errors; a feature worker is
+    another feature's code and may not. This is the top of the task, so the
+    error is handled here once: nothing awaits the task before shutdown, and
+    re-raising would only have the supervisor log the same death again then.
+    """
+    try:
+        await worker(config)
+    except Exception:
+        logger.exception("%s worker stopped with an unexpected error and will not run again", name)
+
+
 def _create_lifespan() -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -354,6 +370,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         catalog_refresher: asyncio.Task[None] | None = None
         selector_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
+        feature_workers: list[tuple[asyncio.Task[None], str]] = []
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -475,6 +492,14 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                         retention_sec=config.budget_reservation_retention_sec,
                     )
                 )
+            # Workers of the features the registry lists. Same
+            # supervisor as the refreshers above: created here, cancelled
+            # together in ``finally`` under one shared bound.
+            feature_workers = [
+                (asyncio.create_task(_run_feature_worker(feature.name, feature.worker, config)), feature.name)
+                for feature in features.CORE_FEATURES
+                if feature.worker is not None and feature.enabled(config)
+            ]
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -498,7 +523,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 (selector_refresher, "catalog selectors"),
                 (reservation_sweeper, "budget reservation sweep"),
             ]
-            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
+            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None] + feature_workers)
             if alias_refresher is not None:
                 reset_alias_cache()
             if policy_refresher is not None:

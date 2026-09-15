@@ -299,3 +299,30 @@ def test_main_discovers_tests_root_and_fails_on_overlay_import(tmp_path: Path, m
 
 def test_real_gateway_tree_is_clean() -> None:
     assert check.main() == 0
+
+
+def test_a_service_may_not_import_the_feature_registry(tmp_path: Path) -> None:
+    # Only the app wiring reads the registry; a service that imported it could
+    # register itself, which is discovery by another name.
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway.features import CORE_FEATURES\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.features", "Forbidden import in Services")]
+
+
+def test_a_route_may_not_import_the_feature_registry(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/api/routes/alerts.py", "from gateway.features import CORE_FEATURES\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.features", "Forbidden import in API routes")]
+
+
+def test_the_deployment_bootstrap_route_may_read_the_registry(tmp_path: Path) -> None:
+    # It publishes which surfaces this deployment hosts, and a listed feature's
+    # surface is one of them: the one route exempted from the ban above.
+    file_path = _write(tmp_path, "gateway/api/routes/bootstrap.py", "from gateway.features import CORE_FEATURES\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+@pytest.mark.parametrize("relative_path", ["gateway/features.py", "gateway/main.py", "gateway/services/thing.py"])
+def test_entry_point_discovery_is_forbidden_anywhere_under_gateway(tmp_path: Path, relative_path: str) -> None:
+    # The registry is a literal tuple on purpose; importlib.metadata is how the
+    # alternative gets written.
+    file_path = _write(tmp_path, relative_path, "from importlib.metadata import entry_points\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "importlib.metadata", "Forbidden import in OSS base")]

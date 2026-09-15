@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway import features
 from gateway.api.deps import get_config, get_db_if_needed
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
@@ -141,6 +142,21 @@ HOSTED_SURFACES: tuple[str, ...] = (
     "organization_providers",
     "organization_usage",
 )
+
+
+def hosted_surfaces(config: GatewayConfig) -> list[str]:
+    """The surfaces this deployment hosts, sorted.
+
+    The edition's fixed set plus the surface of each enabled registry feature.
+    Empty for hybrid, which hosts none.
+    """
+    if config.is_hybrid_mode:
+        return []
+    fixed = HOSTED_SURFACES if config.is_hosted_mode else STANDALONE_SURFACES
+    featured = [
+        feature.surface for feature in features.CORE_FEATURES if feature.surface is not None and feature.enabled(config)
+    ]
+    return sorted((*fixed, *featured))
 
 
 class DeploymentBootstrap(BaseModel):
@@ -344,7 +360,7 @@ async def get_bootstrap(
     return DeploymentBootstrap(
         deployment_type="hosted" if hosted else "standalone",
         session_type="local_operator",
-        surfaces=sorted(HOSTED_SURFACES if hosted else STANDALONE_SURFACES),
+        surfaces=hosted_surfaces(config),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         # Standalone is its own data plane and answers null; a hosted control

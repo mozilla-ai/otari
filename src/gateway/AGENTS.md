@@ -13,6 +13,8 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 Domain protocols live in `ports/`, core implementations in `adapters/`, and
 bindings in `container.py`. `OTARI_BOOTSTRAP=module:callable` may rebind a port
 or contribute a capability-gated router after core bindings are installed.
+A core feature is one domain-named module per layer plus an entry in
+`gateway/features.py`; see ARCHITECTURE.md.
 
 Add a port only when a real second implementation exists. Core never imports an
 overlay. Dependencies request protocols from the container and never name an

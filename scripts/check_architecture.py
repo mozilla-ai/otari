@@ -10,6 +10,9 @@ Enforces:
 6. Port boundaries: a port may describe the domain but not import a caller or an adapter.
 7. Composition root: only gateway/container.py may name a concrete adapter.
 8. Entrypoint purity: gateway/main.py may not import a route module.
+9. Registry: only the app wiring reads gateway/features.py, so a service or a
+   route may not import it; and nothing under gateway/ imports
+   importlib.metadata, so nothing is discovered.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -61,7 +64,10 @@ RULES: dict[str, LayerRule] = {
         # (gateway/main.py, gateway/cli.py, gateway/core, gateway/auth, ...)
         # free to shortcut past the seam. COMPOSITION_ROOT and the adapters
         # package itself are the two exemptions; see check_file.
-        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters"],
+        # importlib.metadata is banned for a different reason: it is how
+        # entry-point discovery is written, and the registry in
+        # gateway/features.py is a literal tuple on purpose (ARCHITECTURE.md).
+        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters", "importlib.metadata"],
         "description": "OSS base",
     },
     # The OSS test suite answers to the same boundary: a test of overlay
@@ -76,7 +82,10 @@ RULES: dict[str, LayerRule] = {
         # A service depends on the port and gets its adapter from the container;
         # naming a concrete adapter would pin the capability to one
         # implementation and defeat the seam (ARCHITECTURE.md, rule 5).
-        "forbidden": ["gateway.api", "gateway.adapters"],
+        # gateway.features is the registry the app wiring reads; a service
+        # that imported it could register itself, which is discovery by
+        # another name.
+        "forbidden": ["gateway.api", "gateway.adapters", "gateway.features"],
         "description": "Services",
     },
     # The API layer resolves a port through the container in deps.py; only the
@@ -107,7 +116,9 @@ RULES: dict[str, LayerRule] = {
             "gateway.core",
             "gateway.auth",
         ],
-        "forbidden": ["sqlalchemy.orm"],
+        # gateway.features for the reason services forbid it; the one route
+        # that reads the registry is exempted below (REGISTRY_READER).
+        "forbidden": ["sqlalchemy.orm", "gateway.features"],
         "description": "API routes",
     },
     "gateway/repositories": {
@@ -169,6 +180,13 @@ COMPOSITION_ROOT = "gateway/container.py"
 ADAPTERS_PACKAGE = "gateway/adapters/"
 ADAPTER_IMPORT = "gateway.adapters"
 
+# The one route allowed to read the feature registry: the deployment bootstrap
+# publishes which surfaces this deployment hosts, and a listed feature's
+# surface is one of them. Everything else under gateway/api/routes and
+# gateway/services answers to the ban in its layer rule.
+REGISTRY_READER = "gateway/api/routes/bootstrap.py"
+REGISTRY_IMPORT = "gateway.features"
+
 
 def _matches(module: str, prefix: str) -> bool:
     """Return whether a module path is the prefix module itself or lives inside it."""
@@ -221,6 +239,8 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         forbidden = [(prefix, file_rule["description"]) for prefix in file_rule["forbidden"]] + forbidden
     if relative_path == COMPOSITION_ROOT or relative_path.startswith(ADAPTERS_PACKAGE):
         forbidden = [entry for entry in forbidden if entry[0] != ADAPTER_IMPORT]
+    if relative_path == REGISTRY_READER:
+        forbidden = [entry for entry in forbidden if entry[0] != REGISTRY_IMPORT]
     if not forbidden:
         return []
 
