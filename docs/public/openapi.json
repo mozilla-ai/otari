@@ -30975,7 +30975,7 @@
     },
     "/api/v1/users": {
       "get": {
-        "description": "List all users with pagination.",
+        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
         "operationId": "users-list_users",
         "parameters": [
           {
@@ -31092,7 +31092,7 @@
     },
     "/api/v1/users/{user_id}": {
       "delete": {
-        "description": "Delete a user, and erase the telemetry captured under their name.",
+        "description": "Delete a user in the caller's organization, and erase their telemetry.",
         "operationId": "users-delete_user",
         "parameters": [
           {
@@ -31134,7 +31134,7 @@
         ]
       },
       "get": {
-        "description": "Get details of a specific user.",
+        "description": "Get details of a user in the caller's organization.",
         "operationId": "users-get_user",
         "parameters": [
           {
@@ -31183,7 +31183,7 @@
         ]
       },
       "patch": {
-        "description": "Update a user.",
+        "description": "Update a user in the caller's organization.",
         "operationId": "users-update_user",
         "parameters": [
           {
@@ -31244,7 +31244,7 @@
     },
     "/api/v1/users/{user_id}/usage": {
       "get": {
-        "description": "Get usage history for a specific user.",
+        "description": "Get usage history for a user in the caller's organization.",
         "operationId": "users-get_user_usage",
         "parameters": [
           {

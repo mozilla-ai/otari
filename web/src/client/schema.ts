@@ -4356,7 +4356,13 @@ export interface paths {
         };
         /**
          * List Users
-         * @description List all users with pagination.
+         * @description List the users the caller's organization can name, with pagination.
+         *
+         *     ``users`` is deployment-global and has no organization column, so which of
+         *     them this organization can name is derived: a key, usage, or a roster row
+         *     puts one in reach, and one reached from nowhere at all (the shared
+         *     ``default`` owner, or a user just created) is shared rather than hidden.
+         *     See ``repositories.users_repository.in_organization``.
          */
         get: operations["users-list_users"];
         put?: never;
@@ -4380,21 +4386,21 @@ export interface paths {
         };
         /**
          * Get User
-         * @description Get details of a specific user.
+         * @description Get details of a user in the caller's organization.
          */
         get: operations["users-get_user"];
         put?: never;
         post?: never;
         /**
          * Delete User
-         * @description Delete a user, and erase the telemetry captured under their name.
+         * @description Delete a user in the caller's organization, and erase their telemetry.
          */
         delete: operations["users-delete_user"];
         options?: never;
         head?: never;
         /**
          * Update User
-         * @description Update a user.
+         * @description Update a user in the caller's organization.
          */
         patch: operations["users-update_user"];
         trace?: never;
@@ -4408,7 +4414,7 @@ export interface paths {
         };
         /**
          * Get User Usage
-         * @description Get usage history for a specific user.
+         * @description Get usage history for a user in the caller's organization.
          */
         get: operations["users-get_user_usage"];
         put?: never;

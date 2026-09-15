@@ -9,14 +9,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, require_deployment_operator
+from gateway.api.deps import CallerOrganization, get_config, get_db, require_deployment_operator
 from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
 from gateway.models.tenancy import Workspace
-from gateway.repositories.users_repository import get_or_create_default_user
+from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
-from gateway.services.tenancy import OrganizationService
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 # A key inherits its user's default allow-list and may narrow it, never broaden
@@ -32,27 +31,6 @@ router = APIRouter(
     dependencies=[Depends(require_deployment_operator)],
 )
 
-
-async def _caller_organization_id(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    identity: CurrentIdentity,
-) -> uuid.UUID:
-    """The organization this request acts in.
-
-    A key is minted, listed and revoked inside one organization, so every route
-    here resolves the caller's before it touches a row. A dashboard session names
-    the identity behind it and resolves that identity's active organization,
-    which is what ``POST /api/v1/organizations/me/switch`` moves; a header master key
-    names nobody, resolves the bootstrap operator, and therefore acts in the
-    default organization. That is the same rule ``services/workspace_scope``
-    already documents for a deployment-wide write, so an operator running several
-    organizations behind one gateway works in the one they are currently in
-    rather than across all of them (otari#817).
-    """
-    return (await OrganizationService(db).get_active_organization_for_user(identity)).id
-
-
-CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
 async def _load_key_in_organization(
@@ -263,6 +241,16 @@ async def create_key(
                 alias=f"User {request.user_id}",
             )
             db.add(user)
+        elif not await owned_by_organization(db, user.user_id, organization_id):
+            # An owner this organization cannot name, which is another
+            # organization's person: the same 404 an unknown id would get, so the
+            # refusal reports no more than the read on ``/users`` does. Minting
+            # here would bill this organization's traffic to their ledger and
+            # their budget (otari-ai#2108).
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with id '{request.user_id}' not found",
+            )
         elif user.deleted_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

@@ -7740,7 +7740,7 @@
         {
           "name": "List Users",
           "request": {
-            "description": "List all users with pagination.",
+            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7806,7 +7806,7 @@
         {
           "name": "Get User",
           "request": {
-            "description": "Get details of a specific user.",
+            "description": "Get details of a user in the caller's organization.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7842,7 +7842,7 @@
               },
               "raw": "{\n  \"alias\": \"string\",\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"blocked\": false,\n  \"budget_id\": \"string\",\n  \"metadata\": {}\n}"
             },
-            "description": "Update a user.",
+            "description": "Update a user in the caller's organization.",
             "header": [
               {
                 "key": "Content-Type",
@@ -7874,7 +7874,7 @@
         {
           "name": "Delete User",
           "request": {
-            "description": "Delete a user, and erase the telemetry captured under their name.",
+            "description": "Delete a user in the caller's organization, and erase their telemetry.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -7901,7 +7901,7 @@
         {
           "name": "Get User Usage",
           "request": {
-            "description": "Get usage history for a specific user.",
+            "description": "Get usage history for a user in the caller's organization.",
             "header": [],
             "method": "GET",
             "url": {

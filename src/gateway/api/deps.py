@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated
@@ -26,6 +27,7 @@ from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.routing import clear_router_backend_cache
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
@@ -693,9 +695,33 @@ def get_file_store(request: Request) -> FileStore:
     return store
 
 
+async def _caller_organization_id(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    identity: CurrentIdentity,
+) -> uuid.UUID:
+    """The organization this request acts in.
+
+    A key is minted, listed and revoked inside one organization, and so is a
+    spend identity read, so every deployment-wide route that touches a tenant's
+    rows resolves the caller's organization before it does. A dashboard session
+    names the identity behind it and resolves that identity's active
+    organization, which is what ``POST /api/v1/organizations/me/switch`` moves; a
+    header master key names nobody, resolves the bootstrap operator, and
+    therefore acts in the default organization. That is the same rule
+    ``services/workspace_scope`` already documents for a deployment-wide write,
+    so an operator running several organizations behind one gateway works in the
+    one they are currently in rather than across all of them (otari#817).
+    """
+    return (await OrganizationService(db).get_active_organization_for_user(identity)).id
+
+
+CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
+
+
 __all__ = [
     "BillingPortDep",
     "ContainerDep",
+    "CallerOrganization",
     "CurrentIdentity",
     "EntitlementPortDep",
     "GrowthSignalPortDep",
