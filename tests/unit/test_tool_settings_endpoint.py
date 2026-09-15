@@ -6,8 +6,10 @@ from typing import Any
 
 import httpx
 import pytest
+from any_guardrail.base import GuardrailName
 from fastapi.testclient import TestClient
 
+from gateway.api.routes import tool_settings
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
 
@@ -183,8 +185,9 @@ def test_tool_settings_not_mounted_in_hybrid_mode(tmp_path: Path, _hybrid_env: N
     with TestClient(create_app(config)) as client:
         # Standalone-only: the management route is not registered in hybrid mode.
         assert client.get(f"{API_ROOT}/tool-settings", headers=AUTH).status_code == 404
-        # And the catalog read with it, since it is mounted on the same router.
+        # And the catalog reads with it, since they sit on the same router.
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles", headers=AUTH).status_code == 404
+        assert client.get(f"{API_ROOT}/tool-settings/guardrails/catalog", headers=AUTH).status_code == 404
 
 
 def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
@@ -274,7 +277,7 @@ def test_guardrail_profiles_never_returns_the_endpoint(tmp_path: Path, monkeypat
 def test_guardrail_profiles_requires_master_key(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles").status_code == 401
-        
+
 
 def test_guardrail_profiles_refuses_an_oversized_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The timeout bounds how long the answer takes, not how much of it is held."""
@@ -291,3 +294,45 @@ def test_guardrail_profiles_refuses_an_oversized_catalog(tmp_path: Path, monkeyp
     body = resp.json()
     assert body["available"] is False
     assert body["profiles"] == []
+
+
+def test_guardrail_catalog_lists_what_this_gateway_can_run(tmp_path: Path) -> None:
+    """No service is configured, and the built-in catalog does not care."""
+    with _client(tmp_path) as client:
+        resp = client.get(f"{API_ROOT}/tool-settings/guardrails/catalog", headers=AUTH)
+
+    assert resp.status_code == 200
+    guardrails = resp.json()["guardrails"]
+    assert len(guardrails) == len(GuardrailName)
+    lakera = next(row for row in guardrails if row["guardrail_name"] == "lakera_guard")
+    # The create stage is what makes this worth serving: it carries the API key.
+    assert any(row["name"] == "api_key" and row["secret"] for row in lakera["create_parameters"])
+
+
+def test_guardrail_catalog_requires_master_key(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        assert client.get(f"{API_ROOT}/tool-settings/guardrails/catalog").status_code == 401
+        assert (
+            client.get(
+                f"{API_ROOT}/tool-settings/guardrails/catalog", headers={"Authorization": "Bearer nope"}
+            ).status_code
+            == 401
+        )
+
+
+def test_guardrail_catalog_is_an_operator_read(tmp_path: Path) -> None:
+    """The reader router is what a member reaches, and this is not a member's to read.
+
+    It is the picker behind a write that stores a vendor key deployment-wide, and
+    ``runnable`` describes the host's installed packages. The profiles read beside
+    it stays on the reader, because a profile name is what a caller sends.
+    """
+    # Router paths, so without API_ROOT: the prefix is added where they mount.
+    catalog = "/tool-settings/guardrails/catalog"
+    profiles = "/tool-settings/guardrails/profiles"
+    operator = {route.path for route in tool_settings.operator_router.routes}  # type: ignore[attr-defined]
+    reader = {route.path for route in tool_settings.reader_router.routes}  # type: ignore[attr-defined]
+
+    assert catalog in operator
+    assert catalog not in reader
+    assert profiles in reader

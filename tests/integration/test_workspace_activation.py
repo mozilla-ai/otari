@@ -312,6 +312,10 @@ async def test_issuing_the_key_twice_rotates_one_row_rather_than_collecting_two(
     assert first.key_id == second.key_id
     assert second.key_name == ACTIVATION_KEY_NAME
     assert second.key_prefix is not None and second.key.startswith(second.key_prefix)
+    # The rotation branch re-fingerprints both halves; a stale suffix would name the
+    # plaintext the first call handed out, which no longer authenticates.
+    assert second.key_suffix is not None and second.key.endswith(second.key_suffix)
+    assert first.key_suffix is not None and first.key.endswith(first.key_suffix)
 
     keys = await _keys_in(async_db, workspace.id)
     assert [key.key_name for key in keys] == [ACTIVATION_KEY_NAME]

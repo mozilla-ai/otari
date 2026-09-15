@@ -14,7 +14,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { UsageSummary } from "@/client"
 import { UsagePage } from "@/features/usage/UsagePage"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationContext, usageTotals } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationContext, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -73,8 +74,12 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  // See UsagePage.test.tsx: the breakdowns read the roster, which is gated on a
+  // surface only the deployment context can report.
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
     { wrapper: withRouter({ url: "/usage" }) },
   )
 }

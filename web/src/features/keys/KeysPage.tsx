@@ -19,7 +19,10 @@ import type {
   UpdateOwnKeyRequest,
   User,
 } from "@/client"
-import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import {
+  CopyField,
+  concealedFingerprint,
+} from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -108,23 +111,7 @@ const getKeyRowKey = (k: ApiKey): string => k.id
 
 // ---------- the one-time secret ----------
 
-/**
- * The plaintext key, shown once, and everything that has to travel with it.
- *
- * This was a strip between the page header and the table, and its docstring
- * argued against exactly the modal it now lives in: a focus trap, a swallowed
- * Esc and a backdrop that ignored clicks were a dialog fighting its own
- * conventions. The objection was to those behaviors rather than to the surface,
- * and `FormDialog` has none of them, except where this content needs one:
- * `isDismissable={false}` is the strip's "there is one control and it is the
- * acknowledgement", kept because a stray backdrop click here loses the key
- * forever.
- *
- * The snippets come with it. An operator creating their first key arrives from
- * the empty state, and "make your first call" is the next thing they need, so
- * leaving it behind on the page would have made this dialog the one place the
- * flow got worse.
- */
+/** One-time key handoff with copyable request examples. */
 function KeySecretStep({
   announce,
   result,
@@ -142,12 +129,11 @@ function KeySecretStep({
   // the API. Undefined when it has not said where its gateway is (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
   const secret = result.key
-  // One reveal for the key and both snippets, because the snippets carry the
-  // same secret: revealing the key while a snippet still printed bullets, or
-  // the reverse, would be one credential in two states on one screen. Open,
-  // because this screen exists to hand the key over and there is no second
-  // chance to read it; the toggle conceals all three.
-  const [isSecretRevealed, setIsSecretRevealed] = useState(true)
+  // The key and both snippets show one stand-in, so the credential on this
+  // screen reads as one thing rather than three.
+  const concealedSecret = concealedFingerprint(secret)
+  // The snippets carry the same credential, so all three fields share visibility.
+  const [isSecretRevealed, setIsSecretRevealed] = useState(false)
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
@@ -161,10 +147,10 @@ function KeySecretStep({
         // snippets show whenever the key is concealed. Without them concealing
         // the key would leave it in plain sight twice over, in the requests
         // that explain it.
-        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: CONCEALED_SECRET }),
+        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: concealedSecret }),
         concealedPython: buildPythonSnippet({
           baseUrl,
-          apiKey: CONCEALED_SECRET,
+          apiKey: concealedSecret,
         }),
       }
     : undefined
@@ -186,7 +172,7 @@ function KeySecretStep({
         <CopyField
           label="Secret key"
           value={secret}
-          concealed={CONCEALED_SECRET}
+          concealed={concealedSecret}
           isRevealed={isSecretRevealed}
           onRevealChange={setIsSecretRevealed}
           fieldRef={secretRef}
@@ -723,6 +709,8 @@ function RegeneratedSecretDialog({
       isOpen
       onOpenChange={onClose}
       size="lg"
+      // A stray backdrop click here loses the key forever: this is the one
+      // message in the product that cannot be shown again.
       isDismissable={false}
       title={title}
       submitLabel="I’ve saved this key"
@@ -1126,7 +1114,7 @@ export function KeysPage() {
         header: "Key",
         cell: (k) => (
           <code className="text-mono-caption text-muted">
-            {k.key_prefix ? `${k.key_prefix}…` : "—"}
+            {k.key_prefix ? `${k.key_prefix}…${k.key_suffix ?? ""}` : "—"}
           </code>
         ),
       },
@@ -1190,8 +1178,15 @@ export function KeysPage() {
               onPress={() => arm(k.id)}
             />
             {/* Permanent delete is only offered once a key is disabled, so a live
-              caller can't be broken (and its audit trail erased) in one click. */}
-            {k.is_active ? null : (
+              caller can't be broken (and its audit trail erased) in one click.
+              The slot is held open when it is not offered: the lane is
+              right-aligned, so a missing action slid every glyph beside it 48px
+              along and Edit sat in a different column on a live row than on a
+              disabled one. An empty span rather than a disabled control, because
+              there is nothing here to refuse. */}
+            {k.is_active ? (
+              <span aria-hidden="true" className="size-8 shrink-0" />
+            ) : (
               <RowAction
                 icon={FiTrash2}
                 label="Delete"

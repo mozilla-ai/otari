@@ -1,11 +1,14 @@
 import { Button, Popover } from "@heroui/react"
 import { Link, type LinkProps } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import { useState } from "react"
 import type { IconType } from "react-icons"
 import {
   FiBookOpen,
   FiChevronDown,
+  FiChevronRight,
   FiFileText,
+  FiHardDrive,
   FiLogOut,
   FiMoon,
   FiSettings,
@@ -145,6 +148,7 @@ function MenuItem({
   isDisabled,
   title,
   trailing,
+  trailingIcon,
   ariaLabel,
 }: {
   label: string
@@ -154,6 +158,8 @@ function MenuItem({
   isDisabled?: boolean
   title?: string
   trailing?: string
+  /** Fills the same lane as `trailing`, for a mark rather than a value. */
+  trailingIcon?: ReactNode
   ariaLabel?: string
 }) {
   return (
@@ -175,7 +181,9 @@ function MenuItem({
       {/* The trailing lane is held open on every row, at the width a value
           takes, so the one row that carries a value does not push its own label
           out of the column the others sit in. */}
-      {trailing ? (
+      {trailingIcon ? (
+        <span className="flex w-11 shrink-0 justify-end">{trailingIcon}</span>
+      ) : trailing ? (
         <span className="w-11 shrink-0 text-right text-shell-secondary font-normal text-muted">
           {trailing}
         </span>
@@ -199,6 +207,7 @@ function MenuLink({
   to,
   onNavigate,
   className = "",
+  trailing,
 }: {
   label: string
   icon: IconType
@@ -206,6 +215,8 @@ function MenuLink({
   to: LinkProps["to"]
   onNavigate: () => void
   className?: string
+  /** Fills the lane the spacer otherwise holds open, so nothing moves. */
+  trailing?: ReactNode
 }) {
   return (
     <Link
@@ -215,7 +226,11 @@ function MenuLink({
     >
       <Icon aria-hidden="true" className={MENU_ICON_CLASS} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span aria-hidden="true" className="h-0 w-11 shrink-0" />
+      {trailing ? (
+        <span className="flex w-11 shrink-0 justify-end">{trailing}</span>
+      ) : (
+        <span aria-hidden="true" className="h-0 w-11 shrink-0" />
+      )}
     </Link>
   )
 }
@@ -282,7 +297,27 @@ function AppearanceControl() {
   )
 }
 
-export function AccountMenu({ collapsed }: { collapsed: boolean }) {
+export function AccountMenu({
+  collapsed,
+  deploymentLanding,
+  triggerRef,
+  onOpenDeploymentLevel,
+}: {
+  collapsed: boolean
+  /**
+   * Where the Deployment row goes, or nothing when that rail has no rows for
+   * this caller. Resolved by the shell rather than here, because it is the
+   * remembered location of a rail and the shell is what owns that memory.
+   */
+  deploymentLanding?: LinkProps["to"]
+  /** So the shell can return focus here when a level it opened closes. */
+  triggerRef?: React.RefObject<HTMLButtonElement | null>
+  /**
+   * Below `md`, what the Deployment row does instead of navigating: the rail
+   * opens it as a level inside the drawer, and this popover has closed by then.
+   */
+  onOpenDeploymentLevel?: () => void
+}) {
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url } = useDeployment()
   const organization = useOrganizationContext()
@@ -296,6 +331,7 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
           band it closes the rail with, so the hover fill is the band rather
           than a pill sitting inside it. */}
       <Button
+        ref={triggerRef}
         variant="ghost"
         // The identity this control exists to draw, folded into the name: a
         // static `aria-label` wins over the children, so a screen reader
@@ -342,6 +378,74 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
             onNavigate={() => setOpen(false)}
           />
           <AppearanceControl />
+          {/* The deployment's own pages, which used to sit in the organization
+              rail's General section. They are the deployment talking about
+              itself rather than the tenant, and that rail is where a tenant
+              reads, so they hang off the account control instead.
+
+              No divider above: the heading already separates, and two marks for
+              one break read as noise. The divider below is the existing one,
+              and it is load-bearing now rather than decorative, because without
+              it Data & Privacy sits directly under Accounts and reads as a
+              third deployment row.
+
+              Rows and heading appear together or not at all. Each row is gated
+              on the value it declares (`/settings` 403s, `/admin/accounts`
+              404s), so a caller can be refused both, and a label over nothing
+              names a group that is not there. */}
+          {/* One row, not the pages themselves: it changes which rail the
+              shell is showing, the way the Organization row in the footer does.
+              The pages behind it are the deployment's own (the running process,
+              and every account across the organizations on it), which is why
+              they are a context rather than a section inside a tenant's rail.
+
+              Absent entirely when the caller operates nothing there, since the
+              rail it opens would have no rows: same predicate the rail runs,
+              so the control and its destination cannot disagree. */}
+          {deploymentLanding ? (
+            onOpenDeploymentLevel ? (
+              // Below `md` this opens a level inside the drawer rather than
+              // navigating, so it is a button: the page behind the drawer has
+              // not moved, and a link would claim it had.
+              <MenuItem
+                label="Deployment"
+                icon={FiHardDrive}
+                trailingIcon={
+                  <FiChevronRight
+                    aria-hidden="true"
+                    className={MENU_ICON_CLASS}
+                  />
+                }
+                onPress={() => {
+                  setOpen(false)
+                  onOpenDeploymentLevel()
+                }}
+              />
+            ) : (
+              <MenuLink
+                label="Deployment"
+                // Not `FiServer`, which the drawing shows: that mark is already
+                // "MCP servers" on the workspace rail, and this menu opens over
+                // that rail, so the two would be on screen together.
+                // `FiHardDrive` is unused across the nav and cannot collide with
+                // either row in the rail this opens.
+                icon={FiHardDrive}
+                to={deploymentLanding}
+                onNavigate={() => setOpen(false)}
+                // The only thing in the menu that says "this opens rather than
+                // goes": every other row leaves for a page, this one changes
+                // which rail is showing. It sits in the 44px trailing lane every
+                // row already holds open, the one Appearance puts its value in,
+                // so nothing shifts.
+                trailing={
+                  <FiChevronRight
+                    aria-hidden="true"
+                    className={MENU_ICON_CLASS}
+                  />
+                }
+              />
+            )
+          ) : null}
           <div className={MENU_DIVIDER} />
           {/* The top bar owns Documentation above `md` (that cluster is
               `hidden md:flex`), and this menu is the one surface that renders

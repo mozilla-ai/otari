@@ -30,6 +30,7 @@ import {
   formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 // One model, on a page of its own: the header with its facts, then every
 // offering of the model this viewer may call, cheapest first, with the price
@@ -208,11 +209,11 @@ function offeringColumns({
         // One line: the selector, which is as long as the provider makes it,
         // opens under the row instead of setting every row's height.
         <span className="text-body whitespace-nowrap">
-          {row.provider}
+          {providerDisplayName(row.provider)}
           <span className="text-caption">
             {" · "}
             {row.provider_type !== row.provider
-              ? `${row.provider_type} · `
+              ? `${providerDisplayName(row.provider_type)} · `
               : ""}
             {credentialLabel(row.credential)}
             {row.quantization ? ` · ${row.quantization}` : ""}
@@ -313,19 +314,26 @@ function offeringColumns({
     })
   } else if (canOverride) {
     // An organization admin cannot touch the deployment's price, but may set
-    // what their own organization is billed above it.
+    // what their own organization is billed for a model it supplies the key
+    // for. An offering on one of the deployment's own instances is not one of
+    // those: the deployment settles that upstream bill, and the gateway refuses
+    // an override for it (otari#1164), so no link is offered rather than one
+    // that ends in a disabled dialog.
     columns.push({
       id: "actions",
       header: "Actions",
-      cell: ({ offering: row }) => (
-        <Link
-          to="/organization/pricing"
-          search={{ override: row.selector }}
-          className="text-link hover:text-link-hover"
-        >
-          Set your rate
-        </Link>
-      ),
+      cell: ({ offering: row }) =>
+        row.credential === "organization" ? (
+          <Link
+            to="/organization/pricing"
+            search={{ override: row.selector }}
+            className="text-link hover:text-link-hover"
+          >
+            Set your rate
+          </Link>
+        ) : (
+          <span className="text-caption text-subtle">Deployment priced</span>
+        ),
     })
   }
   return columns

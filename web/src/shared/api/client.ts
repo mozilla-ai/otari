@@ -454,3 +454,59 @@ export async function apiFetch<T>(
     throw error
   }
 }
+
+/**
+ * Start a streaming request and hand back the live `Response`.
+ *
+ * The one thing `apiFetch` cannot do: it awaits `response.json()`, which is the
+ * whole body, and the Playground exists to render a reply as it arrives rather
+ * than once it is finished. So the caller gets the response and reads
+ * `body.getReader()` itself.
+ *
+ * Everything else is deliberately `apiFetch`'s: the same URL building (a caller
+ * names its resource and never spells the API root), the same refusal
+ * extraction, and the same 401 handling, so a session that expired mid-stream
+ * bounces to sign-in exactly as it would on any other call. Written here rather
+ * than as a raw `fetch` at the call site for that reason: the layer rule is not
+ * about the function, it is about who owns those three behaviors.
+ *
+ * No timeout of its own, and this is the one place that is right. A generated
+ * answer legitimately takes minutes, and the deadline `apiFetch` enforces
+ * exists to stop a *hung* request from holding a connection slot, which a
+ * stream delivering tokens is not. The caller passes an `AbortSignal` it can
+ * trigger instead, which is what a Stop control needs anyway.
+ */
+export async function apiStream(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers)
+  headers.set("Accept", "text/event-stream")
+  if (init.body != null && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json")
+  }
+
+  let response: Response
+  try {
+    response = await fetch(apiUrl(path), { ...init, headers })
+  } catch (error) {
+    // An abort is the caller's own Stop control, not a fault, so it is left to
+    // propagate as itself rather than being reported as an unreachable gateway.
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+
+  if (response.status === 401) {
+    unauthorizedHandler?.()
+    throw new ApiError(response.status, await extractErrorMessage(response))
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response))
+  }
+  if (response.body === null) {
+    throw new ApiError(0, "The gateway returned no response body.")
+  }
+  return response
+}

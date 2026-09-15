@@ -6,6 +6,12 @@ import type { ReactNode } from "react"
 // is selected and more rows match the filter, a "Select all N matching this
 // filter" affordance so a bulk op can target the full filtered set.
 //
+// `left` and `width` are not spelled here: `.otari-bulk-bar` in `globals.css`
+// sets both from the rail's published footprint, and an unlayered rule beats a
+// Tailwind utility, so a `left-*` or `w-*` class at this call site would be
+// inert and editing it would change nothing with no error to say so. `max-w-3xl`
+// and the `-translate-x-1/2` the animation composes with are still this file's.
+//
 // Floats fixed near the bottom of the viewport instead of rendering in flow:
 // an in-flow bar appeared above the table on first selection and shifted every
 // row down under the operator's cursor mid-click-spree, and it scrolled out of
@@ -49,7 +55,7 @@ export function BulkActionBar({
       // card with an elevation that is now `none`, which left the accent doing
       // the work of an edge; the accent is data ink and fills, not a way to say
       // "this is on top".
-      className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 border border-control-border bg-surface px-4 py-2.5"
+      className="otari-bulk-bar fixed bottom-4 z-40 flex max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 border border-control-border bg-surface px-4 py-2.5"
     >
       {/* The count changes as rows are ticked, with no focus move to carry it.
           Foreground, not accent: this is a count, not a destination, and accent

@@ -48,15 +48,28 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 // Mocked at the `@/client` boundary (a real `fetch`), per the standards: the
 // hooks and their invalidation are part of what is under test.
+function catalogModel(id: string) {
+  return {
+    id,
+    object: "model",
+    created: 0,
+    owned_by: id.split(":")[0],
+    pricing_source: "none",
+  }
+}
+
 function mockApi({
   budgets = [organizationBudget()],
   ceilings = [] as OrganizationSpendCeiling[],
   writeStatus = 201,
   budgetsGate,
+  models = [] as string[],
 }: {
   budgets?: OrganizationBudget[]
   ceilings?: OrganizationSpendCeiling[]
   writeStatus?: number
+  /** What GET /v1/models serves, which is where the provider picker looks. */
+  models?: string[]
   // Holds the budget list in flight, so a dialog can be opened before it
   // lands: that is when a default arriving after mount is observable.
   budgetsGate?: Promise<unknown>
@@ -84,6 +97,9 @@ function mockApi({
       }
       if (method === "DELETE") return jsonResponse({ message: "deleted" })
       return jsonResponse(organizationBudget(), writeStatus)
+    }
+    if (url.endsWith(`${API_ROOT}/models`)) {
+      return jsonResponse({ object: "list", data: models.map(catalogModel) })
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
       return jsonResponse({
@@ -212,6 +228,21 @@ describe("OrganizationBudgetsPage", () => {
     })
   })
 
+  it("says what an unnamed budget will be called, before it is saved", async () => {
+    // The name is optional, and a budget saved without one is handed out under
+    // what it caps (#2130) rather than under the head of its id.
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization budgets" })
+
+    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.type(screen.getByLabelText("Limit (USD)"), "75")
+    expect(
+      screen.getByText(/Left blank, that is "\$75.00 \/ month"/),
+    ).toBeInTheDocument()
+  })
+
   it("refuses a limit that is not an amount rather than sending it", async () => {
     mockApi({ budgets: [] })
     const user = userEvent.setup()
@@ -291,6 +322,38 @@ describe("OrganizationBudgetsPage", () => {
       name: "New spend ceiling",
     })
     expect(within(reopened).queryByRole("alert")).toBeNull()
+  })
+
+  it("narrows a ceiling to a provider picked from the ones served here", async () => {
+    // The instance is free text on the wire (a provider configured in
+    // config.yml has no row to point at), so a typo used to store a cap that
+    // narrowed to nothing and then quietly never bit. The list is read off the
+    // catalog because /v1/providers is operator-only and this page is the one
+    // an admin who is not an operator lands on.
+    const requests = mockApi({ models: ["openai-eu:gpt-4o"] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Add ceiling" }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "New spend ceiling",
+    })
+    await user.click(
+      within(dialog).getByRole("button", { name: /show suggestions/i }),
+    )
+    await user.click(await screen.findByRole("option", { name: "openai-eu" }))
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add ceiling" }),
+    )
+
+    await waitFor(() => {
+      const write = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      )
+      expect(write?.body).toMatchObject({ provider_key_id: "openai-eu" })
+    })
   })
 
   it("warns that deleting a held budget will be refused, before trying", async () => {
@@ -394,6 +457,30 @@ describe("OrganizationBudgetsPage", () => {
       scope_type: "organization",
       budget_id: organizationBudget().budget_id,
     })
+  })
+
+  it("offers an unnamed budget by what it caps, without saying the figure twice", async () => {
+    // The head of a uuid is not something an admin can pick by (#2130), and the
+    // option already carries the limit, so a derived label must not repeat it.
+    mockApi({
+      budgets: [
+        organizationBudget({
+          budget_id: "04f2f38a-1111-1111-1111-111111111111",
+          name: null,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization spend ceilings" })
+
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    await user.click(screen.getByRole("button", { name: /Budget/ }))
+
+    expect(
+      await screen.findByRole("option", { name: "$250.00 / month" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /04f2f38a/ })).toBeNull()
   })
 
   it("will not offer a ceiling with no budget to hold", async () => {

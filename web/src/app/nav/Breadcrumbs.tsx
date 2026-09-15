@@ -14,7 +14,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
  * does belong to a second, the scope switcher above the rail names the active
  * one. A hosted deployment can hold several, so there it leads.
  *
- * The two contexts have different scopes to show: the workspace rail is inside
+ * The three contexts have different scopes to show: the workspace rail is inside
  * one workspace, and the organization rail is not inside any.
  */
 export function Breadcrumbs({ pathname }: { pathname: string }) {
@@ -24,11 +24,32 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
 
   const page = navLabelForPath(pathname)
   const organizationName = organization.data?.organization?.name
-  const inOrganization = navContextForPath(pathname) === "organization"
+  // A destination no rail owns names itself and no scope. The trail would
+  // otherwise read "Default workspace / Settings" and file the deployment's own
+  // settings under a workspace that does not own them, which is the same claim
+  // the rail used to make before `ORG_PATHS` stopped counting these.
+  //
+  // The scope goes rather than the page, though `/account` drops the page and
+  // keeps the scope. That is not a precedent to copy: `/account` is
+  // unregistered, so it has no page label to show and the scope is simply what
+  // is left. Dropping the page here would empty the trail on a deployment with
+  // no workspace selected (a first run has none), leaving a reader with neither
+  // a crumb nor a highlighted rail row, and no location at all is worse than a
+  // location that is merely brief.
+  const context = navContextForPath(pathname)
 
   const trail = [
-    deployment_type === "standalone" ? undefined : organizationName,
-    inOrganization ? organizationName : selected?.name,
+    deployment_type === "standalone" || context === "deployment"
+      ? undefined
+      : organizationName,
+    // The deployment has no name to show. The other two scopes are data (a
+    // workspace's name, an organization's), and the process is the one every
+    // tenant shares, so the word is the scope: "Deployment / Settings".
+    context === "deployment"
+      ? "Deployment"
+      : context === "organization"
+        ? organizationName
+        : selected?.name,
     page,
   ].filter((one): one is string => Boolean(one))
 

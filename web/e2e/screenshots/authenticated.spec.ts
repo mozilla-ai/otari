@@ -16,6 +16,15 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   readonly heading: RegExp
 }> = [
   { route: "/", name: "overview", heading: /overview/i },
+  // The one page in this matrix with no page title, which is why its heading
+  // regex names the greeting instead: a chat surface heads with the composer
+  // and its own empty state, not with a title band, and the seeded deployment
+  // serves a mock provider so that state is what renders.
+  {
+    route: "/playground",
+    name: "playground",
+    heading: /what can i help with/i,
+  },
   { route: "/models", name: "models", heading: /models/i },
   {
     route: "/models/openai/gpt-parity-priced",
@@ -70,9 +79,12 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
+  // The deployment's own two pages, reached from the account menu rather than
+  // from a rail, and covered here all the same for the reason /account below
+  // is: this matrix is about how a page renders, not about which control opens
+  // it. Accounts is not the members roster above, which stops at this
+  // organization's boundary.
   { route: "/settings", name: "settings", heading: /settings/i },
-  // Deployment-wide accounts, on the organization rail beside Settings. Not the
-  // members roster above: that one stops at this organization's boundary.
   {
     route: "/admin/accounts",
     name: "admin-accounts",

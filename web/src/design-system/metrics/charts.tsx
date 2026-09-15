@@ -370,6 +370,8 @@ export function TrendChart({
 // A compact, axis-free trend line for KPI tiles. Conveys shape only: no ticks,
 // no tooltip, one color. `ariaLabel` should describe what the trend is (e.g.
 // "Spend trend over the selected window") so it is legible without the visual.
+// The labeled image supplies accessibility; Recharts keyboard navigation stays
+// off because this static trend has no interactive values to explore.
 export function Sparkline({
   values,
   ariaLabel,
@@ -381,15 +383,15 @@ export function Sparkline({
 }) {
   const data = values.map((value, index) => ({ index, value }))
   return (
-    // The wrapper carries the accessible name, so the SVG inside must not be a
-    // second stop: recharts gives its `<svg>` `tabIndex={0}` by default, which
-    // put three empty focus stops on the Overview page, each landing a ring on a
-    // decorative line with nothing to do there. A sparkline has no interaction.
-    <div role="img" aria-label={ariaLabel} className="w-full">
+    <div
+      role="img"
+      aria-label={ariaLabel}
+      className="pointer-events-none w-full"
+    >
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
           data={data}
-          tabIndex={-1}
+          accessibilityLayer={false}
           margin={{ top: 2, right: 2, left: 2, bottom: 2 }}
         >
           <Line
@@ -398,6 +400,7 @@ export function Sparkline({
             stroke={BRAND}
             strokeWidth={1.5}
             dot={false}
+            activeDot={false}
             isAnimationActive={false}
           />
         </LineChart>

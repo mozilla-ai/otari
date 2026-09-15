@@ -34,6 +34,8 @@ def test_create_app_bootstraps_first_api_key(tmp_path: Path) -> None:
     # fingerprint like any other (regression guard for the third mint path).
     assert keys[0].key_prefix is not None
     assert keys[0].key_prefix.startswith("gw-")
+    assert keys[0].key_suffix is not None
+    assert len(keys[0].key_suffix) == 4
     assert len(users) == 1
     # The bootstrap key has no explicit owner, so it lands on the shared "default"
     # user rather than a per-key virtual one.

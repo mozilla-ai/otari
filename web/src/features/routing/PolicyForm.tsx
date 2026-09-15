@@ -8,7 +8,8 @@
  */
 
 import { Link } from "@tanstack/react-router"
-import { type RefObject, useMemo, useState } from "react"
+import { type ReactNode, type RefObject, useMemo, useState } from "react"
+import { FiTrash2 } from "react-icons/fi"
 
 import type { PolicyGuardrail, PolicySpec, User } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -16,10 +17,13 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
-import { ControlField } from "@/design-system/forms/FieldMessages"
+import {
+  ControlField,
+  FieldMessages,
+} from "@/design-system/forms/FieldMessages"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
-import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { ModelComboBox, useModelCatalog } from "@/features/models/ModelComboBox"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import { userOptionText } from "@/features/users/userOptions"
@@ -71,6 +75,82 @@ function useGuardrailsConfigured(enabled: boolean): {
     configured: settings.isLoading || value !== "",
     isLoading: settings.isLoading,
   }
+}
+
+/**
+ * A section's own remove, beside the heading that names it.
+ *
+ * Symmetric with the "+ Add" affordances that summon these sections, and it
+ * closes a trap rather than saving keystrokes: a section already disappears
+ * when its last row is removed, because every section renders behind
+ * `length > 0` and no row's Remove is gated on being the last one. Nothing says
+ * so, so an operator who has filled in a fallback chain loses the section by
+ * pressing what reads as a delete for one entry. Naming the action at the level
+ * it acts on is what makes the row control mean only the row.
+ */
+function SectionRemove({
+  label,
+  onRemove,
+}: {
+  label: string
+  onRemove: () => void
+}) {
+  return (
+    // `shrink-0`, because this is a flex item beside a `ControlField` whose
+    // description is a sentence: the row hands the text the width it asks for
+    // and squeezes the button, which keeps its 36px height and loses its width.
+    // Measured at 19px in one section and 21px in another, each following that
+    // section's own wording. A ghost button's hover is its own box, so what an
+    // operator sees is not a square lighting up but a tall narrow slab around
+    // the glyph, which reads as a clipped rectangle.
+    <Button
+      variant="ghost"
+      isIconOnly
+      className="shrink-0"
+      aria-label={label}
+      onPress={onRemove}
+    >
+      <FiTrash2 aria-hidden />
+    </Button>
+  )
+}
+
+/**
+ * One repeated row of a policy section, with the model catalog's hint under the
+ * whole row rather than under the picker inside it.
+ *
+ * The hint is a sentence ("Could not list models for X. Check that provider's
+ * credentials, ..."), and at this dialog's width it wraps. A wrapped message
+ * makes its field taller than the siblings it shares an `items-end` row with,
+ * which lifts that field's input line clear of theirs: measured at 40px on the
+ * pool rows and 20px on the chain. `web/design/forms.md` ("Control rows") names
+ * the break and this remedy. The picker keeps its empty caption line, so every
+ * child of the row still reserves exactly one, and the hint is announced with
+ * the input through `describedBy` because text outside a field never reaches
+ * its description slot.
+ */
+function SectionRow({
+  id,
+  modelValue,
+  children,
+}: {
+  id: string
+  modelValue: string
+  children: ReactNode
+}) {
+  const { hint } = useModelCatalog(modelValue)
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-end gap-3">{children}</div>
+      {hint ? (
+        <FieldMessages reserve={false}>
+          <span id={id} className="text-muted">
+            {hint}
+          </span>
+        </FieldMessages>
+      ) : null}
+    </div>
+  )
 }
 
 /** Which entry of `initialPool` serves when the router declines. */
@@ -812,12 +892,24 @@ export function PolicyForm({
       {/* Conditional tier-down */}
       {conditions.length > 0 ? (
         <div className="flex flex-col gap-3 border border-control-border p-3">
-          <ControlField
-            label="Instead, when the budget fills up"
-            description="Checked before the model above. A threshold must be under 100: the budget gate refuses a request before selection once the cap is reached, so a rule at 100 could never fire."
-          />
+          <div className="flex items-start justify-between gap-3">
+            <ControlField
+              label="Instead, when the budget fills up"
+              description="Checked before the model above. A threshold must be under 100: the budget gate refuses a request before selection once the cap is reached, so a rule at 100 could never fire."
+            />
+            <SectionRemove
+              label="Remove the budget tier-down"
+              onRemove={() => {
+                setConditions([])
+              }}
+            />
+          </div>
           {conditions.map((condition, index) => (
-            <div key={index} className="flex flex-wrap items-end gap-3">
+            <SectionRow
+              key={index}
+              id={`tier-hint-${index}`}
+              modelValue={condition.target}
+            >
               <Field
                 label="Budget used at least (%)"
                 value={String(condition.threshold)}
@@ -850,6 +942,8 @@ export function PolicyForm({
                       ),
                     )
                   }
+                  hintPlacement="detached"
+                  describedBy={`tier-hint-${index}`}
                   isRequired
                 />
               </div>
@@ -863,7 +957,7 @@ export function PolicyForm({
                   Remove
                 </Button>
               </FieldAction>
-            </div>
+            </SectionRow>
           ))}
         </div>
       ) : null}
@@ -873,18 +967,34 @@ export function PolicyForm({
               whether a share sits next to each entry. */}
       {candidates.length > 0 ? (
         <div className="flex flex-col gap-3 border border-control-border p-3">
-          <ControlField
-            label={
-              weighted ? "Split traffic between" : "The router chooses between"
-            }
-            description={
-              weighted
-                ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
-                : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
-            }
-          />
+          <div className="flex items-start justify-between gap-3">
+            <ControlField
+              label={
+                weighted
+                  ? "Split traffic between"
+                  : "The router chooses between"
+              }
+              description={
+                weighted
+                  ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
+                  : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
+              }
+            />
+            <SectionRemove
+              label="Remove the routed pool"
+              onRemove={() => {
+                setCandidates([])
+                setWeights([])
+                setSafeIndex(0)
+              }}
+            />
+          </div>
           {candidates.map((entry, index) => (
-            <div key={index} className="flex flex-wrap items-end gap-3">
+            <SectionRow
+              key={index}
+              id={`pool-hint-${index}`}
+              modelValue={entry}
+            >
               <div className="min-w-56 flex-1">
                 <ModelComboBox
                   label={`Model ${index + 1}`}
@@ -894,6 +1004,8 @@ export function PolicyForm({
                       prev.map((c, i) => (i === index ? value : c)),
                     )
                   }
+                  hintPlacement="detached"
+                  describedBy={`pool-hint-${index}`}
                   isRequired
                 />
               </div>
@@ -948,7 +1060,7 @@ export function PolicyForm({
                   Remove
                 </Button>
               </FieldAction>
-            </div>
+            </SectionRow>
           ))}
           <p className="text-caption">
             {weighted ? (
@@ -1025,12 +1137,24 @@ export function PolicyForm({
       {/* Failure chain */}
       {chain.length > 0 ? (
         <div className="flex flex-col gap-3 border border-control-border p-3">
-          <ControlField
-            label="If that fails, try"
-            description="Tried in order after a retryable failure. Not tried once tokens have started streaming, or after a 400/401/403, which every provider would reject the same way."
-          />
+          <div className="flex items-start justify-between gap-3">
+            <ControlField
+              label="If that fails, try"
+              description="Tried in order after a retryable failure. Not tried once tokens have started streaming, or after a 400/401/403, which every provider would reject the same way."
+            />
+            <SectionRemove
+              label="Remove the fallback chain"
+              onRemove={() => {
+                setChain([])
+              }}
+            />
+          </div>
           {chain.map((entry, index) => (
-            <div key={index} className="flex flex-wrap items-end gap-3">
+            <SectionRow
+              key={index}
+              id={`chain-hint-${index}`}
+              modelValue={entry}
+            >
               <div className="min-w-56 flex-1">
                 <ModelComboBox
                   label={`Fallback ${index + 1}`}
@@ -1040,6 +1164,8 @@ export function PolicyForm({
                       prev.map((e, i) => (i === index ? value : e)),
                     )
                   }
+                  hintPlacement="detached"
+                  describedBy={`chain-hint-${index}`}
                   isRequired
                 />
               </div>
@@ -1053,7 +1179,7 @@ export function PolicyForm({
                   Remove
                 </Button>
               </FieldAction>
-            </div>
+            </SectionRow>
           ))}
           <div className="flex flex-wrap items-baseline gap-2">
             <button
@@ -1080,23 +1206,30 @@ export function PolicyForm({
       {/* Guardrails */}
       {guardrails.length > 0 ? (
         <div className="flex flex-col gap-3 border border-control-border p-3">
-          <div>
-            <span className="text-body">Always check</span>
-            <p className="text-caption">
-              Runs on every request through this policy. Callers can add their
-              own guardrails but cannot weaken these.
-            </p>
-            {guardrails_.configured ? null : (
-              <p className="mt-1 text-caption text-warning">
-                No guardrails service is configured, so these cannot run. With{" "}
-                <code>if the service is down</code> set to block, every request
-                through this policy is refused until one is configured.{" "}
-                <Link to="/tools" className="underline">
-                  Set one up
-                </Link>
-                , or remove the guardrail.
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="text-body">Always check</span>
+              <p className="text-caption">
+                Runs on every request through this policy. Callers can add their
+                own guardrails but cannot weaken these.
               </p>
-            )}
+              {guardrails_.configured ? null : (
+                <p className="mt-1 text-caption text-warning">
+                  No guardrails service is configured, so these cannot run. With{" "}
+                  <code>if the service is down</code> set to block, every
+                  request through this policy is refused until one is
+                  configured.{" "}
+                  <Link to="/tools" className="underline">
+                    Set one up
+                  </Link>
+                  , or remove the guardrail.
+                </p>
+              )}
+            </div>
+            <SectionRemove
+              label="Remove the guardrails"
+              onRemove={() => setGuardrails([])}
+            />
           </div>
           {guardrails.map((guardrail, index) => (
             <div key={index} className="flex flex-col gap-3">

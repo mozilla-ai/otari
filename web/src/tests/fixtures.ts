@@ -99,6 +99,7 @@ const STANDALONE_SURFACES = [
   "keys",
   "models",
   "organizations",
+  "playground",
   "pricing",
   "providers",
   "routing",
@@ -111,11 +112,14 @@ const STANDALONE_SURFACES = [
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
 // HOSTED_SURFACES beside it: the process-global provider page drops, the
-// organization-scoped one takes its place, and the organization-wide Usage page
-// appears, being a destination only where "my organization" is narrower than
-// "everything" (otari-ai#1963).
+// organization-scoped one takes its place, the Playground drops because a
+// control plane serves no inference (otari#822), and the organization-wide
+// Usage page appears, being a destination only where "my organization" is
+// narrower than "everything" (otari-ai#1963).
+const HOSTED_DROPS = new Set(["providers", "playground"])
+
 export const HOSTED_SURFACES = [
-  ...STANDALONE_SURFACES.filter((surface) => surface !== "providers"),
+  ...STANDALONE_SURFACES.filter((surface) => !HOSTED_DROPS.has(surface)),
   "organization_providers",
   "organization_usage",
 ]
@@ -432,6 +436,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     // NOT NULL on the server: a key always belongs to exactly one workspace.
     workspace_id: "11111111-1111-1111-1111-111111111111",
     key_prefix: "gw-AbC3dE",
+    key_suffix: "7xKp",
     key_name: "ci-bot",
     user_id: "alice",
     created_at: "2026-01-01T00:00:00+00:00",
@@ -638,6 +643,8 @@ export function workspaceProviderKeyOverride(
     disabled: false,
     is_effective_default: true,
     is_effective_enabled: true,
+    // Empty is the answer "every model this key serves", never "no model".
+    allowed_models: [],
     ...overrides,
   }
 }

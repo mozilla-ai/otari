@@ -1,4 +1,5 @@
 import { Button, Chip } from "@heroui/react"
+import { Link } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 
 import type {
@@ -51,6 +52,7 @@ export function AddWorkspaceMemberDialog({
   workspaceId,
   candidates,
   rosterResolved,
+  canManageOrganization,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -63,6 +65,13 @@ export function AddWorkspaceMemberDialog({
    * told is a full workspace.
    */
   rosterResolved: boolean
+  /**
+   * Whether the caller manages the organization. Only they can act on the way
+   * out of an exhausted workspace, so only they are pointed at the page that
+   * does it; everyone else is told who can. A context that has not answered
+   * counts as false, which is the sentence that is true either way.
+   */
+  canManageOrganization: boolean
 }) {
   const add = useAddWorkspaceMember()
   const [userId, setUserId] = useState("")
@@ -93,8 +102,24 @@ export function AddWorkspaceMemberDialog({
       {isNobodyLeft ? (
         <InfoBanner>
           Every active member of this organization is already in this workspace.
-          A workspace's members are always a subset of the organization's, so
-          add someone there first, on the Members page.
+          A workspace's members are always a subset of the organization's, so{" "}
+          {canManageOrganization ? (
+            <>
+              add someone to the organization first, on{" "}
+              {/* Underlined, not colored alone: the link ink on this banner's
+                  muted prose is under the contrast floor, so the underline is
+                  what carries it. */}
+              <Link
+                to="/organization/members"
+                className="text-link underline hover:text-link-hover"
+              >
+                Members &amp; roles
+              </Link>
+              .
+            </>
+          ) : (
+            "an organization owner or admin has to add someone to the organization first."
+          )}
         </InfoBanner>
       ) : (
         <>

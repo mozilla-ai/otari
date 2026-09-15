@@ -219,8 +219,9 @@ describe("ModelDetailPage", () => {
     expect(
       within(rows[0] as HTMLElement).getByText("DEFAULT"),
     ).toBeInTheDocument()
+    // The vendor's own spelling, not the wire id (otari#990).
     expect(
-      within(rows[1] as HTMLElement).getByText("nebius"),
+      within(rows[1] as HTMLElement).getByText("Nebius"),
     ).toBeInTheDocument()
     expect(
       within(rows[1] as HTMLElement).getByText("CUSTOM"),
@@ -285,6 +286,9 @@ describe("ModelDetailPage", () => {
         deployment_operator: false,
       }),
     })
+    // An offering on the organization's own key: the deployment does not settle
+    // that upstream bill, so the override is the organization's to set.
+    GLM_DETAIL.offerings[0] = offering({ credential: "organization" })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     const links = await screen.findAllByRole("link", { name: "Set your rate" })
@@ -292,6 +296,22 @@ describe("ModelDetailPage", () => {
       "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
     )
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
+  })
+
+  it("offers no override on an offering the deployment supplies the key for", async () => {
+    mockApi({
+      context: organizationContext({
+        role: "admin",
+        deployment_operator: false,
+      }),
+    })
+    // Every offering runs on a deployment instance, and the gateway refuses an
+    // override for one (otari#1164).
+    GLM_DETAIL.offerings[0] = offering({ credential: "deployment" })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    expect(await screen.findAllByText("Deployment priced")).not.toHaveLength(0)
+    expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
   })
 
   it("shows what the organization was charged for an offering", async () => {

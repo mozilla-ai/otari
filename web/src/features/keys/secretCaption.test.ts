@@ -15,6 +15,7 @@ const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   key: "gw-secret",
   key_name: "ci-bot",
   key_prefix: "gw-secret…",
+  key_suffix: "cret",
   metadata: {},
   reject_user_mismatch: null,
   user_id: "alice",

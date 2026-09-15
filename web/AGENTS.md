@@ -112,6 +112,15 @@ Import API shapes from `@/client`, not directly from the generated schema.
 `src/client/schema.ts` is generated from `docs/public/openapi.json` and
 committed. Keep `src/client/local.ts` limited to shapes OpenAPI cannot own.
 
+A field added to a gateway response model without a default lands in OpenAPI's
+`required`, so it is non-optional in the regenerated client, and every
+hand-written call site that builds that shape literally stops typechecking until
+it carries the field. The generated file is where the diff stops, not where the
+change stops, so a clean regeneration of a few added lines is not evidence that
+the change is contained. `pnpm run lint` is Biome and does not typecheck, so
+`pnpm run typecheck` is the gate that catches this; the usual call sites are the
+builders in `src/tests/fixtures.ts` and the per-feature test files.
+
 `apiFetch` in `shared/api/client.ts` prepends `API_ROOT` to every request. A
 call site passes the resource only, `apiFetch("/keys")`, and never spells
 `/api/v1`. A test that stubs `fetch` sees the whole URL; one that spies on
@@ -176,6 +185,31 @@ pnpm --dir web run typecheck
 pnpm --dir web test
 pnpm --dir web run build
 ```
+
+**`nav[aria-label="Sidebar"]` is not the whole rail.** The scope band above it
+(the workspace switcher, the back row) and the footer below it (the Organization
+switch, the account control) are siblings of the landmark inside the `<aside>`,
+not children of it. A query scoped to the landmark misses them while they sit
+visibly in the rail, and the failure reads as the element not rendering rather
+than as the query looking in the wrong place. Query the page for anything in the
+band or the footer.
+
+**After resolving a conflict, go looking by name for every fix that landed in
+that file since the merge base.** A conflict resolution reverts a review fix more
+easily than anything else in the file: it is typically one line, it has no test
+behind it, and it lives in a state no test reaches, while whoever is resolving is
+holding the structural change in their head. Re-reading the diff does not catch
+it, because an absent line has no shape. Grep the resolved file for the guard, the
+flag or the narrowing you know should be there, and then re-run whatever
+established it in the first place.
+
+**A CI green and a local green answer different questions.** CI builds the pull
+request's merge ref, so its run is the branch merged into `main` as it stood when
+the run was created; a local run is the branch alone. The suites are therefore
+different sets, CI's result can move with no change on the branch, and a test can
+fail there against a combination nobody has run here. Before reading a CI green as
+a statement about what you wrote, `git fetch origin main` and count
+`HEAD..origin/main`: that is how far the tested thing is from the written thing.
 
 Playwright behavioral tests run against a real built gateway and scope
 assertions to the rows they create. Dismiss React Aria popovers before asserting
@@ -265,6 +299,25 @@ config that owns no files and exits clean over a tree the real typecheck rejects
 test files included. Use the command in Checks above. The tell that found this:
 an `@ts-expect-error` whose error had been deliberately removed still reported
 success, where `pnpm --dir web run typecheck` reports `TS2578`.
+
+**Two instances of one control measuring differently is a sizing bug, not a
+measurement.** Each is following the length of the prose beside it, so a control
+sized by its neighbor's wording was never sized. The rule that prevents it is
+`design/layout.md`, "Repeated rows": a trailing action takes `shrink-0` in any
+flex row.
+
+**Every data table here is `table-layout: auto` with 16px cell padding and no
+declared column widths anywhere**, so the browser re-solves every column from its
+content on each render. Any plan of the form "take the width from column X" is
+therefore a guess rather than a specification: the solver decides which column
+pays, and the stylesheet does not say. Measure a column change by injecting the
+new cell into the live table and reading the result back.
+
+- Give every part of an injected cell `flex: 0 0 auto`. Without it the parts
+  shrink to fit and overflow their own element with no error, leaving column
+  widths that look plausible and are not.
+- Overwrite `last_used` with a real timestamp first. Every row in the seed says
+  "never", and that one substitution moves a measured overflow from 0 to 23px.
 
 **And absence from the built CSS proves nothing on its own.** Tailwind emits
 only the utilities something in the tree asks for, so checking whether a

@@ -302,3 +302,11 @@ hides.
 | `RefreshButton` | `onRefresh`, `isFetching?`, `updatedAt?`, `label?` | A refetch, with its own freshness caption. Pass `updatedAt` or the caption reads nothing |
 | `CopyButton` | `value`, `label` | Copy one value. Icon-only, 44x44 hit area |
 | `CopyField` | `label`, `value`, `multiline?`, `concealed?`, `action?` | A readonly field of a value to paste elsewhere. `concealed` is what it shows until the operator asks for the value, for a credential: Copy copies the real one either way, so a key is handed over without being read off the screen |
+
+API-key handoff fields start concealed, showing the first eight and last four
+characters. That stand-in is `concealedFingerprint`, beside `CONCEALED_SECRET`
+in the same module, so its shape is decided in one place rather than rebuilt at
+a call site. Copy and reveal are adjacent icon controls inside the field, each
+a 44x44 target below `md`. Copy uses the full value in either state; request
+examples share the reveal state and the same stand-in, so one credential never
+wears two on a screen.

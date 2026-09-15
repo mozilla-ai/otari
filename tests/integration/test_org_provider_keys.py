@@ -468,6 +468,72 @@ async def test_disabling_a_key_cascades_deleting_its_model_restrictions(async_db
     ).models == []
 
 
+async def test_the_effective_view_carries_each_key_allow_list(async_db: AsyncSession) -> None:
+    """The narrowing travels on the row beside the flags, so a caller summarizing
+    a workspace reads both in one call rather than one call per key. An empty
+    list is the common answer and means every model the key serves."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = OrgProviderKeyService(async_db)
+    narrowed = await service.create_key_for_user(user=owner, request=_create_request(name="narrowed"))
+    open_key = await service.create_key_for_user(user=owner, request=_create_request(name="open"))
+
+    await service.add_model_restriction_for_user(
+        user=owner, workspace_id=workspace.id, key_id=narrowed.id, model="gpt-4o-mini"
+    )
+    await service.add_model_restriction_for_user(
+        user=owner, workspace_id=workspace.id, key_id=narrowed.id, model="gpt-4o"
+    )
+
+    effective = await service.list_effective_keys_for_workspace(user=owner, workspace_id=workspace.id)
+    by_key = {row.org_provider_key_id: row.allowed_models for row in effective.data}
+    assert by_key[narrowed.id] == ["gpt-4o", "gpt-4o-mini"], "sorted, as the repository orders them"
+    assert by_key[open_key.id] == []
+
+
+async def test_a_sibling_workspace_allow_list_does_not_leak_into_this_one(async_db: AsyncSession) -> None:
+    """The batch read filters on the two columns independently, so a pair nobody
+    asked about can match the query. One workspace's narrowing must not show up
+    on another's view of the same key."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace_a = await _workspace(async_db, organization, name="A", owner=owner)
+    workspace_b = await _workspace(async_db, organization, name="B", owner=owner)
+    service = OrgProviderKeyService(async_db)
+    key = await service.create_key_for_user(user=owner, request=_create_request())
+
+    await service.add_model_restriction_for_user(user=owner, workspace_id=workspace_a.id, key_id=key.id, model="gpt-4o")
+
+    b_effective = await service.list_effective_keys_for_workspace(user=owner, workspace_id=workspace_b.id)
+    assert [row.allowed_models for row in b_effective.data] == [[]]
+
+
+async def test_an_override_write_answers_with_the_allow_list_it_left_behind(async_db: AsyncSession) -> None:
+    """Pinning keeps the narrowing, disabling deletes it, and both say so in the
+    row they return: the dashboard renders that row, so a stale allow-list on it
+    would report a narrowing the gateway no longer holds."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = OrgProviderKeyService(async_db)
+    key = await service.create_key_for_user(user=owner, request=_create_request())
+    await service.add_model_restriction_for_user(user=owner, workspace_id=workspace.id, key_id=key.id, model="gpt-4o")
+
+    pinned = await service.set_workspace_override_for_user(
+        user=owner,
+        workspace_id=workspace.id,
+        key_id=key.id,
+        request=WorkspaceProviderKeyOverrideRequest(is_default=True),
+    )
+    assert pinned.allowed_models == ["gpt-4o"]
+
+    disabled = await service.set_workspace_override_for_user(
+        user=owner, workspace_id=workspace.id, key_id=key.id, request=WorkspaceProviderKeyOverrideRequest(disabled=True)
+    )
+    assert disabled.allowed_models == [], "disabling deletes the allow-list, so the row cannot still name it"
+
+
 async def test_restricting_models_on_a_disabled_key_is_refused(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")

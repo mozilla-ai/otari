@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
+import { API_ROOT } from "@/shared/api/client"
 
 import { PricingOverrideDialog } from "./PricingOverrideDialog"
 
@@ -48,6 +49,63 @@ const EXISTING: OrganizationPricingOverride[] = [
   }),
 ]
 
+// What the model-key picker offers. The catalog rather than discovery, because
+// this dialog answers to an organization admin who is refused the
+// deployment-operator read; `fast` is an alias, and is left out of the list.
+const CATALOG = {
+  object: "list",
+  data: [
+    "openai:gpt-4o-mini",
+    "anthropic:claude-haiku-4-5",
+    "anthropic:claude-sonnet-5",
+    "fast",
+  ].map((id) => ({
+    id,
+    object: "model",
+    created: 0,
+    owned_by: id.split(":")[0],
+    pricing_source: "none",
+    deployment_managed: false,
+  })),
+}
+
+// The same catalog with one model the deployment supplies the credential for,
+// which is what the refusal below reads.
+const CATALOG_WITH_A_MANAGED_MODEL = {
+  ...CATALOG,
+  data: [
+    ...CATALOG.data,
+    {
+      id: "nebius_prod:llama-3",
+      object: "model",
+      created: 0,
+      owned_by: "nebius_prod",
+      pricing_source: "configured",
+      deployment_managed: true,
+    },
+  ],
+}
+
+// A tenant rather than the deployment's operator, which is the audience the
+// refusal is for: an operator pays the upstream bill and keeps setting the rate.
+const TENANT_CONTEXT = {
+  organization_member_id: "018f0000-0000-4000-8000-00000000000a",
+  caller: {
+    user_id: "018f0000-0000-4000-8000-00000000000b",
+    email: "admin@acme.test",
+    full_name: "Acme admin",
+  },
+  role: "admin",
+  status: "active",
+  organization: {
+    id: "018f0000-0000-4000-8000-0000000000ff",
+    name: "Acme",
+    slug: "acme",
+  },
+  workspace_memberships: [],
+  deployment_operator: false,
+}
+
 const meta = {
   title: "Dashboard/Organization/PricingOverrideDialog",
   component: PricingOverrideDialog,
@@ -57,6 +115,7 @@ const meta = {
     existing: EXISTING,
     onSaved: () => {},
   },
+  parameters: { api: { [`${API_ROOT}/models`]: CATALOG } },
 } satisfies Meta<typeof PricingOverrideDialog>
 
 export default meta
@@ -106,5 +165,22 @@ export const FromTrigger: Story = {
         />
       </div>
     )
+  },
+}
+
+/**
+ * A model this deployment supplies the provider key for, so its rate is the
+ * catalog's rather than this organization's (otari-ai#2095).
+ *
+ * Type `nebius_prod:llama-3` into Model key: the field says whose rate it is and
+ * the save stays disabled. The gateway refuses the write either way; this is the
+ * half that stops it being offered.
+ */
+export const DeploymentSuppliedModel: Story = {
+  parameters: {
+    api: {
+      [`${API_ROOT}/models`]: CATALOG_WITH_A_MANAGED_MODEL,
+      [`${API_ROOT}/organizations/me`]: TENANT_CONTEXT,
+    },
   },
 }

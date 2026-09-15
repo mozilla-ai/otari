@@ -8,6 +8,12 @@ import secrets
 # recovered from the stored SHA-256 hash.
 KEY_PREFIX_LENGTH = 10
 
+# Number of trailing plaintext characters kept alongside the prefix, so a key can be
+# told apart from another sharing its prefix. Four, matching the ``last4`` that
+# provider credentials have always stored; it takes the unexposed remainder from
+# ~342 bits to ~318 and, like the prefix, never gates auth.
+KEY_SUFFIX_LENGTH = 4
+
 
 def generate_api_key() -> str:
     """Generate a new API key with prefix.
@@ -38,6 +44,16 @@ def key_prefix(api_key: str) -> str:
     it is not a secret and is never used for authentication.
     """
     return api_key[:KEY_PREFIX_LENGTH]
+
+
+def key_suffix(api_key: str) -> str:
+    """Return the display-only trailing characters of an API key.
+
+    Called at every key-mint site, rotation included, so a rotated row never keeps
+    the suffix of the secret it replaced. Like the prefix it is not a secret, is
+    never used for authentication, and cannot be recovered from the stored hash.
+    """
+    return api_key[-KEY_SUFFIX_LENGTH:]
 
 
 def validate_api_key_format(api_key: str) -> None:

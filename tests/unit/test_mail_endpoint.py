@@ -4,11 +4,15 @@ Unit rather than integration: the route reads configuration and sends through a
 transport, with no database behind it beyond the one the app needs to boot.
 """
 
+import logging
+from collections.abc import Generator
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
@@ -71,6 +75,34 @@ def test_a_configured_deployment_sends_a_templated_test_message(tmp_path: Path) 
     assert body["missing"] == []
     assert sent.status_code == 200
     assert sent.json() == {"ok": True, "transport": "console", "reason": None}
+
+
+@pytest.fixture
+def console_mail(caplog: pytest.LogCaptureFixture) -> Generator[pytest.LogCaptureFixture]:
+    """Read what the console transport logged; the gateway logger does not propagate."""
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="gateway"):
+            yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def test_the_test_message_names_the_interface_rather_than_this_process(
+    tmp_path: Path, console_mail: pytest.LogCaptureFixture
+) -> None:
+    # The one message whose whole job is proving the mail setup has to name the
+    # address an operator would actually open.
+    with _client(
+        tmp_path,
+        mail_transport="console",
+        public_base_url="https://api.example.com",
+        ui_base_url="https://app.example.com/ui",
+    ) as client:
+        client.post(f"{API_ROOT}/settings/mail/test", json={"to": "ada@example.com"}, headers=AUTH)
+
+    assert "https://app.example.com/ui" in console_mail.text
+    assert "https://api.example.com" not in console_mail.text
 
 
 def test_a_send_that_fails_reports_why_instead_of_erroring(tmp_path: Path) -> None:

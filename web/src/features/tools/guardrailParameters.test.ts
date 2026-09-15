@@ -15,7 +15,7 @@ function spec(
   overrides: Partial<GuardrailParameterSpec> &
     Pick<GuardrailParameterSpec, "name" | "type">,
 ): GuardrailParameterSpec {
-  return { required: false, secret: false, ...overrides }
+  return { required: false, secret: false, storable: true, ...overrides }
 }
 
 describe("seedParameters", () => {

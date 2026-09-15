@@ -440,6 +440,18 @@
   --field-background: #ffffff;
   --field-border: rgb(0 0 0 / 0.48);
   --field-border-width: 1px;
+  /* The placeholder's own rung, and the one field variable whose default is
+     wrong rather than merely unmapped. `@heroui/styles` aliases
+     `--field-placeholder` to `--muted`, which this block points at
+     `--color-text-muted`: the secondary text role, tuned to carry captions at
+     4.5:1. That leaves a hint 1.47:1 from a typed value, so it reads as a
+     default already filled in rather than as a hint. The tertiary rung is
+     3.12:1 from the value and still 6.39:1 on the field, which a placeholder
+     needs because it often carries the only example of the format a field
+     wants. It also paints the trigger chevrons and the field addons, so the
+     ratio against the field matters as much as the one against the value; the
+     select's chevron is already pinned to this same rung further down. */
+  --field-placeholder: var(--color-text-subtle);
   /* Four HeroUI variables the mapping above never claimed. Without them a token
      change reaches most of the screen but not these: HeroUI's own values are
      literals, so a Select's value text, a field's shadow and every table and
@@ -649,6 +661,10 @@
   --field-background: rgb(255 255 255 / 0.05);
   --field-border: rgb(255 255 255 / 0.345);
   --field-border-width: 1px;
+  /* Same repair as the light block, which carries the reasoning. The dark ramp
+     is the same shape: muted leaves a hint 1.58:1 from a typed value, subtle
+     takes it to 3.05:1. */
+  --field-placeholder: var(--color-text-subtle);
 
   /* Mirror of the light block: own the `@theme` alias values directly
    * so each theme is self-contained and doesn't inherit from a sibling
@@ -3180,8 +3196,37 @@ main {
 }
 /* The floating bulk bar slides up from the viewport edge; fixed positioning
    means it never reflows the table it acts on. */
+/* The rail's footprint, published by the shell (`data-rail`) so a fixed overlay
+ * can center on the content beside the rail instead of on the viewport. Zero by
+ * default, which is what every surface without the shell gets and what the
+ * off-canvas drawer costs the content below `md`.
+ *
+ * The media query is belt and braces rather than the thing that makes this
+ * correct: the shell says `drawer` below `md`, so the zero above already
+ * answers that case. It is kept so a viewport change is right during the frame
+ * before the shell's own media listener has re-rendered. */
+[data-rail] {
+  --rail-width: 0px;
+}
+@media (min-width: 48rem) {
+  [data-rail="expanded"] {
+    --rail-width: 16.5rem;
+  }
+  [data-rail="collapsed"] {
+    --rail-width: 4.5rem;
+  }
+}
+
 .otari-bulk-bar {
   animation: otari-bulk-bar-in 160ms ease-out;
+  /* Centered on the content, not the viewport: `left-1/2` alone put the bar
+     132px left of the table it belongs to and over the last visible rows.
+     The width goes with it, because a fixed element's `100%` is the viewport
+     too: centered but still viewport-wide, the bar reached back over the rail
+     on a narrow desktop (at 768px with the rail expanded it is 736px wide in a
+     504px pane). The call site's `max-w-3xl` still caps it. */
+  left: calc(50% + var(--rail-width, 0px) / 2);
+  width: calc(100% - var(--rail-width, 0px) - 2rem);
 }
 /* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
  * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and

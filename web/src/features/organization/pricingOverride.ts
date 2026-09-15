@@ -7,7 +7,7 @@
  * None of them is the authority: the server refuses either way.
  */
 
-import type { OrganizationPricingOverride } from "@/client"
+import type { ModelObject, OrganizationPricingOverride } from "@/client"
 
 /** The rate fields an override carries, in the order the form shows them. */
 export const RATE_FIELDS = [
@@ -47,6 +47,65 @@ export function parseRate(value: string): number | undefined {
  */
 export function isValidModelKey(value: string): boolean {
   return /^[^\s:/]+[:/][^\s]+$/.test(value.trim())
+}
+
+/**
+ * The provider instance prefixes this deployment holds the credential for.
+ *
+ * Read off the catalog rather than off the provider list, which an organization
+ * admin is refused (#821). Keyed on the prefix, not the whole model id, so a
+ * model the catalog has not listed (a key typed by hand, one behind a
+ * `?provider=` filter) is still judged by the instance it names, exactly as the
+ * server judges it.
+ */
+export function deploymentManagedPrefixes(
+  models: readonly ModelObject[] | undefined,
+): ReadonlySet<string> {
+  const prefixes = new Set<string>()
+  for (const model of models ?? []) {
+    if (!model.deployment_managed) continue
+    // Split on either delimiter, because the catalog lists a pricing-only model
+    // under the key it is stored as (`_get_pricing_map` in `api/routes/models.py`
+    // does not normalize), so a row predating key normalization arrives as
+    // `instance/model`. Splitting on ":" alone would file that whole id as a
+    // prefix and leave the real one out of the set, which reads as "not
+    // deployment supplied" and offers a control the gateway refuses.
+    const [prefix] = model.id.split(/[:/]/, 1)
+    if (prefix) prefixes.add(prefix)
+  }
+  return prefixes
+}
+
+/**
+ * Why this organization may not set its own rate for a model, or undefined.
+ *
+ * A key addressed through one of the deployment's own provider instances
+ * dispatches on the deployment's credential, so the deployment settles the
+ * upstream bill and its rate is the catalog's. A bare `provider:model` key
+ * resolves against the organization's own BYO credential instead, and is the
+ * organization's to price.
+ *
+ * The deployment operator is exempt, because they are the party that pays. That
+ * is what keeps a standalone deployment, whose single administrator is also its
+ * only tenant, pricing its own models exactly as before.
+ *
+ * Both halves of the server's rule
+ * (`OrganizationPricingService.raise_if_deployment_supplied`), stated
+ * here so the control is disabled with a reason rather than earning a 403.
+ */
+export function managedModelReason({
+  modelKey,
+  managedPrefixes,
+  isDeploymentOperator,
+}: {
+  modelKey: string
+  managedPrefixes: ReadonlySet<string>
+  isDeploymentOperator: boolean
+}): string | undefined {
+  if (isDeploymentOperator) return undefined
+  const prefix = modelKey.trim().split(/[:/]/, 1)[0]
+  if (!prefix || !managedPrefixes.has(prefix)) return undefined
+  return `${prefix} is one of this deployment's own providers, so its rates are set on the catalog above. An override applies to a model your organization supplies its own provider key for.`
 }
 
 /**

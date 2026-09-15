@@ -134,6 +134,65 @@ describe("WorkspaceMembersPage", () => {
     expect(dialog.queryByLabelText("Organization member")).toBeNull()
   })
 
+  it("sends a manager from the exhausted dialog to the organization roster", async () => {
+    // The way out of a full workspace is to add somebody to the organization,
+    // which is a different page, and the sentence that says so used to name it
+    // without reaching it.
+    mockApi()
+    await renderPage()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add member" }),
+    )
+    const dialog = within(await screen.findByRole("dialog"))
+    // Named "Members & roles" rather than the page's own "Organization →
+    // Members & roles", so the two are separable while both are on screen.
+    expect(
+      dialog.getByRole("link", { name: "Members & roles" }),
+    ).toHaveAttribute("href", "/organization/members")
+  })
+
+  it("leaves no dialog over the organization roster once the link is followed", async () => {
+    // #1083 asks for the link to close the dialog. It does, without any close
+    // handler: the dialog is mounted by this page, which is the route component
+    // for /members, so the navigation unmounts both. Asserted rather than
+    // reasoned about, because it is the acceptance criterion.
+    mockApi()
+    await renderPage()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add member" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await userEvent.click(
+      within(dialog).getByRole("link", { name: "Members & roles" }),
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull()
+    })
+  })
+
+  it("tells a workspace admin who is only an organization member who can act", async () => {
+    // They manage this workspace, so they open the dialog, and they cannot add
+    // anyone to the organization, so the link would land them on a page they
+    // can only read.
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
+    })
+    await renderPage()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add member" }),
+    )
+    const dialog = within(await screen.findByRole("dialog"))
+    expect(
+      dialog.getByText(/an organization owner or admin has to add someone/),
+    ).toBeInTheDocument()
+    expect(dialog.queryByRole("link")).toBeNull()
+  })
+
   it("reports a roster that failed instead of calling the workspace full", async () => {
     // An empty candidate list is only "everyone is already here" once the
     // roster has answered; a failed one has to say so instead.

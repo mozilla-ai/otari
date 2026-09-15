@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -116,13 +116,34 @@ describe("TrendChart", () => {
 })
 
 describe("Sparkline", () => {
-  it("renders a recharts sparkline line for KPI tiles", () => {
+  it("renders a static recharts sparkline for KPI tiles", async () => {
     const { container } = render(
       <Sparkline values={[1, 3, 2, 5]} ariaLabel="Spend trend" />,
     )
 
     expect(screen.getByRole("img", { name: "Spend trend" })).toBeInTheDocument()
     expect(container.querySelector(".recharts-line")).not.toBeNull()
+    expect(screen.getByRole("img", { name: "Spend trend" })).toHaveClass(
+      "pointer-events-none",
+    )
+    expect(container.querySelector("svg")).not.toHaveAttribute("tabindex")
+    expect(screen.queryByRole("application")).not.toBeInTheDocument()
+
+    const chart = container.querySelector(".recharts-wrapper")!
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 400, 32),
+    )
+    try {
+      await act(async () => {
+        fireEvent.mouseMove(chart, { clientX: 150, clientY: 16 })
+        await new Promise(requestAnimationFrame)
+      })
+      expect(
+        container.querySelector(".recharts-active-dot"),
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.restoreAllMocks()
+    }
   })
 })
 

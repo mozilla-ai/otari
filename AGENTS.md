@@ -80,6 +80,14 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   no `make openapi` target; `make openapi-check` only validates. Verify with
   `make openapi-check` and `make postman-check`. The same `openapi-spec` CI job runs both
   checks, so missing this fails CI even when `openapi-check` passes.
+- **A new route also owes `scripts/sdk_codegen/sdk-endpoints.txt`**, which is a
+  hand-maintained manifest rather than a generated file, and the one artifact in
+  this list that a spec regeneration does not fix.
+  `tests/unit/test_sdk_endpoint_coverage.py` fails until every `METHOD path` the
+  spec exposes appears under `[covered]` or `[excluded]` with a reason, which is
+  deliberate: the codegen workflow pushes the file into all four SDK repos, so
+  classifying a new endpoint here is what keeps them in step, and the drift
+  fails in the repo that caused it.
 - `docs/public/code-execution-openapi.yaml` is the exception in that directory: it is
   **hand-maintained**, not generated. It specifies a backend Otari calls, so no app here
   serves those paths and `generate_openapi.py` neither reads nor writes it. Edit it
@@ -119,6 +127,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 ## Repository Conventions
 - Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).
 - Add a comment only where the logic is not obvious; keep docstrings concise and meaningful on public functions and classes. Do not restate the code, narrate the change, or record what the code used to do: the commit message is where that belongs. Leave the comments around a change shorter than you found them: prune narration, repeated rationale, and implementation history as you touch them.
+- A docblock belongs immediately above the declaration it describes, and the way it stops doing so is an insertion. When you add a declaration beside an existing documented one, put the new pair above or below the whole block, never between a block and what it documents, and do not move the existing declaration to make room: moving it is what opens the gap the next insertion falls into. Four of these are in the tree, three of them written in one day, and none is reachable by lint, typecheck or any test, because a comment over the wrong thing compiles. `grep -rP -l '\*/\n[ \t]*/\*\*' web/src` finds it: two docblocks with nothing between them but horizontal space. The horizontal-only class is the whole discriminator, because a module header sits a **blank** line above the first declaration's own block while a stranded block is **flush** against the next one, the declaration that separated them having moved. `\s*` spans the blank line and turns the ordinary arrangement into eight false positives. Still not a gate: a section comment deliberately placed above another block is legal, so a hit is worth reading rather than presumed wrong. And do not add `-z`: the shell's `grep` is ugrep, which has `-P`, but any `z` among the flags routes the call to the system BSD grep, which does not, and the query then dies with a usage block that scrolls like output while a pipe reports its own exit code instead of the failure.
 - A workaround for an any-llm gap is a legitimate change here. Keep it minimal and follow the convention in [CONTRIBUTING.md](CONTRIBUTING.md#when-the-fix-is-upstream-but-otari-cannot-wait) (`service_tier` in `src/gateway/api/routes/chat.py` is the worked example).
 - Preserve security-relevant behavior: header parsing, auth checks, and the error-detail boundary. Do not leak internals in public error responses, and never log secrets, tokens, or raw API keys (the one-time bootstrap key print is the deliberate exception).
 - Keep test additions next to the behavior they cover: unit for pure logic, integration for route or database behavior.

@@ -50,6 +50,12 @@ a password, which can be before the operator claims the deployment: a member
 added to the roster and signed up signs in there. While both credentials still
 work, the page offers the master-key box beside the form.
 
+Account settings also carries the name you are known by, which is not a
+credential: it is what the account menu, the organization roster and the user
+column on Usage and Activity show. Someone an admin added to the roster by
+address has no name until they set one here. Clearing it puts those surfaces
+back to naming you by your sign-in address.
+
 ## First-run walkthrough
 
 1. Start Otari in standalone mode.
@@ -67,7 +73,10 @@ The [Quickstart](quickstart.md) includes a complete request example.
 ## The setup guide
 
 Overview offers a short setup flow until the selected workspace serves its first
-successful gateway request. The key it creates is an ordinary workspace API key.
+successful gateway request from outside the product. A message sent in the
+Playground does not close it: the guide marks the moment somebody's own code
+first reached the gateway, which is the point of the flow. The key it creates is
+an ordinary workspace API key.
 Skipping the guide hides it for that workspace; it does not revoke a key already
 created. Set `activation_guide: false` to disable the flow for the deployment.
 
@@ -76,10 +85,11 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Models and Routing. Models is the catalog grouped by model: a list of cards
-  with a rail of filters beside it, and a page per model where every offering
-  of it is compared, one per provider, each with its own limits and the price
-  your organization is charged. It is read-only; a rate is set on Model pricing.
+- Playground, Models, and Routing. Models is the catalog grouped by model: a
+  list of cards with a rail of filters beside it, and a page per model where
+  every offering of it is compared, one per provider, each with its own limits
+  and the price your organization is charged. It is read-only; a rate is set on
+  Model pricing.
 - Tools
 - API keys, providers, and workspace members
 
@@ -102,10 +112,13 @@ admin manages their own organization's budgets and the spend ceilings holding
 them, while a deployment operator gets the deployment-wide budgets and the
 gateway users assigned to them. Model pricing splits the same way, with the
 default pricing catalog kept to an operator and the organization's own rate
-overrides open to its admins. For an operator that section also shows the
-update a scheduled genai-prices check has left for review, when the defaults
-were last accepted and by whom, and how far each stored rate sits from
-today's default.
+overrides open to its admins. An override covers a model the organization
+supplies the provider key for; a model reached through one of the deployment's
+own provider instances is priced by the catalog, because the deployment holds
+that credential and settles its upstream bill. For an operator that section
+also shows the update a scheduled genai-prices check has left for review, when
+the defaults were last accepted and by whom, and how far each stored rate sits
+from today's default.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.
@@ -120,6 +133,32 @@ recent requests. An organization owner or admin also gets a budget-health
 figure, read from the spend ceilings holding their organization, while a
 deployment operator gets provider health and the deployment's own budgets
 instead.
+
+## Playground
+
+The Playground is the in-product chat page: pick a model the gateway serves and
+talk to it, or put two side by side and record which answered better. Requests
+run through the same path as any other completion, so routing policies,
+guardrails, budgets and the tool loop all apply, and every request appears in
+Activity and Usage.
+
+Two things are worth knowing about how it is billed and what it stores.
+
+A Playground request carries no API key. It is authorized by the dashboard
+session and billed to whoever sent it, in the workspace the switcher has
+selected, against that person's own budget and rate limit; its usage row
+therefore has no key attached. Picking a different model changes which provider
+credential the gateway resolves, never who pays. A request made here also does
+not count as the workspace's first request, so the setup guide keeps waiting for
+one from outside the product, which is the milestone it exists to mark.
+
+Nothing is stored until asked for. Saving a conversation or recording a
+comparison prompts once for content retention, and the flags are per person and
+revocable; withdrawing one blocks new saves and deletes nothing. Saved
+transcripts, recorded comparisons and pinned models are visible only to the
+person who created them, even to colleagues in the same workspace, and each can
+be deleted from the page. Hosted control planes serve no inference, so they do
+not offer the page at all.
 
 ## Observability
 

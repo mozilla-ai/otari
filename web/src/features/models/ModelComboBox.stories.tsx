@@ -153,3 +153,41 @@ export const LargeCatalog: Story = {
     </div>
   ),
 }
+
+/**
+ * `source="catalog"` reads GET /v1/models instead, for a form a tenant fills in:
+ * the discovery endpoint is a deployment-operator read, so an organization admin
+ * would be refused it and see an empty list. The catalog also lists aliases and
+ * routing policies under a bare display name, and those are left out here: they
+ * are names that stand for a model rather than one a provider serves.
+ */
+export const OverTheCatalog: Story = {
+  parameters: {
+    api: {
+      [`${API_ROOT}/models`]: {
+        object: "list",
+        data: [
+          "openai:gpt-4o",
+          "anthropic:claude-sonnet-4-5",
+          "mistral:mistral-small",
+          "fast",
+        ].map((id) => ({
+          id,
+          object: "model",
+          created: 0,
+          owned_by: id.split(":")[0],
+          pricing_source: "none",
+        })),
+      },
+    },
+  },
+  args: { source: "catalog", label: "Model key" },
+  render: (args) => {
+    const [value, setValue] = useState("")
+    return (
+      <div className="w-[24rem]">
+        <ModelComboBox {...args} value={value} onChange={setValue} />
+      </div>
+    )
+  },
+}

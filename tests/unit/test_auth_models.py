@@ -3,7 +3,15 @@ from unittest.mock import patch
 
 import pytest
 
-from gateway.auth.models import generate_api_key, hash_key, validate_api_key_format
+from gateway.auth.models import (
+    KEY_PREFIX_LENGTH,
+    KEY_SUFFIX_LENGTH,
+    generate_api_key,
+    hash_key,
+    key_prefix,
+    key_suffix,
+    validate_api_key_format,
+)
 
 
 @pytest.mark.parametrize(
@@ -55,3 +63,12 @@ def test_generate_api_key_still_validates_at_mint_time() -> None:
         pytest.raises(RuntimeError, match="failed validation"),
     ):
         generate_api_key()
+
+
+def test_the_two_fingerprint_halves_do_not_overlap() -> None:
+    """A minted key is long enough that the displayed halves never meet."""
+    api_key = generate_api_key()
+
+    assert key_prefix(api_key) == api_key[:KEY_PREFIX_LENGTH]
+    assert key_suffix(api_key) == api_key[-KEY_SUFFIX_LENGTH:]
+    assert len(api_key) > KEY_PREFIX_LENGTH + KEY_SUFFIX_LENGTH

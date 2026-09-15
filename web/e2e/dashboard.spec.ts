@@ -5,6 +5,7 @@ import {
   login,
   MASTER_KEY,
   nav,
+  openAccountMenu,
   openNested,
   openOrganization,
   pageHeading,
@@ -123,13 +124,24 @@ test.describe("dashboard core flows", () => {
     for (const [link, heading] of [
       ["Spend & budgets", "Budgets"],
       ["Model pricing", "Model pricing"],
-      // Exact, because this rail also carries "Org settings" and the default
-      // match is a substring one.
-      ["Settings", "Settings"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
       await expect(pageHeading(page, heading)).toBeVisible()
     }
+
+    // The deployment's own rail, which neither loop above reaches: it is entered
+    // from the account menu rather than from a row, and the menu closes on the
+    // way, so the rail is what carries you between its two pages once you are
+    // in. Exact, because the organization rail also carries "Org settings".
+    const menu = await openAccountMenu(page)
+    await menu.getByRole("link", { name: "Deployment" }).click()
+    await expect(pageHeading(page, "Settings")).toBeVisible()
+    await nav(page).getByRole("link", { name: "Accounts", exact: true }).click()
+    await expect(pageHeading(page, "Accounts")).toBeVisible()
+    // The way out names where it goes. Queried on the page rather than inside
+    // the Sidebar landmark: the back row is in the scope band above the nav, the
+    // same place the workspace switcher sits on the other rail.
+    await expect(page.getByRole("link", { name: /^Back to / })).toBeVisible()
   })
 
   test("create a budget", async ({ page }) => {
@@ -222,6 +234,59 @@ test.describe("dashboard core flows", () => {
     await expect(row.getByText("alice@example.com")).toBeVisible()
   })
 
+  test("the bulk bar sits over the table, not over the rail", async ({
+    page,
+  }) => {
+    // The only detector this fix will ever have. Its offset is CSS, so jsdom
+    // cannot see it and no Vitest case can assert it; the shell publishes the
+    // rail's footprint as `data-rail` and `globals.css` turns that into
+    // `--rail-width`, and if the attribute is ever dropped the variable falls
+    // back to `0px`, the bar silently returns to being centered on the viewport,
+    // and every other check stays green.
+    //
+    // Narrow enough that the cap on the bar's own width is not what keeps it
+    // inside the pane: at 1440 `max-w-3xl` dominates and the bug is invisible.
+    await page.setViewportSize({ width: 1024, height: 800 })
+    await login(page)
+    await nav(page).getByRole("link", { name: "API keys" }).click()
+
+    const rows = page.getByRole("row", { name: /ci-bot/ })
+    await expect(rows).toBeVisible()
+    // `force`, because the real `<input>` is behind the styled box that draws
+    // it: Playwright finds the input, then times out waiting for it to stop
+    // being covered by `.otari-checkbox-box`, which is the arrangement
+    // `web/AGENTS.md` describes under "A control's own box does not tell you
+    // whether it is visible". The input is the control; the span is paint.
+    await rows.getByRole("checkbox").first().check({ force: true })
+
+    const bar = page.getByRole("toolbar", { name: "Bulk actions" })
+    await expect(bar).toBeVisible()
+
+    const barBox = await bar.boundingBox()
+    // The content pane, not the table. They are the same thing only while the
+    // table fits: at 1440 the table is 1128 in a 1176 pane and the two centers
+    // coincide, which is what made the table look like a fair reference. At
+    // 1024 the table is 980 in a 760 pane and scrolls inside it, so centering
+    // the bar on the table would put it half off the screen. The pane is what
+    // the bar belongs to.
+    const paneBox = await page.locator("main").boundingBox()
+    if (!barBox || !paneBox) throw new Error("no layout to measure")
+
+    // Centered on the pane rather than on the window, within a pixel of
+    // rounding.
+    const barCenter = barBox.x + barBox.width / 2
+    const paneCenter = paneBox.x + paneBox.width / 2
+    expect(Math.abs(barCenter - paneCenter)).toBeLessThanOrEqual(1)
+
+    // And inside the pane rather than reaching back over the rail: a fixed
+    // element's own `100%` is the viewport, so centering it alone left it
+    // viewport-wide.
+    expect(barBox.x).toBeGreaterThanOrEqual(paneBox.x - 1)
+    expect(barBox.x + barBox.width).toBeLessThanOrEqual(
+      paneBox.x + paneBox.width + 1,
+    )
+  })
+
   test("create a routing policy", async ({ page }) => {
     await login(page)
     await openNested(page, "Routing", "Policies")
@@ -234,9 +299,10 @@ test.describe("dashboard core flows", () => {
     // "Copy policy name" control.
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("fast")
     // "Serves" is a model combobox (allows custom values); type the selector, then
-    // close the popover so it does not aria-hide the submit button.
-    await dialog.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
-    await page.keyboard.press("Escape")
+    // put the popover away so it does not aria-hide the submit button.
+    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await serves.fill("openai:gpt-4o")
+    await dismissComboBoxInDialog(serves)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // The policy name is the table's row-header cell (react-aria rowheader).
@@ -252,17 +318,17 @@ test.describe("dashboard core flows", () => {
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("chained")
-    await dialog.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
-    await page.keyboard.press("Escape")
+    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await serves.fill("openai:gpt-4o")
+    await dismissComboBoxInDialog(serves)
 
     // The failure chain is summoned, not presented, so naming one model stays a
     // short task.
     await expect(page.getByText("If that fails, try")).toBeHidden()
     await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    await page
-      .getByRole("combobox", { name: /Fallback 1/ })
-      .fill("anthropic:claude-3-5-haiku-latest")
-    await page.keyboard.press("Escape")
+    const fallback = page.getByRole("combobox", { name: /Fallback 1/ })
+    await fallback.fill("anthropic:claude-3-5-haiku-latest")
+    await dismissComboBoxInDialog(fallback)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // Scoped to the row this test created: "+1 on failure" anywhere on the page

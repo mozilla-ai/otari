@@ -368,7 +368,7 @@ async def test_a_templated_message_sends_over_a_configured_transport(
         "mail_test",
         to="ada@example.com",
         subject="Otari test message",
-        values={"PUBLIC_BASE_URL": "https://otari.example.com", "TRANSPORT": "console"},
+        values={"UI_BASE_URL": "https://otari.example.com", "TRANSPORT": "console"},
     )
     assert delivery.delivered is True
     assert delivery.transport == "console"
@@ -404,6 +404,24 @@ def test_link_is_absolute_when_the_deployment_knows_its_address_and_relative_oth
     assert Mailer(GatewayConfig()).link("/#/accept-invitation?token=abc") == "/#/accept-invitation?token=abc"
 
 
+def test_link_names_the_interface_when_an_edge_serves_it_elsewhere() -> None:
+    # A link in an email is followed by a browser, so it has to name wherever
+    # the interface is reached, not the address this process answers on.
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui"))
+
+    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/#/verify-email?token=abc"
+
+
+def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
+    # ``can_send_links`` gates the send, so it has to still imply an absolute
+    # link now that links are built from the interface address rather than from
+    # the one that flag reads.
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui"))
+
+    assert mailer.can_send_links is True
+    assert mailer.link("/#/verify-email?token=t") == "https://app.example.com/ui/#/verify-email?token=t"
+
+
 def test_link_does_not_double_a_trailing_slash() -> None:
     assert Mailer(_ready(public_base_url="https://otari.example.com/")).link("/x") == "https://otari.example.com/x"
 
@@ -412,7 +430,7 @@ def test_link_does_not_double_a_trailing_slash() -> None:
 
 
 def test_render_wraps_a_body_in_the_shared_layout() -> None:
-    message = render_email("mail_test", subject="Otari test message", values={"PUBLIC_BASE_URL": "u", "TRANSPORT": "t"})
+    message = render_email("mail_test", subject="Otari test message", values={"UI_BASE_URL": "u", "TRANSPORT": "t"})
     assert message.html.startswith("<!doctype html>")
     assert "<title>Otari test message</title>" in message.html
     assert "Your Otari mail settings work" in message.html
@@ -421,7 +439,7 @@ def test_render_wraps_a_body_in_the_shared_layout() -> None:
 
 def test_a_placeholder_with_no_value_fails_here_rather_than_in_an_inbox() -> None:
     with pytest.raises(MailTemplateError, match="TRANSPORT"):
-        render_email("mail_test", subject="Otari test message", values={"PUBLIC_BASE_URL": "u"})
+        render_email("mail_test", subject="Otari test message", values={"UI_BASE_URL": "u"})
 
 
 def test_every_shipped_template_loads() -> None:
@@ -451,7 +469,7 @@ def test_a_missing_template_is_named() -> None:
 
 def test_a_reserved_value_name_is_refused_rather_than_silently_overwritten() -> None:
     with pytest.raises(MailTemplateError, match="SUBJECT"):
-        render_email("mail_test", subject="x", values={"SUBJECT": "mine", "PUBLIC_BASE_URL": "u", "TRANSPORT": "t"})
+        render_email("mail_test", subject="x", values={"SUBJECT": "mine", "UI_BASE_URL": "u", "TRANSPORT": "t"})
 
 
 def test_a_value_is_never_rescanned_as_a_placeholder() -> None:
@@ -464,7 +482,7 @@ def test_a_value_is_never_rescanned_as_a_placeholder() -> None:
     message = render_email(
         "mail_test",
         subject="{{TRANSPORT}}",
-        values={"PUBLIC_BASE_URL": "{{TRANSPORT}}", "TRANSPORT": "console"},
+        values={"UI_BASE_URL": "{{TRANSPORT}}", "TRANSPORT": "console"},
     )
     assert message.subject == "console"
     assert "{{TRANSPORT}}" in message.text
@@ -474,7 +492,7 @@ def test_the_subject_is_stripped_of_newlines_but_the_body_is_not() -> None:
     message = render_email(
         "mail_test",
         subject="Test {{TRANSPORT}}",
-        values={"PUBLIC_BASE_URL": "u", "TRANSPORT": "smtp\r\nBcc: attacker@example.com"},
+        values={"UI_BASE_URL": "u", "TRANSPORT": "smtp\r\nBcc: attacker@example.com"},
     )
     assert "\r" not in message.subject
     assert "\n" not in message.subject

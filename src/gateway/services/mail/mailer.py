@@ -82,14 +82,17 @@ class Mailer:
             raise MailNotConfiguredError(self.missing_settings)
 
     def link(self, path: str) -> str:
-        """Build an absolute link into this deployment, or a relative one if it cannot.
+        """Build an absolute link to this deployment's interface, or a relative one if it cannot.
+
+        Absolute against ``effective_ui_base_url``, not this process's address:
+        what follows a link is a browser.
 
         A relative link is still a valid thing to hand an operator to share; it
         is only worthless *in an email*, which is why ``can_send_links`` and not
         this is what gates a send.
         """
-        base = self._config.public_base_url
-        return f"{base.rstrip('/')}{path}" if base else path
+        base = self._config.effective_ui_base_url
+        return f"{base}{path}" if base else path
 
     async def send(self, *, to: str, message: MailMessage) -> MailDelivery:
         """Deliver one rendered message. Never raises.

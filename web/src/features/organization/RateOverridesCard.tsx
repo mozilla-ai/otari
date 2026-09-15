@@ -12,6 +12,7 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { UNIT_LABELS } from "@/features/pricing/units"
+import { useModels } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useDeleteOrganizationPricing,
@@ -20,8 +21,12 @@ import {
 import { formatDateTime, formatRate } from "@/shared/helpers/format"
 import { useUrlValue } from "@/shared/helpers/urlState"
 import { PricingOverrideDialog } from "./PricingOverrideDialog"
-import { overrideStatus } from "./pricingOverride"
-import { canManage } from "./roles"
+import {
+  deploymentManagedPrefixes,
+  managedModelReason,
+  overrideStatus,
+} from "./pricingOverride"
+import { canManage, isDeploymentOperator } from "./roles"
 
 // What this organization pays for a model, above the catalog the rest of this
 // page shows.
@@ -92,7 +97,24 @@ export function RateOverridesCard() {
     useState<OrganizationPricingOverride>()
 
   const canEdit = canManage(context.data)
+  const isOperator = isDeploymentOperator(context.data)
+  // Only asked for when there is a control to withhold: a reader's Edit is
+  // already disabled by the role, so a viewer costs the page no catalog read.
+  // It also warms the query the dialog reads on open, which shares the key.
+  const catalog = useModels(canEdit)
+  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
+
   const rows = overrides.data ?? []
+
+  // Why this row's rate is not this organization's to change, or undefined. A
+  // row can predate the rule, so the table asks per row rather than assuming its
+  // contents are all still writable.
+  const managedReason = (override: OrganizationPricingOverride) =>
+    managedModelReason({
+      modelKey: override.model_key,
+      managedPrefixes,
+      isDeploymentOperator: isOperator,
+    })
 
   const openAdd = () => {
     setOpenCount((count) => count + 1)
@@ -184,24 +206,35 @@ export function RateOverridesCard() {
     {
       id: "actions",
       header: "",
-      cell: (row) => (
-        // Both controls stay mounted and disabled for a reader rather than
-        // vanishing, so the page does not reflow between roles.
-        <RowActionRow>
-          <RowAction
-            icon={FiEdit2}
-            label="Edit"
-            isDisabled={!canEdit}
-            onPress={() => openEdit(row)}
-          />
-          <RowAction
-            icon={FiTrash2}
-            label="Delete"
-            isDisabled={!canEdit}
-            onPress={() => setPendingDelete(row)}
-          />
-        </RowActionRow>
-      ),
+      cell: (row) => {
+        // Editing is refused for a model the deployment supplies the credential
+        // for; deleting is not, because it returns the model to the catalog rate,
+        // which is the direction the rule wants.
+        const refused = managedReason(row)
+        return (
+          // Both controls stay mounted and disabled for a reader rather than
+          // vanishing, so the page does not reflow between roles.
+          <RowActionRow>
+            <RowAction
+              icon={FiEdit2}
+              label="Edit"
+              // A disabled control takes no focus, so the reason has to live in
+              // the accessible name rather than in a tooltip.
+              ariaLabel={
+                refused ? `Edit ${row.model_key}. ${refused}` : undefined
+              }
+              isDisabled={!canEdit || refused !== undefined}
+              onPress={() => openEdit(row)}
+            />
+            <RowAction
+              icon={FiTrash2}
+              label="Delete"
+              isDisabled={!canEdit}
+              onPress={() => setPendingDelete(row)}
+            />
+          </RowActionRow>
+        )
+      },
     },
   ]
 
@@ -235,6 +268,9 @@ export function RateOverridesCard() {
           This organization&rsquo;s own rate for a model, applied ahead of the
           catalog above. A model with no override here is priced by that
           catalog.
+          {isOperator
+            ? null
+            : " An override covers a model your organization supplies the provider key for; this deployment's own providers are priced by the catalog."}
         </p>
       </Section>
 

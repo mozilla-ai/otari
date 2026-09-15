@@ -56,7 +56,7 @@ from gateway.api.routes.keys import (
     KeyInfo,
     _load_key_in_organization,
 )
-from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
 from gateway.models.tenancy import User as TenancyUser
@@ -252,6 +252,7 @@ async def create_own_key(
         workspace_id=workspace_id,
         key_hash=hash_key(api_key),
         key_prefix=key_prefix(api_key),
+        key_suffix=key_suffix(api_key),
         key_name=request.key_name,
         user_id=owner.user_id,
         expires_at=request.expires_at,
@@ -399,6 +400,7 @@ async def rotate_own_key(
     new_api_key = generate_api_key()
     key.key_hash = hash_key(new_api_key)
     key.key_prefix = key_prefix(new_api_key)
+    key.key_suffix = key_suffix(new_api_key)
     key.last_used_at = None
 
     try:

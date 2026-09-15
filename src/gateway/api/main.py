@@ -9,6 +9,7 @@ from gateway.api.routes import (
     auth_oauth,
     auth_password,
     auth_password_reset,
+    auth_profile,
     auth_session,
     auth_signup,
     auth_webauthn,
@@ -40,6 +41,7 @@ from gateway.api.routes import (
     organization_usage,
     organizations,
     otlp,
+    playground,
     pricing,
     providers,
     rerank,
@@ -153,6 +155,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(admin.router)
     api.include_router(auth_session.router)
     api.include_router(auth_password.router)
+    api.include_router(auth_profile.router)
     api.include_router(auth_signup.router)
     api.include_router(auth_password_reset.router)
     api.include_router(auth_webauthn.router)
@@ -181,6 +184,15 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     # flat for an SDK. Same reader gate as /v1/models.
     api.include_router(catalog.router)
     api.include_router(catalog.operator_router)
+    if serves_data_plane:
+        # Both planes at once, which is why it is mounted here rather than with
+        # the data plane above: the Playground page reads the management surface
+        # (its own saved transcripts, the workspace's tools) and dispatches a
+        # completion. So it needs the management session hybrid mode does not
+        # have, and the data plane a hosted control plane does not serve
+        # (otari#822); ``hosted_mode.DATA_PLANE_PREFIXES`` answers its prefix
+        # there with the 404 that names the data plane.
+        api.include_router(playground.router)
     api.include_router(providers.router)
     api.include_router(keys.router)
     api.include_router(users.router)

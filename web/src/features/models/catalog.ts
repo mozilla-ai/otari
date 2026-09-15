@@ -3,6 +3,7 @@ import type {
   CatalogModelSummary,
   CatalogOffering,
 } from "@/client"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 // What the list can be narrowed by, and how a row is sorted. Pure, so the page
 // stays a composition and these can be pinned on their own.
@@ -350,14 +351,24 @@ export function vendorOptions(
     .map((vendor) => ({ value: vendor, label: vendor || "Unknown vendor" }))
 }
 
-/** Provider instances present, once each, for the rail. */
+/**
+ * Provider instances present, once each, for the rail.
+ *
+ * Named the way the vendor names itself and sorted by that, so the list reads
+ * alphabetically on screen (otari#990); the value stays the instance id, which
+ * is what the filter and the URL carry. An instance the operator named
+ * themselves has no entry and is shown as they spelled it.
+ */
 export function providerOptions(
   models: CatalogModelSummary[],
 ): { value: string; label: string }[] {
   const providers = new Set(models.flatMap((model) => model.providers))
   return [...providers]
-    .sort((a, b) => a.localeCompare(b))
-    .map((provider) => ({ value: provider, label: provider }))
+    .map((provider) => ({
+      value: provider,
+      label: providerDisplayName(provider),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
 export function priceSourceLabel(

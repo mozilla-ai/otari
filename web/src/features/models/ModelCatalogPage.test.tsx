@@ -221,7 +221,8 @@ describe("ModelCatalogPage", () => {
     ).toBeInTheDocument()
     expect(within(list).queryByText(/Kimi K2.6/)).toBeNull()
     // The rail says one provider is in force.
-    expect(screen.getByRole("checkbox", { name: "fireworks" })).toBeChecked()
+    // The rail names the vendor and filters on the instance id (otari#990).
+    expect(screen.getByRole("checkbox", { name: "Fireworks AI" })).toBeChecked()
   })
 
   it("searches by vendor", async () => {

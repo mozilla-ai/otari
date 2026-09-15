@@ -91,6 +91,7 @@ function mockApi(
           const row = apiKey({
             id: "key-new",
             key_prefix: NEW_SECRET.slice(0, 10),
+            key_suffix: NEW_SECRET.slice(-4),
             key_name: body.key_name ?? null,
             user_id: body.user_id ?? "apikey-key-new",
             allowed_models: body.allowed_models ?? null,
@@ -217,14 +218,21 @@ describe("KeysPage", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("lists keys with status and prefix, never the full secret", async () => {
+  it("lists key fingerprints and supports keys without stored suffixes", async () => {
     mockApi({
       keys: [
         apiKey({
           id: "key-1",
           key_name: "ci-bot",
           key_prefix: "gw-AbC3dE",
+          key_suffix: "1234",
           is_active: true,
+        }),
+        apiKey({
+          id: "key-prefix-only",
+          key_name: "prefix-only",
+          key_prefix: "gw-Older",
+          key_suffix: null,
         }),
         apiKey({
           id: "key-2",
@@ -238,7 +246,10 @@ describe("KeysPage", () => {
 
     const activeRow = (await screen.findByText("ci-bot")).closest("tr")!
     expect(within(activeRow).getByText("Active")).toBeInTheDocument()
-    expect(within(activeRow).getByText("gw-AbC3dE…")).toBeInTheDocument()
+    expect(within(activeRow).getByText("gw-AbC3dE…1234")).toBeInTheDocument()
+
+    const prefixOnlyRow = screen.getByText("prefix-only").closest("tr")!
+    expect(within(prefixOnlyRow).getByText("gw-Older…")).toBeInTheDocument()
 
     // A key minted before the prefix existed renders "—", not a crash.
     const legacyRow = screen.getByText("legacy").closest("tr")!
@@ -248,7 +259,7 @@ describe("KeysPage", () => {
     expect(document.body.textContent).not.toContain(NEW_SECRET)
   })
 
-  it("shows the plaintext + first-call snippet once, then only the prefix", async () => {
+  it("conceals a new key and its snippets until explicitly revealed", async () => {
     mockApi({ keys: [] })
     const user = userEvent.setup()
     renderPage(<KeysPage />)
@@ -262,11 +273,25 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     await submitTheCreateDialog(user)
 
-    // Open revealed: this screen exists to hand the key over, and there is no
-    // second chance to read it.
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
+    expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
+      "gw-NEWSE••••••••0000",
+    )
+    expect(
+      (within(reveal).getByLabelText("curl") as HTMLTextAreaElement).value,
+    ).not.toContain(NEW_SECRET)
+    expect(
+      (
+        within(reveal).getByLabelText(
+          "Python (OpenAI SDK)",
+        ) as HTMLTextAreaElement
+      ).value,
+    ).not.toContain(NEW_SECRET)
+    await user.click(
+      within(reveal).getByRole("button", { name: "Show Secret key" }),
+    )
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(NEW_SECRET)
     const curl = within(reveal).getByLabelText("curl") as HTMLTextAreaElement
     const python = within(reveal).getByLabelText(
@@ -302,12 +327,14 @@ describe("KeysPage", () => {
       screen.getByRole("button", { name: /I.?ve saved this key/ }),
     )
 
-    // After closing, the list shows only the prefix and the secret is gone from the DOM.
+    // After closing, only the fingerprint remains.
     expect(
       screen.queryByRole("alert", { name: /API key created|New secret for/ }),
     ).not.toBeInTheDocument()
     expect(
-      await screen.findByText(`${NEW_SECRET.slice(0, 10)}…`),
+      await screen.findByText(
+        `${NEW_SECRET.slice(0, 10)}…${NEW_SECRET.slice(-4)}`,
+      ),
     ).toBeInTheDocument()
     expect(document.body.textContent).not.toContain(NEW_SECRET)
   })
@@ -549,14 +576,9 @@ describe("KeysPage", () => {
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
-    // Concealed first, because copying without reading is what has to keep
-    // working once the operator puts the key away (otari-ai#2111). The step
-    // opens revealed, so the toggle is how that state is reached now.
     await user.click(
-      within(reveal).getByRole("button", { name: "Hide Secret key" }),
+      within(reveal).getByRole("button", { name: "Copy Secret key" }),
     )
-    const copyButtons = within(reveal).getAllByRole("button", { name: "Copy" })
-    await user.click(copyButtons[0])
 
     // The key reached the clipboard and never the screen.
     expect(writeText).toHaveBeenCalledWith(NEW_SECRET)
@@ -621,9 +643,12 @@ describe("KeysPage", () => {
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
     })
-    // Revealed on arrival, the same as a created key: regenerate hands over the
-    // same thing and hands it over the same way.
-    expect(within(reveal).getByDisplayValue(REGEN_SECRET)).toBeInTheDocument()
+    expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
+      "gw-REGEN••••••••0000",
+    )
+    expect(
+      (within(reveal).getByLabelText("curl") as HTMLTextAreaElement).value,
+    ).not.toContain(REGEN_SECRET)
   })
 
   it("keeps the page's create action visible while the dialog is open", async () => {
@@ -779,6 +804,34 @@ describe("KeysPage", () => {
     expect(
       within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
     ).toBeInTheDocument()
+  })
+
+  it("keeps the action lane's slots the same on a live row and a disabled one", async () => {
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", is_active: true }),
+        apiKey({ id: "key-2", key_name: "legacy", is_active: false }),
+      ],
+    })
+    renderPage(<KeysPage />)
+
+    const slots = async (name: string) => {
+      const row = (await screen.findByText(name)).closest("tr")!
+      const lane = row.lastElementChild!.firstElementChild!
+      return lane.children.length
+    }
+
+    // Delete is only offered once a key is disabled, and the lane is
+    // right-aligned, so a lane one control shorter slid every glyph beside it
+    // along and put Edit in a different column on each row. The slot is held
+    // open instead.
+    expect(await slots("ci-bot")).toBe(await slots("legacy"))
+    expect(
+      within((await screen.findByText("ci-bot")).closest("tr")!).queryByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    ).not.toBeInTheDocument()
   })
 
   it("permanently deletes a disabled key after confirm", async () => {
@@ -1360,7 +1413,9 @@ describe("KeysPage", () => {
       const reveal = await screen.findByRole("alert", {
         name: /API key created|New secret for/,
       })
-      expect(within(reveal).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+      expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
+        "gw-NEWSE••••••••0000",
+      )
 
       const post = fetchMock.mock.calls.find(
         ([u, init]) =>

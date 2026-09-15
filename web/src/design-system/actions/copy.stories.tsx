@@ -3,7 +3,12 @@ import { useRef, useState } from "react"
 
 import { Button as ActionButton } from "./Button"
 import { CopyButton } from "./CopyButton"
-import { CONCEALED_SECRET, CopyableValue, CopyField } from "./CopyField"
+import {
+  CONCEALED_SECRET,
+  CopyableValue,
+  CopyField,
+  concealedFingerprint,
+} from "./CopyField"
 
 /**
  * The three ways a value an operator has to paste elsewhere is handed over.
@@ -165,25 +170,7 @@ export const Concealed: Story = {
   ),
 }
 
-/**
- * `fieldRef` hands the field's element to the caller, so something outside it
- * can put the caret in the value.
- *
- * The Keys page uses it for the one-time reveal: the key appears and the field
- * is selected, so Ctrl/Cmd-C works without aiming at the button. That matters
- * because the Clipboard API is undefined on the non-secure origins this
- * dashboard is routinely served from, which is the same reason the field
- * selects on click.
- */
-/**
- * A field that opens revealed, for the one screen that exists to hand a
- * credential over.
- *
- * `defaultRevealed` is the uncontrolled form of it. The toggle still works and
- * Copy still copies the real value, so nothing otari-ai#2111 asked for is given
- * up; what changes is which state the field starts in. Reach for it only where
- * there is no second chance to read the value.
- */
+/** Explicit opt-in for an uncontrolled field that starts visible. */
 export const RevealedOnArrival: Story = {
   render: () => (
     <div className="flex w-[34rem] flex-col gap-4">
@@ -207,7 +194,7 @@ export const RevealedOnArrival: Story = {
  */
 export const CoupledReveal: Story = {
   render: function CoupledRevealStory() {
-    const [isRevealed, setIsRevealed] = useState(true)
+    const [isRevealed, setIsRevealed] = useState(false)
     const key = "otari-sk-9f3a1c77b0e244d1e8a972fc0a3bc5d8"
     const request = (secret: string) =>
       `curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer ${secret}"`
@@ -216,7 +203,7 @@ export const CoupledReveal: Story = {
         <CopyField
           label="Secret key"
           value={key}
-          concealed={CONCEALED_SECRET}
+          concealed={concealedFingerprint(key)}
           isRevealed={isRevealed}
           onRevealChange={setIsRevealed}
         />
@@ -224,7 +211,7 @@ export const CoupledReveal: Story = {
           label="Example request"
           multiline
           value={request(key)}
-          concealed={request(CONCEALED_SECRET)}
+          concealed={request(concealedFingerprint(key))}
           isRevealed={isRevealed}
           onRevealChange={setIsRevealed}
         />
@@ -233,6 +220,7 @@ export const CoupledReveal: Story = {
   },
 }
 
+/** The caller can focus the field through `fieldRef`. */
 export const WithFieldRef: Story = {
   render: () => {
     const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)

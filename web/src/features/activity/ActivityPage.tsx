@@ -34,6 +34,8 @@ import {
   type ManualRates,
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import { userDisplay } from "@/features/users/userDisplay"
 import { useSetPricing } from "@/shared/api/pricing"
 import {
   useDeleteUsage,
@@ -47,6 +49,7 @@ import {
   useUsageSummary,
 } from "@/shared/api/usage"
 import { formatRelative } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -194,6 +197,9 @@ function InFlightControl({
   data: InFlightResponse
   updatedAt: number
 }) {
+  // An in-flight row carries no alias (the registry is in memory and never
+  // touches the users table), so the roster is the only name available here.
+  const memberLabels = useMemberAttributionLabels()
   const [isOpen, setIsOpen] = useState(false)
   const shown = data.requests
   const hidden = Math.max(0, data.total - shown.length)
@@ -237,7 +243,10 @@ function InFlightControl({
                     <span className="min-w-0">
                       <span className="block truncate">{request.model}</span>
                       <span className="block truncate text-caption">
-                        {request.user_id ?? "—"}
+                        {request.user_id === null
+                          ? "—"
+                          : userDisplay(request.user_id, null, memberLabels)
+                              .label}
                         {request.policy_name ? ` · ${request.policy_name}` : ""}
                       </span>
                     </span>
@@ -972,6 +981,7 @@ function RequestDetail({
    */
   onPriceModel: ((model: string) => void) | null
 }) {
+  const memberLabels = useMemberAttributionLabels()
   // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
   // is either a model the gateway has no price for or a request refused before
   // it could be billed. Both are the same fix, and the row holds what the
@@ -999,14 +1009,21 @@ function RequestDetail({
         <RoutingPlan entry={entry} />
       ) : null}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <DetailField label="Provider">{entry.provider ?? "—"}</DetailField>
+        <DetailField label="Provider">
+          {entry.provider ? providerDisplayName(entry.provider) : "—"}
+        </DetailField>
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
         <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
         {entry.source_label ? (
           <DetailField label="Session">{entry.source_label}</DetailField>
         ) : null}
+        {/* The name reads, the id stays copyable: this is the one place an
+            operator goes for the raw id, so naming the person here must not
+            take it away. */}
         <DetailField label="User" copyValue={entry.user_id} copyLabel="user id">
-          {entry.user_id ?? "—"}
+          {entry.user_id === null
+            ? "—"
+            : userDisplay(entry.user_id, entry.user_alias, memberLabels).label}
         </DetailField>
         <DetailField
           label="API key"
@@ -1128,6 +1145,9 @@ function RequestDetail({
 // ---------- page ----------
 
 export function ActivityPage() {
+  // Who the people behind the owner ids are. The log already carries the alias
+  // the gateway was told; the roster is who the person is, so it wins.
+  const memberLabels = useMemberAttributionLabels()
   // Filter + pagination state lives in the URL, so a filtered view is shareable
   // and survives the back button. `patch` batches related changes into one entry.
   const url = useUrlState(URL_DEFAULTS)
@@ -1592,10 +1612,16 @@ export function ActivityPage() {
     options: { value: string; label: string }[],
     value: string,
   ) => options.find((o) => o.value === value)?.label ?? value
-  const userOptionsList = realGroups(entitySummary.data?.by_user).map((r) => ({
-    value: r.key as string,
-    label: r.label ? `${r.label} (${r.key})` : (r.key as string),
-  }))
+  // Name first, id in parentheses: the id is what the filter submits, and two
+  // people can share a name. Resolved the way the User column resolves it, so
+  // the same person reads the same in the picker, the chip and the row.
+  const userOptionsList = realGroups(entitySummary.data?.by_user).map((r) => {
+    const name = userDisplay(r.key as string, r.label, memberLabels)
+    return {
+      value: r.key as string,
+      label: name.id ? `${name.label} (${name.id})` : name.label,
+    }
+  })
   const clearEntityFilters = () =>
     url.patch({
       status: "",
@@ -1929,9 +1955,9 @@ export function ActivityPage() {
   const pickCustom = (startIso: string, endIso: string) =>
     url.patch({ start_date: startIso, end_date: endIso })
 
-  // Memoized on its per-render inputs (the key labels and the routing outcomes,
-  // both themselves memoized) so DataTable's per-row cache holds: a fresh array
-  // every render would rebuild all rows per click.
+  // Memoized on its per-render inputs (the roster labels and the routing
+  // outcomes, both themselves memoized) so DataTable's per-row cache holds: a
+  // fresh array every render would rebuild all rows per click.
   const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
     const apiKeyLabel = (entry: UsageEntry): string =>
       entry.api_key_id === null
@@ -1947,7 +1973,14 @@ export function ActivityPage() {
           </span>
         ),
       },
-      { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
+      {
+        id: "user",
+        header: "User",
+        cell: (e) =>
+          e.user_id === null
+            ? "—"
+            : userDisplay(e.user_id, e.user_alias, memberLabels).label,
+      },
       {
         id: "model",
         header: "Model",
@@ -2025,7 +2058,7 @@ export function ActivityPage() {
         cell: (e) => <StatusMark status={e.status} />,
       },
     ]
-  }, [groupOutcomes])
+  }, [groupOutcomes, memberLabels])
 
   return (
     <div className="flex flex-col">

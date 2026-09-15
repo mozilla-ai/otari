@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  CallerIdentity,
+  OrganizationContext,
   Passkey,
   PasskeysResponse,
   PasswordResponse,
@@ -11,12 +13,14 @@ import type {
   SetPasswordRequest,
   SignupRequest,
   SignupResponse,
+  UpdateProfileRequest,
   VerifyEmailResponse,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
   NO_RETRY,
   ORGANIZATION_MEMBERS,
+  ORGANIZATIONS,
   PASSKEYS,
 } from "@/shared/api/queryKeys"
 import { createPasskey } from "@/shared/helpers/webauthn"
@@ -59,6 +63,42 @@ export function useSetPassword() {
         body: JSON.stringify(body),
       }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
+  })
+}
+
+/**
+ * Change the name the signed-in identity goes by (`PATCH /v1/auth/profile`).
+ *
+ * Always the caller's own identity: the endpoint takes no id. `null` clears the
+ * name, which is the state a roster entry added by address starts in, and every
+ * surface that draws a person falls back to the address from there.
+ *
+ * Two caches carry that name. The membership context is where the sidebar reads
+ * it, and the response is exactly the `caller` it holds, so that one is seeded
+ * from the answer before being invalidated: the account control renames itself
+ * on the same tick rather than a round trip later. The roster is the other, where
+ * `userDisplay` resolves a user id for Usage, Activity and Budgets. The context
+ * is touched at its own key rather than at `[ORGANIZATIONS]`, which would re-read
+ * the memberships list as well and nothing here moves it.
+ */
+export function useUpdateProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateProfileRequest) =>
+      apiFetch<CallerIdentity>("/auth/profile", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (caller) => {
+      queryClient.setQueryData<OrganizationContext>(
+        [ORGANIZATIONS, "context"],
+        (previous) => (previous ? { ...previous, caller } : previous),
+      )
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATIONS, "context"],
+      })
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
     },
   })

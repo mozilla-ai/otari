@@ -41,7 +41,8 @@ descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.
 
 The dashboard hides deployment-wide provider management and exposes
-organization-scoped provider keys instead. Deployment-wide APIs still require
+organization-scoped provider keys instead. It also hides the Playground, whose
+whole purpose is to dispatch a completion. Deployment-wide APIs still require
 operator authority; organization-scoped APIs apply membership and role checks.
 
 A hosted control plane and its hybrid gateways form one system: the gateway

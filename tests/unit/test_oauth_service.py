@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
@@ -219,6 +220,109 @@ class TestRedirectUri:
         config = configured(public_base_url="https://otari.example.com/")
 
         assert oauth_service.redirect_uri(config, "google") == "https://otari.example.com/auth/google/callback"
+
+
+class TestWhereTheBrowserLands:
+    def test_the_landing_target_names_the_ui_and_the_redirect_uri_this_process(self) -> None:
+        # The provider has to reach this process to be bounced, and the browser
+        # has to land back on the origin holding the state it stored.
+        config = configured(
+            public_base_url="https://api.example.com",
+            ui_base_url="https://app.example.com/ui",
+        )
+
+        assert oauth_service.redirect_uri(config, "google") == "https://api.example.com/auth/google/callback"
+        assert oauth_service.callback_landing_target(config, "google", "code=x") == (
+            "https://app.example.com/ui/#/auth/google/callback?code=x"
+        )
+
+    def test_an_unset_ui_base_url_lands_back_on_this_process(self) -> None:
+        # The single-origin shape, which is every deployment serving its own UI.
+        config = configured(public_base_url="https://otari.example.com")
+
+        assert oauth_service.callback_landing_target(config, "google", "") == (
+            "https://otari.example.com/#/auth/google/callback"
+        )
+
+    def test_the_fallback_belongs_to_the_config_not_to_one_caller(self) -> None:
+        # ``ui_base_url`` promises the fallback in its own description, so it has
+        # to hold for every reader rather than for the one that first needed it.
+        assert GatewayConfig(public_base_url="https://otari.example.com").effective_ui_base_url == (
+            "https://otari.example.com"
+        )
+        assert GatewayConfig(ui_base_url="https://app.example.com/").effective_ui_base_url == "https://app.example.com"
+        assert GatewayConfig().effective_ui_base_url == ""
+
+    def test_a_whitespace_only_ui_base_url_falls_back_rather_than_poisoning_the_url(self) -> None:
+        # An env var keeps the spaces a YAML value would have eaten, and a value
+        # that is only whitespace is truthy, so without the strip it would win
+        # the fallback and put a space in every URL handed to a browser.
+        config = configured(public_base_url="https://otari.example.com", ui_base_url="   ")
+
+        assert config.effective_ui_base_url == "https://otari.example.com"
+
+    def test_a_trailing_slash_on_the_ui_base_url_does_not_double_up(self) -> None:
+        config = configured(ui_base_url="https://app.example.com/")
+
+        assert oauth_service.callback_landing_target(config, "google", "") == (
+            "https://app.example.com/#/auth/google/callback"
+        )
+
+
+class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "app.example.com",
+            "app.example.com/ui",
+            "//app.example.com",
+        ],
+    )
+    def test_a_host_written_without_a_scheme_is_refused(self, value: str) -> None:
+        # The mistake this setting invites, and the one that says nothing when it
+        # lands: a relative reference resolves against this deployment's own
+        # address, so the redirect puts the browser on a path here that does not
+        # exist and the emailed links stop being links.
+        with pytest.raises(ValidationError, match="ui_base_url"):
+            GatewayConfig(ui_base_url=value)
+
+    @pytest.mark.parametrize("value", ["https://app.example.com/#", "https://app.example.com/#/x"])
+    def test_a_fragment_is_refused(self, value: str) -> None:
+        # The hash route is appended to this value, so a second '#' can match no
+        # route and the authorization code is dropped without a word.
+        with pytest.raises(ValidationError, match="fragment"):
+            GatewayConfig(ui_base_url=value)
+
+    def test_a_query_string_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="query string"):
+            GatewayConfig(ui_base_url="https://app.example.com?trace=1")
+
+    def test_an_at_sign_in_the_path_is_not_userinfo(self) -> None:
+        # '@' delimits userinfo only in the authority. A handle-shaped path is an
+        # ordinary URL, so the check has to read the parsed authority rather than
+        # the whole string.
+        assert GatewayConfig(ui_base_url="https://app.example.com/@tenant").ui_base_url == (
+            "https://app.example.com/@tenant"
+        )
+
+    def test_userinfo_is_refused(self) -> None:
+        # This value travels in a redirect, into browser history and into
+        # everybody's inbox, so a credential written here is not one the config
+        # viewer's redaction would ever cover. The refusal names no part of it,
+        # the way ``docs_url``'s does.
+        with pytest.raises(ValidationError, match="no username or password"):
+            GatewayConfig(ui_base_url="https://user:secret@app.example.com")
+
+    @pytest.mark.parametrize("value", ["/ui", "/"])
+    def test_a_root_relative_path_is_refused(self, value: str) -> None:
+        # It would survive the redirect and mean nothing in an inbox, and '/'
+        # would strip to empty and read as unset. A deployment under a path
+        # prefix writes the whole URL, as public_base_url already does.
+        with pytest.raises(ValidationError, match="absolute"):
+            GatewayConfig(ui_base_url=value)
+
+    def test_an_absolute_url_survives_with_its_trailing_slash_dropped(self) -> None:
+        assert GatewayConfig(ui_base_url="https://app.example.com/ui/").ui_base_url == "https://app.example.com/ui"
 
 
 class TestAuthorizationUrl:

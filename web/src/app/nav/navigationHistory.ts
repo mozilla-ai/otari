@@ -41,7 +41,18 @@ import type { NavItem, NavPath } from "./types"
 const STORAGE_KEYS: Record<NavContext, string> = {
   workspace: "otari.dashboard.lastWorkspaceLocation",
   organization: "otari.dashboard.lastOrganizationLocation",
+  deployment: "otari.dashboard.lastDeploymentLocation",
 }
+
+/**
+ * Which rail to return to when leaving the deployment one.
+ *
+ * A context rather than a location, which is why it is not in the record above:
+ * the deployment rail is reached from a control that renders on both of the
+ * other rails, so "back" has no static answer and the shell holds nothing else
+ * that remembers which one you were on.
+ */
+const RAIL_CONTEXT_KEY = "otari.dashboard.lastRailContext"
 
 /**
  * A place to return to.
@@ -97,8 +108,16 @@ export function rememberLocation(
 ): void {
   const to = destinationAt(pathname)
   if (!to || !isPathVisible(to, isVisible)) return
+  const context = navContextForPath(pathname)
   try {
-    window.localStorage.setItem(STORAGE_KEYS[navContextForPath(pathname)], to)
+    window.localStorage.setItem(STORAGE_KEYS[context], to)
+    // Which rail to come back to, which is any rail but the deployment's own.
+    // Written unconditionally this would be a state that destroys its own
+    // input: landing on a deployment page would record "deployment" as the
+    // place to return to, and the back link reads this to decide where that is.
+    if (context !== "deployment") {
+      window.localStorage.setItem(RAIL_CONTEXT_KEY, context)
+    }
   } catch {
     // Storage can throw when it is disabled (blocked cookies, private mode).
     // Losing the memory costs a landing page, so it is not worth an error path.
@@ -127,4 +146,32 @@ export function lastLocation(
   if (!known || navContextForPath(known) !== context) return undefined
   if (!isPathVisible(known, isVisible)) return undefined
   return { to: known }
+}
+
+/**
+ * The rail to return to from the deployment one.
+ *
+ * Validated rather than trusted in both directions. The stored string is
+ * checked against the union, because a key left by an older build or edited by
+ * hand would otherwise arrive as a `NavContext` the compiler believes; and the
+ * remembered context is only offered when it still has somewhere reachable in
+ * it, which is asked of `lastLocation` rather than reimplemented here so the two
+ * answers cannot disagree.
+ *
+ * Falls back to the workspace rail, which covers both a browser that has never
+ * recorded one (a bookmark straight to a deployment page) and a context that has
+ * since been gated off. A back link into a rail someone can no longer use is a
+ * worse failure than one that goes somewhere merely unexpected.
+ */
+export function lastRailContext(
+  isVisible: (item: NavItem) => boolean,
+): Exclude<NavContext, "deployment"> {
+  let raw: string | null = null
+  try {
+    raw = window.localStorage.getItem(RAIL_CONTEXT_KEY)
+  } catch {
+    return "workspace"
+  }
+  if (raw !== "workspace" && raw !== "organization") return "workspace"
+  return lastLocation(raw, isVisible) ? raw : "workspace"
 }

@@ -42,7 +42,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
 )
-from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_model_access import resolve_session_catalog_scope
 
@@ -117,7 +117,26 @@ class ModelObject(BaseModel):
     # knows the model. Metadata only (independent of the default_pricing toggle);
     # ``None`` when the dataset has no value for the model.
     context_window: int | None = None
+    # True when this model is addressed through one of the deployment's own
+    # provider instances, so the deployment holds the upstream credential and its
+    # rate is the deployment price list's. False for a bare ``provider:model``
+    # key, which resolves against an organization's own BYO credential, and for
+    # an alias or policy, which is a name rather than a model. It is what lets the
+    # dashboard withhold a rate-override control the gateway would refuse anyway
+    # (``OrganizationPricingService.raise_if_deployment_supplied``).
+    deployment_managed: bool = False
 
+
+
+def mark_deployment_managed(config: GatewayConfig, model: ModelObject) -> ModelObject:
+    """Stamp ``deployment_managed`` from the entry's own id, and hand it back.
+
+    Applied in one pass rather than at each construction site: the answer depends
+    only on the id and the provider map, so deriving it once is what keeps the
+    phases from disagreeing about a model they both build.
+    """
+    model.deployment_managed = is_deployment_instance_key(config, model.id)
+    return model
 
 
 def owner_from_key(model_key: str) -> str:
@@ -590,6 +609,9 @@ async def build_merged_catalog(
             return is_model_allowed(key_allowlist, normalize_pricing_key(config, target))
 
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
+
+    for obj in merged.values():
+        mark_deployment_managed(config, obj)
 
     return MergedCatalog(
         models=merged,

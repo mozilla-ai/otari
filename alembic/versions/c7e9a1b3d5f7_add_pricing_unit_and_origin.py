@@ -19,7 +19,7 @@ inventing an origin would be worse than admitting the gap. The organization
 override table takes both columns too, so the two price lists stay one shape.
 
 Revision ID: c7e9a1b3d5f7
-Revises: f1c4a8e2d6b9
+Revises: c4e7a9b2d6f8
 Create Date: 2026-09-09
 """
 
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c7e9a1b3d5f7"
-down_revision: str | Sequence[str] | None = "f1c4a8e2d6b9"
+down_revision: str | Sequence[str] | None = "c4e7a9b2d6f8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

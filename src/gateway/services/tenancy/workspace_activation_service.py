@@ -46,9 +46,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
-from gateway.core.usage_source import served_here
+from gateway.core.usage_source import integration_traffic, served_here
 from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace
@@ -199,6 +199,7 @@ class ActivationApiKeyPublic(BaseModel):
     key: str
     key_id: str
     key_prefix: str | None
+    key_suffix: str | None
     key_name: str | None
 
 
@@ -306,6 +307,7 @@ class WorkspaceActivationService:
                 workspace_id=workspace.id,
                 key_hash=hash_key(plaintext),
                 key_prefix=key_prefix(plaintext),
+                key_suffix=key_suffix(plaintext),
                 key_name=ACTIVATION_KEY_NAME,
                 user_id=owner.user_id,
             )
@@ -313,6 +315,7 @@ class WorkspaceActivationService:
         else:
             record.key_hash = hash_key(plaintext)
             record.key_prefix = key_prefix(plaintext)
+            record.key_suffix = key_suffix(plaintext)
             # The owner moves with the rotation. Whoever asked last is the only
             # person holding a plaintext that still authenticates, so leaving the
             # first issuer's id on the row would bill a second manager's requests
@@ -332,6 +335,7 @@ class WorkspaceActivationService:
             key=plaintext,
             key_id=record.id,
             key_prefix=record.key_prefix,
+            key_suffix=record.key_suffix,
             key_name=record.key_name,
         )
 
@@ -464,12 +468,21 @@ class WorkspaceActivationService:
         else's traffic recorded here for cost reporting, so a workspace whose only
         rows came from an import has still never called this gateway, and the guide
         would be lying to close.
+
+        Two exclusions, not one, and the second is a different kind of thing.
+        Imported usage is traffic this deployment did not serve; a Playground
+        request is traffic it served for its own UI. The guide exists to mark the
+        moment somebody's own code first reached this gateway, so a message typed
+        into the product is the demo rather than the integration, and closing on
+        one would retire the guide for a workspace that has not integrated
+        anything. See :func:`~gateway.core.usage_source.integration_traffic`.
         """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
+                integration_traffic(UsageLog.endpoint),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -482,14 +495,18 @@ class WorkspaceActivationService:
     async def _latest_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
         """The most recent gateway request in the workspace, successful or not.
 
-        Scoped to what this deployment served, for the reason in
-        :meth:`_first_successful_request`.
+        Scoped the same two ways as :meth:`_first_successful_request`, and the
+        Playground exclusion matters here for a second reason: this row is what
+        the guide shows as "your last attempt", so a Playground message would
+        otherwise report the product talking to itself as the caller's most
+        recent try and hide the failing request they are actually debugging.
         """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
+                integration_traffic(UsageLog.endpoint),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())

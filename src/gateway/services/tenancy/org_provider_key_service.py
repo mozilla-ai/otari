@@ -596,6 +596,12 @@ class OrgProviderKeyService:
         effective_ids = {
             active.id for group in by_provider.values() if (active := resolve_active_key(group)) is not None
         }
+        # One query for every key's allow-list rather than one per key: the
+        # response carries the narrowing beside the flags, so a caller reading
+        # a workspace's departures reads them all at once.
+        restrictions = await self.restrictions.list_for_workspace_keys(
+            [(workspace.id, key.id) for key, _ in candidates]
+        )
 
         return WorkspaceProviderKeyOverridesPublic(
             data=[
@@ -606,6 +612,7 @@ class OrgProviderKeyService:
                     disabled=override.disabled if override else False,
                     is_effective_default=key.id in effective_ids,
                     is_effective_enabled=not (override.disabled if override else False),
+                    allowed_models=restrictions.get((workspace.id, key.id), []),
                 )
                 for key, override in candidates
             ]
@@ -698,6 +705,12 @@ class OrgProviderKeyService:
             workspace_id=workspace.id,
         )
         active = resolve_active_key(candidates)
+        # Read back rather than derived from the flags: disabling deletes the
+        # allow-list and pinning keeps it, and the row this returns is what the
+        # dashboard renders, so it has to say which happened.
+        allowed_models = await self.restrictions.list_for_workspace_key(
+            workspace_id=workspace.id, org_provider_key_id=key.id
+        )
         return WorkspaceProviderKeyOverridePublic(
             workspace_id=workspace.id,
             org_provider_key_id=key.id,
@@ -705,6 +718,7 @@ class OrgProviderKeyService:
             disabled=result_disabled,
             is_effective_default=active is not None and active.id == key.id,
             is_effective_enabled=not result_disabled,
+            allowed_models=allowed_models,
         )
 
     async def reset_workspace_override_for_user(

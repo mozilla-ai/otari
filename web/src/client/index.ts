@@ -69,6 +69,14 @@ export type SetPasswordRequest = Schemas["SetPasswordRequest"]
 export type PasswordResponse = Schemas["PasswordResponse"]
 
 // ---------------------------------------------------------------------------
+// The one thing about itself an identity may change that is not a credential:
+// the name it goes by. `PATCH /v1/auth/profile` answers with the same
+// `CallerIdentity` the membership context carries, so the account page can seat
+// the new name where the shell read the old one.
+// ---------------------------------------------------------------------------
+export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
+
+// ---------------------------------------------------------------------------
 // The public auth flows (otari#650): signup, email verification, and password
 // recovery. Every one of them answers a caller who holds neither the master key
 // nor a session, so the address or the token in the request is the whole of
@@ -441,6 +449,8 @@ export type SwitchOrganizationRequest =
   Schemas["SwitchActiveOrganizationRequest"]
 /** An organization plus the caller's standing in it: what every tenancy page reads first. */
 export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
+/** Who is signed in, as against what they may do: the person the chrome draws. */
+export type CallerIdentity = Schemas["CallerIdentityPublic"]
 // The caller's own workspace memberships, carried on the context so the shell
 // can seed its switcher from the call it already makes. Not a directory of the
 // organization's workspaces: listing those is a separate authorized read.
@@ -589,6 +599,46 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+
+// ---------------------------------------------------------------------------
+// Playground
+//
+// The dashboard's own chat page; see `src/gateway/api/routes/playground.py`.
+// Its completion endpoint takes the ordinary chat request body, so the shapes
+// named here are the page's memory (consent, saved transcripts, rated
+// comparisons, pinned models) and the tools menu's availability read.
+// ---------------------------------------------------------------------------
+export type PlaygroundConsent = Schemas["PlaygroundConsentPublic"]
+export type PlaygroundConsentUpdate = Schemas["PlaygroundConsentUpdate"]
+
+// Three states from two fields: a tool the deployment never configured, one a
+// workspace turned off (with the reason), and one that can be attached.
+export type PlaygroundToolStatus = Schemas["PlaygroundToolStatus"]
+export type PlaygroundTools = Schemas["PlaygroundToolsResponse"]
+export type PlaygroundMcpServer = Schemas["PlaygroundMcpServer"]
+
+// A saved transcript. The list carries a turn count and not the turns, so
+// loading one back into the page is a second request.
+export type PlaygroundConversation = Schemas["PlaygroundConversationSummary"]
+export type PlaygroundConversations = Schemas["PlaygroundConversationsPublic"]
+export type SavePlaygroundConversationRequest =
+  Schemas["PlaygroundConversationCreate"]
+export type PlaygroundMessage = Schemas["PlaygroundMessagePublic"]
+export type PlaygroundMessages = Schemas["PlaygroundMessagesPublic"]
+
+// A rated A/B exchange. The summary deliberately carries no answer bodies;
+// there is no endpoint that reads one back, because a comparison is a recorded
+// judgment rather than a transcript to resume.
+export type PlaygroundComparison = Schemas["PlaygroundComparisonSummary"]
+export type PlaygroundComparisons = Schemas["PlaygroundComparisonsPublic"]
+export type SavePlaygroundComparisonRequest =
+  Schemas["PlaygroundComparisonCreate"]
+export type PlaygroundComparisonPreference =
+  SavePlaygroundComparisonRequest["preference"]
+
+export type PlaygroundFavoriteModels = Schemas["PlaygroundFavoriteModelsPublic"]
+export type PlaygroundFavoriteModelsUpdate =
+  Schemas["PlaygroundFavoriteModelsUpdate"]
 
 // The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
 // here rather than hand-written at the call site so the authorization response

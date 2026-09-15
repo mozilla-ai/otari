@@ -48,11 +48,24 @@ function CallerProbe() {
 
 // The menu holds a router Link, so it needs a real router; `renderWithRouter`
 // mounts it at "/" and resolves the first location before the assertions run.
-async function renderMenu(overrides: Partial<DeploymentBootstrap> = {}) {
+type MenuOptions = Partial<DeploymentBootstrap> & {
+  deploymentLanding?: string
+  onOpenDeploymentLevel?: () => void
+}
+
+async function renderMenu({
+  deploymentLanding,
+  onOpenDeploymentLevel,
+  ...overrides
+}: MenuOptions = {}) {
   await renderWithRouter(
     <AppProviders>
       <DeploymentProvider value={bootstrap(overrides)}>
-        <AccountMenu collapsed={false} />
+        <AccountMenu
+          collapsed={false}
+          deploymentLanding={deploymentLanding as never}
+          onOpenDeploymentLevel={onOpenDeploymentLevel}
+        />
         <CallerProbe />
       </DeploymentProvider>
     </AppProviders>,
@@ -64,7 +77,7 @@ function settled(): Promise<HTMLElement> {
   return screen.findByText("standing settled")
 }
 
-async function openMenu(overrides: Partial<DeploymentBootstrap> = {}) {
+async function openMenu(overrides: MenuOptions = {}) {
   await renderMenu(overrides)
   // The trigger's accessible name carries who is signed in, so it is matched on
   // its prefix rather than in full.
@@ -265,5 +278,52 @@ describe("AccountMenu", () => {
     await settled()
 
     expect(screen.getByText("Signed in")).toBeInTheDocument()
+  })
+  describe("the Deployment row", () => {
+    it("offers one row that opens the deployment rail, with the mark it opens", async () => {
+      mockCaller(OPERATOR)
+      await openMenu({ deploymentLanding: "/settings" })
+      await settled()
+
+      const row = screen.getByRole("link", { name: "Deployment" })
+      expect(row).toHaveAttribute("href", "/settings")
+      // Not the pages themselves: the row changes which rail is showing, the
+      // way the Organization row in the footer does.
+      expect(screen.queryByRole("link", { name: "Accounts" })).toBeNull()
+    })
+
+    it("shows no row when that rail has nothing for this caller", async () => {
+      // The shell resolves the landing through the same predicate the rail runs,
+      // so a caller who operates nothing there gets no control into a rail with
+      // no rows. Absent, not disabled: a disabled row would tell them a place
+      // exists that the deployment declines to admit exists.
+      mockCaller(OPERATOR)
+      await openMenu()
+      await settled()
+
+      expect(screen.queryByRole("link", { name: "Deployment" })).toBeNull()
+      expect(
+        screen.getByRole("link", { name: "Account settings" }),
+      ).toBeInTheDocument()
+    })
+
+    it("opens a level instead of navigating when the shell asks it to", async () => {
+      // Below `md` the rail opens it as a level inside the drawer, so the row is
+      // a button: the page behind the drawer has not moved and a link would
+      // claim it had.
+      const onOpen = vi.fn()
+      mockCaller(OPERATOR)
+      await openMenu({
+        deploymentLanding: "/settings",
+        onOpenDeploymentLevel: onOpen,
+      })
+      await settled()
+
+      expect(screen.queryByRole("link", { name: "Deployment" })).toBeNull()
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Deployment" }))
+      expect(onOpen).toHaveBeenCalledTimes(1)
+    })
   })
 })

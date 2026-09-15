@@ -52,7 +52,10 @@ class MailSettings(BaseModel):
     from_email: str | None = Field(description="The 'From' address on outgoing mail, if one is configured.")
     from_name: str = Field(description="The 'From' display name on outgoing mail.")
     public_base_url: str | None = Field(
-        description="This deployment's own externally-reachable URL, used to build links in outgoing mail."
+        description=(
+            "This deployment's own externally-reachable URL, which mail needs before it can send. "
+            "The links themselves are built from ui_base_url, or from this when that is unset."
+        )
     )
     missing: list[str] = Field(
         description=(
@@ -144,8 +147,7 @@ async def send_test_mail(
         to=recipient,
         subject="Otari test message",
         values={
-            # public_base_url is what makes the mailer ready, so it is set here.
-            "PUBLIC_BASE_URL": config.public_base_url or "",
+            "UI_BASE_URL": config.effective_ui_base_url,
             "TRANSPORT": mailer.transport_name,
         },
     )

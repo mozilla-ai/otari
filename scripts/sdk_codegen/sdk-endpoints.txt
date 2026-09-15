@@ -83,6 +83,26 @@ GET /api/v1/files/{file_id}              # not yet wrapped
 GET /api/v1/files/{file_id}/content      # not yet wrapped
 DELETE /api/v1/files/{file_id}           # not yet wrapped
 
+# The Playground, which is the dashboard's own chat page and is excluded on a
+# stronger ground than "not yet wrapped": its completion endpoint is authorized
+# by a dashboard session cookie, so an SDK holding an API key cannot call it at
+# all, and the surrounding reads store what that page remembers for the signed-in
+# person. An SDK caller wanting a completion has POST /api/v1/chat/completions,
+# which this one delegates to.
+POST /api/v1/playground/chat/completions                        # session-authorized, not an SDK surface
+GET /api/v1/playground/tools                                    # session-authorized, not an SDK surface
+GET /api/v1/playground/consent                                  # session-authorized, not an SDK surface
+PUT /api/v1/playground/consent                                  # session-authorized, not an SDK surface
+GET /api/v1/playground/conversations                            # session-authorized, not an SDK surface
+POST /api/v1/playground/conversations                           # session-authorized, not an SDK surface
+GET /api/v1/playground/conversations/{conversation_id}/messages  # session-authorized, not an SDK surface
+DELETE /api/v1/playground/conversations/{conversation_id}       # session-authorized, not an SDK surface
+GET /api/v1/playground/comparisons                              # session-authorized, not an SDK surface
+POST /api/v1/playground/comparisons                             # session-authorized, not an SDK surface
+DELETE /api/v1/playground/comparisons/{comparison_id}           # session-authorized, not an SDK surface
+GET /api/v1/playground/favorite-models                          # session-authorized, not an SDK surface
+PUT /api/v1/playground/favorite-models                          # session-authorized, not an SDK surface
+
 # Dashboard / admin management surface: present in the gateway spec, not yet
 # wrapped by any SDK shell. Deferred here so the drift gate stays green; move to
 # [covered] when a shell surfaces them. Kept identical across all four SDKs.
@@ -126,6 +146,10 @@ DELETE /api/v1/auth/session                         # dashboard-only
 # flow. An SDK authenticates with the master key or an API key and never holds
 # a password, so there is nothing here for one to wrap.
 PUT /api/v1/auth/password                           # dashboard-only
+# The name the signed-in identity goes by: the account page's own write, beside
+# the credential ones. An SDK authenticates as a key rather than as a person and
+# has no account page to render, so there is nothing here for one to wrap.
+PATCH /api/v1/auth/profile                          # dashboard-only
 # Signup, email verification, and password reset (otari#650): claiming a
 # roster identity's dashboard login and recovering it, the same browser-only
 # credential flow PUT /api/v1/auth/password is. No SDK caller holds a password.
@@ -197,6 +221,7 @@ GET /api/v1/tool-settings                           # not yet wrapped
 PATCH /api/v1/tool-settings                         # not yet wrapped
 POST /api/v1/tool-settings/{service}/test           # not yet wrapped
 GET /api/v1/tool-settings/guardrails/profiles       # not yet wrapped
+GET /api/v1/tool-settings/guardrails/catalog        # not yet wrapped
 POST /api/v1/search                                 # not yet wrapped
 POST /api/v1/search/{search_tool_name}              # not yet wrapped
 # Search tools (runtime search-tool management)

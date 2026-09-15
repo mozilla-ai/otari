@@ -173,6 +173,20 @@ test.describe("api keys", () => {
     const reveal = page.getByRole("alert", { name: /API key created/ })
     await expect(reveal).toBeVisible()
     await expect(reveal).toContainText("shown only once")
+    const secretField = reveal.getByLabel("Secret key", { exact: true })
+    await expect(secretField).toHaveValue(/^gw-.{5}•{8}.{4}$/)
+    const masked = await secretField.inputValue()
+    await reveal.getByRole("button", { name: "Show Secret key" }).click()
+    const secret = await secretField.inputValue()
+    expect(secret).not.toContain("•")
+    await expect(reveal.getByLabel("curl", { exact: true })).toHaveValue(
+      new RegExp(secret),
+    )
+    await reveal.getByRole("button", { name: "Hide Secret key" }).click()
+    await expect(secretField).toHaveValue(masked)
+    await expect(reveal.getByLabel("curl", { exact: true })).not.toHaveValue(
+      new RegExp(secret),
+    )
     // Scoped to the dialog rather than to the reveal: the acknowledgement is
     // the dialog's own submit, in the footer, so it sits outside the alert
     // region the announcement covers.

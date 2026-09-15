@@ -11,6 +11,7 @@ import type {
   Workspace,
   WorkspaceBudgetDefault,
   WorkspaceMember,
+  WorkspaceProviderKeyOverride,
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
 import { API_ROOT } from "@/shared/api/client"
@@ -21,6 +22,7 @@ import {
   workspace,
   workspaceBudgetDefault,
   workspaceMember,
+  workspaceProviderKeyOverride,
 } from "@/tests/fixtures"
 
 interface Request {
@@ -46,6 +48,8 @@ function mockApi(
     // Keyed by workspace id, so a test can give one workspace a default and
     // leave another without one.
     budgetDefaults?: Record<string, WorkspaceBudgetDefault[]>
+    /** This workspace's view of its organization's keys, keyed the same way. */
+    providerKeys?: Record<string, WorkspaceProviderKeyOverride[]>
     /** A refusal for `POST ${API_ROOT}/workspaces`, for the error paths. */
     createRefusal?: { status: number; detail: string }
   } = {},
@@ -56,6 +60,7 @@ function mockApi(
   const orgMembers = opts.orgMembers ?? [organizationMember()]
   const budgets = opts.budgets ?? []
   const budgetDefaults = opts.budgetDefaults ?? {}
+  const providerKeys = opts.providerKeys ?? {}
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -74,9 +79,10 @@ function mockApi(
       return jsonResponse(members[0] ?? workspaceMember())
     }
     if (url.includes("provider-keys")) {
-      if (url.includes("/models")) return jsonResponse({ models: [] })
-      if (url.includes(`${API_ROOT}/workspaces/`))
-        return jsonResponse({ data: [] })
+      if (url.includes(`${API_ROOT}/workspaces/`)) {
+        const id = url.split(`${API_ROOT}/workspaces/`)[1]?.split("/")[0] ?? ""
+        return jsonResponse({ data: providerKeys[id] ?? [] })
+      }
       return jsonResponse({ data: [], count: 0 })
     }
     if (url.includes("member-budget-policies")) {
@@ -259,6 +265,58 @@ describe("WorkspacesPage", () => {
     expect(
       screen.getByRole("button", { name: /Default member budget/ }),
     ).toHaveTextContent("Team standard")
+  })
+
+  it("offers an unnamed budget by what it caps, and tells two of them apart", async () => {
+    // A picker exists to let somebody choose, and the head of a uuid supports no
+    // choice: two unnamed budgets used to read as two opaque strings, and picking
+    // the wrong one silently hands every member the wrong ceiling (#2130).
+    mockApi({
+      budgets: [
+        budget({
+          budget_id: "04f2f38a-1111-1111-1111-111111111111",
+          name: null,
+          max_budget: 50,
+          budget_duration_sec: null,
+          reset_alignment: "calendar_month",
+        }),
+        budget({
+          budget_id: "9b71c0de-2222-2222-2222-222222222222",
+          name: null,
+          max_budget: 50,
+          budget_duration_sec: null,
+          reset_alignment: "calendar_month",
+        }),
+        budget({
+          budget_id: "c0ffee00-3333-3333-3333-333333333333",
+          name: null,
+          max_budget: 500,
+          budget_duration_sec: null,
+          reset_alignment: "calendar_month",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Default member budget/ }),
+    )
+
+    // The two that cap the same figure carry their ids; the one that does not
+    // needs no qualifier.
+    expect(
+      await screen.findByRole("option", { name: "$50.00 / month (04f2f38a)" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "$50.00 / month (9b71c0de)" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "$500.00 / month" }),
+    ).toBeInTheDocument()
   })
 
   it("puts a refused create on the name that caused it, not in a banner", async () => {
@@ -592,7 +650,11 @@ describe("WorkspacesPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Edit" }))
 
-    expect(await screen.findByText("Provider keys")).toBeInTheDocument()
+    // Named twice on the page once the column exists, so this is the section
+    // inside the form rather than the header above the list.
+    expect(
+      within(await screen.findByRole("dialog")).getByText("Provider keys"),
+    ).toBeInTheDocument()
     expect(
       requests.some((request) =>
         request.url.includes(
@@ -605,6 +667,79 @@ describe("WorkspacesPage", () => {
         request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
       ),
     ).toBe(true)
+  })
+
+  it("counts a workspace's departures on the list", async () => {
+    // The support question this answers is "why is gpt-4o missing in Bravo",
+    // which until now meant opening Edit on each workspace in turn (#2106).
+    mockApi({
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+      providerKeys: {
+        [SECOND]: [
+          workspaceProviderKeyOverride({ allowed_models: ["gpt-4o"] }),
+          workspaceProviderKeyOverride({
+            org_provider_key_id: "88888888-8888-8888-8888-888888888888",
+            disabled: true,
+          }),
+        ],
+      },
+    })
+    renderPage(<WorkspacesPage />)
+
+    const row = (await screen.findByText("Bravo")).closest("tr")
+    expect(row).not.toBeNull()
+    expect(
+      within(row as HTMLElement).getByText("1 narrowed, 1 never used"),
+    ).toBeInTheDocument()
+  })
+
+  it("shows no provider-key column where the organization holds no keys", async () => {
+    // Every standalone deployment: organization-owned keys are a hosted
+    // surface, so the column would be a header over blank cells.
+    mockApi()
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Default Workspace")
+    expect(
+      screen.queryByRole("columnheader", { name: "Provider keys" }),
+    ).toBeNull()
+  })
+
+  it("stops fanning out across a tenant with many workspaces", async () => {
+    // The column costs one read per workspace and the list walk above it is
+    // bounded only at 100k, so past a sane count the column is dropped rather
+    // than fetched.
+    const many = Array.from({ length: 26 }, (_, i) =>
+      workspace({
+        id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`,
+        name: `Workspace ${i}`,
+      }),
+    )
+    const requests = mockApi({ workspaces: many })
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Workspace 25")
+    expect(
+      screen.queryByRole("columnheader", { name: "Provider keys" }),
+    ).toBeNull()
+    expect(
+      requests.filter((request) => request.url.includes("provider-keys")),
+    ).toEqual([])
+  })
+
+  it("says a workspace that departs from nothing inherits every key", async () => {
+    // Distinct from the empty cell an organization holding no keys gets: this
+    // workspace could depart and has not.
+    mockApi({
+      providerKeys: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceProviderKeyOverride(),
+        ],
+      },
+    })
+    renderPage(<WorkspacesPage />)
+
+    expect(await screen.findByText("Inherits all")).toBeInTheDocument()
   })
 
   it("keeps the provider keys and their reads away from a member", async () => {

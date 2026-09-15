@@ -222,13 +222,20 @@ class UpdatedAtMixin:
 # =============================================================================
 
 
+# The column width of the name an identity goes by, and therefore the bound
+# every request that writes one has to share. One number rather than a literal
+# per schema: a bound stated in three places is one that two of them stop
+# matching.
+MAX_FULL_NAME_LENGTH = 255
+
+
 class UserBase(SQLModel):
     """Fields an identity carries on the wire."""
 
     email: str | None = Field(default=None, max_length=255)
     is_active: bool = True
     is_superuser: bool = False
-    full_name: str | None = Field(default=None, max_length=255)
+    full_name: str | None = Field(default=None, max_length=MAX_FULL_NAME_LENGTH)
 
 
 class UserCreate(UserBase):

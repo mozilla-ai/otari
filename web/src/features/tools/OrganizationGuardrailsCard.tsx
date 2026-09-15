@@ -58,6 +58,11 @@ import { useWorkspaces } from "@/shared/api/workspaces"
 
 type Mode = "block" | "monitor"
 
+// One width for every select and the credential box in a guardrail entry, so
+// the entry has a rhythm instead of an edge per control. Full width where the
+// row stacks on a phone.
+const SELECT_SLOT = "w-full sm:w-48"
+
 const MODE_OPTIONS = [
   { value: "monitor", label: "Monitor" },
   { value: "block", label: "Block" },
@@ -129,13 +134,16 @@ function WorkspaceScope({
           reserveMessage={false}
         />
       ) : (
-        <FilterSelect
-          label="Runs in"
-          value={everywhere ? "all" : "chosen"}
-          onChange={(next) => onEverywhere(next === "all")}
-          options={scopeOptions}
-          disabled={disabled}
-        />
+        <div className={SELECT_SLOT}>
+          <FilterSelect
+            label="Runs in"
+            value={everywhere ? "all" : "chosen"}
+            onChange={(next) => onEverywhere(next === "all")}
+            options={scopeOptions}
+            disabled={disabled}
+            fullWidth
+          />
+        </div>
       )}
       {everywhere ? null : (
         // A named group rather than a per-box aria-label. Each box is labelled
@@ -358,31 +366,49 @@ function GuardrailRow({
         ) : null}
         {guardrail.enabled ? null : <Badge tone="warn">Paused</Badge>}
       </div>
+      {/* Two widths down the entry rather than six. Each control sized to its
+          own content put 101, 178, 90, 288 and 208px in one row, and the scope
+          select below it stretched to the full 1126: the reader gets a new edge
+          per control and the row reads as debris. `SELECT_SLOT` is the common
+          one and the endpoint keeps the wider box, because a URL is the one
+          value here that is long. This is a rhythm, not the control lane
+          `SettingRow` draws: the entry is a dense row rather than a settings
+          list, and adopting the lane would make it eight rows tall, which is a
+          question for the design of an entry and not for its alignment. */}
       <div className="flex flex-wrap items-end gap-2">
-        <FilterSelect
-          label="Mode"
-          value={mode}
-          onChange={(next) => setMode(next as Mode)}
-          options={MODE_OPTIONS}
-          disabled={busy}
-        />
-        <FilterSelect
-          label="If unreachable"
-          value={onUnavailable}
-          onChange={(next) => setOnUnavailable(next as Mode)}
-          options={UNAVAILABLE_OPTIONS}
-          disabled={busy}
-        />
-        <FilterSelect
-          label="Status"
-          value={enabled ? "on" : "off"}
-          onChange={(next) => setEnabled(next === "on")}
-          options={[
-            { value: "on", label: "Active" },
-            { value: "off", label: "Paused" },
-          ]}
-          disabled={busy}
-        />
+        <div className={SELECT_SLOT}>
+          <FilterSelect
+            label="Mode"
+            value={mode}
+            onChange={(next) => setMode(next as Mode)}
+            options={MODE_OPTIONS}
+            disabled={busy}
+            fullWidth
+          />
+        </div>
+        <div className={SELECT_SLOT}>
+          <FilterSelect
+            label="If unreachable"
+            value={onUnavailable}
+            onChange={(next) => setOnUnavailable(next as Mode)}
+            options={UNAVAILABLE_OPTIONS}
+            disabled={busy}
+            fullWidth
+          />
+        </div>
+        <div className={SELECT_SLOT}>
+          <FilterSelect
+            label="Status"
+            value={enabled ? "on" : "off"}
+            onChange={(next) => setEnabled(next === "on")}
+            options={[
+              { value: "on", label: "Active" },
+              { value: "off", label: "Paused" },
+            ]}
+            disabled={busy}
+            fullWidth
+          />
+        </div>
         <input
           type="text"
           inputMode="url"
@@ -403,7 +429,7 @@ function GuardrailRow({
             guardrail.has_credential ? "replace credential" : "add credential"
           }
           onChange={(event) => setCredential(event.target.value)}
-          className={`w-full sm:w-52 ${INPUT_CLASS}`}
+          className={`${SELECT_SLOT} ${INPUT_CLASS}`}
         />
       </div>
       <WorkspaceScope

@@ -8,6 +8,7 @@ import {
   applyNavLabelOverrides,
   composeNavItems,
   composeNavSections,
+  DEPLOYMENT_NAV_SECTIONS,
   isPathVisible,
   NAV_ITEMS,
   NAV_SECTIONS,
@@ -61,6 +62,7 @@ describe("nav registry", () => {
       "Overview",
       "Activity",
       "Usage",
+      "Playground",
       "Models",
       "Routing",
       "Tools",
@@ -124,13 +126,58 @@ describe("nav registry", () => {
     expect(paths).toEqual([...new Set(paths)])
   })
 
+  it("puts the deployment destinations on their own rail", () => {
+    expect(
+      DEPLOYMENT_NAV_SECTIONS.flatMap((section) =>
+        section.items.map((item) => item.to),
+      ),
+    ).toEqual(["/settings", "/admin/accounts"])
+    // And on neither of the others. A destination drawn on two rails would
+    // resolve to whichever came first in NAV_ITEMS and be gated by that one.
+    const others = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].flatMap((section) =>
+      section.items.map((item) => item.to),
+    )
+    expect(others).not.toContain("/settings")
+    expect(others).not.toContain("/admin/accounts")
+  })
+
+  it("keeps a deployment destination registered, and therefore gated", () => {
+    // The failure this exists to catch: expressing "not on the rail" by
+    // deleting the entry. `NAV_ITEMS` is what `navItemForPath` answers from, so
+    // an unregistered path is an *ungated* one, and the shell would render
+    // these pages on a deployment that serves neither surface instead of
+    // refusing them. Nothing about the rail being empty says so, which is why
+    // it is asserted here rather than left to the rail tests.
+    for (const [to, surface, operatorOnly] of [
+      ["/settings", "settings", "refused"],
+      ["/admin/accounts", "admin", "unlisted"],
+    ] as const) {
+      const item = navItemForPath(to)
+      expect(item?.to).toBe(to)
+      expect(item?.surface).toBe(surface)
+      // The two values encode which refusal the server gives, 403 against 404.
+      // Flattening them would make the menu lie about one of the two.
+      expect(item?.operatorOnly).toBe(operatorOnly)
+      // And owned by the deployment rail, not the organization one it used to
+      // sit inside. Asserted as the rule rather than as the value: the first
+      // version of this line pinned "organization" on the strength of it being
+      // what the code returned, and that is how a page ended up opening a rail
+      // whose scope did not own it.
+      expect(navContextForPath(to)).toBe("deployment")
+    }
+  })
+
   it("sorts a pathname onto the rail that declares it", () => {
     // Not a URL-prefix rule: /workspaces and /settings are organization
     // destinations whose paths look like anything else, and /members is a
     // workspace one directly under the root.
     expect(navContextForPath("/members")).toBe("workspace")
     expect(navContextForPath("/workspaces")).toBe("organization")
-    expect(navContextForPath("/settings")).toBe("organization")
+    // Its own context, not the organization's: the deployment's pages describe
+    // the process every tenant shares. This line said "organization" while that
+    // was merely what the code did, and an asserted value is indistinguishable
+    // from a considered one.
+    expect(navContextForPath("/settings")).toBe("deployment")
     expect(navContextForPath("/organization/members")).toBe("organization")
     // Unregistered paths open in the context the shell starts in.
     expect(navContextForPath("/docs")).toBe("workspace")
@@ -353,6 +400,14 @@ describe("nav registry", () => {
     const gateway = NAV_SECTIONS.find((section) => section.id === "gateway")
     expect(gateway?.label).toBe("Build")
     expect(gateway?.items.map((item) => item.label)).toContain("Routing")
+    // `org-general` keeps its heading with one row in it, where the index
+    // section at the top of the workspace rail has none with one row in it. The
+    // registry's comment there is about a section that is *first*, with nothing
+    // above it to be absorbed into; General is last, under two labelled
+    // siblings, so without a heading its row reads as the tail of the section
+    // above rather than as a group of its own. Same rule, different
+    // surroundings: a heading earns its place when the section has labelled
+    // siblings.
     const general = ORG_NAV_SECTIONS.find(
       (section) => section.id === "org-general",
     )

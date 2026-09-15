@@ -1,5 +1,6 @@
+import { Tooltip as HeroTooltip } from "@heroui/react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 /**
@@ -12,6 +13,10 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
  * props onto the control instead, so there is one element playing both parts.
  */
 describe("Tooltip", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("wraps a plain node in the library's own trigger", () => {
     render(
       <Tooltip content="An exact timestamp">
@@ -44,5 +49,25 @@ describe("Tooltip", () => {
       "data-slot",
       "tooltip-trigger",
     )
+  })
+
+  /**
+   * The delay is read off the props HeroUI is handed rather than from an open
+   * tooltip: react-aria's hover never fires under jsdom, so a test that waits
+   * for the label waits forever whatever the delay is. Left unset, HeroUI falls
+   * back to `--tooltip-delay` on the document root, which it ships at
+   * react-aria's 1.5s warmup, and every icon action in every table goes back to
+   * reading as unlabeled.
+   */
+  it("opens on its own delay rather than HeroUI's 1.5s default", () => {
+    const root = vi.spyOn(HeroTooltip, "Root")
+    render(
+      <Tooltip content="Delete">
+        <span>x</span>
+      </Tooltip>,
+    )
+    // The exact value: `design/overlays.md` states it, so moving it has to move
+    // the sentence that documents it too.
+    expect(root.mock.calls[0]?.[0]?.delay).toBe(300)
   })
 })

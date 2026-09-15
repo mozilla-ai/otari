@@ -60,6 +60,12 @@ const ALIGNMENT_LABELS: Record<string, string> = {
   calendar_month: "Monthly, the 1st at 00:00 UTC",
 }
 
+const SHORT_ALIGNMENTS: Record<string, string> = {
+  calendar_day: "day",
+  calendar_week: "week",
+  calendar_month: "month",
+}
+
 const HOUR = 3_600
 const DAY = 86_400
 
@@ -91,6 +97,41 @@ export function periodLabel(
     return `Every ${hours} ${hours === 1 ? "hour" : "hours"}, from the last reset`
   }
   return `Every ${seconds}s, from the last reset`
+}
+
+/**
+ * The same period as a bare unit, for a label that reads as a rate.
+ *
+ * `periodLabel` spells the boundary out because a table cell is where an
+ * operator checks exactly when a budget turns over. A derived name is not: it
+ * has to fit beside a figure (`$50.00 / month`), so it takes the unit alone.
+ * `undefined` where a budget never resets, which is a label with no rate at all
+ * rather than one reading "never".
+ *
+ * A calendar boundary is a word (`month`) and a rolling duration is a count
+ * (`30 days`). They are not the same product: a duration restarts on the first
+ * request after the last reset, so it walks, and 30 days is 1.5 percent more
+ * generous than the calendar month the deployment form's "Monthly" preset
+ * suggests. That form also takes a custom day count, which has no calendar word
+ * at all, so a count is the only spelling every period has.
+ */
+export function shortPeriodLabel(
+  budget: Pick<OrganizationBudget, "reset_alignment" | "budget_duration_sec">,
+): string | undefined {
+  if (budget.reset_alignment) {
+    return SHORT_ALIGNMENTS[budget.reset_alignment] ?? budget.reset_alignment
+  }
+  const seconds = budget.budget_duration_sec
+  if (seconds === null || seconds === undefined) return undefined
+  if (seconds % DAY === 0) {
+    const days = seconds / DAY
+    return `${days} ${days === 1 ? "day" : "days"}`
+  }
+  if (seconds % HOUR === 0) {
+    const hours = seconds / HOUR
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`
+  }
+  return `${seconds}s`
 }
 
 /** The three caps a budget can hold, as every response shape carries them. */
@@ -130,13 +171,6 @@ export function limitLabel(budget: BudgetCaps): string {
     caps.push(`${formatNumber(budget.request_limit)} requests`)
   }
   return caps.join(" + ")
-}
-
-/** How a budget is named on screen: its label, else the head of its id. */
-export function budgetLabel(
-  budget: Pick<OrganizationBudget, "name" | "budget_id">,
-): string {
-  return budget.name ?? budget.budget_id.split("-")[0]
 }
 
 /**

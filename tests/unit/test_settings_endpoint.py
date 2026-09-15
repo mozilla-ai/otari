@@ -318,6 +318,16 @@ def test_config_view_shows_the_legal_link_targets() -> None:
     assert by_key["privacy_url"].settable is False
 
 
+def test_the_viewer_shows_the_ui_base_url_actually_in_use() -> None:
+    # Unset, public_base_url answers for it, so showing the bare field would
+    # tell an operator debugging a link that nothing is configured.
+    config = GatewayConfig(public_base_url="https://otari.example.com")
+    shown = {field.key: field.value for field in _config_fields(config)}
+
+    assert shown["ui_base_url"] == "https://otari.example.com"
+    assert GatewayConfig(ui_base_url="https://app.example.com").ui_base_url == "https://app.example.com"
+
+
 def test_every_config_field_is_shown_or_deliberately_omitted() -> None:
     """The roster is hand-maintained, so its completeness is checked rather than remembered.
 

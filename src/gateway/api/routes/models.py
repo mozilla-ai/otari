@@ -27,6 +27,7 @@ from gateway.services.merged_catalog_service import (
     context_window_for_key,
     created_timestamp,
     get_pricing_map,
+    mark_deployment_managed,
     model_from_pricing,
     normalized_pricing_lookup,
     owner_from_key,
@@ -353,7 +354,7 @@ async def get_model(
         )
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            return fallback
+            return mark_deployment_managed(config, fallback)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",
@@ -374,8 +375,8 @@ async def get_model(
             context_window=context_window_for_key(model_key),
         )
         apply_default_pricing(obj)
-        return obj
+        return mark_deployment_managed(config, obj)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
-    return model_from_pricing(pricing)
+    return mark_deployment_managed(config, model_from_pricing(pricing))

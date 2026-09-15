@@ -138,11 +138,33 @@ Sessions are revocable and expire after `dashboard_session_ttl_hours`. Password
 changes, master-key rotation, sign-out, and identity deactivation revoke relevant
 sessions.
 
+A session authorizes the management API. It does not authorize
+`/api/v1/chat/completions` or any other data-plane path, which take an API key
+or the master key and nothing else: a keyless request resolves to the
+deployment's default workspace, so honoring a cookie there would let any member
+of any organization spend that workspace's provider credential.
+
+The Playground is the one surface that runs a completion from a session, and it
+is a separate endpoint rather than a relaxation of that rule.
+`POST /api/v1/playground/chat/completions` resolves the caller's own attribution
+user and proves their membership of the workspace it will bill before the
+request reaches the pipeline, so the request is billed to the person who sent it
+in a workspace that is theirs. No credential is minted for the browser and none
+is held there. The usage row it writes carries no `api_key_id` and its own
+endpoint label, which is what keeps in-product traffic separable from a
+customer's integration.
+
 ### Passkeys
 
 Passkeys are optional and additive to password sign-in. Set
 `public_base_url` to establish the origin and relying-party ID. Use
 `webauthn_rp_id` only when passkeys must be bound to a parent domain.
+
+Where an edge serves the dashboard on a different host to the gateway, set
+`webauthn_rp_id` to a domain that is a parent of both and list the dashboard
+origin in `webauthn_allowed_origins`. The ID is not derived from `ui_base_url`,
+so without this the ceremony fails in the browser and nothing is logged here
+([#1134](https://github.com/mozilla-ai/otari/issues/1134)).
 
 Changing the relying-party ID makes existing passkeys unusable. The dashboard
 continues listing unusable credentials so the owner can remove them.
@@ -155,6 +177,10 @@ secret. Register this redirect URI with the provider:
 ```text
 {public_base_url}/auth/{provider}/callback
 ```
+
+The gateway answers that path itself and redirects the browser into the
+dashboard to finish. Where an edge serves the dashboard elsewhere, set
+`ui_base_url` too; see [Configuration](configuration.md#the-interface-address).
 
 OAuth signs in an existing Otari identity whose email the provider verifies. It
 does not provision arbitrary provider accounts.
