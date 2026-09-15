@@ -37,20 +37,7 @@ export const SETUP_TABS: ReadonlyArray<{
  */
 export const DEFAULT_SETUP_TAB: SetupSnippetId = "agent"
 
-/** Which tabs carry the key in their text, and so have something to conceal. */
-export function carriesKey(id: SetupSnippetId): boolean {
-  return id !== "agent"
-}
-
-/**
- * Every tab's snippet, built once from one input.
- *
- * The agent prompt takes no key at all (it names the environment variable
- * instead), so it is built from the rest of the input and is the same string
- * whether the key is revealed or concealed. That is what `carriesKey` above is
- * for: a caller concealing the key must not offer a reveal toggle on the one
- * tab where there is nothing hidden.
- */
+/** The agent prompt names the environment variable; the other tabs carry its value. */
 export function buildSetupSnippets(
   input: RequestSnippetInput,
 ): Record<SetupSnippetId, string> {

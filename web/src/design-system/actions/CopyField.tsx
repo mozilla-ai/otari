@@ -477,7 +477,7 @@ export function CopyField({
         field
       )}
       {/* Announce only the "Copied" event, never the secret itself. */}
-      <span aria-live="polite" className="text-xs text-success">
+      <span aria-live="polite" className="sr-only">
         {copied ? "Copied to clipboard." : ""}
       </span>
       {selectHint ? (

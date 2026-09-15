@@ -14,6 +14,7 @@ import { useModels } from "@/shared/api/models"
 import { resolveSnippetBaseUrl } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
+import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion"
 
 /**
  * The step between "a provider is configured" and "this dashboard has something
@@ -98,6 +99,7 @@ function SetupFlow({
   onCheckNow: () => Promise<unknown>
 }) {
   const navigate = useNavigate()
+  const prefersReducedMotion = usePrefersReducedMotion()
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
   const models = useModels()
@@ -187,7 +189,13 @@ function SetupFlow({
   const checkNow = async () => {
     setIsChecking(true)
     try {
-      await onCheckNow()
+      // Match the original activation flow: let the working orb complete a beat.
+      await Promise.all([
+        onCheckNow(),
+        new Promise((resolve) =>
+          setTimeout(resolve, prefersReducedMotion ? 0 : 2_400),
+        ),
+      ])
     } finally {
       setIsChecking(false)
     }
