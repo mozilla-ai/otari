@@ -3336,36 +3336,30 @@ main {
    once"; a heading that wears the role cannot drift from it. And `h3`/`h4`,
    hand-spelled at 16/24 semibold, turned out to be `text-title` exactly. */
 
-/* Match the original activation orb's phase dissolve. */
-.setup-orb-layer-in {
-  animation: setup-orb-fade-in 420ms ease-out;
-}
-.setup-orb-layer-out {
-  animation: setup-orb-fade-out 420ms ease-out forwards;
-}
-@keyframes setup-orb-fade-in {
-  from {
-    opacity: 0;
-    transform: scale(0.94);
+@theme {
+  /* Match the original activation orb's phase dissolve. */
+  --duration-setup-orb: 420ms;
+  --animate-setup-orb-in: setup-orb-fade-in var(--duration-setup-orb) ease-out;
+  --animate-setup-orb-out: setup-orb-fade-out var(--duration-setup-orb) ease-out
+    forwards;
+  @keyframes setup-orb-fade-in {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-@keyframes setup-orb-fade-out {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.06);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .setup-orb-layer-in,
-  .setup-orb-layer-out {
-    animation: none;
+  @keyframes setup-orb-fade-out {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.06);
+    }
   }
 }

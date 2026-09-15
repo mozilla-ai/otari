@@ -205,7 +205,7 @@ export function SetupSheet({
           <p className="text-caption text-subtle">
             {tab === "agent"
               ? "Works with Claude Code, Codex, Cursor, and any agent that can edit files and run commands. It reads the key from your environment rather than carrying it."
-              : "Prefer to have an agent wire this up? The Agent tab is a paste-ready prompt."}
+              : "Prefer to have an agent wire this up? The Agent tab is a paste-ready prompt. When the key is hidden, the example shows a stand-in; copying always includes your real key."}
           </p>
           {model === undefined ? (
             <p className="text-caption text-subtle">

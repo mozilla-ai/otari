@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { SetupOrb } from "@/features/onboarding/SetupOrb"
 
@@ -9,22 +9,31 @@ vi.mock("thinking-orbs", () => ({
 }))
 
 afterEach(() => {
-  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
+
+function finishAnimation(element: HTMLElement) {
+  // jsdom lacks AnimationEvent, so React listens for the WebKit event name.
+  fireEvent(element, new Event("webkitAnimationEnd", { bubbles: true }))
+}
 
 it("crossfades from searching to working, then removes the outgoing canvas", async () => {
   const { container, rerender } = render(<SetupOrb phase="waiting" />)
   await waitFor(() =>
     expect(container.querySelectorAll("canvas")).toHaveLength(1),
   )
-  vi.useFakeTimers()
   rerender(<SetupOrb phase="checking" />)
   expect(container.querySelectorAll("canvas")).toHaveLength(2)
   expect(container.querySelector('[aria-label="working"]')).toBeInTheDocument()
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(420)
-  })
+  const incoming = container.querySelector('[aria-label="working"]')
+    ?.parentElement?.parentElement
+  expect(incoming).toBeInTheDocument()
+  finishAnimation(incoming!)
+  expect(container.querySelectorAll("canvas")).toHaveLength(2)
+  const outgoing = container.querySelector('[aria-label="searching"]')
+    ?.parentElement?.parentElement
+  expect(outgoing).toBeInTheDocument()
+  finishAnimation(outgoing!)
   expect(container.querySelectorAll("canvas")).toHaveLength(1)
   expect(container.querySelector('[aria-label="working"]')).toBeInTheDocument()
 })

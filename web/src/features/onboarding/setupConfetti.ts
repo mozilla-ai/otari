@@ -1,4 +1,5 @@
 /** A restrained burst from the center of the settled success dialog. */
+// Fourteen pieces read as a celebration without crowding the success message.
 const CONFIG = {
   particleCount: 14,
   spread: 100,
@@ -37,7 +38,7 @@ function paletteFromTheme(): string[] {
 }
 
 /** Viewport-relative center of an element, the way canvas-confetti wants it. */
-export function confettiOriginOf(element: Element): { x: number; y: number } {
+function confettiOriginOf(element: Element): { x: number; y: number } {
   const { left, top, width, height } = element.getBoundingClientRect()
   return {
     x: (left + width / 2) / window.innerWidth,
@@ -68,7 +69,8 @@ export async function fireSetupConfetti(
 ): Promise<void> {
   if (hasFired || signal.aborted) return
   const animations: Animation[] = []
-  let overlayZIndex = 0
+  // canvas-confetti's own default layer, the floor when no ancestor sets one.
+  let overlayZIndex = 100
   for (let node: Element | null = element; node; node = node.parentElement) {
     animations.push(...(node.getAnimations?.() ?? []))
     const zIndex = Number(getComputedStyle(node).zIndex)
@@ -90,7 +92,7 @@ export async function fireSetupConfetti(
   await confetti({
     ...CONFIG,
     origin: confettiOriginOf(element),
-    // HeroUI's overlay is above canvas-confetti's default layer.
+    // HeroUI's overlay sits above canvas-confetti's default layer.
     zIndex: overlayZIndex + 1,
     ...(colors.length > 0 ? { colors } : {}),
     shapes: ["square"],

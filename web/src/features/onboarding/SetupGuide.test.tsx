@@ -348,6 +348,10 @@ describe("SetupGuide", () => {
           ? screen.getByText(/Works with Claude Code/)
           : screen.getByText(/Prefer to have an agent wire this up/)
       const original = hint.textContent
+      if (label !== "Agent") {
+        expect(hint).toHaveTextContent("the example shows a stand-in")
+        expect(hint).toHaveTextContent("copying always includes your real key")
+      }
       await user.click(
         screen.getByRole("button", { name: "Show Your API key" }),
       )

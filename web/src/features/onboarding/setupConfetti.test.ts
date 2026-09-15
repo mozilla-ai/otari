@@ -68,3 +68,12 @@ it("does not celebrate a dismissed dialog or consume its next presentation", asy
   await fireSetupConfetti(element, new AbortController().signal)
   expect(confetti).toHaveBeenCalledTimes(1)
 })
+
+it("stays above canvas-confetti's own layer when no ancestor sets one", async () => {
+  const element = document.createElement("div")
+  document.body.append(element)
+  await fireSetupConfetti(element, new AbortController().signal)
+  expect(confetti).toHaveBeenCalledWith(
+    expect.objectContaining({ zIndex: 101 }),
+  )
+})
