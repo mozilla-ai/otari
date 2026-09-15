@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -34,8 +35,7 @@ def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | No
         return int(normalized)
     choices = ", ".join(_LOG_LEVEL_NAMES)
     raise click.BadParameter(
-        f"{value!r} is not a valid log level. Choose one of {choices} (case-insensitive) "
-        "or a numeric level such as 20."
+        f"{value!r} is not a valid log level. Choose one of {choices} (case-insensitive) or a numeric level such as 20."
     )
 
 
@@ -227,6 +227,142 @@ def gen_secret_key() -> None:
     click.echo(generate_secret_key())
 
 
+# Claude Code's own edit tools and the tool_input field naming their target.
+_HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
+
+
+def _hook_find_repo_root(start: Path) -> Path | None:
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
+    result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    paths = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        entry = line[3:]
+        if " -> " in entry:
+            entry = entry.split(" -> ", 1)[1]
+        paths.append(entry.strip('"'))
+    return paths
+
+
+@cli.command(name="hook")
+@click.option(
+    "--harness",
+    type=click.Choice(["claude-code"]),
+    default="claude-code",
+    show_default=True,
+    help="Agent integration sending this callback.",
+)
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to config YAML file, used to resolve --url/--api-key when they are not given.",
+)
+@click.option("--url", envvar="OTARI_URL", default=None, help="Base URL of the Otari gateway.")
+@click.option("--api-key", envvar="OTARI_API_KEY", default=None, help="Credential for the Hook Server.")
+def hook(harness: str, config: str | None, url: str | None, api_key: str | None) -> None:
+    """Native callback entry point for a supported agent's hook protocol.
+
+    Reads one JSON hook payload on stdin, collects the evidence that payload
+    carries (a PreToolUse call's own target path, or a Stop event's Git
+    status), and calls POST /api/v1/hooks/check. Never reads or evaluates the
+    policy itself: gateway.agent_runtime does that; this command is a thin,
+    harness-specific transport. See docs/agent-gates.md.
+
+    Exit code is this harness's own protocol, not otari policy check's:
+    Claude Code's PreToolUse and Stop hooks both take 0 (proceed) or 2 (block,
+    stderr shown to the agent). Never blocks on a problem that is not a
+    required gate failing: a missing policy, an unreachable gateway, or a
+    missing credential all exit 0, with a message on stderr where there is
+    one worth surfacing.
+    """
+    import httpx
+
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    event = payload.get("hook_event_name")
+    repo = Path(payload.get("cwd") or Path.cwd())
+    root = _hook_find_repo_root(repo)
+    if root is None:
+        return
+
+    gates_file = root / ".otari-gates.yml"
+    if not gates_file.is_file():
+        return
+
+    changed_paths: list[str]
+    if event == "PreToolUse":
+        field = _HOOK_EDIT_TOOL_PATH_FIELDS.get(payload.get("tool_name", ""))
+        target = (payload.get("tool_input") or {}).get(field) if field else None
+        if not target:
+            return
+        try:
+            changed_paths = [str(Path(target).resolve().relative_to(root))]
+        except ValueError:
+            return  # Outside the repo: nothing this policy can name.
+    elif event == "Stop":
+        collected = _hook_collect_changed_paths(root)
+        if collected is None:
+            click.echo("otari hook: could not read Git state, not blocking.", err=True)
+            return
+        changed_paths = collected
+    else:
+        return  # An event this harness integration does not check yet.
+
+    gateway_config = load_config(config)
+    # host is a bind address (0.0.0.0 is the documented default), not a connect
+    # target; a client dials localhost instead.
+    connect_host = "localhost" if gateway_config.host == "0.0.0.0" else gateway_config.host  # noqa: S104
+    resolved_url = url or f"http://{connect_host}:{gateway_config.port}"
+    resolved_key = api_key or gateway_config.master_key
+    if not resolved_key:
+        click.echo("otari hook: no API key or master key resolved, not blocking.", err=True)
+        return
+
+    try:
+        response = httpx.post(
+            f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
+            json={"policy_yaml": gates_file.read_text(encoding="utf-8"), "changed_paths": changed_paths},
+            headers={"Otari-Key": f"Bearer {resolved_key}"},
+            timeout=15.0,
+        )
+        response.raise_for_status()
+        result = response.json()
+    except httpx.HTTPError as exc:
+        click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
+        return
+
+    if not result.get("blocked"):
+        return
+
+    summary = "\n".join(
+        f"  [x] {gate['gate_id']}: {gate['message']}" for gate in result["results"] if gate["outcome"] != "pass"
+    )
+    click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}", err=True)
+    raise SystemExit(2)
+
+
 @cli.group()
 def routing() -> None:
     """Inspect routing policies."""
@@ -302,8 +438,10 @@ def routing_explain(
     if policy_name is None:
         click.echo("Configured policies:")
         for name, listed in cfg.routing.policies.items():
-            shape = f"router:{listed.router_backend}" if listed.router_backend else (
-                "dynamic" if listed.is_dynamic else "static"
+            shape = (
+                f"router:{listed.router_backend}"
+                if listed.router_backend
+                else ("dynamic" if listed.is_dynamic else "static")
             )
             candidates = len(listed.router_candidates) or 1
             click.echo(f"  {name}  ({shape}, {candidates + len(listed.on_failure)} candidate(s))")
@@ -342,12 +480,8 @@ def routing_explain(
     click.echo(f"{policy_name}: {len(plan.attempts)} candidate(s), selected by {plan.selection_reason}")
     for attempt in plan.attempts:
         canonical = f"{attempt.instance}:{attempt.model}"
-        label = (
-            f"weighted {shares[canonical]:.0f}%" if canonical in shares else attempt.selection_reason
-        )
-        click.echo(
-            f"  {attempt.position}. {canonical}    [{label}]  dispatches as {attempt.dispatch_model}"
-        )
+        label = f"weighted {shares[canonical]:.0f}%" if canonical in shares else attempt.selection_reason
+        click.echo(f"  {attempt.position}. {canonical}    [{label}]  dispatches as {attempt.dispatch_model}")
     for dropped in plan.dropped:
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
     # Keyed on the backend rather than on the shares: a weighted policy whose whole
@@ -376,9 +510,7 @@ def routing_explain(
     if plan.guardrails:
         click.echo("  guardrails (always enforced):")
         for guardrail in plan.guardrails:
-            click.echo(
-                f"    {guardrail.profile}  mode={guardrail.mode}  on_unavailable={guardrail.on_unavailable}"
-            )
+            click.echo(f"    {guardrail.profile}  mode={guardrail.mode}  on_unavailable={guardrail.on_unavailable}")
     if spec.is_dynamic:
         click.echo(
             "  note: this policy selects per request, so it has no single target or price. It works on "
@@ -569,7 +701,6 @@ def import_claude_code(
     click.echo(f"Imported {accepted} event(s); {duplicate} already present; {rejected} rejected.")
     if rejected:
         raise SystemExit(1)
-
 
 
 def main() -> None:
