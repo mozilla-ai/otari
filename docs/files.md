@@ -125,3 +125,100 @@ Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markit
 (Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
 libraries since Otari is a network service. OCR is optional; install the
 `ocr` extra (`pip install gateway[ocr]`) to enable it.
+
+## Hybrid Anthropic Files (opt-in)
+
+Hybrid gateways can forward the Anthropic GA Files API through any-llm while
+keeping bytes at Anthropic. Enable `files_provider_native_enabled` only after the
+control plane contributes the Files protocol and the deployed any-llm version
+contains its Files interface. The initial implementation targets any-llm 1.28.
+The gateway returns a fixed 502 if that interface or the control-plane protocol
+is unavailable. The default remains disabled.
+
+Use the official Anthropic SDK's GA `files` resource, not `beta.files`:
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    auth_token="YOUR_OTARI_WORKSPACE_API_KEY",
+    base_url="https://gateway.example/api/",
+)
+with open("input.csv", "rb") as source:
+    uploaded = client.files.upload(file=("input.csv", source, "text/csv"))
+
+message = client.messages.create(
+    model="anthropic:YOUR_AUTHORIZED_CLAUDE_MODEL",
+    max_tokens=1024,
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "container_upload", "file_id": uploaded.id},
+            {"type": "text", "text": "Analyze this CSV."},
+        ],
+    }],
+    tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+)
+client.files.delete(uploaded.id)
+```
+
+The SDK appends `/v1/files`, so the direct deployment base URL ends in `/api/`.
+Files requests require `anthropic-version`, which the SDK supplies. Every Files
+verb rejects the legacy `files-api-2025-04-14` beta. Listings use `page`, `limit`,
+and `ids[]`, with `data` and `next_page` responses. `ids[]` cannot be combined
+with pagination. Legacy `after_id`, `before_id`, and `order` are rejected.
+
+Files belong to the API key's uploader and workspace. Sharing a workspace does
+not grant another user access. Listings come from those scoped bindings, never
+from an account-wide Anthropic listing. Unknown, foreign, expired, and deleted
+IDs are indistinguishable. Uploaded inputs are not downloadable when Anthropic
+marks them `downloadable: false`; eligible generated outputs can be downloaded
+with `client.files.download(file_id)`.
+
+Every structured reference in Messages history is checked before dispatch.
+The authorized model plan must include the binding's exact Anthropic account
+generation. File-bearing requests have no account or provider fallback. Chat
+Completions and Responses reject provider file references; use Messages.
+Managed credentials still reject caller-selected container reuse.
+
+### Limits and cleanup
+
+| Setting | Default / requirement |
+| --- | --- |
+| `files_max_bytes` | 512 MiB per file |
+| `files_transfer_timeout_seconds` | 300 seconds, covering receipt and upload |
+| `files_idle_timeout_seconds` | 30 seconds |
+| `files_rate_limit_rpm` | 60 operations per uploader/workspace, enforced in the control plane |
+| `files_retention_hours` | Hybrid default 168; provider range 1–2160 hours |
+| `files_max_count`, `files_max_outstanding_bytes` | Explicit positive control-plane quotas required |
+| `files_temporary_capacity_bytes` | 2 GiB shared admission ceiling across local workers |
+| `files_operation_timeout_seconds` | 600 seconds |
+| `files_diagnostic_retention_days` | 30 days for unbound operation diagnostics |
+
+Uploads spool to private, request-scoped temporary files. Multipart receipt
+finishes before provider upload starts. The initial spool admission mechanism
+requires a POSIX filesystem and coordinates workers under the same operating
+system user. Use an ephemeral, quota-limited temporary volume; reservations are
+reclaimed after process termination, and rolled-over file buffers are unlinked
+temporary files. No durable gateway file store is used.
+
+Deletion revokes local access before contacting Anthropic. Failed deletions stay
+in a durable cleanup queue. Gateways claim fenced, five-minute leases of up to
+20 files; failures back off from one minute to six hours. Replacing, removing,
+or restoring a retired credential waits for required cleanup. Workspace-key
+disabling and user/workspace deletion also revoke affected bindings.
+
+An upload or generated ID is withheld until its binding commits. Uploads are
+never retried after an uncertain provider outcome. A crash or lost response can
+leave an inaccessible upstream orphan. Uploaded bytes receive finite provider
+retention. Generated outputs have **no guaranteed provider retention** unless
+Anthropic reports it; local expiry alone cannot delete an unknown upstream ID.
+
+### Release verification
+
+The core contract has been exercised with the merged any-llm Files implementation
+at `2524c196c4c8cbeb8698a9e0b6f90d73aa659a9d` and Anthropic Python SDK 0.125.0.
+The published any-llm 1.28 dependency pin and lockfile update remain a release
+gate. Before hosted enablement, verify the composed hosted adapter, generated
+output expiry, and the Octonous workflow without managed container reuse.
+The canonical server contract is in [Hybrid mode protocol](hybrid-mode-protocol.md#provider-native-files).

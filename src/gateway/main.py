@@ -61,6 +61,7 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+from gateway.services.provider_files.executor import run_provider_file_cleanup
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
@@ -432,6 +433,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
+            if config.files_provider_native_enabled:
+                feature_workers.append(
+                    (asyncio.create_task(run_provider_file_cleanup(config)), "provider file cleanup")
+                )
         else:
             init_db(config)
             async with create_session() as session:
@@ -508,9 +513,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             app.state.log_writer = log_writer
             yield
         finally:
-            await _stop_refreshers(
-                [(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers
-            )
+            await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
             for _task, worker in workers:
                 if worker.reset is not None:
                     worker.reset()

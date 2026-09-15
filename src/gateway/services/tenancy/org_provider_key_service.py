@@ -77,6 +77,8 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
     resolve_active_key,
 )
+from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
+from gateway.services.provider_files.accounts import retire_byo_account
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -496,6 +498,9 @@ class OrgProviderKeyService:
             update_data["encrypted_api_key"] = encrypted_api_key
             update_data["last4"] = last4
 
+        if {"encrypted_api_key", "api_base", "client_args"} & update_data.keys():
+            await retire_byo_account(self.db, key, release_secret=True)
+
         try:
             updated = await self.keys.update_key(key, update_data)
             await self.db.commit()
@@ -520,6 +525,7 @@ class OrgProviderKeyService:
         if key is None:
             raise OrgProviderKeyNotFoundError(key_id)
 
+        await retire_byo_account(self.db, key, release_secret=False)
         updated = await self.keys.update_key(key, {"archived_at": datetime.now(UTC), "is_org_default": False})
         await self.db.commit()
         await refresh_org_provider_cache(self.db)
@@ -534,6 +540,7 @@ class OrgProviderKeyService:
         if key is None:
             raise OrgProviderKeyNotFoundError(key_id)
 
+        await retire_byo_account(self.db, key, release_secret=True)
         updated = await self.keys.update_key(key, {"archived_at": None})
         await self.db.commit()
         await refresh_org_provider_cache(self.db)
@@ -553,6 +560,7 @@ class OrgProviderKeyService:
         if key.archived_at is None:
             raise OrgProviderKeyNotArchivedError(key_id)
 
+        await retire_byo_account(self.db, key, release_secret=True)
         await self.keys.delete_key(key)
         await self.db.commit()
         await refresh_org_provider_cache(self.db)
@@ -665,6 +673,7 @@ class OrgProviderKeyService:
         # spans the variable set of override rows a "pin" can land in (unlike
         # `set_org_default`, which is a single row the partial unique index
         # already arbitrates).
+        await ProviderFileRepository(self.db).lock_organization(workspace.organization_id)
         await WorkspaceRepository(self.db).lock(workspace.id)
 
         existing = await self.overrides.get(workspace_id=workspace.id, org_provider_key_id=key.id)
@@ -707,6 +716,16 @@ class OrgProviderKeyService:
             result_default, result_disabled = created.is_default, created.disabled
 
         if new_disabled and not current_disabled:
+            files = ProviderFileRepository(self.db)
+            generation = await files.latest_account("organization_key", str(key.id), workspace.organization_id)
+            if generation is not None:
+                await files.revoke(
+                    datetime.now(UTC),
+                    "workspace_credential_disabled",
+                    organization_id=workspace.organization_id,
+                    workspace_id=workspace.id,
+                    generation_id=generation.id,
+                )
             await self.restrictions.delete_for_workspace_key(workspace_id=workspace.id, org_provider_key_id=key.id)
 
         await self.db.commit()

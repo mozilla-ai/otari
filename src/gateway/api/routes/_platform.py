@@ -134,6 +134,7 @@ _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_final_attemp
 class ResolvedAttempt(BaseModel):
     """A single resolution attempt returned by the platform."""
 
+    provider_account_generation_id: str | None = None
     attempt_id: str
     position: int
     provider: str
@@ -294,6 +295,7 @@ async def run_platform_attempts(
     report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None, bool], None],
     on_success: Callable[[ResolvedAttempt], None],
     max_tool_iterations: int,
+    build_kwargs: Callable[[ResolvedAttempt, dict[str, Any]], dict[str, Any]] = default_attempt_kwargs,
 ) -> T:
     """Iterate ``attempts``, returning the first one that succeeds.
 
@@ -345,7 +347,7 @@ async def run_platform_attempts(
     last_exc: BaseException | None = None
 
     for index, attempt in enumerate(attempts):
-        completion_kwargs = default_attempt_kwargs(attempt, base_request_fields)
+        completion_kwargs = build_kwargs(attempt, base_request_fields)
         is_last_planned_attempt = index == len(attempts) - 1
 
         # Per-attempt lock-in flag. Flipped the moment the upstream returns
@@ -658,6 +660,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
                 api_key=str(att["api_key"]),
                 managed=bool(att.get("managed", False)),
                 extra_params=att.get("extra_params"),
+                provider_account_generation_id=att.get("provider_account_generation_id"),
             )
             for att in attempts_payload
         ]
@@ -693,6 +696,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
                 api_key=str(payload["api_key"]),
                 managed=bool(payload.get("managed", False)),
                 extra_params=payload.get("extra_params"),
+                provider_account_generation_id=payload.get("provider_account_generation_id"),
             )
         ],
     )
