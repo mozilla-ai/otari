@@ -77,12 +77,6 @@ INLINE_COST_SETTLEMENTS = Counter(
     registry=REGISTRY,
 )
 
-RATE_LIMIT_HITS = Counter(
-    "gateway_rate_limit_hits",
-    "Total number of rate limit hits",
-    registry=REGISTRY,
-)
-
 BUDGET_EXCEEDED = Counter(
     "gateway_budget_exceeded",
     "Total number of budget exceeded events",
@@ -232,11 +226,6 @@ def record_abandoned_attempt(provider: str, model: str, reason: str, position: i
 def record_inline_cost_settlement(outcome: str) -> None:
     """Record an attached, unattached, or timed-out inline settlement."""
     INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
-
-
-def record_rate_limit_hit() -> None:
-    """Record a rate limit hit."""
-    RATE_LIMIT_HITS.inc()
 
 
 def record_budget_exceeded() -> None:

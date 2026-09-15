@@ -18,7 +18,6 @@ from gateway.metrics import (
     record_budget_exceeded,
     record_cost,
     record_inline_cost_settlement,
-    record_rate_limit_hit,
     record_tokens,
 )
 
@@ -70,14 +69,6 @@ def test_record_inline_cost_settlement_increments_counter(outcome: str) -> None:
     record_inline_cost_settlement(outcome)
 
     assert _sample("gateway_inline_cost_settlements_total", labels) - before == 1.0
-
-
-def test_record_rate_limit_hit_increments_counter() -> None:
-    before = _sample("gateway_rate_limit_hits_total")
-
-    record_rate_limit_hit()
-
-    assert _sample("gateway_rate_limit_hits_total") - before == 1.0
 
 
 def test_record_budget_exceeded_increments_counter() -> None:
@@ -329,22 +320,6 @@ def test_active_requests_returns_to_zero() -> None:
     client.get("/ok")
 
     assert _sample("gateway_active_requests") == before
-
-
-def test_rate_limiter_records_metric_on_429() -> None:
-    """RateLimiter.check() records a metric before raising 429."""
-    from gateway.rate_limit import RateLimiter
-
-    limiter = RateLimiter(rpm=1)
-    limiter.check("metric-rl-user")
-
-    before = _sample("gateway_rate_limit_hits_total")
-
-    with pytest.raises(HTTPException) as exc_info:
-        limiter.check("metric-rl-user")
-
-    assert exc_info.value.status_code == 429
-    assert _sample("gateway_rate_limit_hits_total") - before == 1.0
 
 
 @pytest.mark.skipif(not os.path.exists("/proc/stat"), reason="ProcessCollector needs /proc")
