@@ -1,10 +1,8 @@
 import logging
-import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 import uvicorn
@@ -13,6 +11,10 @@ from uvicorn.config import logger
 from gateway.core.config import API_ROOT, load_config
 from gateway.log_config import setup_logger
 from gateway.main import create_app
+
+if TYPE_CHECKING:
+    from gateway.container import MigrationContribution
+    from gateway.core.config import GatewayConfig
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
     "DEBUG": logging.DEBUG,
@@ -34,8 +36,7 @@ def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | No
         return int(normalized)
     choices = ", ".join(_LOG_LEVEL_NAMES)
     raise click.BadParameter(
-        f"{value!r} is not a valid log level. Choose one of {choices} (case-insensitive) "
-        "or a numeric level such as 20."
+        f"{value!r} is not a valid log level. Choose one of {choices} (case-insensitive) or a numeric level such as 20."
     )
 
 
@@ -154,11 +155,30 @@ def serve(
         sys.exit(0)
 
 
+def _contributed_chains(gateway_config: "GatewayConfig") -> tuple["MigrationContribution", ...]:
+    """The Alembic chains the configured bootstrap contributes.
+
+    A selector that cannot load is the operator's typo, not a bug, so it is
+    reported as a message and not as a traceback out of ``build_container``.
+    """
+    from gateway.container import BootstrapError, build_container
+
+    try:
+        return build_container(gateway_config.bootstrap).migration_contributions()
+    except BootstrapError as error:
+        click.echo(f"Could not load the configured bootstrap: {error}", err=True)
+        sys.exit(1)
+
+
 @cli.command()
 @click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 def init_db(config: str | None, database_url: str | None) -> None:
-    """Initialize the database schema."""
+    """Initialize the database schema.
+
+    Runs nothing unless ``auto_migrate`` is on; ``otari migrate`` is the
+    command for a deployment that migrates out of band.
+    """
     from gateway.db import init_db as db_init
 
     gateway_config = load_config(config)
@@ -168,7 +188,10 @@ def init_db(config: str | None, database_url: str | None) -> None:
 
     click.echo(f"Initializing database: {gateway_config.database_url}")
 
-    db_init(gateway_config)
+    # From the container, so a bootstrap's chains are part of the schema this
+    # creates, exactly as they are at boot. Built here rather than passed in
+    # because the CLI has no app to take one from.
+    db_init(gateway_config, migration_contributions=_contributed_chains(gateway_config))
 
     click.echo("Database initialized successfully!")
 
@@ -178,7 +201,15 @@ def init_db(config: str | None, database_url: str | None) -> None:
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 @click.option("--revision", default="head", help="Target revision (default: head)")
 def migrate(config: str | None, database_url: str | None, revision: str) -> None:
-    """Run database migrations using Alembic."""
+    """Run database migrations using Alembic.
+
+    Otari's own chain, then any chain the configured bootstrap contributes, the
+    same two steps a boot with ``auto_migrate`` on takes. This is the path a
+    deployment with ``auto_migrate`` off has, so it has to reach a plugin's
+    tables as well: no other command creates them.
+    """
+    from gateway.core.database import run_migrations
+
     gateway_config = load_config(config)
 
     if database_url:
@@ -188,30 +219,29 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
         click.echo(f"Invalid revision format: {revision}", err=True)
         sys.exit(1)
 
-    alembic_path = shutil.which("alembic")
-    if not alembic_path:
-        click.echo("alembic command not found in PATH", err=True)
-        sys.exit(1)
+    contributions = _contributed_chains(gateway_config)
+    # ``heads`` names the same target as ``head`` here, since Otari's chain is
+    # single-headed and a script checks that it stays so.
+    if contributions and revision not in {"head", "heads"}:
+        # A target revision names one in Otari's chain, which a contributed
+        # history knows nothing about. Pinning core is a deliberate act, so the
+        # plugin chains are left where they are rather than taken to their own
+        # head beside an older core.
+        names = ", ".join(contribution.name for contribution in contributions)
+        click.echo(f"Target revision is not head; leaving the contributed chains alone ({names})")
+        contributions = ()
 
     click.echo(f"Running migrations on: {gateway_config.database_url}")
     click.echo(f"Target revision: {revision}")
-
-    env = os.environ.copy()
-    env["OTARI_DATABASE_URL"] = gateway_config.database_url
+    for contribution in contributions:
+        click.echo(f"Including contributed chain: {contribution.name} ({contribution.version_table})")
 
     try:
-        result = subprocess.run(  # noqa: S603 validated up a few lines
-            [alembic_path, "upgrade", revision],
-            env=env,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        click.echo(result.stdout)
-        click.echo("Migrations completed successfully!")
-    except subprocess.CalledProcessError as e:
-        click.echo(f"Migration failed: {e.stderr}", err=True)
+        run_migrations(gateway_config.database_url, contributions, revision=revision)
+    except Exception as error:  # noqa: BLE001 alembic raises whatever the chain raised
+        click.echo(f"Migration failed: {error}", err=True)
         sys.exit(1)
+    click.echo("Migrations completed successfully!")
 
 
 @cli.command(name="gen-secret-key")
@@ -302,8 +332,10 @@ def routing_explain(
     if policy_name is None:
         click.echo("Configured policies:")
         for name, listed in cfg.routing.policies.items():
-            shape = f"router:{listed.router_backend}" if listed.router_backend else (
-                "dynamic" if listed.is_dynamic else "static"
+            shape = (
+                f"router:{listed.router_backend}"
+                if listed.router_backend
+                else ("dynamic" if listed.is_dynamic else "static")
             )
             candidates = len(listed.router_candidates) or 1
             click.echo(f"  {name}  ({shape}, {candidates + len(listed.on_failure)} candidate(s))")
@@ -342,12 +374,8 @@ def routing_explain(
     click.echo(f"{policy_name}: {len(plan.attempts)} candidate(s), selected by {plan.selection_reason}")
     for attempt in plan.attempts:
         canonical = f"{attempt.instance}:{attempt.model}"
-        label = (
-            f"weighted {shares[canonical]:.0f}%" if canonical in shares else attempt.selection_reason
-        )
-        click.echo(
-            f"  {attempt.position}. {canonical}    [{label}]  dispatches as {attempt.dispatch_model}"
-        )
+        label = f"weighted {shares[canonical]:.0f}%" if canonical in shares else attempt.selection_reason
+        click.echo(f"  {attempt.position}. {canonical}    [{label}]  dispatches as {attempt.dispatch_model}")
     for dropped in plan.dropped:
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
     # Keyed on the backend rather than on the shares: a weighted policy whose whole
@@ -376,9 +404,7 @@ def routing_explain(
     if plan.guardrails:
         click.echo("  guardrails (always enforced):")
         for guardrail in plan.guardrails:
-            click.echo(
-                f"    {guardrail.profile}  mode={guardrail.mode}  on_unavailable={guardrail.on_unavailable}"
-            )
+            click.echo(f"    {guardrail.profile}  mode={guardrail.mode}  on_unavailable={guardrail.on_unavailable}")
     if spec.is_dynamic:
         click.echo(
             "  note: this policy selects per request, so it has no single target or price. It works on "
@@ -569,7 +595,6 @@ def import_claude_code(
     click.echo(f"Imported {accepted} event(s); {duplicate} already present; {rejected} rejected.")
     if rejected:
         raise SystemExit(1)
-
 
 
 def main() -> None:

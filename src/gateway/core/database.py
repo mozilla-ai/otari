@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from alembic import command
 from alembic.config import Config
@@ -19,6 +19,9 @@ from sqlalchemy.pool import NullPool
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+
+if TYPE_CHECKING:
+    from gateway.container import MigrationContribution
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
@@ -82,13 +85,70 @@ def to_sync_url(database_url: str) -> str:
     return url.set(drivername=sync_drivername).render_as_string(hide_password=False)
 
 
-def _run_migrations(database_url: str) -> None:
+def escape_ini_value(value: str) -> str:
+    """Escape a value bound for ``Config.set_main_option``.
+
+    Alembic stores a main option in a configparser whose interpolation reads a
+    percent sign as the start of a token, so a URL carrying a percent-encoded
+    password (``p%40ss``) raises ``ValueError`` as it is written. Doubling the
+    sign stores it literally; the read back through interpolation returns the
+    original.
+    """
+    return value.replace("%", "%%")
+
+
+def _alembic_config(script_location: str, database_url: str) -> Config:
+    # Alembic builds a synchronous engine, so the async form an operator may
+    # configure (the README's own sqlite+aiosqlite:///, or postgresql+asyncpg://)
+    # is converted here, once, for every chain. Otari's env.py also converts what
+    # it reads, and the conversion is idempotent; a contributed env.py has no
+    # reason to know it must, and one that did not died in connect().
+    database_url = to_sync_url(database_url)
     alembic_cfg = Config()
-    alembic_dir = Path(__file__).resolve().parents[3] / "alembic"
-    alembic_cfg.set_main_option("script_location", str(alembic_dir))
-    alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+    alembic_cfg.set_main_option("script_location", escape_ini_value(script_location))
+    alembic_cfg.set_main_option("sqlalchemy.url", escape_ini_value(database_url))
+    # The same URL on two channels. Otari's own env.py reads the main option,
+    # which is why that write is escaped; a contributed chain is expected to
+    # prefer the attribute, which is stored unescaped and so needs no
+    # interpolation to read back.
+    alembic_cfg.attributes["database_url"] = database_url
     alembic_cfg.attributes["configure_logger"] = False
-    command.upgrade(alembic_cfg, "head")
+    return alembic_cfg
+
+
+def run_migrations(
+    database_url: str,
+    contributions: Iterable[MigrationContribution] = (),
+    *,
+    revision: str = "head",
+) -> None:
+    """Upgrade Otari's own chain to ``revision``, then each contributed chain to head.
+
+    Public because ``otari migrate`` runs it too. The out-of-band path and the
+    boot path being one function is the point: a deployment on
+    ``auto_migrate=false`` is the one that most needs a plugin's tables to
+    appear, and two implementations would drift there first.
+
+    ``revision`` names a revision in Otari's own chain. A contributed chain has
+    a history of its own and is always taken to its head, so a caller pinning
+    core to an older revision passes no contributions.
+
+    Every chain runs against the same URL, in its synchronous form, on the two
+    channels ``docs/configuration.md`` documents. Otari's own ``env.py`` stays
+    on Alembic's default version table and a contribution stamps the one it
+    declared, so the histories never share a row.
+    """
+    alembic_dir = Path(__file__).resolve().parents[3] / "alembic"
+    command.upgrade(_alembic_config(str(alembic_dir), database_url), revision)
+    for contribution in contributions:
+        logger.info(
+            "Running contributed migration chain %s (version table %s)",
+            contribution.name,
+            contribution.version_table,
+        )
+        alembic_cfg = _alembic_config(contribution.script_location, database_url)
+        alembic_cfg.attributes["version_table"] = contribution.version_table
+        command.upgrade(alembic_cfg, "head")
 
 
 def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
@@ -250,8 +310,17 @@ def engine_kwargs(
     return kwargs
 
 
-def init_db(config: GatewayConfig) -> None:
-    """Initialize async database engine and optionally run migrations."""
+def init_db(config: GatewayConfig, *, migration_contributions: Iterable[MigrationContribution] = ()) -> None:
+    """Initialize async database engine and optionally run migrations.
+
+    With ``auto_migrate`` on, Otari's own chain runs first and then each of
+    ``migration_contributions`` (recorded on the container by a bootstrap, see
+    ``gateway.container.MigrationContribution``). ``otari migrate`` and
+    ``otari init-db`` run the same chains, from the same container.
+
+    The channels a contributed ``env.py`` reads, and what it owes in return,
+    are documented in ``docs/configuration.md``.
+    """
 
     global _engine, _SessionLocal, _log_engine, _LogSessionLocal  # noqa: PLW0603
 
@@ -300,7 +369,7 @@ def init_db(config: GatewayConfig) -> None:
         _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
 
     if config.auto_migrate:
-        _run_migrations(database_url)
+        run_migrations(database_url, migration_contributions)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

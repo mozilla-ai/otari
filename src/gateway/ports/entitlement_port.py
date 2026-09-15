@@ -9,9 +9,10 @@ The core adapter grants the base build's capability set and reports every
 overlay-only capability as absent; an overlay binds a real resolver behind the
 same port. The dashboard resolves the same axis in the browser, from
 ``BASE_CAPABILITIES`` in ``web/src/shared/hooks/useEntitlements.tsx``, and the
-two answers are meant to agree: hiding a link is not authorization, so a router
-an overlay contributes is gated on this port server-side as well
-(``gateway.api.deps.require_capability``).
+two answers are meant to agree: hiding a link is not authorization, so a
+contributed router that names a capability is gated on this port server-side as
+well (``gateway.api.deps.require_capability``). A contribution may name no
+capability, and then it sits on no licensing axis and this port never sees it.
 """
 
 from typing import Protocol

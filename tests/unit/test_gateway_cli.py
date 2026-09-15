@@ -1,6 +1,8 @@
 import logging
 import sys
+from collections.abc import Generator
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import uvicorn
@@ -116,3 +118,136 @@ def test_gen_secret_key_prints_a_usable_fernet_key() -> None:
     # Round-trips through Fernet, so it is a valid key the secret box can use.
     box = Fernet(key.encode())
     assert box.decrypt(box.encrypt(b"x")) == b"x"
+
+
+# -- the out-of-band migration path ---------------------------------------------
+#
+# ``auto_migrate=false`` is the posture that most needs these commands: it is
+# the deployment whose tables no boot will create. A bootstrap's chains have to
+# come through here too, or a plugin's tables exist only where DDL at boot is
+# allowed.
+
+
+@dataclass
+class MigrationCapture:
+    """What the CLI asked the shared chain runner to do."""
+
+    database_url: str | None = None
+    revision: str | None = None
+    chains: tuple[str, ...] = ()
+    init_chains: tuple[str, ...] = ()
+
+
+@pytest.fixture
+def migration_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[MigrationCapture]:
+    """A bootstrap contributing one chain, with the runner and ``init_db`` stubbed.
+
+    The chains are real ``MigrationContribution``s off a real container, since
+    it is the CLI's reading of the container that is under test; only the part
+    that would touch a database is replaced.
+    """
+    import gateway.core.database as database_module
+    import gateway.db as db_module
+
+    captured = MigrationCapture()
+
+    (tmp_path / "chain_bootstrap.py").write_text(
+        "from gateway.container import MigrationContribution\n\n\n"
+        "def register(container):\n"
+        "    container.contribute_migrations(\n"
+        "        MigrationContribution(name='demo', script_location='/tmp/demo', version_table='demo_version')\n"
+        "    )\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("chain_bootstrap", None)
+
+    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
+        return GatewayConfig(master_key="test-master-key", bootstrap="chain_bootstrap:register")
+
+    def fake_run_migrations(
+        database_url: str,
+        contributions: object = (),
+        *,
+        revision: str = "head",
+    ) -> None:
+        captured.database_url = database_url
+        captured.revision = revision
+        captured.chains = tuple(c.name for c in contributions)  # type: ignore[attr-defined]
+
+    def fake_init_db(config: GatewayConfig, *, migration_contributions: object = ()) -> None:
+        captured.init_chains = tuple(c.name for c in migration_contributions)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
+    monkeypatch.setattr(database_module, "run_migrations", fake_run_migrations)
+    monkeypatch.setattr(db_module, "init_db", fake_init_db)
+    yield captured
+    sys.modules.pop("chain_bootstrap", None)
+
+
+def test_migrate_runs_the_contributed_chains_too(migration_stubs: MigrationCapture) -> None:
+    result = CliRunner().invoke(gateway_cli.cli, ["migrate"])
+
+    assert result.exit_code == 0, result.output
+    assert migration_stubs.revision == "head"
+    assert migration_stubs.chains == ("demo",)
+    assert "demo" in result.output
+
+
+def test_migrate_to_a_pinned_revision_leaves_the_contributed_chains_alone(
+    migration_stubs: MigrationCapture,
+) -> None:
+    """A revision names one in Otari's chain; a contributed history knows nothing about it."""
+    result = CliRunner().invoke(gateway_cli.cli, ["migrate", "--revision", "abc123"])
+
+    assert result.exit_code == 0, result.output
+    assert migration_stubs.revision == "abc123"
+    assert migration_stubs.chains == ()
+    assert "leaving the contributed chains alone" in result.output
+
+
+def test_migrate_to_heads_still_runs_the_contributed_chains(migration_stubs: MigrationCapture) -> None:
+    """``heads`` names the same target as ``head``: Otari's chain is single-headed."""
+    result = CliRunner().invoke(gateway_cli.cli, ["migrate", "--revision", "heads"])
+
+    assert result.exit_code == 0, result.output
+    assert migration_stubs.chains == ("demo",)
+
+
+def test_migrate_reports_a_bad_bootstrap_selector_instead_of_a_traceback(
+    migration_stubs: MigrationCapture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A selector that cannot load is the operator's typo, not a bug."""
+    monkeypatch.setattr(
+        gateway_cli,
+        "load_config",
+        lambda config_path=None: GatewayConfig(master_key="k", bootstrap="no_such_module:register"),
+    )
+
+    result = CliRunner().invoke(gateway_cli.cli, ["migrate"])
+
+    assert result.exit_code == 1
+    assert "Could not load the configured bootstrap" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_migrate_reports_a_failed_chain_instead_of_a_traceback(
+    migration_stubs: MigrationCapture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import gateway.core.database as database_module
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("revision d5b7f9a1c3e6 is not present")
+
+    monkeypatch.setattr(database_module, "run_migrations", explode)
+
+    result = CliRunner().invoke(gateway_cli.cli, ["migrate"])
+
+    assert result.exit_code == 1
+    assert "Migration failed: revision d5b7f9a1c3e6 is not present" in result.output
+
+
+def test_init_db_creates_the_contributed_chains_tables_too(migration_stubs: MigrationCapture) -> None:
+    result = CliRunner().invoke(gateway_cli.cli, ["init-db"])
+
+    assert result.exit_code == 0, result.output
+    assert migration_stubs.init_chains == ("demo",)

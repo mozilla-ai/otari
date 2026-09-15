@@ -9,7 +9,7 @@ from alembic.util import CommandError
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Engine
 
-from gateway.core.database import to_sync_url
+from gateway.core.database import escape_ini_value, to_sync_url
 
 # Importing anything from gateway.models registers every model module on this
 # metadata (see gateway/models/__init__.py), which is what makes the comparison
@@ -57,7 +57,7 @@ if not database_url:
 # `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`
 # reading OTARI_DATABASE_URL. Migrations run on a sync engine, so an async URL
 # (the form README documents for SQLite) would otherwise fail with MissingGreenlet.
-config.set_main_option("sqlalchemy.url", to_sync_url(database_url))
+config.set_main_option("sqlalchemy.url", escape_ini_value(to_sync_url(database_url)))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

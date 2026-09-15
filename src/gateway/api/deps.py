@@ -626,7 +626,8 @@ TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_
 def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable[None]]:
     """Build a dependency that refuses a request unless the deployment is entitled.
 
-    The gate every contributed router is mounted behind. A refusal carries the
+    The gate a contributed router that names a capability is mounted behind; a
+    contribution naming none is mounted without it. A refusal carries the
     same status and body as a request for a path nothing serves (404 with the
     framework's wording), so the response alone does not reveal whether the
     surface exists. The surface itself stays mounted: it appears in the OpenAPI
