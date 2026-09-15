@@ -160,6 +160,14 @@ instead submits `git status --porcelain`'s output, which does cover
 shell-written changes (anything a `Bash` call touched), at the cost of only
 catching them after the fact rather than preventing them.
 
+`otari hook` runs `git status` itself on a `Stop` event because Claude
+Code's own Stop payload names no files: unlike `PreToolUse`, where
+`tool_input` already hands you a target, there is nothing to check on
+`Stop` unless something goes and finds out what changed. This is specific
+to `changed_path`; a future gate type (`command_match`, `check_passed`)
+collects whatever evidence it needs in its own way, not through this same
+Git-status step.
+
 1. Add a `PreToolUse` hook to `.claude/settings.local.json` (personal,
    usually gitignored by a global `~/.config/git/ignore`, so it never lands
    in a PR) or `.claude/settings.json` (project-wide, committed). The

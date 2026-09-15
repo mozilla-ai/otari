@@ -240,6 +240,18 @@ def _hook_find_repo_root(start: Path) -> Path | None:
 
 
 def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
+    """Evidence for a `changed_path` gate on a Stop event: what Git sees changed.
+
+    Claude Code's Stop payload carries no file list of its own (unlike
+    PreToolUse, whose tool_input already names a target), so a Stop-time
+    changed_path check has nothing to evaluate unless something goes and
+    finds out what changed. Git status is that something: harness-agnostic
+    (the same command regardless of which tool wrote the change, unlike
+    parsing Claude Code's own transcript format) and ground truth for the
+    working tree, including a change a `Bash` call made that no tool_input
+    ever named. Specific to changed_path: a future gate type collects its
+    own evidence in its own way, not through this function.
+    """
     result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
         ["git", "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=repo_root,
