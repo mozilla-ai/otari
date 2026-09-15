@@ -164,8 +164,9 @@ attempt fails silently rather than erroring: `POST /pulls/<n>/requested_reviewer
 poll for its review waits out the timeout on a bot that was never coming.
 
 - **Team.** `gh pr edit <n> --add-reviewer mozilla-ai/otari-team`. CODEOWNERS auto-requests that
-  team only on the open-core guardrail paths (`ARCHITECTURE.md`, `scripts/check_architecture.py`,
-  `.github/CODEOWNERS`), so every other PR needs the request made explicitly.
+  team only on the open-core guardrail paths it lists (`.github/CODEOWNERS`), so every other PR
+  needs the request made explicitly. Once the `main` ruleset requires code-owner review, a PR
+  touching one of those paths cannot merge on an approval from anyone else.
 
 ## Handling the review
 
