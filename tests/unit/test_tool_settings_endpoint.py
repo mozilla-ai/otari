@@ -6,7 +6,6 @@ from typing import Any
 
 import httpx
 import pytest
-from any_guardrail.base import GuardrailName
 from fastapi.testclient import TestClient
 
 from gateway.api.routes import tool_settings
@@ -303,7 +302,12 @@ def test_guardrail_catalog_lists_what_this_gateway_can_run(tmp_path: Path) -> No
 
     assert resp.status_code == 200
     guardrails = resp.json()["guardrails"]
-    assert len(guardrails) == len(GuardrailName)
+    listed = {row["guardrail_name"] for row in guardrails}
+    # What this gateway can run is what it can reach over a hosted API. A
+    # guardrail that would hold model weights here belongs in the service the
+    # profiles read beside this one describes.
+    assert {"lakera_guard", "susfactor"} <= listed
+    assert not listed & {"llama_guard", "injec_guard"}
     lakera = next(row for row in guardrails if row["guardrail_name"] == "lakera_guard")
     # The create stage is what makes this worth serving: it carries the API key.
     assert any(row["name"] == "api_key" and row["secret"] for row in lakera["create_parameters"])
@@ -323,9 +327,9 @@ def test_guardrail_catalog_requires_master_key(tmp_path: Path) -> None:
 def test_guardrail_catalog_is_an_operator_read(tmp_path: Path) -> None:
     """The reader router is what a member reaches, and this is not a member's to read.
 
-    It is the picker behind a write that stores a vendor key deployment-wide, and
-    ``runnable`` describes the host's installed packages. The profiles read beside
-    it stays on the reader, because a profile name is what a caller sends.
+    It is the picker behind a write that stores a vendor credential
+    deployment-wide. The profiles read beside it stays on the reader, because a
+    profile name is what a caller sends.
     """
     # Router paths, so without API_ROOT: the prefix is added where they mount.
     catalog = "/tool-settings/guardrails/catalog"
