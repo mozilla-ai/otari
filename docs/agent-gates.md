@@ -1,9 +1,11 @@
 # Agent Gates
 
-A gate is a repo-owned rule that checks what a coding agent (or you) actually
-did to the working tree, not what a transcript claims. Rules live in
-`.otari-gates.yml`, committed alongside the code they check, so they survive
-an agent swap and a clone the same way the rest of the repo does.
+A gate is a repo-owned rule that checks evidence a caller reports about what a
+coding agent (or you) did to the working tree, not what a transcript claims.
+Otari evaluates that caller-reported evidence; it does not read the caller's
+repository itself. Rules live in `.otari-gates.yml`, committed alongside the
+code they check, so they survive an agent swap and a clone the same way the
+rest of the repo does.
 
 This is core Otari, evaluated by `otari serve`'s Hook Server, not a separate
 package or plugin. It is not [Guardrails](guardrails.md), which checks
@@ -87,7 +89,7 @@ broader symlink/monorepo/rename semantics are not built yet.
 in the `Otari-Key` header. This identifies who sent the request, not whether
 its evidence is true.
 
-```
+```console
 $ python3 -c '
 import json, urllib.request
 body = json.dumps({
