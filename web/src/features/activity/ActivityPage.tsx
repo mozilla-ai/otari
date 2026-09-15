@@ -318,6 +318,7 @@ const TOOL_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
   { label: "Any tool", value: "any" },
   { label: "Web search", value: "web_search" },
+  { label: "Web fetch", value: "web_fetch" },
   { label: "Code execution", value: "code_execution" },
 ]
 
@@ -556,8 +557,8 @@ function formatToolUsage(usage: ToolUsage): string {
 // Cost attributable to gateway-run tools on this row, from the rate stored with the
 // row rather than the live price, so a historical row reads as it was billed.
 function toolCost(entry: UsageEntry): number | null {
-  const usages = toolUsage(entry).filter((usage) => usage.unitRate !== null)
-  if (!usages.length) return null
+  const usages = toolUsage(entry).filter((usage) => usage.billed > 0)
+  if (usages.some((usage) => usage.unitRate === null)) return null
   return usages.reduce(
     (sum, usage) => sum + usage.billed * (usage.unitRate ?? 0),
     0,

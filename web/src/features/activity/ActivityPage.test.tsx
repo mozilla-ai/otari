@@ -1,315 +1,21 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  InFlightRequest,
-  InFlightResponse,
-  OrganizationMember,
-  UsageEntry,
-} from "@/client"
+import type { InFlightRequest, InFlightResponse } from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
 import { API_ROOT } from "@/shared/api/client"
-import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
-import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationMember } from "@/tests/fixtures"
-import { withRouter } from "@/tests/router"
+import {
+  countCalls,
+  entry,
+  jsonResponse,
+  listCalls,
+  mockApi,
+  operatorContext,
+  renderPage,
+} from "@/tests/activity"
+import { organizationMember } from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
-
-function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
-  const row = {
-    id: "req-1",
-    user_id: "alice",
-    api_key_id: "key-1",
-    timestamp: new Date().toISOString(),
-    model: "gpt-4o",
-    provider: "openai",
-    endpoint: "/v1/chat/completions",
-    prompt_tokens: 1200,
-    completion_tokens: 300,
-    total_tokens: 1500,
-    cache_read_tokens: null,
-    cache_write_tokens: null,
-    cache_write_1h_tokens: null,
-    billing_meters: null,
-    pricing_breakdown: null,
-    cost: 0.0123,
-    status: "success",
-    error_message: null,
-    status_code: null,
-    latency_ms: 842,
-    source: "gateway",
-    source_label: null,
-    counts_toward_budget: true,
-    ...overrides,
-  }
-  return {
-    ...row,
-    // The server derives this (see `UsageEntry.bulk_editable`); mirrored here so a
-    // fixture cannot claim a shape the API would never send, which is what let these
-    // tests treat a budget-exempt gateway row as selectable. Override it explicitly
-    // to exercise a row whose provenance and budget flag disagree.
-    bulk_editable:
-      overrides.bulk_editable ??
-      (!row.counts_toward_budget && row.source !== "gateway"),
-  }
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  })
-}
-
-// The context the shell reads before it paints. The usage hooks wait on it to
-// learn whether this caller reads the deployment-wide routes or the
-// organization-scoped ones (otari#837), so a hand-rolled mock that does not
-// answer it renders a page that fetches nothing. `mockApi` has its own arm; the
-// four narrower mocks in this file use this.
-function operatorContext(): Response {
-  return jsonResponse({
-    organization_member_id: "om-1",
-    role: "owner",
-    status: "active",
-    organization: {
-      id: "org-1",
-      name: "Acme",
-      slug: "acme",
-      created_by_user_id: null,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    byo_provider_keys_allowed: true,
-    deployment_operator: true,
-    provider_key_encryption_available: true,
-    workspace_memberships: [],
-  })
-}
-
-interface FetchCall {
-  url: string
-  method: string
-  body: string | undefined
-}
-
-// Mock fetch for the usage list/count/summary reads plus the delete and
-// set-price mutations. Records every call so tests can assert URLs and bodies.
-function mockApi(
-  opts: {
-    rows?: UsageEntry[]
-    // A thunk when a test needs the count to move under a page that is already
-    // rendered, which is what the "N new" badge is derived from.
-    total?: number | (() => number)
-    groupRows?: UsageEntry[]
-    users?: string[]
-    inFlight?: InFlightResponse | (() => InFlightResponse)
-    /** The workspace the switcher is pointed at, if a test needs one. */
-    workspace?: string
-    /** False for the tenant who does not operate the deployment (otari#837). */
-    deploymentOperator?: boolean
-    /** The organization roster the User column names people from. */
-    members?: OrganizationMember[]
-  } = {},
-) {
-  const rows = opts.rows ?? []
-  const total = () => {
-    const t = opts.total ?? rows.length
-    return typeof t === "function" ? t() : t
-  }
-  const inFlight = () => {
-    const f = opts.inFlight ?? { requests: [], total: 0 }
-    return typeof f === "function" ? f() : f
-  }
-  const calls: FetchCall[] = []
-
-  const mock = vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(async (input, init) => {
-      const url = String(input)
-      const method = (init?.method ?? "GET").toUpperCase()
-      calls.push({
-        url,
-        method,
-        body: typeof init?.body === "string" ? init.body : undefined,
-      })
-
-      if (url.endsWith(`${API_ROOT}/usage`) && method === "DELETE") {
-        return jsonResponse({ deleted: 1 })
-      }
-      if (url.includes(`${API_ROOT}/usage/set-price`)) {
-        return jsonResponse({ matched: 1, updated: 1, unchanged: 0 })
-      }
-      // The read arms match the path's tail rather than the whole prefix, so one
-      // mock answers both /api/v1/usage/* and /api/v1/organizations/me/usage/*: which
-      // of the two the page asked for is what the assertions read off `calls`.
-      // The two write arms above stay deployment-wide, because they are.
-      if (url.includes("/usage/count")) {
-        return jsonResponse({ total: total() })
-      }
-      // Ahead of the bare usage arm below, which would otherwise answer this
-      // with the row array and hand the in-flight control the wrong shape.
-      if (url.includes("/usage/in-flight")) {
-        return jsonResponse(inFlight())
-      }
-      if (url.includes("/usage/summary")) {
-        const models = Array.from(new Set(rows.map((r) => r.model)))
-        return jsonResponse({
-          start_date: "",
-          end_date: "",
-          bucket: "day",
-          totals: {
-            cost: 0,
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            request_count: 0,
-            error_count: 0,
-            avg_latency_ms: null,
-          },
-          by_model: models.map((m) => ({
-            key: m,
-            cost: 0,
-            tokens: 0,
-            requests: 0,
-            is_other: false,
-          })),
-          // The user and key pickers read these breakdowns, not a full /v1/users
-          // or /v1/keys listing. Label-free so an option's name and a chip's label
-          // are the bare id, which keeps the filter assertions readable.
-          by_user: (opts.users ?? ["alice", "bob"]).map((u) => ({
-            key: u,
-            cost: 0,
-            tokens: 0,
-            requests: 0,
-            is_other: false,
-          })),
-          by_api_key: [],
-          by_source: Array.from(new Set(rows.map((r) => r.source))).map(
-            (s) => ({
-              key: s,
-              cost: 0,
-              tokens: 0,
-              requests: 0,
-              is_other: false,
-            }),
-          ),
-          series: [],
-        })
-      }
-      if (url.includes("/usage")) {
-        // The request-group lookup (repeatable request_group_id) is the same list
-        // endpoint, so it is served here: rows of the asked-for groups only, out of
-        // `groupRows` when a test needs siblings the page itself never listed.
-        const asked = new URL(url, "http://localhost").searchParams.getAll(
-          "request_group_id",
-        )
-        if (asked.length) {
-          const pool = opts.groupRows ?? rows
-          return jsonResponse(
-            pool.filter(
-              (r) => r.request_group_id && asked.includes(r.request_group_id),
-            ),
-          )
-        }
-        return jsonResponse(rows)
-      }
-      // The roster the User column names people from. Empty by default, which
-      // is the deployment nobody has invited anyone to: the rows then read the
-      // alias the log itself carries.
-      if (url.includes(`${API_ROOT}/organizations/me/members`)) {
-        const members = opts.members ?? []
-        return jsonResponse({ data: members, total: members.length })
-      }
-      // Seeds the switcher, and only when a test asks for it: the provider reads
-      // `workspace_memberships` off this one response rather than listing
-      // workspaces, so a test that leaves `workspace` unset renders the
-      // deployment-wide view the other cases here assume.
-      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-        return jsonResponse({
-          organization_member_id: "om-1",
-          role: "owner",
-          status: "active",
-          organization: {
-            id: "org-1",
-            name: "Acme",
-            slug: "acme",
-            created_by_user_id: null,
-            created_at: new Date().toISOString(),
-            updated_at: null,
-          },
-          byo_provider_keys_allowed: true,
-          // These suites are the operator's view of the page, which is what the
-          // deployment-wide routes below answer. The member's view reads
-          // /v1/organizations/me/usage instead and has its own cases.
-          deployment_operator: opts.deploymentOperator ?? true,
-          provider_key_encryption_available: true,
-          workspace_memberships: opts.workspace
-            ? [
-                {
-                  workspace_id: opts.workspace,
-                  workspace_name: "Production",
-                  role: "owner",
-                  status: "active",
-                },
-              ]
-            : [],
-        })
-      }
-      // The page no longer reads /v1/users or /v1/keys; both fall through to the
-      // empty default below, and a test asserting that is at the end of this file.
-      return jsonResponse([])
-    })
-
-  return { mock, calls }
-}
-
-function renderPage(ui: ReactElement, route = "/activity") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  // The log's User column asks the organization roster what to call each person,
-  // and that read is gated on the `organizations` surface, so the page needs the
-  // deployment context the shell always gives it.
-  return render(
-    <DeploymentProvider value={bootstrap()}>
-      <QueryClientProvider client={client}>
-        <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
-      </QueryClientProvider>
-    </DeploymentProvider>,
-    {
-      wrapper: withRouter({ url: route }),
-    },
-  )
-}
-
-// Only the list requests (not /count, /summary, /in-flight, or mutations) carry
-// the pagination + filter params.
-function listCalls(calls: FetchCall[]): string[] {
-  return calls
-    .filter(
-      (c) =>
-        c.method === "GET" &&
-        c.url.includes(`${API_ROOT}/usage`) &&
-        !c.url.includes("/count") &&
-        !c.url.includes("/summary") &&
-        !c.url.includes("/in-flight") &&
-        !c.url.includes("/set-price"),
-    )
-    .map((c) => c.url)
-}
-
-function countCalls(calls: FetchCall[]): string[] {
-  return calls
-    .filter(
-      (c) => c.method === "GET" && c.url.includes(`${API_ROOT}/usage/count`),
-    )
-    .map((c) => c.url)
-}
 
 describe("ActivityPage", () => {
   afterEach(() => {
@@ -1994,6 +1700,53 @@ describe("ActivityPage gateway-run tools", () => {
     expect(screen.getByText(/3 at \$0\.01 each, \$0\.03/)).toBeInTheDocument()
   })
 
+  it.each([
+    {
+      name: "failed Fetch only",
+      tools: { web_fetch: { billed: 0, errors: 1 } },
+      expectedCost: "$0.00",
+    },
+    {
+      name: "failed Fetch and priced Search",
+      tools: {
+        web_fetch: { billed: 0, errors: 1 },
+        web_search: { billed: 1, errors: 0, unit_rate: 0.01 },
+      },
+      expectedCost: "$0.01",
+    },
+  ])(
+    "shows the billed tool cost for $name",
+    async ({ tools, expectedCost }) => {
+      mockApi({ rows: [entry({ billing_meters: { tools } })] })
+      renderPage(<ActivityPage />)
+
+      await userEvent.click(await screen.findByText("gpt-4o"))
+      const costField = (await screen.findByText("Tool cost")).closest("div")!
+      expect(within(costField).getByText(expectedCost)).toBeInTheDocument()
+      expect(screen.getByText(/web fetch, 1 failed/)).toBeInTheDocument()
+      expect(screen.queryByText("unpriced")).not.toBeInTheDocument()
+    },
+  )
+
+  it("does not hide an unpriced successful tool beside a priced tool", async () => {
+    mockApi({
+      rows: [
+        entry({
+          billing_meters: {
+            tools: {
+              web_fetch: { billed: 1, errors: 0 },
+              web_search: { billed: 1, errors: 0, unit_rate: 0.01 },
+            },
+          },
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    await userEvent.click(await screen.findByText("gpt-4o"))
+    expect(await screen.findByText("unpriced")).toBeInTheDocument()
+  })
+
   it("labels an unpriced tool instead of reporting it as free", async () => {
     // A tool with no rate records units at cost 0. Rendering that as "$0.0000"
     // would read as "this is free" when it means "nobody set a price".
@@ -2009,31 +1762,6 @@ describe("ActivityPage gateway-run tools", () => {
     await userEvent.click(await screen.findByText("gpt-4o"))
     expect(await screen.findByText("Tool cost")).toBeInTheDocument()
     expect(screen.getByText("unpriced")).toBeInTheDocument()
-  })
-})
-
-describe("ActivityPage filter serialization", () => {
-  it("sends every active filter to the server, not just the chip", async () => {
-    // Regression: `tool` was added to the URL state, the chip, and the bulk-mutation
-    // body, but not to the query serializer every request shares. The page then
-    // looked filtered (chip, URL) while the list, the count, and the timeline all
-    // went out unfiltered, so the table showed rows that did not match.
-    const { calls } = mockApi({ rows: [entry()] })
-    renderPage(<ActivityPage />, "/activity?tool=web_search&range=24h")
-
-    await screen.findByText("gpt-4o")
-    const requested = calls.map((c) => c.url)
-    for (const path of [
-      `${API_ROOT}/usage?`,
-      `${API_ROOT}/usage/count`,
-      `${API_ROOT}/usage/summary`,
-    ]) {
-      const hit = requested.find((url) => url.includes(path))
-      expect(hit, `no request to ${path}`).toBeDefined()
-      expect(hit, `${path} dropped the tool filter`).toContain(
-        "tool=web_search",
-      )
-    }
   })
 })
 
