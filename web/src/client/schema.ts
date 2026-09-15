@@ -2296,9 +2296,11 @@ export interface paths {
          *
          *     Refused with a 409 when the period overlaps one already stored for that model,
          *     naming the period it collides with, rather than shadowing it. Refused with a
-         *     403 when the model is addressed through one of the deployment's own provider
-         *     instances: the deployment holds that credential and settles its upstream bill,
-         *     so its rate is the deployment price list's rather than a tenant's.
+         *     403 when the deployment, not the caller's organization, holds the credential
+         *     that serves the model, whether through one of its own provider instances or a
+         *     hosted credential the bound port supplies with no BYO key on file: either way
+         *     the deployment settles the upstream bill, so its rate is the deployment price
+         *     list's rather than a tenant's.
          *
          *     The key is normalized to its canonical ``instance:model`` form first, the same
          *     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
