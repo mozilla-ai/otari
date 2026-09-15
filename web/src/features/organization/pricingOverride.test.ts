@@ -262,6 +262,25 @@ describe("deploymentManagedPrefixes", () => {
   it("is empty while the catalog has not arrived", () => {
     expect(deploymentManagedPrefixes(undefined).size).toBe(0)
   })
+
+  // A pricing-only model is listed under the key it is stored as, so a row that
+  // predates key normalization reaches the catalog as `instance/model`. Filing
+  // the whole id as a prefix would leave the real one out of the set and offer a
+  // control the gateway refuses.
+  it("reads the prefix off a legacy slash-form catalog id", () => {
+    const prefixes = deploymentManagedPrefixes([
+      model("nebius_prod/llama-3", true),
+    ])
+
+    expect([...prefixes]).toEqual(["nebius_prod"])
+    expect(
+      managedModelReason({
+        modelKey: "nebius_prod:llama-3",
+        managedPrefixes: prefixes,
+        isDeploymentOperator: false,
+      }),
+    ).toBeDefined()
+  })
 })
 
 describe("managedModelReason", () => {

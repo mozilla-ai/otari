@@ -117,7 +117,12 @@ export function PricingOverrideDialog({
   // The catalog is readable by any signed-in caller, which is what makes it the
   // source for this: the provider list that would answer the same question is
   // withheld from an organization admin (#821).
-  const catalog = useModels()
+  //
+  // Gated on `isOpen` because the card renders this dialog whether or not it is
+  // showing, so an ungated read here would fire for a member or viewer and undo
+  // the card's own gate. The query key is shared, so an opener who may edit
+  // finds it already warm from the card.
+  const catalog = useModels(isOpen)
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
   const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)

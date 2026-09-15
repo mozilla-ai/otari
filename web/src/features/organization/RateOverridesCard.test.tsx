@@ -593,6 +593,24 @@ describe("RateOverridesCard", () => {
       expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled()
     })
 
+    // The dialog is rendered whether or not it is showing, so an ungated catalog
+    // read inside it would fire for a reader and undo the card's own gate.
+    it("asks for no catalog at all when the caller cannot edit", async () => {
+      const requests = mockApi({
+        context: organizationContext({ role: "member" }),
+        overrides: [pricingOverride()],
+      })
+
+      await renderPage()
+      expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument()
+
+      expect(
+        requests.filter((request) =>
+          request.url.endsWith(`${API_ROOT}/models`),
+        ),
+      ).toEqual([])
+    })
+
     it("leaves the deployment operator pricing its own models", async () => {
       mockApi({
         overrides: [pricingOverride({ model_key: "nebius_prod:llama-3" })],
