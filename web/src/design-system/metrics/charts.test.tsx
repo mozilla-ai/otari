@@ -126,7 +126,7 @@ describe("Sparkline", () => {
     expect(screen.getByRole("img", { name: "Spend trend" })).toHaveClass(
       "pointer-events-none",
     )
-    expect(container.querySelector("svg")).toHaveAttribute("tabindex", "-1")
+    expect(container.querySelector("svg")).not.toHaveAttribute("tabindex")
     expect(screen.queryByRole("application")).not.toBeInTheDocument()
 
     const chart = container.querySelector(".recharts-wrapper")!

@@ -370,6 +370,8 @@ export function TrendChart({
 // A compact, axis-free trend line for KPI tiles. Conveys shape only: no ticks,
 // no tooltip, one color. `ariaLabel` should describe what the trend is (e.g.
 // "Spend trend over the selected window") so it is legible without the visual.
+// The labeled image supplies accessibility; Recharts keyboard navigation stays
+// off because this static trend has no interactive values to explore.
 export function Sparkline({
   values,
   ariaLabel,
@@ -390,7 +392,6 @@ export function Sparkline({
         <LineChart
           data={data}
           accessibilityLayer={false}
-          tabIndex={-1}
           margin={{ top: 2, right: 2, left: 2, bottom: 2 }}
         >
           <Line
