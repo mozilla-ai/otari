@@ -235,8 +235,10 @@ not, so handlers on the request path catch `DATABASE_ERRORS` from
 supports `${VAR}` interpolation. Service-level environment reads go through
 `otari_env()`.
 
-Validate a new security or routing setting at config load. Add it to the
-Settings visibility roster or deliberate-omission list.
+Validate a new security or routing setting at config load. Annotate every new
+field with its settings view (`core/settings_view.py`): shown in a group,
+omitted, or secret. The settings endpoint derives its view from that, and a
+field without one fails at import.
 
 ## Usage filters
 
