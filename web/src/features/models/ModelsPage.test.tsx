@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -15,8 +15,10 @@ import type {
   PricingResponse,
 } from "@/client"
 import { ModelsPage } from "@/features/models/ModelsPage"
+import { SetPriceDialog } from "@/features/models/SetPriceDialog"
 import * as apiClient from "@/shared/api/client"
 import { organizationContext, pricingResponse } from "@/tests/fixtures"
+import { getModalBackdrop } from "@/tests/modal"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
@@ -1065,6 +1067,53 @@ describe("ModelsPage", () => {
     expect(
       screen.queryByRole("button", { name: /backfill/i }),
     ).not.toBeInTheDocument()
+  })
+
+  it("dismisses the pricing form from Escape and the backdrop", async () => {
+    mockApi()
+    const user = userEvent.setup()
+
+    renderWithClient(<ModelsPage />)
+    await screen.findByText("openai:gpt-4o")
+    await user.type(screen.getByRole("searchbox"), "vllm:mistral-small")
+    await user.click(
+      await screen.findByRole("button", { name: "Price vllm:mistral-small" }),
+    )
+
+    await user.click(getModalBackdrop())
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+
+    await user.click(
+      await screen.findByRole("button", { name: "Price vllm:mistral-small" }),
+    )
+    await screen.findByRole("dialog")
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+  })
+
+  it("keeps the pricing form open while a price save is pending", async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+
+    render(
+      <SetPriceDialog
+        isOpen
+        onOpenChange={onOpenChange}
+        isPending
+        error={undefined}
+        onSubmit={() => undefined}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+    await user.click(getModalBackdrop())
+    await user.keyboard("{Escape}")
+
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 
   // -- pricing a model the catalog does not list --------------------------
