@@ -302,7 +302,7 @@ describe("CopyField, concealed", () => {
       />,
     )
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy Secret key" }))
 
     // Handed over without being seen, which is the whole point: the clipboard
     // gets the key and the field still shows the stand-in.
@@ -328,7 +328,7 @@ describe("CopyField, concealed", () => {
     )
     const field = screen.getByLabelText("Secret key") as HTMLInputElement
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy Secret key" }))
 
     // Ctrl/Cmd-C is the only way left, and it can only reach the plaintext, so
     // the field reveals it and selects that rather than the stand-in.
@@ -399,8 +399,6 @@ describe("CopyField, concealed", () => {
       />,
     )
 
-    // Revealed on arrival, which is what the one-time secret step needs, and
-    // still able to conceal: the toggle is the affordance, not the default.
     expect(screen.getByLabelText("Secret key")).toHaveValue("gw-shown-at-once")
     await user.click(screen.getByRole("button", { name: "Hide Secret key" }))
     expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
@@ -511,7 +509,7 @@ describe("CopyField, concealed", () => {
       />,
     )
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy Secret key" }))
     rerender(
       <CopyField
         label="Secret key"
@@ -555,7 +553,7 @@ describe("CopyField, concealed", () => {
       />,
     )
 
-    await user.click(screen.getByRole("button", { name: "Copy" }))
+    await user.click(screen.getByRole("button", { name: "Copy Secret key" }))
     rerender(
       <CopyField
         label="Secret key"

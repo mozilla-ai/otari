@@ -1,7 +1,7 @@
-import { Button } from "@heroui/react"
 import type { ReactElement, ReactNode } from "react"
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
-import { FiEye, FiEyeOff } from "react-icons/fi"
+import { FiCheck, FiCopy, FiEye, FiEyeOff } from "react-icons/fi"
+import { Button } from "@/design-system/actions/Button"
 import { CopyButton } from "@/design-system/actions/CopyButton"
 import { copyToClipboard } from "@/design-system/helpers/clipboard"
 
@@ -96,14 +96,8 @@ type CopyFieldProps = {
        * has been asked for, while Copy copies the real value either way, so a
        * key can be handed over without being read off the screen (otari-ai#2111).
        *
-       * The one-time secret step is the exception and opens revealed, by product
-       * ruling: that screen exists to hand the key over, and there is no second
-       * chance to read it. The toggle and copying without reading survive there,
-       * which is what otari-ai#2111 asked for.
-       *
-       * A whole-value field passes `CONCEALED_SECRET`. A snippet passes the same
-       * snippet built around that stand-in, so what is hidden is the key rather
-       * than the request that explains it.
+       * A secret field passes `CONCEALED_SECRET` or a partial fingerprint.
+       * A snippet uses a stand-in for the key while keeping the request readable.
        */
       concealed?: string
       /**
@@ -372,6 +366,29 @@ export function CopyField({
     </Button>
   )
 
+  const inlineControls = concealed !== undefined && !multiline
+  const copyButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      isIconOnly={inlineControls}
+      aria-label={inlineControls ? `Copy ${label}` : undefined}
+      onPress={copy}
+    >
+      {inlineControls ? (
+        copied ? (
+          <FiCheck aria-hidden="true" className="h-3.5 w-3.5" />
+        ) : (
+          <FiCopy aria-hidden="true" className="h-3.5 w-3.5" />
+        )
+      ) : copied ? (
+        "Copied"
+      ) : (
+        "Copy"
+      )}
+    </Button>
+  )
+
   const field = multiline ? (
     <textarea
       id={fieldId}
@@ -390,13 +407,13 @@ export function CopyField({
       readOnly
       value={shown}
       onFocus={selectUnlessConcealed}
-      // Concealed, the right padding clears the toggle rather than the value
+      // Concealed, the right padding clears both controls rather than the value
       // running under it, and the field grows below `md` so the 44px touch
       // floor fits between its borders.
       className={
         concealed === undefined
           ? shared
-          : `${shared} min-h-[2.875rem] pr-14 md:min-h-0 md:pr-11`
+          : `${shared} min-h-[2.875rem] pr-24 md:min-h-0 md:pr-20`
       }
       {...credentialProps}
     />
@@ -415,16 +432,15 @@ export function CopyField({
               for the reason `action` is barred from the multiline variant at
               all: right padding on a textarea indents every line of it. */}
           {concealed !== undefined && multiline ? revealToggle : null}
-          <Button size="sm" variant="ghost" onPress={copy}>
-            {copied ? "Copied" : "Copy"}
-          </Button>
+          {!inlineControls ? copyButton : null}
         </div>
       </div>
       {concealed !== undefined && !multiline ? (
         <div className="relative">
           {field}
-          <span className="absolute top-1/2 right-1 -translate-y-1/2">
+          <span className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1">
             {revealToggle}
+            {copyButton}
           </span>
         </div>
       ) : (

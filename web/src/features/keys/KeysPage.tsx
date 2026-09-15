@@ -108,23 +108,7 @@ const getKeyRowKey = (k: ApiKey): string => k.id
 
 // ---------- the one-time secret ----------
 
-/**
- * The plaintext key, shown once, and everything that has to travel with it.
- *
- * This was a strip between the page header and the table, and its docstring
- * argued against exactly the modal it now lives in: a focus trap, a swallowed
- * Esc and a backdrop that ignored clicks were a dialog fighting its own
- * conventions. The objection was to those behaviors rather than to the surface,
- * and `FormDialog` has none of them, except where this content needs one:
- * `isDismissable={false}` is the strip's "there is one control and it is the
- * acknowledgement", kept because a stray backdrop click here loses the key
- * forever.
- *
- * The snippets come with it. An operator creating their first key arrives from
- * the empty state, and "make your first call" is the next thing they need, so
- * leaving it behind on the page would have made this dialog the one place the
- * flow got worse.
- */
+/** One-time key handoff with copyable request examples. */
 function KeySecretStep({
   announce,
   result,
@@ -142,12 +126,9 @@ function KeySecretStep({
   // the API. Undefined when it has not said where its gateway is (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
   const secret = result.key
-  // One reveal for the key and both snippets, because the snippets carry the
-  // same secret: revealing the key while a snippet still printed bullets, or
-  // the reverse, would be one credential in two states on one screen. Open,
-  // because this screen exists to hand the key over and there is no second
-  // chance to read it; the toggle conceals all three.
-  const [isSecretRevealed, setIsSecretRevealed] = useState(true)
+  const concealedSecret = `${secret.slice(0, 8)}••••••••${secret.slice(-4)}`
+  // The snippets carry the same credential, so all three fields share visibility.
+  const [isSecretRevealed, setIsSecretRevealed] = useState(false)
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
@@ -186,7 +167,7 @@ function KeySecretStep({
         <CopyField
           label="Secret key"
           value={secret}
-          concealed={CONCEALED_SECRET}
+          concealed={concealedSecret}
           isRevealed={isSecretRevealed}
           onRevealChange={setIsSecretRevealed}
           fieldRef={secretRef}
@@ -1126,7 +1107,7 @@ export function KeysPage() {
         header: "Key",
         cell: (k) => (
           <code className="text-mono-caption text-muted">
-            {k.key_prefix ? `${k.key_prefix}…` : "—"}
+            {k.key_prefix ? `${k.key_prefix}…${k.key_suffix ?? ""}` : "—"}
           </code>
         ),
       },
