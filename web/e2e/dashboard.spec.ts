@@ -299,9 +299,10 @@ test.describe("dashboard core flows", () => {
     // "Copy policy name" control.
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("fast")
     // "Serves" is a model combobox (allows custom values); type the selector, then
-    // close the popover so it does not aria-hide the submit button.
-    await dialog.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
-    await page.keyboard.press("Escape")
+    // put the popover away so it does not aria-hide the submit button.
+    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await serves.fill("openai:gpt-4o")
+    await dismissComboBoxInDialog(serves)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // The policy name is the table's row-header cell (react-aria rowheader).
@@ -317,17 +318,17 @@ test.describe("dashboard core flows", () => {
     // Scoped from here: the dialog's submit says "Create policy" too.
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("textbox", { name: /Policy name/ }).fill("chained")
-    await dialog.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
-    await page.keyboard.press("Escape")
+    const serves = dialog.getByRole("combobox", { name: /Serves/ })
+    await serves.fill("openai:gpt-4o")
+    await dismissComboBoxInDialog(serves)
 
     // The failure chain is summoned, not presented, so naming one model stays a
     // short task.
     await expect(page.getByText("If that fails, try")).toBeHidden()
     await dialog.getByRole("button", { name: /Add a fallback chain/ }).click()
-    await page
-      .getByRole("combobox", { name: /Fallback 1/ })
-      .fill("anthropic:claude-3-5-haiku-latest")
-    await page.keyboard.press("Escape")
+    const fallback = page.getByRole("combobox", { name: /Fallback 1/ })
+    await fallback.fill("anthropic:claude-3-5-haiku-latest")
+    await dismissComboBoxInDialog(fallback)
     await dialog.getByRole("button", { name: "Create policy" }).click()
 
     // Scoped to the row this test created: "+1 on failure" anywhere on the page
