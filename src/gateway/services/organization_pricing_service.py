@@ -23,8 +23,11 @@ every writer and none of them can be expressed in the schema at all:
 - **A deployment-supplied model is not the organization's to re-price.** A key
   addressed through one of ``config.providers``' instances dispatches on the
   deployment's own credential, so the deployment settles its upstream bill and
-  owns its rate; only a bare ``provider:model`` key resolves against the
-  organization's BYO credential. See
+  owns its rate. A bare ``provider:model`` key usually resolves against the
+  organization's BYO credential instead, but not always: with none stored, the
+  bound ``ModelProviderPort`` may still serve it on a hosted credential the
+  deployment owns (an overlay's managed-inference fleet), which pays the same
+  bill through a different door and gets the same refusal. See
   :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
 Periods are half-open, ``[effective_from, effective_to)``. Two adjacent periods
@@ -46,8 +49,9 @@ from gateway.core.config import GatewayConfig
 from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.services.provider_kwargs import is_deployment_instance_key
+from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.errors import (
     OrganizationPricingManagedModelError,
@@ -93,10 +97,22 @@ def _describe_period(effective_from: datetime, effective_to: datetime | None) ->
 class OrganizationPricingService:
     """Read and write the caller's organization's pricing overrides."""
 
-    def __init__(self, db: AsyncSession, config: GatewayConfig):
+    def __init__(
+        self,
+        db: AsyncSession,
+        config: GatewayConfig,
+        model_provider: ModelProviderPort | None = None,
+    ):
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
+        # Optional and unbuilt when omitted, rather than defaulted to the core
+        # adapter here: services depend on ports, never on a concrete adapter
+        # (``check_architecture.py``), so a caller that does not pass one (most
+        # tests, and any construction outside the route's own DI) gets exactly
+        # the config.providers-only check that existed before this port was
+        # consulted at all. The route always passes the bound one.
+        self.model_provider = model_provider
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
         """The caller's organization, having checked they may change its rates."""
@@ -118,7 +134,12 @@ class OrganizationPricingService:
         organization = await self.organizations.get_active_organization_for_user(user)
         return organization.id
 
-    async def raise_if_deployment_supplied(self, user: TenancyUser, model_key: str) -> None:
+    async def raise_if_deployment_supplied(
+        self,
+        user: TenancyUser,
+        model_key: str,
+        organization_id: uuid.UUID,
+    ) -> None:
         """Refuse a rate for a model this deployment, not this organization, pays for.
 
         Public for the reason :meth:`raise_if_overlapping` is: it is one of the
@@ -132,11 +153,43 @@ class OrganizationPricingService:
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.
         """
-        if not is_deployment_instance_key(self.config, model_key):
+        if not await self._is_deployment_supplied(organization_id, model_key):
             return
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
         raise OrganizationPricingManagedModelError(model_key)
+
+    async def _is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
+        """Whether the deployment, not the organization, would settle ``model_key``'s upstream bill.
+
+        Two independent mechanisms answer "the deployment pays for this", checked
+        in order so the common case takes no I/O: a ``config.providers`` instance
+        (this build's own admin-configured credential), or a hosted credential the
+        bound ``ModelProviderPort`` would still serve the candidate on when it
+        carries no BYO key (an overlay's managed-inference fleet, e.g. mzai). A
+        refusal from the port counts too, because it still means this candidate
+        resolves on a deployment-owned upstream; it is just one this organization
+        may not use, which is a reason to keep the rate off this organization's
+        table, not a reason to let it set one.
+        """
+        if is_deployment_instance_key(self.config, model_key):
+            return True
+        if self.model_provider is None:
+            return False
+        split = split_selector(model_key)
+        if split is None:
+            return False
+        provider, model = split
+        try:
+            credential = await self.model_provider.resolve_hosted_credential(
+                organization_id=organization_id,
+                workspace_id=None,
+                provider=provider,
+                model=model,
+            )
+        except HostedAccessDeniedError:
+            return True
+        return credential is not None
 
     async def raise_if_overlapping(
         self,
@@ -234,7 +287,7 @@ class OrganizationPricingService:
         period that overlaps one already stored for this key.
         """
         organization_id = await self._writable_organization_id(user)
-        await self.raise_if_deployment_supplied(user, model_key)
+        await self.raise_if_deployment_supplied(user, model_key, organization_id)
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
@@ -355,7 +408,7 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
-        await self.raise_if_deployment_supplied(user, row.model_key)
+        await self.raise_if_deployment_supplied(user, row.model_key, organization_id)
 
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)

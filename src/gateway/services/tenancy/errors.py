@@ -816,12 +816,15 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
     """An override aimed at a model the deployment, not the organization, pays for.
 
     An override is how an organization records what it pays for a model it
-    supplies the provider key for. A model addressed through one of the
-    deployment's own provider instances is not that: the deployment holds the
-    upstream credential and settles the upstream bill, so its rate is the
-    deployment price list's and a tenant-set rate would decide what that
-    deployment charges itself. A zero is the sharp end of it, since cost is also
-    what a budget counts down.
+    supplies the provider key for. Two things are not that, and either raises
+    this: a model addressed through one of the deployment's own ``config.providers``
+    instances, and a bare ``provider:model`` key that, with no BYO credential
+    stored, the bound ``ModelProviderPort`` would still serve on a hosted
+    credential the deployment owns (an overlay's managed-inference fleet). Both
+    mean the deployment holds the upstream credential and settles the upstream
+    bill, so the rate is the deployment price list's and a tenant-set rate would
+    decide what that deployment charges itself. A zero is the sharp end of it,
+    since cost is also what a budget counts down.
 
     Withheld from an organization manager, not from everyone: a deployment
     operator is the party that pays, so the standalone deployment whose one
@@ -831,7 +834,7 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
 
     def __init__(self, model_key: str):
         super().__init__(
-            f"'{model_key}' runs on a provider instance this deployment supplies the credential for, "
+            f"'{model_key}' resolves on a credential this deployment, not your organization, supplies, "
             "so its rate is set on the deployment price list rather than per organization. An override "
             "applies to a model your organization supplies its own provider key for."
         )

@@ -23,6 +23,7 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -605,6 +606,104 @@ async def test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organiz
             stored.id,
             _rates(input_price_per_million=0.0, effective_from=stored.effective_from),
         )
+
+
+class _FakeHostedModelProvider:
+    """A stub ``ModelProviderPort`` that serves or refuses one fixed provider.
+
+    Stands in for an overlay's hosted-inference adapter: ``config.providers``
+    knows nothing about it, which is the point, because these tests are for the
+    refusal path ``is_deployment_instance_key`` cannot see on its own.
+    """
+
+    def __init__(self, *, served: str | None = None, denied: str | None = None) -> None:
+        self._served = served
+        self._denied = denied
+
+    async def resolve_hosted_credential(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
+        provider: str,
+        model: str | None,
+    ) -> HostedCredential | None:
+        del organization_id, workspace_id, model
+        if provider == self._denied:
+            raise HostedAccessDeniedError(f"{provider} is not enabled for this organization")
+        if provider == self._served:
+            return HostedCredential(api_key="x", api_base=None, response_provider=provider)
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["owner", "admin"])
+async def test_an_organization_may_not_price_a_model_a_hosted_credential_serves(
+    async_db: AsyncSession, role: str
+) -> None:
+    """A bare key still refuses when no BYO credential is what actually serves it.
+
+    ``_MODEL_KEY`` names no configured instance, so ``is_deployment_instance_key``
+    alone would wave this through. The bound port answering "I would serve
+    'openai' myself" is what otherwise lets an organization undercut a hosted
+    fleet it never supplied the key for.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug=f"acme-hosted-{role}", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role=role, name=f"{role} person")
+    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(served="openai"))
+
+    with pytest.raises(OrganizationPricingManagedModelError) as refused:
+        await service.create_for_caller(identity, _MODEL_KEY, _rates(input_price_per_million=0.0))
+
+    assert _MODEL_KEY in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_a_hosted_access_refusal_still_counts_as_deployment_supplied(async_db: AsyncSession) -> None:
+    """``HostedAccessDeniedError`` means the port owns this key too, just for someone else.
+
+    The candidate still resolves on a deployment-owned upstream; the
+    organization not being entitled to it is a reason to keep the rate off this
+    table, not a loophole into setting one.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-denied", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(denied="openai"))
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_operator_may_price_a_model_a_hosted_credential_serves(async_db: AsyncSession) -> None:
+    """The same operator exemption applies through this door as through config.providers."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-operator", created_by_user_id=None
+    )
+    identity = await _operator(async_db, organization)
+    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(served="openai"))
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
+
+
+@pytest.mark.asyncio
+async def test_an_organization_may_price_a_model_no_hosted_credential_serves(async_db: AsyncSession) -> None:
+    """A port bound but silent on this provider leaves the BYO path untouched."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-unserved", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(served="anthropic"))
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
 
 
 @pytest.mark.asyncio
