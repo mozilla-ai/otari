@@ -2,7 +2,8 @@
 
 Thin composition over `gateway.services.organization_pricing_service`: resolve
 the caller's identity, call the service, return its typed result. The overlap
-rule and the role gate live there, and the domain errors it raises carry their
+rule, the role gate, and the refusal to re-price a model the deployment supplies
+the credential for all live there, and the domain errors it raises carry their
 own statuses (see `gateway.services.tenancy.errors`), so nothing here catches
 them.
 
@@ -204,9 +205,10 @@ class OrganizationModelPricingsPublic(BaseModel):
 
 def get_organization_pricing_service(
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationPricingService:
-    """Build the pricing service on the request's session."""
-    return OrganizationPricingService(db)
+    """Build the pricing service on the request's session and provider map."""
+    return OrganizationPricingService(db, config)
 
 
 ServiceDep = Annotated[OrganizationPricingService, Depends(get_organization_pricing_service)]
@@ -298,7 +300,10 @@ async def create_organization_pricing(
     """Set the organization's rate for a model over a period.
 
     Refused with a 409 when the period overlaps one already stored for that model,
-    naming the period it collides with, rather than shadowing it.
+    naming the period it collides with, rather than shadowing it. Refused with a
+    403 when the model is addressed through one of the deployment's own provider
+    instances: the deployment holds that credential and settles its upstream bill,
+    so its rate is the deployment price list's rather than a tenant's.
 
     The key is normalized to its canonical ``instance:model`` form first, the same
     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
@@ -328,6 +333,10 @@ async def replace_organization_pricing(
     Future requests in the period price at the new rate; usage already settled
     keeps the cost it was billed, because a settled cost is stored on the usage
     row rather than recomputed.
+
+    Refused with a 403 on the same deployment-supplied-model rule the create path
+    carries, so a row stored before that rule existed cannot be edited into a rate
+    nobody could create today.
     """
     override = await service.replace_for_caller(identity, pricing_id, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)

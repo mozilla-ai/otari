@@ -402,3 +402,21 @@ def normalize_pricing_key(config: GatewayConfig, raw_key: str) -> str:
     except (ValueError, AnyLLMError):
         return raw_key
     return f"{provider_key(provider)}:{model}"
+
+
+def is_deployment_instance_key(config: GatewayConfig, model_key: str) -> bool:
+    """Whether this pricing key names an instance the deployment holds the credential for.
+
+    The line between the two credential mechanisms, stated as a predicate. An
+    ``instance:model`` key whose prefix is in ``config.providers`` (config.yml
+    overlaid with the stored ``provider_credentials``) dispatches on the
+    deployment's own credential and never consults the organization-scoped tables;
+    a bare ``provider:model`` key resolves against an organization's BYO key
+    instead. :func:`resolve_provider_selector` above branches on exactly this
+    test, and `models.provider_keys` states the rule it comes from.
+
+    So it answers "who pays the upstream bill for this model", which is what
+    decides whether an organization may set its own rate for it.
+    """
+    split = split_selector(model_key)
+    return split is not None and split[0] in config.providers

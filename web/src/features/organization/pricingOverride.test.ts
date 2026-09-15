@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import type { OrganizationPricingOverride } from "@/client"
+import type { ModelObject, OrganizationPricingOverride } from "@/client"
 
 import {
+  deploymentManagedPrefixes,
   findOverlapping,
   isValidModelKey,
+  managedModelReason,
   overrideStatus,
   parseRate,
   periodBlockedReason,
@@ -232,5 +234,80 @@ describe("overrideStatus", () => {
   it("is expired at the exact instant its period ends", () => {
     const ending = override({ effective_to: new Date(NOW).toISOString() })
     expect(overrideStatus(ending, NOW)).toBe("expired")
+  })
+})
+
+describe("deploymentManagedPrefixes", () => {
+  function model(id: string, deployment_managed: boolean): ModelObject {
+    return {
+      id,
+      object: "model",
+      created: 0,
+      owned_by: id.split(":")[0] ?? "",
+      pricing_source: "none",
+      deployment_managed,
+    }
+  }
+
+  it("collects the instance prefixes the deployment holds the credential for", () => {
+    const prefixes = deploymentManagedPrefixes([
+      model("nebius_prod:llama-3", true),
+      model("nebius_prod:llama-4", true),
+      model("openai:gpt-4o", false),
+    ])
+
+    expect([...prefixes]).toEqual(["nebius_prod"])
+  })
+
+  it("is empty while the catalog has not arrived", () => {
+    expect(deploymentManagedPrefixes(undefined).size).toBe(0)
+  })
+})
+
+describe("managedModelReason", () => {
+  const managedPrefixes = new Set(["nebius_prod"])
+
+  it("refuses a model addressed through one of the deployment's instances", () => {
+    expect(
+      managedModelReason({
+        modelKey: "nebius_prod:llama-3",
+        managedPrefixes,
+        isDeploymentOperator: false,
+      }),
+    ).toMatch(/deployment's own providers/i)
+  })
+
+  // The legacy slash spelling reaches the same row, so it has to reach the same
+  // refusal; the server normalizes both onto the colon form.
+  it("reads the slash spelling as the same instance", () => {
+    expect(
+      managedModelReason({
+        modelKey: "nebius_prod/llama-3",
+        managedPrefixes,
+        isDeploymentOperator: false,
+      }),
+    ).toBeDefined()
+  })
+
+  it("allows a model the organization supplies its own key for", () => {
+    expect(
+      managedModelReason({
+        modelKey: "openai:gpt-4o",
+        managedPrefixes,
+        isDeploymentOperator: false,
+      }),
+    ).toBeUndefined()
+  })
+
+  // The operator is the party that pays the upstream bill, which is what keeps a
+  // standalone deployment pricing its own models exactly as before.
+  it("exempts the deployment operator", () => {
+    expect(
+      managedModelReason({
+        modelKey: "nebius_prod:llama-3",
+        managedPrefixes,
+        isDeploymentOperator: true,
+      }),
+    ).toBeUndefined()
   })
 })

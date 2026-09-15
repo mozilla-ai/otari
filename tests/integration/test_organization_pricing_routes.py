@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
@@ -36,6 +36,7 @@ from gateway.services.organization_pricing_service import (
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
+    OrganizationPricingManagedModelError,
     OrganizationPricingNotFoundError,
     OrganizationPricingOverlapError,
     TenancyValidationError,
@@ -474,7 +475,8 @@ async def test_a_management_role_may_write_an_override(async_db: AsyncSession, r
     )
     identity = await _identity(async_db, organization, role=role, name=f"{role} person")
 
-    created = await OrganizationPricingService(async_db).create_for_caller(identity, _MODEL_KEY, _rates())
+    service = OrganizationPricingService(async_db, GatewayConfig())
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
     assert created.organization_id == organization.id
     assert created.input_price_per_million == 2.5
@@ -488,10 +490,121 @@ async def test_a_non_management_role_may_not_write_an_override(async_db: AsyncSe
         name="Acme", slug=f"acme-{role}", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role=role, name=f"{role} person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
 
     with pytest.raises(NotAuthorizedError):
         await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+
+# =============================================================================
+# Whose model is it to re-price (otari-ai#2095)
+# =============================================================================
+
+_MANAGED_KEY = "nebius_prod:llama-3"
+# One configured instance, so ``nebius_prod:llama-3`` dispatches on the
+# deployment's own credential while ``openai:gpt-4o`` stays a bare provider key
+# resolved against whatever the organization supplies.
+_MANAGED_CONFIG = GatewayConfig(providers={"nebius_prod": {"provider_type": "nebius", "api_key": "x"}})
+
+
+async def _operator(db: AsyncSession, organization: Organization) -> User:
+    """An identity that also operates the deployment, which no role confers."""
+    user = await UserRepository(db).create_local_identity(
+        full_name="operator person",
+        active_organization_id=organization.id,
+        is_superuser=True,
+    )
+    await OrganizationMemberRepository(db).create_membership(
+        organization_id=organization.id,
+        user_id=user.id,
+        role="owner",
+    )
+    return user
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["owner", "admin"])
+async def test_an_organization_may_not_price_a_model_the_deployment_supplies(
+    async_db: AsyncSession, role: str
+) -> None:
+    """The deployment holds that credential, so it settles the bill and sets the rate.
+
+    Without this an organization admin could store a zero for a model the
+    deployment pays the upstream for, which makes it free and, because a budget
+    counts down the cost, spends nothing either.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug=f"acme-managed-{role}", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role=role, name=f"{role} person")
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+
+    with pytest.raises(OrganizationPricingManagedModelError) as refused:
+        await service.create_for_caller(identity, _MANAGED_KEY, _rates(input_price_per_million=0.0))
+
+    assert _MANAGED_KEY in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_an_organization_may_still_price_a_model_it_supplies_the_key_for(async_db: AsyncSession) -> None:
+    """A bare ``provider:model`` key resolves against the organization's own BYO credential."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-byo", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_operator_may_price_a_model_the_deployment_supplies(async_db: AsyncSession) -> None:
+    """The exemption that keeps a standalone deployment pricing its own models.
+
+    There the one administrator is also the single organization's owner, so a
+    blanket refusal would retire the override surface rather than protect anyone.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-operator", created_by_user_id=None
+    )
+    identity = await _operator(async_db, organization)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+
+    created = await service.create_for_caller(identity, _MANAGED_KEY, _rates())
+
+    assert created.model_key == _MANAGED_KEY
+
+
+@pytest.mark.asyncio
+async def test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organization(
+    async_db: AsyncSession,
+) -> None:
+    """Rows already stored keep resolving; what they may not do is change rate.
+
+    Nothing migrates the existing table, so an override an organization stored
+    for a deployment-supplied model survives. Leaving the update path open would
+    let it be edited into a rate nobody could create today, which is the same
+    bypass by another door.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-legacy", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    # Stored through a config that knows no instances, which is the deployment as
+    # it was before the instance existed.
+    stored = await OrganizationPricingService(async_db, GatewayConfig()).create_for_caller(
+        identity, _MANAGED_KEY, _rates()
+    )
+
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.replace_for_caller(
+            identity,
+            stored.id,
+            _rates(input_price_per_million=0.0, effective_from=stored.effective_from),
+        )
 
 
 @pytest.mark.asyncio
@@ -503,7 +616,7 @@ async def test_any_member_may_read_the_overrides(async_db: AsyncSession, role: s
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
     reader = await _identity(async_db, organization, role=role, name=f"{role} reader")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     await service.create_for_caller(owner, _MODEL_KEY, _rates())
 
     visible, total = await service.list_for_caller(reader)
@@ -533,7 +646,7 @@ async def test_a_negative_rate_is_refused_at_the_service_boundary(async_db: Asyn
         name="Acme", slug=f"acme-negative-{field}", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
 
     with pytest.raises(TenancyValidationError) as caught:
         await service.create_for_caller(owner, _MODEL_KEY, _rates(**{field: -1.0}))
@@ -551,7 +664,7 @@ async def test_another_organizations_override_is_a_404_not_a_403(async_db: Async
     mine = await OrganizationRepository(async_db).create_organization(name="Mine", slug="mine", created_by_user_id=None)
     their_owner = await _identity(async_db, theirs, role="owner", name="their owner")
     my_owner = await _identity(async_db, mine, role="owner", name="my owner")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     their_override = await service.create_for_caller(their_owner, _MODEL_KEY, _rates())
 
     with pytest.raises(OrganizationPricingNotFoundError):
@@ -571,7 +684,7 @@ async def test_the_overlap_rule_is_scoped_to_one_organization(async_db: AsyncSes
     )
     first_owner = await _identity(async_db, first, role="owner", name="first owner")
     second_owner = await _identity(async_db, second, role="owner", name="second owner")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     period = _rates(effective_from=datetime.now(UTC) - timedelta(days=1))
 
     await service.create_for_caller(first_owner, _MODEL_KEY, period)
@@ -588,7 +701,7 @@ async def test_a_second_overlapping_period_is_refused_for_one_organization(
         name="Acme", slug="acme-overlap", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     await service.create_for_caller(owner, _MODEL_KEY, _rates(effective_from=datetime.now(UTC) - timedelta(days=1)))
 
     with pytest.raises(OrganizationPricingOverlapError):
@@ -677,7 +790,7 @@ async def test_deleting_an_override_returns_the_model_to_the_deployment_list(
             output_price_per_million=20.0,
         )
     )
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     override = await service.create_for_caller(owner, _MODEL_KEY, _rates())
     await async_db.commit()
 
@@ -783,7 +896,7 @@ async def test_a_racing_duplicate_period_is_a_conflict_not_an_integrity_error(
         name="Acme", slug="acme-race", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     rates = _rates()
 
     await service.create_for_caller(owner, _MODEL_KEY, rates)
@@ -816,7 +929,7 @@ async def test_the_race_conflict_names_the_period_it_actually_hit(
         name="Acme", slug="acme-race-message", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     start = datetime.now(UTC)
     bounded = _rates(effective_from=start, effective_to=start + timedelta(days=1))
 
@@ -851,7 +964,7 @@ async def test_a_check_violation_is_not_reported_as_a_conflict(
         name="Acme", slug="acme-check", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
 
     # The service's own rate validation would refuse this first, so bypass it to
     # reach the table's CHECK, which is the constraint under test.
@@ -885,7 +998,7 @@ async def test_an_update_that_fails_for_another_reason_is_not_reported_as_a_conf
         name="Acme", slug="acme-update-check", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db)
+    service = OrganizationPricingService(async_db, GatewayConfig())
     period = _rates()
     stored = await service.create_for_caller(owner, _MODEL_KEY, period)
     await async_db.commit()

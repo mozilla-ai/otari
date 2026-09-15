@@ -65,6 +65,10 @@ function catalogModel(
       : null,
     pricing_source: source,
     context_window,
+    // Every fixture here is a bare provider key, which is what the page's own
+    // behavior is written against; the flag only steers the organization's
+    // rate-override surface.
+    deployment_managed: false,
   }
 }
 

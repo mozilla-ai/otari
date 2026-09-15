@@ -2192,7 +2192,10 @@ export interface paths {
          * @description Set the organization's rate for a model over a period.
          *
          *     Refused with a 409 when the period overlaps one already stored for that model,
-         *     naming the period it collides with, rather than shadowing it.
+         *     naming the period it collides with, rather than shadowing it. Refused with a
+         *     403 when the model is addressed through one of the deployment's own provider
+         *     instances: the deployment holds that credential and settles its upstream bill,
+         *     so its rate is the deployment price list's rather than a tenant's.
          *
          *     The key is normalized to its canonical ``instance:model`` form first, the same
          *     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
@@ -2224,6 +2227,10 @@ export interface paths {
          *     Future requests in the period price at the new rate; usage already settled
          *     keeps the cost it was billed, because a settled cost is stored on the usage
          *     row rather than recomputed.
+         *
+         *     Refused with a 403 on the same deployment-supplied-model rule the create path
+         *     carries, so a row stored before that rule existed cannot be edited into a rate
+         *     nobody could create today.
          */
         put: operations["organization-pricing-replace_organization_pricing"];
         post?: never;
@@ -7882,6 +7889,11 @@ export interface components {
             context_window?: number | null;
             /** Created */
             created: number;
+            /**
+             * Deployment Managed
+             * @default false
+             */
+            deployment_managed: boolean;
             /** Id */
             id: string;
             /**

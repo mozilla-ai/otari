@@ -5,8 +5,8 @@ The write half of per-organization pricing. The read half is
 of ``model_pricing`` and the genai-prices dataset when it is given an
 organization.
 
-Two rules live here rather than in the route, because both have to hold for
-every writer and one of them cannot be expressed in the schema at all:
+Three rules live here rather than in the route, because each has to hold for
+every writer and none of them can be expressed in the schema at all:
 
 - **A period may not overlap another for the same key.** ``model_pricing`` is a
   version series where a later row shadows an earlier one; an override is a
@@ -20,6 +20,12 @@ every writer and one of them cannot be expressed in the schema at all:
   organization is billed, so this is the same owner-or-admin gate the rest of the
   organization surface uses, delegated to ``OrganizationService`` rather than
   re-deriving membership here.
+- **A deployment-supplied model is not the organization's to re-price.** A key
+  addressed through one of ``config.providers``' instances dispatches on the
+  deployment's own credential, so the deployment settles its upstream bill and
+  owns its rate; only a bare ``provider:model`` key resolves against the
+  organization's BYO credential. See
+  :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
 Periods are half-open, ``[effective_from, effective_to)``. Two adjacent periods
 may therefore share an instant (one ends exactly where the next begins) without
@@ -36,11 +42,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import GatewayConfig
 from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.pricing_service import normalize_effective_at
+from gateway.services.provider_kwargs import is_deployment_instance_key
+from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.errors import (
+    OrganizationPricingManagedModelError,
     OrganizationPricingNotFoundError,
     OrganizationPricingOverlapError,
     TenancyValidationError,
@@ -82,8 +92,9 @@ def _describe_period(effective_from: datetime, effective_to: datetime | None) ->
 class OrganizationPricingService:
     """Read and write the caller's organization's pricing overrides."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, config: GatewayConfig):
         self.db = db
+        self.config = config
         self.organizations = OrganizationService(db)
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
@@ -105,6 +116,26 @@ class OrganizationPricingService:
         """
         organization = await self.organizations.get_active_organization_for_user(user)
         return organization.id
+
+    async def raise_if_deployment_supplied(self, user: TenancyUser, model_key: str) -> None:
+        """Refuse a rate for a model this deployment, not this organization, pays for.
+
+        Public for the reason :meth:`raise_if_overlapping` is: it is one of the
+        rules this surface exists to enforce, and asserting it through a create
+        would prove it through the role gate and the identity resolver instead.
+
+        The deployment operator is exempt because they are the party the rule
+        protects. On a standalone deployment that identity is also the single
+        organization's administrator, so nothing there changes; on a control plane
+        serving tenants who did not pay for the upstream capacity, an override on a
+        deployment-supplied instance would let a tenant name its own cost basis,
+        and a zero would make the model free and spend no budget.
+        """
+        if not is_deployment_instance_key(self.config, model_key):
+            return
+        if await DeploymentUserService(self.db).has_administration_access(user):
+            return
+        raise OrganizationPricingManagedModelError(model_key)
 
     async def raise_if_overlapping(
         self,
@@ -196,8 +227,13 @@ class OrganizationPricingService:
         model_key: str,
         override: PricingOverrideInput,
     ) -> OrganizationModelPricing:
-        """Store a new override, refusing one that overlaps an existing period."""
+        """Store a new override.
+
+        Refused for a model the deployment supplies the credential for, and for a
+        period that overlaps one already stored for this key.
+        """
         organization_id = await self._writable_organization_id(user)
+        await self.raise_if_deployment_supplied(user, model_key)
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
@@ -316,6 +352,7 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
+        await self.raise_if_deployment_supplied(user, row.model_key)
 
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)

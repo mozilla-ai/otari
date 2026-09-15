@@ -47,7 +47,7 @@ from gateway.services.pricing_service import (
     model_context_window,
     normalize_effective_at,
 )
-from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_model_access import resolve_session_catalog_scope
 
@@ -116,6 +116,14 @@ class ModelObject(BaseModel):
     # knows the model. Metadata only (independent of the default_pricing toggle);
     # ``None`` when the dataset has no value for the model.
     context_window: int | None = None
+    # True when this model is addressed through one of the deployment's own
+    # provider instances, so the deployment holds the upstream credential and its
+    # rate is the deployment price list's. False for a bare ``provider:model``
+    # key, which resolves against an organization's own BYO credential, and for
+    # an alias or policy, which is a name rather than a model. It is what lets the
+    # dashboard withhold a rate-override control the gateway would refuse anyway
+    # (``OrganizationPricingService.raise_if_deployment_supplied``).
+    deployment_managed: bool = False
 
 
 class ModelListResponse(BaseModel):
@@ -129,6 +137,17 @@ def _owner_from_key(model_key: str) -> str:
     """The provider a ``provider:model`` key names, or "unknown" for a bare name."""
     provider, separator, _ = model_key.partition(":")
     return provider if separator else "unknown"
+
+
+def _mark_deployment_managed(config: GatewayConfig, model: ModelObject) -> ModelObject:
+    """Stamp ``deployment_managed`` from the entry's own id, and hand it back.
+
+    Applied in one pass rather than at each construction site: the answer depends
+    only on the id and the provider map, so deriving it once is what keeps the
+    phases from disagreeing about a model they both build.
+    """
+    model.deployment_managed = is_deployment_instance_key(config, model.id)
+    return model
 
 
 def _created_timestamp(model: "Model") -> int:
@@ -692,6 +711,9 @@ async def list_models(
 
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
 
+    for obj in merged.values():
+        _mark_deployment_managed(config, obj)
+
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)
 
@@ -861,7 +883,7 @@ async def get_model(
         )
         _apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            return fallback
+            return _mark_deployment_managed(config, fallback)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",
@@ -889,8 +911,8 @@ async def get_model(
             context_window=_context_window_for_key(model_key),
         )
         _apply_default_pricing(obj)
-        return obj
+        return _mark_deployment_managed(config, obj)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
-    return _model_from_pricing(pricing)
+    return _mark_deployment_managed(config, _model_from_pricing(pricing))

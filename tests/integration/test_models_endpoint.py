@@ -1,11 +1,15 @@
 """Tests for the GET /api/v1/models endpoint."""
 
+from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+
+from .conftest import build_test_client
 
 
 def test_list_models_empty(
@@ -193,3 +197,59 @@ def test_list_models_sorted_by_key(
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
     assert ids == sorted(ids)
+
+
+@pytest.fixture
+def instance_config(postgres_url: str) -> GatewayConfig:
+    """A deployment with one provider instance of its own.
+
+    ``home_lab`` is a configured instance, so a key addressed through it
+    dispatches on this deployment's credential; ``openai`` is not, so that prefix
+    stays a bare provider name resolved against whatever BYO key an organization
+    supplies.
+    """
+    return GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        providers={"home_lab": {"provider_type": "openai", "api_base": "https://box.ts.net/v1", "api_key": "t"}},
+    )
+
+
+@pytest.fixture
+def instance_client(instance_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    yield from build_test_client(instance_config)
+
+
+def _price(client: TestClient, model_key: str) -> None:
+    resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": model_key, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers={API_KEY_HEADER: "Bearer test-master-key"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_the_catalog_says_which_models_the_deployment_supplies(instance_client: TestClient) -> None:
+    """``deployment_managed`` is what lets the dashboard withhold a rate override.
+
+    An organization may set its own rate for a model it supplies the provider key
+    for, and not for one the deployment holds the credential to, so the catalog
+    has to distinguish them rather than leave a client guessing from the prefix.
+    """
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    _price(instance_client, "home_lab:llama-3")
+    _price(instance_client, "openai:gpt-4o")
+
+    listed = instance_client.get(f"{API_ROOT}/models", headers=headers)
+    assert listed.status_code == 200, listed.text
+    managed = {model["id"]: model["deployment_managed"] for model in listed.json()["data"]}
+
+    assert managed["home_lab:llama-3"] is True
+    assert managed["openai:gpt-4o"] is False
+
+    one = instance_client.get(f"{API_ROOT}/models/home_lab:llama-3", headers=headers)
+    assert one.status_code == 200, one.text
+    assert one.json()["deployment_managed"] is True

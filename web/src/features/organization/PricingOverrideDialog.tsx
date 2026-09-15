@@ -5,17 +5,22 @@ import type { OrganizationPricingOverride } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { useModels } from "@/shared/api/models"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
 } from "@/shared/api/pricing"
 
 import {
+  deploymentManagedPrefixes,
   findOverlapping,
   isValidModelKey,
+  managedModelReason,
   parseRate,
   periodBlockedReason,
 } from "./pricingOverride"
+import { isDeploymentOperator } from "./roles"
 
 // The form behind both Add and Edit. One component rather than two, because the
 // only difference is whether the model key is editable: the endpoint replaces a
@@ -109,6 +114,13 @@ export function PricingOverrideDialog({
   // draft *and* its mutation).
   const create = useCreateOrganizationPricing()
   const replace = useReplaceOrganizationPricing()
+  // The catalog is readable by any signed-in caller, which is what makes it the
+  // source for this: the provider list that would answer the same question is
+  // withheld from an organization admin (#821).
+  const catalog = useModels()
+  const organization = useOrganizationContext()
+  const isOperator = isDeploymentOperator(organization.data)
+  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
   const save = (draft: PricingOverrideDraft) => {
     const onDone = { onSuccess: onSaved }
     if (editing) {
@@ -172,6 +184,14 @@ export function PricingOverrideDialog({
   const cacheWrite1hRate = parseRate(cacheWrite1h)
 
   const keyInvalid = !isValidModelKey(modelKey)
+  // Judged on the key the request would carry: the one being typed on the add
+  // path, and the stored, immutable one on the edit path, where the rule still
+  // has to hold for a row saved before it existed.
+  const managedReason = managedModelReason({
+    modelKey: editing?.model_key ?? modelKey,
+    managedPrefixes,
+    isDeploymentOperator: isOperator,
+  })
   const periodReason = periodBlockedReason(from, to)
   const fromMs = from.trim() === "" ? Date.now() : Date.parse(from)
   const toMs = to.trim() === "" ? undefined : Date.parse(to)
@@ -205,20 +225,29 @@ export function PricingOverrideDialog({
   const keyReason =
     keyInvalid && modelKey.trim() !== ""
       ? "A rate is stored under a 'provider:model' key, so it needs the provider prefix."
-      : undefined
+      : managedReason
   const blockedReason = keyInvalid
     ? editing
       ? keyReason
       : undefined
-    : startRequired
-      ? "An edit needs a start. Leaving it blank would move this override's period to now."
-      : (periodReason ??
-        (clash
-          ? `This period overlaps an override already stored for ${clash.model_key}. Change the period, or edit that one instead.`
-          : undefined))
+    : // On the edit path the key has no control of its own, so the managed
+      // refusal is said here or nowhere. It precedes the period checks because
+      // it is about the row rather than the dates, and no period fixes it.
+      editing && managedReason
+      ? managedReason
+      : startRequired
+        ? "An edit needs a start. Leaving it blank would move this override's period to now."
+        : (periodReason ??
+          (clash
+            ? `This period overlaps an override already stored for ${clash.model_key}. Change the period, or edit that one instead.`
+            : undefined))
 
   const invalid =
-    keyInvalid || ratesInvalid || startRequired || blockedReason !== undefined
+    keyInvalid ||
+    ratesInvalid ||
+    startRequired ||
+    managedReason !== undefined ||
+    blockedReason !== undefined
 
   const submit = () => {
     if (invalid || inputRate === undefined || outputRate === undefined) return

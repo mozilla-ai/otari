@@ -46,13 +46,14 @@ function pricingOverride(
 // Mocked at the `@/client` boundary (a real `fetch`), which is what the standards
 // call for: the hooks and their invalidation are part of what is under test, so
 // stubbing them would leave the interesting half uncovered.
-function catalogModel(id: string) {
+function catalogModel(id: string, deployment_managed = false) {
   return {
     id,
     object: "model",
     created: 0,
     owned_by: id.split(":")[0],
     pricing_source: "none",
+    deployment_managed,
   }
 }
 
@@ -62,6 +63,7 @@ function mockApi({
   writeStatus = 201,
   writeBody = pricingOverride() as unknown,
   models = [] as string[],
+  managedModels = [] as string[],
 }: {
   context?: OrganizationContext
   overrides?: OrganizationPricingOverride[]
@@ -69,6 +71,8 @@ function mockApi({
   writeBody?: unknown
   /** What GET /v1/models serves, which is where the model-key picker looks. */
   models?: string[]
+  /** Catalog entries the deployment supplies the credential for. */
+  managedModels?: string[]
 } = {}) {
   const requests: RecordedRequest[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -86,7 +90,13 @@ function mockApi({
       return jsonResponse(writeBody, writeStatus)
     }
     if (url.endsWith(`${API_ROOT}/models`)) {
-      return jsonResponse({ object: "list", data: models.map(catalogModel) })
+      return jsonResponse({
+        object: "list",
+        data: [
+          ...models.map((id) => catalogModel(id)),
+          ...managedModels.map((id) => catalogModel(id, true)),
+        ],
+      })
     }
     return jsonResponse(context)
   })
@@ -507,5 +517,91 @@ describe("RateOverridesCard", () => {
     expect(
       await screen.findByText(/already covers part of that period/i),
     ).toBeInTheDocument()
+  })
+
+  // otari-ai#2095: the rates of a model the deployment supplies the credential
+  // for are the deployment's, not a tenant's. The server refuses either way;
+  // these cover the half that keeps the control from being offered.
+  describe("a model the deployment supplies", () => {
+    const tenant = organizationContext({ deployment_operator: false })
+
+    it("blocks the save and says whose rate it is", async () => {
+      mockApi({ context: tenant, managedModels: ["nebius_prod:llama-3"] })
+      const user = userEvent.setup()
+
+      await renderPage()
+
+      await user.click(
+        await screen.findByRole("button", { name: /add override/i }),
+      )
+      await user.type(
+        await screen.findByRole("combobox", { name: /model key/i }),
+        "nebius_prod:llama-3",
+      )
+      await user.type(screen.getByLabelText(/input, per 1m tokens/i), "0")
+      await user.type(screen.getByLabelText(/output, per 1m tokens/i), "0")
+
+      expect(
+        await screen.findByText(/one of this deployment's own providers/i),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: /^add override$/i }),
+      ).toBeDisabled()
+    })
+
+    it("leaves a model the organization supplies its own key for alone", async () => {
+      mockApi({
+        context: tenant,
+        models: ["openai:gpt-4o"],
+        managedModels: ["nebius_prod:llama-3"],
+      })
+      const user = userEvent.setup()
+
+      await renderPage()
+
+      await user.click(
+        await screen.findByRole("button", { name: /add override/i }),
+      )
+      await user.type(
+        await screen.findByRole("combobox", { name: /model key/i }),
+        "openai:gpt-4o",
+      )
+      await user.type(screen.getByLabelText(/input, per 1m tokens/i), "3")
+      await user.type(screen.getByLabelText(/output, per 1m tokens/i), "15")
+
+      expect(
+        screen.getByRole("button", { name: /^add override$/i }),
+      ).toBeEnabled()
+    })
+
+    it("refuses to edit a row stored before the rule, and still allows deleting it", async () => {
+      mockApi({
+        context: tenant,
+        overrides: [pricingOverride({ model_key: "nebius_prod:llama-3" })],
+        managedModels: ["nebius_prod:llama-3"],
+      })
+
+      await renderPage()
+
+      // Named by the reason rather than by the word "Edit": a disabled control
+      // takes no focus, so its accessible name is where the refusal can be read.
+      expect(
+        await screen.findByRole("button", {
+          name: /one of this deployment's own providers/i,
+        }),
+      ).toBeDisabled()
+      expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled()
+    })
+
+    it("leaves the deployment operator pricing its own models", async () => {
+      mockApi({
+        overrides: [pricingOverride({ model_key: "nebius_prod:llama-3" })],
+        managedModels: ["nebius_prod:llama-3"],
+      })
+
+      await renderPage()
+
+      expect(await screen.findByRole("button", { name: /edit/i })).toBeEnabled()
+    })
   })
 })
