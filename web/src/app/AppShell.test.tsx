@@ -552,7 +552,6 @@ describe("AppShell surface gating", () => {
       "Overview",
       "Activity",
       "Usage",
-      "Playground",
       "Models",
       "API keys",
       "Providers",

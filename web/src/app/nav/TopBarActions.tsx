@@ -3,30 +3,18 @@ import { Link } from "@tanstack/react-router"
 // By its `@/…` specifier, never as `./overlayWalletSlot`: that specifier is the
 // seam's alias key, and the module says what a relative import would cost.
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
+import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
+import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
-// The right end of the top bar: the links that are not destinations in either
-// rail.
-//
-// Documentation is the guide bundled with this gateway, unless the deployment
-// named documentation of its own (`docs_url`), which is what a hosted build
-// points at its product docs. It sits in the chrome because it is read
-// alongside a page rather than instead of one, and the design's account menu
-// has no row for it; the menu keeps a row of its own anyway, because this
-// cluster is hidden below `md` and the guide would otherwise have no entry
-// point on a phone.
-//
-// The design also draws a balance at the end of the cluster, and this build has
-// none to draw: this gateway meters spend but holds no wallet. `WalletNavSlot`
-// is the seam a build that does hold one replaces to contribute the chip, so
-// the gap is reachable rather than something an overlay would have to edit this
-// file to fill. It renders nothing here.
+// Desktop destinations; the account menu keeps them reachable on mobile.
 
 const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-shell-label font-medium text-muted transition-colors hover:text-foreground"
 
 export function TopBarActions() {
   const { docs_url } = useDeployment()
+  const hostsSurface = useSurfaceVisibility()
 
   return (
     // Hidden below the md breakpoint, where the mobile header has room for the
@@ -34,6 +22,11 @@ export function TopBarActions() {
     // cluster and so inherits that, which is what otari.ai's own navbar does
     // with the balance.
     <div className="hidden shrink-0 items-center gap-5 md:flex">
+      {hostsSurface(PLAYGROUND_NAV_ITEM) && (
+        <Link to={PLAYGROUND_NAV_ITEM.to} className={ACTION}>
+          {PLAYGROUND_NAV_ITEM.label}
+        </Link>
+      )}
       {docs_url ? (
         <a
           href={docs_url}

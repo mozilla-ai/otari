@@ -15,6 +15,8 @@ import {
   FiShield,
 } from "react-icons/fi"
 
+import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
+import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
 import { Avatar } from "@/design-system/indicators/Avatar"
 import { useAuth } from "@/features/auth/AuthContext"
@@ -320,6 +322,7 @@ export function AccountMenu({
 }) {
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url } = useDeployment()
+  const hostsSurface = useSurfaceVisibility()
   const organization = useOrganizationContext()
   const [open, setOpen] = useState(false)
   const identity = sessionIdentity(organization.data?.caller)
@@ -447,13 +450,16 @@ export function AccountMenu({
             )
           ) : null}
           <div className={MENU_DIVIDER} />
-          {/* The top bar owns Documentation above `md` (that cluster is
-              `hidden md:flex`), and this menu is the one surface that renders
-              inside the mobile drawer, so this row is what keeps documentation
-              reachable on a phone. Hidden from `md` up rather than shown
-              everywhere, because the design's menu draws no such row.
-              It follows the top bar's target: the deployment's own docs site
-              when it named one, the bundled guide otherwise. */}
+          {/* The top bar's destinations remain reachable in the mobile drawer. */}
+          {hostsSurface(PLAYGROUND_NAV_ITEM) && (
+            <MenuLink
+              label={PLAYGROUND_NAV_ITEM.label}
+              icon={PLAYGROUND_NAV_ITEM.icon}
+              to={PLAYGROUND_NAV_ITEM.to}
+              onNavigate={() => setOpen(false)}
+              className="md:hidden"
+            />
+          )}
           {docs_url ? (
             <MenuExternalLink
               label="Documentation"
