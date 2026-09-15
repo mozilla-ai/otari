@@ -21,7 +21,7 @@ reading of the same rows:
   ``POST /api/v1/organizations/me/switch``, which 404s on one the caller does not
   belong to.
 * **How much of the organization** follows the rule the workspace list already
-  uses: an owner, an admin or a superuser reads every workspace in it, and a
+  uses: an owner or an admin reads every workspace in it, and a
   member or viewer reads the ones they actively belong to. A member who belongs
   to no workspace gets an empty page, not a refusal: the surface is theirs and
   simply has nothing in it yet.
