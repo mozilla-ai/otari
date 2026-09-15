@@ -31,13 +31,22 @@ away the page that configures guardrails.
 The built-in catalog
 --------------------
 
-Beside that sits a second, local catalog: every guardrail ``any_guardrail`` ships,
-read straight from its import-free registry. Nothing is joined and nothing is
-fetched, so there is no unavailable state to report. It carries **both** stages,
-because a guardrail this gateway constructs itself has no operator YAML fixing its
-constructor, and the create stage is where a vendor API key lives. It carries the
-one-of requirement groups beside them, because a constraint satisfied by any of
-several parameters is one no parameter's own ``required`` flag can state.
+Beside that sits a second, local catalog: the guardrails this gateway can run
+itself, read straight from ``any_guardrail``'s import-free registry. Nothing is
+joined and nothing is fetched, so there is no unavailable state to report. It
+carries **both** stages, because a guardrail this gateway constructs itself has no
+operator YAML fixing its constructor, and the create stage is where a vendor API
+key lives. It carries the one-of requirement groups beside them, because a
+constraint satisfied by any of several parameters is one no parameter's own
+``required`` flag can state.
+
+It is not every guardrail the library ships. A guardrail that works by holding
+model weights in the process running it is not one this gateway builds, so it is
+not one this catalog may offer; those belong in the guardrails service above, and
+the two catalogs divide on exactly that line. The rule is upstream's own backend
+taxonomy rather than a list kept here, and it reads ``alternate_backends`` beside
+``backend`` so a guardrail with a hosted path alongside a local default is
+reachable by the path that is a call rather than a download.
 
 Whether a guardrail can actually run here is a question about installed packages,
 not about a service. It is answered by probing for the top-level modules that
@@ -57,7 +66,7 @@ from any_guardrail.base import GuardrailName
 from any_guardrail.parameter_registry import get_parameter_schema, get_requirement_groups
 from any_guardrail.parameters import RequirementGroup
 from any_guardrail.registry import GUARDRAIL_METADATA
-from any_guardrail.taxonomy import GuardrailMetadata
+from any_guardrail.taxonomy import BackendType, GuardrailMetadata
 from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.log_config import logger
@@ -423,7 +432,7 @@ class BuiltInGuardrailSpec(GuardrailMetadata):
 
 
 class BuiltInGuardrailCatalog(BaseModel):
-    """Every guardrail this gateway ships, whether or not it can currently run it."""
+    """The guardrails this gateway can build and call itself."""
 
     guardrails: list[BuiltInGuardrailSpec] = Field(default_factory=list)
 
@@ -458,6 +467,17 @@ def _backend_availability(name: GuardrailName) -> tuple[bool, str | None]:
     return False, LOCAL_GUARDRAILS_EXTRA
 
 
+def _reachable_over_a_hosted_api(name: GuardrailName) -> bool:
+    """Whether ``name`` runs as a call to a service rather than as a local model.
+
+    ``alternate_backends`` counts beside ``backend``: SusFactor defaults to a local
+    encoder and also answers over 0DIN's hosted API, and it is the hosted path this
+    gateway would take.
+    """
+    metadata = GUARDRAIL_METADATA[name]
+    return BackendType.HOSTED_API in ({metadata.backend} | metadata.alternate_backends)
+
+
 def _builtin_spec(name: GuardrailName) -> BuiltInGuardrailSpec:
     """One guardrail's row, built from the import-free registry alone."""
     runnable, missing_extra = _backend_availability(name)
@@ -473,16 +493,20 @@ def _builtin_spec(name: GuardrailName) -> BuiltInGuardrailSpec:
 
 
 def build_builtin_guardrail_catalog() -> BuiltInGuardrailCatalog:
-    """Every guardrail any-guardrail ships, typed for the form that defines one.
+    """Every guardrail any-guardrail reaches over a hosted API, typed for the form that defines one.
 
     Does no I/O and reaches no service, so unlike `fetch_guardrail_catalog` it has
     no unavailable state: the answer is a property of the installed library. Both
     parameter stages are published, because a guardrail this gateway constructs
     has no operator YAML fixing its constructor.
+
+    The filter belongs here and not in `_specs_for_stage`, which the sidecar half
+    shares: an operator's own guardrails service may well run a local model, and
+    typing its parameters is what `fetch_guardrail_catalog` exists to do.
     """
     return BuiltInGuardrailCatalog(
         guardrails=sorted(
-            (_builtin_spec(name) for name in GuardrailName),
+            (_builtin_spec(name) for name in GuardrailName if _reachable_over_a_hosted_api(name)),
             key=lambda spec: spec.display_name.casefold(),
         )
     )
