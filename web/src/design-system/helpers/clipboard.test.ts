@@ -99,4 +99,15 @@ describe("copyToClipboard", () => {
   it("does not report success where no clipboard mechanism exists at all", async () => {
     expect(await copyToClipboard("openai:gpt-4o", undefined)).toBe(false)
   })
+
+  it("removes the scratch textarea even when select() throws (#1149)", async () => {
+    vi.spyOn(HTMLTextAreaElement.prototype, "select").mockImplementation(() => {
+      throw new Error("detached document")
+    })
+
+    await expect(copyToClipboard("provider secret", undefined)).rejects.toThrow(
+      "detached document",
+    )
+    expect(document.querySelectorAll("textarea")).toHaveLength(0)
+  })
 })

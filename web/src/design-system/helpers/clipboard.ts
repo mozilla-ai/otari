@@ -35,27 +35,32 @@ function legacyCopy(text: string): boolean {
   source.style.opacity = "0"
   document.body.appendChild(source)
 
-  const selection = document.getSelection()
-  const previous =
-    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  const previousFocus =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-  source.select()
-
   let copied = false
+  let selection: Selection | null = null
+  let previous: Range | null = null
+  let previousFocus: HTMLElement | null = null
   try {
-    copied = document.execCommand("copy")
-  } catch {
-    copied = false
-  }
+    selection = document.getSelection()
+    previous =
+      selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+    previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    source.select()
 
-  source.remove()
-  if (selection && previous) {
-    selection.removeAllRanges()
-    selection.addRange(previous)
+    try {
+      copied = document.execCommand("copy")
+    } catch {
+      copied = false
+    }
+  } finally {
+    source.remove()
+    if (selection && previous) {
+      selection.removeAllRanges()
+      selection.addRange(previous)
+    }
+    previousFocus?.focus()
   }
-  previousFocus?.focus()
   return copied
 }
