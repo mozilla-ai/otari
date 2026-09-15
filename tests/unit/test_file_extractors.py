@@ -99,6 +99,77 @@ def test_failing_converter_build_degrades_instead_of_raising(monkeypatch: pytest
     assert "magika model failed to load" in result.detail
 
 
+def test_bounded_pdf_rejects_page_count_before_extracting(monkeypatch: pytest.MonkeyPatch) -> None:
+    indexed = False
+
+    class FakeDocument:
+        def __init__(self, _data: bytes) -> None:
+            pass
+
+        def __len__(self) -> int:
+            return 101
+
+        def __getitem__(self, _index: int) -> Any:
+            nonlocal indexed
+            indexed = True
+            raise AssertionError("over-limit PDF must not read a page")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pypdfium2",
+        type("m", (), {"PdfDocument": FakeDocument}),
+    )
+
+    result = file_extractors.extract_bounded_pdf_text_sync(b"%PDF", max_pages=100, max_text_bytes=1024)
+
+    assert result.ok is False
+    assert indexed is False
+
+
+def test_bounded_pdf_stops_at_utf8_byte_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeTextPage:
+        def get_text_range(self) -> str:
+            return "é" * 100
+
+        def close(self) -> None:
+            pass
+
+    class FakePage:
+        def get_textpage(self) -> FakeTextPage:
+            return FakeTextPage()
+
+        def close(self) -> None:
+            pass
+
+    class FakeDocument:
+        def __init__(self, _data: bytes) -> None:
+            pass
+
+        def __len__(self) -> int:
+            return 2
+
+        def __getitem__(self, _index: int) -> FakePage:
+            return FakePage()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pypdfium2",
+        type("m", (), {"PdfDocument": FakeDocument}),
+    )
+
+    result = file_extractors.extract_bounded_pdf_text_sync(b"%PDF", max_pages=100, max_text_bytes=51)
+
+    assert result.ok is True
+    assert result.truncated is True
+    assert len(result.text.encode("utf-8")) <= 51
+
+
 def test_missing_markitdown_reports_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     import builtins
 

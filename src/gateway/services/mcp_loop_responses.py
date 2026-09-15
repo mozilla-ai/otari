@@ -42,7 +42,7 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.tool_format import openai_to_responses_tools
-from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
 
 if TYPE_CHECKING:

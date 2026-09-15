@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Protocol, TypeAlias, TypeVar
+from urllib.request import getproxies_environment
 
 import httpx
 
@@ -183,6 +184,7 @@ async def validate_retrieval_target(
     policy: DomainPolicy | None = None,
     resolver: AddressResolver | None = None,
     deadline: NetworkDeadline | None = None,
+    allow_private: bool = False,
 ) -> ValidatedTarget:
     """Canonicalize, resolve, and admit a destination before connection setup.
 
@@ -217,7 +219,7 @@ async def validate_retrieval_target(
     for address in resolved:
         canonical_address = ipaddress.ip_address(str(address))
         reason = _blocked_address_reason(canonical_address)
-        if reason is not None:
+        if reason is not None and not allow_private:
             raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
         if canonical_address not in seen:
             admitted.append(canonical_address)
@@ -451,6 +453,75 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             transports = tuple(entry.transport for entry in self._pools.values())
             self._pools.clear()
         await asyncio.gather(*(transport.aclose() for transport in transports), return_exceptions=True)
+
+
+class TrustedProxyAsyncHTTPTransport(PinnedAsyncHTTPTransport):
+    """Use operator-trusted environment proxies, retaining pinning for direct traffic.
+
+    Local target validation still applies, but the proxy resolves the hostname
+    again and must enforce address safety at connection time. Proxy routing is
+    snapshotted at construction and evaluated separately for every redirect hop.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._environment_proxies = getproxies_environment()
+        proxies: dict[str, httpx.Proxy] = {}
+        for scheme in ("http", "https", "all"):
+            value = self._environment_proxies.get(scheme)
+            if value:
+                try:
+                    proxy = httpx.Proxy(value)
+                except (httpx.InvalidURL, ValueError):
+                    raise ValueError("web retrieval proxy URL is invalid") from None
+                if proxy.url.scheme not in {"http", "https"}:
+                    raise ValueError("web retrieval supports only HTTP(S) proxies")
+                if not proxy.url.is_absolute_url:
+                    raise ValueError("web retrieval proxy URL must include a hostname")
+                proxies[scheme] = proxy
+        self._proxy_transports = {
+            scheme: httpx.AsyncHTTPTransport(
+                proxy=proxy,
+                verify=self._ssl_context,
+                trust_env=False,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=10),
+                retries=0,
+            )
+            for scheme, proxy in proxies.items()
+        }
+
+    def _bypasses_proxy(self, target: ValidatedTarget) -> bool:
+        host = target.origin.host
+        candidates = (host.value, host.url_host, f"{host.url_host}:{target.origin.port}")
+        for value in self._environment_proxies.get("no", "").split(","):
+            rule = value.strip().lower().lstrip(".")
+            if rule == "*":
+                return True
+            if rule and any(
+                candidate == rule or (not host.is_ip and candidate.endswith(f".{rule}"))
+                for candidate in candidates
+            ):
+                return True
+        return False
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        target = self._target_from_request(request)
+        if self._closed:
+            raise PinnedTransportError("web retrieval transport is closed")
+        if not self._bypasses_proxy(target):
+            proxy_transport = self._proxy_transports.get(request.url.scheme) or self._proxy_transports.get("all")
+            if proxy_transport is not None:
+                return await proxy_transport.handle_async_request(request)
+        return await super().handle_async_request(request)
+
+    async def aclose(self) -> None:
+        try:
+            await super().aclose()
+        finally:
+            await asyncio.gather(
+                *(transport.aclose() for transport in self._proxy_transports.values()),
+                return_exceptions=True,
+            )
 
 
 @dataclass(frozen=True, slots=True)

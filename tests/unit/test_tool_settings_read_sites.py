@@ -45,6 +45,29 @@ def test_build_web_search_backend_env_fallback_when_config_unset(monkeypatch: py
     assert backend._max_results == 4
 
 
+@pytest.mark.parametrize("trusted", [False, True])
+def test_retrieval_proxy_trust_comes_only_from_deployment_config(
+    monkeypatch: pytest.MonkeyPatch, trusted: bool
+) -> None:
+    monkeypatch.setenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", str(not trusted).lower())
+    config = GatewayConfig(web_retrieval_trust_env_proxy=trusted)
+    backend = _build_web_search_backend(
+        base_url="http://searxng:8080",
+        tool_entry={"trust_env_proxy": not trusted, "web_retrieval_trust_env_proxy": not trusted},
+        config=config,
+    )
+    assert backend._trust_env_proxy is trusted
+
+
+def test_retrieval_proxy_trust_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", "true")
+    backend = _build_web_search_backend(base_url="http://searxng:8080", tool_entry={})
+    assert backend._trust_env_proxy is True
+    monkeypatch.setenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", "invalid")
+    with pytest.raises(ValueError, match="Invalid boolean"):
+        _build_web_search_backend(base_url="http://searxng:8080", tool_entry={})
+
+
 def test_resolve_purpose_hints_from_config() -> None:
     config = GatewayConfig(sandbox_purpose_hint="sbx", web_search_purpose_hint="ws")
     assert _resolve_sandbox_purpose_hint(None, config) == "sbx"

@@ -42,6 +42,7 @@ from gateway.services.tool_format import (
     inject_purpose_hints_anthropic,
     openai_to_anthropic_tools,
 )
+from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.web_search_budget import WebSearchBudget
 
 
@@ -1431,6 +1432,26 @@ async def test_native_blocks_prepended_to_final_content(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_nonstream_native_search_results_respect_the_result_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(_two_round_responses()))
+    oversized_title = "line\n" * WEB_RETRIEVAL_RESULT_MAX_BYTES
+    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": oversized_title}])
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    tool_result = cast(Any, result.content[1])
+    assert len(tool_result.model_dump_json(exclude_none=True).encode("utf-8")) <= WEB_RETRIEVAL_RESULT_MAX_BYTES
+    assert tool_result.content[0].title.endswith("…")
+
+
+@pytest.mark.asyncio
 async def test_no_native_blocks_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """The historical shape: the gateway's search is invisible in the response."""
     monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(_two_round_responses()))
@@ -1774,7 +1795,8 @@ async def test_stream_emits_native_blocks_with_gapless_indices(monkeypatch: pyte
         return next(iter_streams)
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
-    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": "Python"}])
+    oversized_title = "line\n" * WEB_RETRIEVAL_RESULT_MAX_BYTES
+    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": oversized_title}])
 
     events = [
         event
@@ -1808,6 +1830,9 @@ async def test_stream_emits_native_blocks_with_gapless_indices(monkeypatch: pyte
     # The query survives without any input_json_delta: the start event carries the
     # complete block, and the SDK only overwrites ``input`` when a delta arrives.
     assert cast(Any, starts[0].content_block).input == {"query": "python"}
+    tool_result = cast(Any, starts[1].content_block)
+    assert len(tool_result.model_dump_json(exclude_none=True).encode("utf-8")) <= WEB_RETRIEVAL_RESULT_MAX_BYTES
+    assert tool_result.content[0].title.endswith("…")
     # The gateway's own tool_use block still never reaches the client.
     assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
 

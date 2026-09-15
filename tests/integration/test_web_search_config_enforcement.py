@@ -10,7 +10,8 @@ the other door into the same capability.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import uuid
+from collections.abc import AsyncIterator, Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -25,8 +26,10 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.models.entities import WorkspaceWebSearchConfig
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _REQUEST = {
@@ -101,7 +104,7 @@ def _post_with_search_patched(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._tools.WebSearchBackend", new=fake_backend),
+        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
     return response, seen
@@ -122,6 +125,103 @@ def test_no_row_leaves_the_request_exactly_as_it_was(
     assert seen.backend_kwargs["max_results"] == 5, "the backend's own default"
     assert "allowed_domains" not in seen.backend_kwargs
     assert "blocked_domains" not in seen.backend_kwargs
+
+
+@pytest.mark.parametrize(
+    ("field", "values"),
+    [
+        ("allowed_domains", ["https://example.com/path"]),
+        ("blocked_domains", ["https://example.com/path"]),
+        ("allowed_domains", [f"{index}.example.com" for index in range(101)]),
+        ("blocked_domains", [f"{index}.example.com" for index in range(101)]),
+    ],
+)
+def test_invalid_request_domain_rules_are_rejected_before_dispatch(
+    field: str,
+    values: list[str],
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    body = {
+        **_REQUEST,
+        "tools": [{"type": "otari_web_search", field: values}],
+    }
+
+    response, seen = _post_with_search_patched(client, api_key_header, body)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["message"] == (
+        "Web search allowed_domains and blocked_domains must each contain at most 100 bare valid hostnames"
+    )
+    assert seen.ran is False
+    assert seen.backend_kwargs == {}
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            f"{API_ROOT}/chat/completions",
+            {
+                "model": "openai:gpt-4o",
+                "messages": [{"role": "user", "content": "search"}],
+                "tools": [{"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}],
+            },
+        ),
+        (
+            f"{API_ROOT}/responses",
+            {
+                "model": "openai:gpt-4o",
+                "input": "search",
+                "tools": [{"type": "otari_web_search", "allowed_domains": ["https://example.com/path"]}],
+            },
+        ),
+    ],
+)
+def test_invalid_request_domain_rules_are_rejected_for_other_completion_shapes(
+    path: str,
+    body: dict[str, Any],
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+
+    response = client.post(path, json=body, headers=api_key_header)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Web search allowed_domains and blocked_domains must each contain at most 100 bare valid hostnames"
+    )
+
+
+def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_config(client, master_key_header, workspace_id, enabled=True, allowed_domains=["example.com"])
+
+    with db_session_factory() as db:
+        row = db.get(WorkspaceWebSearchConfig, uuid.UUID(workspace_id))
+        assert row is not None
+        row.allowed_domains = ["https://example.com/private"]
+        db.commit()
+
+    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"]["message"] == ("Web search configuration contains an invalid domain rule")
+    assert seen.ran is False
+    stored = client.get(f"{API_ROOT}/workspaces/{workspace_id}/web-search", headers=master_key_header)
+    assert stored.status_code == 200
+    assert stored.json()["allowed_domains"] == ["https://example.com/private"]
 
 
 def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
@@ -413,7 +513,7 @@ def test_a_streaming_request_gets_the_same_narrowing(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
-        patch("gateway.api.routes._tools.WebSearchBackend", new=fake_backend),
+        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
 
@@ -645,6 +745,40 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     assert len(rows) == 1
     assert rows[0]["status"] == "error"
     assert rows[0]["status_code"] == 403
+
+
+def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _stored_search_tool(client, master_key_header, "invalid-config-search")
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_config(client, master_key_header, workspace_id, enabled=True, allowed_domains=["example.com"])
+
+    with db_session_factory() as db:
+        row = db.get(WorkspaceWebSearchConfig, uuid.UUID(workspace_id))
+        assert row is not None
+        row.allowed_domains = ["https://example.com/private"]
+        db.commit()
+
+    client.post(f"{API_ROOT}/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "invalid-config-search-key", "user_id": "invalid-config-search-user"},
+        headers=master_key_header,
+    ).json()
+
+    with patch("gateway.api.routes.search.run_search", new=AsyncMock()) as ran:
+        response = client.post(
+            f"{API_ROOT}/search/invalid-config-search",
+            json={"query": "anything"},
+            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+        )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "Web search configuration contains an invalid domain rule"
+    assert ran.await_count == 0
 
 
 def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(

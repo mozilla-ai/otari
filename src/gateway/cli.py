@@ -12,7 +12,6 @@ from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
 from gateway.log_config import setup_logger
-from gateway.main import create_app
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
     "DEBUG": logging.DEBUG,
@@ -88,6 +87,8 @@ def serve(
     log_level: int,
 ) -> None:
     """Start the Otari server."""
+    from gateway.main import create_app
+
     if workers > 1:
         raise click.ClickException(
             "Otari does not support running more than one worker process yet. "

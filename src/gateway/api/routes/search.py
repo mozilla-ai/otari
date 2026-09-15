@@ -55,6 +55,7 @@ from gateway.api.routes._passthrough import (
     resolve_passthrough_user_id,
 )
 from gateway.api.routes._pipeline import (
+    WEB_SEARCH_CONFIG_INVALID_DETAIL,
     WEB_SEARCH_NOT_ENABLED_DETAIL,
     _elapsed_ms,
     failure_status_code,
@@ -81,7 +82,10 @@ from gateway.services.search_backend import (
     resolve_search_tool,
     run_search,
 )
-from gateway.services.tenancy.workspace_web_search_service import resolve_workspace_web_search_config
+from gateway.services.tenancy.workspace_web_search_service import (
+    InvalidStoredWebSearchDomainError,
+    resolve_workspace_web_search_config,
+)
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -302,7 +306,19 @@ async def _dispatch_search(
     # workspace, which is a policy that fails open. Only the veto applies; the
     # row's other fields shape the in-loop backend's own request and have no
     # counterpart in this endpoint's provider adapters.
-    workspace_search = await resolve_workspace_web_search_config(db, usage_workspace_id)
+    try:
+        workspace_search = await resolve_workspace_web_search_config(db, usage_workspace_id)
+    except InvalidStoredWebSearchDomainError as exc:
+        await log_rejection(
+            WEB_SEARCH_CONFIG_INVALID_DETAIL,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=WEB_SEARCH_CONFIG_INVALID_DETAIL,
+        ) from exc
     if workspace_search is not None and not workspace_search.enabled:
         await log_rejection(
             WEB_SEARCH_NOT_ENABLED_DETAIL,

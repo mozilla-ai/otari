@@ -39,7 +39,8 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.tool_format import openai_to_anthropic_tools
 from gateway.services.tool_usage import is_tool_error
-from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_network import truncate_utf8
 from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
 
 if TYPE_CHECKING:
@@ -95,6 +96,62 @@ WEB_SEARCH_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
 MCP_CLIENT_BETA = "mcp-client-2025-11-20"
 
 
+def _web_search_result_block(
+    tool_use_id: str,
+    citations: list[WebSearchResultBlock],
+) -> WebSearchToolResultBlock:
+    return WebSearchToolResultBlock(
+        tool_use_id=tool_use_id,
+        type="web_search_tool_result",
+        content=citations,
+    )
+
+
+def _web_search_result_size(tool_use_id: str, citations: list[WebSearchResultBlock]) -> int:
+    block = _web_search_result_block(tool_use_id, citations)
+    return len(block.model_dump_json(exclude_none=True).encode("utf-8"))
+
+
+def _append_bounded_citation(
+    citations: list[WebSearchResultBlock],
+    *,
+    tool_use_id: str,
+    url: str,
+    title: str,
+    page_age: str | None,
+) -> None:
+    def citation(candidate_title: str) -> WebSearchResultBlock:
+        return WebSearchResultBlock(
+            type="web_search_result",
+            url=url,
+            title=candidate_title,
+            page_age=page_age,
+            encrypted_content="",
+        )
+
+    complete = citation(title)
+    if _web_search_result_size(tool_use_id, [*citations, complete]) <= WEB_RETRIEVAL_RESULT_MAX_BYTES:
+        citations.append(complete)
+        return
+
+    minimal = citation("")
+    if _web_search_result_size(tool_use_id, [*citations, minimal]) > WEB_RETRIEVAL_RESULT_MAX_BYTES:
+        return
+
+    best = minimal
+    low = 0
+    high = min(len(title.encode("utf-8")), WEB_RETRIEVAL_RESULT_MAX_BYTES)
+    while low <= high:
+        midpoint = (low + high) // 2
+        candidate = citation(truncate_utf8(title, midpoint, suffix="…").text)
+        if _web_search_result_size(tool_use_id, [*citations, candidate]) <= WEB_RETRIEVAL_RESULT_MAX_BYTES:
+            best = candidate
+            low = midpoint + 1
+        else:
+            high = midpoint - 1
+    citations.append(best)
+
+
 def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list[Any]:
     """A ``server_tool_use`` / ``web_search_tool_result`` pair for one gateway search.
 
@@ -117,14 +174,12 @@ def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list
             # Nothing to cite. A hit with no URL is unusable to a citations panel.
             continue
         page_age = " ".join(str(result.get("published_date") or "").split())[:_PAGE_AGE_MAX_CHARS]
-        citations.append(
-            WebSearchResultBlock(
-                type="web_search_result",
-                url=url,
-                title=str(result.get("title") or url).strip(),
-                page_age=page_age or None,
-                encrypted_content="",
-            )
+        _append_bounded_citation(
+            citations,
+            tool_use_id=tool_use_id,
+            url=url,
+            title=str(result.get("title") or url).strip(),
+            page_age=page_age or None,
         )
     return [
         ServerToolUseBlock(
@@ -136,11 +191,7 @@ def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list
             input={"query": query},
             type="server_tool_use",
         ),
-        WebSearchToolResultBlock(
-            tool_use_id=tool_use_id,
-            type="web_search_tool_result",
-            content=citations,
-        ),
+        _web_search_result_block(tool_use_id, citations),
     ]
 
 

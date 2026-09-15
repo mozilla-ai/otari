@@ -232,6 +232,26 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
     assert config.mcp_allow_loopback is False
 
 
+def test_retrieval_proxy_trust_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    assert GatewayConfig().web_retrieval_trust_env_proxy is False
+
+
+def test_retrieval_proxy_trust_yaml_and_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", raising=False)
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("web_retrieval_trust_env_proxy: true\n", encoding="utf-8")
+    assert load_config(str(config_file)).web_retrieval_trust_env_proxy is True
+    monkeypatch.setenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", "false")
+    assert load_config(str(config_file)).web_retrieval_trust_env_proxy is False
+    monkeypatch.setenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", "invalid")
+    with pytest.raises(ValueError):
+        load_config(str(config_file))
+
+
 def test_load_config_service_level_fields_ignore_legacy_gateway_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
