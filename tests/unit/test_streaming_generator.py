@@ -318,6 +318,10 @@ async def _noop_complete(usage: CompletionUsage) -> None:
     return None
 
 
+async def _noop_no_usage() -> None:
+    return None
+
+
 async def _fail_on_error(exc: BaseException) -> None:
     pytest.fail(f"on_error should not be called: {exc}")
 
@@ -535,3 +539,155 @@ async def test_keepalives_do_not_mask_an_upstream_error() -> None:
     assert "server_error" in events[-2]
     assert events[-1] == "data: [DONE]\n\n"
     assert errors == [_PROVIDER_CRASHED]
+
+
+@pytest.mark.asyncio
+async def test_on_first_chunk_fires_once_on_the_first_real_chunk() -> None:
+    """``on_first_chunk`` fires exactly once, for a multi-chunk stream."""
+    calls = 0
+
+    def on_first_chunk() -> None:
+        nonlocal calls
+        calls += 1
+
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("hello", "world", "usage"),
+            format_chunk=_format_chunk,
+            extract_usage=_extract_usage,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=_noop_complete,
+            on_error=_fail_on_error,
+            label="test:model",
+            on_first_chunk=on_first_chunk,
+        )
+    ]
+
+    assert events == ["data: hello\n\n", "data: world\n\n", "data: usage\n\n", "data: [DONE]\n\n"]
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_on_first_chunk_is_not_triggered_by_keepalives() -> None:
+    """A keepalive is transport filler, not a chunk: it must not count as TTFT."""
+    release = asyncio.Event()
+    calls = 0
+
+    def on_first_chunk() -> None:
+        nonlocal calls
+        calls += 1
+
+    async def _slow_first_chunk() -> AsyncIterator[str]:
+        await release.wait()
+        yield "hello"
+
+    gen = streaming_generator(
+        stream=_slow_first_chunk(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        label="test:model",
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+        on_first_chunk=on_first_chunk,
+    )
+
+    assert await gen.__anext__() == ": keepalive\n\n"
+    assert await gen.__anext__() == ": keepalive\n\n"
+    assert calls == 0
+    release.set()
+    assert await gen.__anext__() == "data: hello\n\n"
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_on_first_chunk_does_not_fire_when_extract_usage_raises_on_first_chunk() -> None:
+    """If the first chunk is never actually formatted and sent, TTFT must not
+    be recorded for it: on_first_chunk previously fired before extract_usage
+    ran, so a crash there still counted a chunk the client never received."""
+    calls = 0
+    errors: list[str] = []
+
+    def on_first_chunk() -> None:
+        nonlocal calls
+        calls += 1
+
+    def _raise_on_first(chunk: str) -> CompletionUsage | None:
+        raise ValueError(_PROVIDER_CRASHED)
+
+    async def on_error(exc: BaseException) -> None:
+        errors.append(str(exc))
+
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("hello"),
+            format_chunk=_format_chunk,
+            extract_usage=_raise_on_first,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=_noop_complete,
+            on_error=on_error,
+            label="test:model",
+            on_first_chunk=on_first_chunk,
+        )
+    ]
+
+    assert errors == [_PROVIDER_CRASHED]
+    assert calls == 0
+    assert not any(event.startswith("data: hello") for event in events)
+
+
+@pytest.mark.asyncio
+async def test_on_first_chunk_fires_on_flush_not_on_buffering() -> None:
+    """A chunk held in the terminal buffer (cost-carrier detection under
+    ``settle_before_done``) has not reached the client yet: on_first_chunk
+    must fire when it is actually flushed and yielded, not when it is merely
+    pulled off the upstream and buffered."""
+    release = asyncio.Event()
+    calls = 0
+
+    def on_first_chunk() -> None:
+        nonlocal calls
+        calls += 1
+
+    def _is_carrier(chunk: str) -> bool:
+        return chunk == "carrier"
+
+    async def _carrier_then_trailing() -> AsyncIterator[str]:
+        yield "carrier"
+        await release.wait()
+        yield "trailing"
+
+    gen = streaming_generator(
+        stream=_carrier_then_trailing(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=_noop_complete,
+        on_error=_fail_on_error,
+        on_no_usage=_noop_no_usage,
+        label="test:model",
+        keepalive_interval_seconds=_KEEPALIVE_INTERVAL,
+        settle_before_done=True,
+        is_cost_carrier=_is_carrier,
+        on_first_chunk=on_first_chunk,
+    )
+
+    # "carrier" is pulled off the upstream immediately and buffered (it is a
+    # cost carrier under settle_before_done), so nothing has actually reached
+    # the client yet: on_first_chunk must not have fired even though a real
+    # chunk was already read.
+    assert await gen.__anext__() == ": keepalive\n\n"
+    assert calls == 0
+
+    release.set()
+    # "trailing" also gets buffered (buffering_terminal stays true), the
+    # stream then ends and the terminal buffer flushes both chunks: this is
+    # the first point anything is actually sent, and where TTFT must land.
+    assert await gen.__anext__() == "data: carrier\n\n"
+    assert calls == 1
+    assert await gen.__anext__() == "data: trailing\n\n"
+    assert calls == 1
+    assert await gen.__anext__() == "data: [DONE]\n\n"

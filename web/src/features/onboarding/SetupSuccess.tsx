@@ -1,13 +1,7 @@
-import { useEffect, useRef } from "react"
-import { FiCheck } from "react-icons/fi"
-
 import type { ActivationAttempt } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { Dialog } from "@/design-system/feedback/Dialog"
-import {
-  confettiOriginOf,
-  fireSetupConfetti,
-} from "@/features/onboarding/setupConfetti"
+import { SetupSuccessMark } from "@/features/onboarding/SetupSuccessMark"
 import { formatCost } from "@/shared/helpers/format"
 
 /**
@@ -88,15 +82,6 @@ export function SetupSuccess({
   onDismiss: () => void
   onOpenActivity: () => void
 }) {
-  const markRef = useRef<HTMLSpanElement>(null)
-
-  // Thrown from the mark outwards, once, on mount. A no-op under reduced
-  // motion, which the helper enforces rather than this screen.
-  useEffect(() => {
-    const mark = markRef.current
-    if (mark) void fireSetupConfetti(confettiOriginOf(mark))
-  }, [])
-
   return (
     <Dialog
       isOpen
@@ -107,11 +92,7 @@ export function SetupSuccess({
       isAnnouncement
       title="Your first call went through"
       description="Otari observed the request and finished setup for this workspace."
-      mark={
-        <span ref={markRef} className="mt-0.5 flex shrink-0">
-          <FiCheck aria-hidden className="text-success size-6" />
-        </span>
-      }
+      mark={<SetupSuccessMark />}
       actions={
         // Scoped to gateway traffic: imported usage is somebody else's
         // requests, and the one that just landed is the newest row of what is

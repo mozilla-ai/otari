@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, waitFor } from "@testing-library/react"
+import { act, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -307,6 +307,60 @@ describe("SetupGuide", () => {
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
     expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
+  })
+
+  it("keeps the manual check visible for the original orb beat", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderGuide()
+    await screen.findByLabelText("Your API key")
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const timedUser = userEvent.setup({
+        advanceTimers: vi.advanceTimersByTime,
+      })
+      const button = screen.getByRole("button", { name: "Check now" })
+      await timedUser.click(button)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000)
+      })
+      expect(button).toHaveAttribute("data-pending", "true")
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_500)
+      })
+      expect(button).not.toHaveAttribute("data-pending")
+    } finally {
+      vi.useRealTimers()
+    }
+    // A second check is available after the animation ends.
+    await user.click(screen.getByRole("button", { name: "Close" }))
+  })
+
+  it("keeps snippet guidance unchanged when revealing and hiding the key", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderGuide()
+    await screen.findByLabelText("Your API key")
+    for (const label of ["Agent", "cURL", "Python", "TypeScript"]) {
+      await user.click(screen.getByRole("button", { name: label }))
+      const hint =
+        label === "Agent"
+          ? screen.getByText(/Works with Claude Code/)
+          : screen.getByText(/Prefer to have an agent wire this up/)
+      const original = hint.textContent
+      if (label !== "Agent") {
+        expect(hint).toHaveTextContent("the example shows a stand-in")
+        expect(hint).toHaveTextContent("copying always includes your real key")
+      }
+      await user.click(
+        screen.getByRole("button", { name: "Show Your API key" }),
+      )
+      expect(hint).toHaveTextContent(original ?? "")
+      await user.click(
+        screen.getByRole("button", { name: "Hide Your API key" }),
+      )
+      expect(hint).toHaveTextContent(original ?? "")
+    }
   })
 
   it("offers an agent prompt, cURL, Python and TypeScript", async () => {
