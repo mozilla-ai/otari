@@ -67,7 +67,7 @@ function SeriesMarker({ color }: { color: string }) {
 // and `label` at render time, so only the format props are passed by the
 // caller. For a single series it shows one value row; for a stack it shows one
 // row per non-zero series (marker + label + value) plus a total. Exported for
-// direct branch testing since recharts hover is impractical to drive in jsdom.
+// direct branch testing.
 export function ChartTooltip({
   active,
   label,
