@@ -59,7 +59,7 @@ class TestRedactSecretLikeValues:
 class TestNestedRedaction:
     """otari#1125: the walk stopped at depth one, so a credential one level down
     was returned in clear. Every cell here pairs the new masking with the restore
-    that has to move with it — a mask that reaches a nested entry while the
+    that has to move with it: a mask that reaches a nested entry while the
     restore still walks one level writes ``***`` over the credential on the next
     PATCH, which is worse than the leak it was fixing."""
 
@@ -141,8 +141,25 @@ class TestNestedRoundTrip:
 
         assert restore_redacted_values({"headers": {"trace": "on"}}, stored) == {"headers": {"trace": "on"}}
 
+    def test_the_mask_at_the_depth_bound_with_nothing_stored_stays_the_mask(self) -> None:
+        # The shallow rule is that a mask with no stored counterpart is taken
+        # literally, because dropping the caller's entry is worse than keeping a
+        # placeholder. The bound has to answer the same way: handing back the
+        # absent stored value writes null over what the caller actually sent.
+        submitted: object = REDACTED_VALUE
+        for _ in range(_MAX_NESTING_DEPTH):
+            submitted = {"a": submitted}
+
+        restored = restore_redacted_values(submitted, {"unrelated": "x"})  # type: ignore[arg-type]
+
+        node: object = restored
+        for _ in range(_MAX_NESTING_DEPTH):
+            assert isinstance(node, dict)
+            node = node["a"]
+        assert node == REDACTED_VALUE
+
     def test_a_list_at_the_depth_bound_is_not_overwritten_by_its_own_mask(self) -> None:
-        # The depth bound is the ONLY thing that masks a bare list element —
+        # The depth bound is the ONLY thing that masks a bare list element:
         # nothing else does, because an element has no key name to match on.
         # The restore walk pairs a mask with its stored value BY KEY, so an
         # element had no way back and an unchanged save wrote *** over the

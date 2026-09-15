@@ -58,14 +58,14 @@ def redact_secret_like_values(values: dict[str, Any] | None) -> dict[str, Any] |
 
     Nested objects and lists are walked, because none of the four columns
     constrains its shape and a credential one level down was returned in clear
-    (otari#1125). A matching key masks its value WHOLE, dict or list included —
+    (otari#1125). A matching key masks its value WHOLE, dict or list included:
     the same thing a matching top-level key has always done to a non-scalar, so
     depth 0 behaves exactly as before.
 
     Lists are walked but their bare elements are never masked: an element has no
     key name to match on, and masking one on its value would be a guess. Only a
     mapping inside a list can carry a masked entry. :func:`restore_redacted_values`
-    depends on that — see its own note.
+    depends on that; see its own note.
     """
     if values is None:
         return None
@@ -77,12 +77,17 @@ def redact_secret_like_values(values: dict[str, Any] | None) -> dict[str, Any] |
 def _restore_node(incoming: Any, stored: Any, depth: int) -> Any:
     """Prefer the stored value wherever the caller echoed the mask back, at any depth."""
     if depth >= _MAX_NESTING_DEPTH:
-        # The bound is the one place a BARE list element gets masked — nothing
+        # The bound is the one place a BARE list element gets masked: nothing
         # else masks an element, because an element has no key to match on. The
         # dict branch below restores a masked value by its key, and a list has
         # no key, so without this a list sitting exactly at the bound came back
         # as ``***`` and an unchanged PATCH wrote the mask over the credential.
-        return stored if incoming == REDACTED_VALUE else incoming
+        # With nothing stored underneath there is nothing to prefer, so the mask
+        # is kept as itself rather than returned as the missing value; that is
+        # the answer the dict branch already gives a key it cannot find.
+        if incoming == REDACTED_VALUE and stored is not None:
+            return stored
+        return incoming
     if isinstance(incoming, dict):
         stored_map = stored if isinstance(stored, dict) else {}
         out: dict[Any, Any] = {}
@@ -128,7 +133,7 @@ def restore_redacted_values(
     fixing (otari#1125).
 
     A bare ``***`` inside a LIST is taken literally, because masking never puts
-    one there — list elements have no key to match on — so an element that looks
+    one there (list elements have no key to match on), so an element that looks
     like the mask came from the caller and means itself.
     """
     if incoming is None:
