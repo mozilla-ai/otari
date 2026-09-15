@@ -116,9 +116,9 @@ PR with almost no CI, and neither of them reports anything:
   `mergeStateStatus: DIRTY` beside a check set that is not growing, and read that tell as "not
   growing" rather than as "small": a PR that was mergeable when its checks ran and conflicted
   afterwards keeps every one of those rows, so `DIRTY` beside a **complete** green set is the
-  same fault from the other end. Checks attach to the head sha, so nothing about them changes
-  when the mergeability underneath them does; four PRs based on `main` but stacked in content
-  showed a full green set for the parent's pre-merge state within a minute of that parent
+  same fault from the other end. Checks attach to the SHA used by that workflow run, so nothing
+  about them changes when the mergeability underneath them does; four PRs based on `main` but
+  stacked in content showed a full green set for the parent's pre-merge state within a minute of that parent
   squashing. `DIRTY` plus finished means re-verify after the rebase, and until then the set says
   only that the content merged with an earlier `main`.
 
