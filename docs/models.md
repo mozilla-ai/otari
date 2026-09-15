@@ -210,7 +210,12 @@ catalog shows. `instance:<cleaned id>` (`fireworks:glm-5.3`, spelled as the
 catalog spells the name) resolves to the provider's full id on that instance,
 where only one offering on the instance cleans to it. The model's catalog id
 (`z-ai/glm-5.3`) resolves to the model's cheapest offering by the deployment's
-own rates. Both are relabeled
+own rates. Where that id's vendor is also a provider's name (`openai/gpt-4o`,
+which is equally the legacy spelling of a request to OpenAI), it resolves only
+among that provider's own offerings and otherwise not at all: a selector that
+names a provider reaches that provider or fails, and is never redirected to
+another one. A model's `selector` in the catalog is null where it has no such
+spelling. Both are relabeled
 like an alias, so a response's `model` is what was sent, and pricing, budgets
 and usage key on the offering reached. A key whose allow-list names some
 instances only should send one of those instances or an alias, since a bare

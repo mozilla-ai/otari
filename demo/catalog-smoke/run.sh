@@ -34,7 +34,8 @@ done
 mkdir -p "$STATE"
 [ -f "$STATE/.gitignore" ] || echo '*' > "$STATE/.gitignore"
 if [ "$RESET" = 1 ]; then
-  rm -f "$STATE/otari.db" "$STATE/otari.db-wal" "$STATE/otari.db-shm" "$STATE/seeded" "$STATE/config.yml"
+  rm -f "$STATE/otari.db" "$STATE/otari.db-wal" "$STATE/otari.db-shm" "$STATE/seeded" "$STATE/config.yml" \
+    "$STATE/password"
 fi
 
 # One master key and one credential-encryption key per state directory, so a
@@ -75,16 +76,35 @@ GATEWAY=$!
 echo "$GATEWAY" > "$STATE/gateway.pid"
 trap 'kill "$GATEWAY" 2>/dev/null; wait "$GATEWAY" 2>/dev/null' EXIT INT TERM
 
+READY=0
 for _ in $(seq 1 90); do
-  curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
+  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
   if ! kill -0 "$GATEWAY" 2>/dev/null; then
     echo "the gateway exited before answering; see $STATE/gateway.log" >&2
     exit 1
   fi
   sleep 1
 done
+if [ "$READY" != 1 ]; then
+  echo "the gateway did not answer /health within 90 seconds; see $STATE/gateway.log" >&2
+  exit 1
+fi
 
-PASSWORD="${OTARI_SMOKE_PASSWORD:-smoke-test-1234}"
+# One random password per state directory rather than a fixed one: this binds
+# to 0.0.0.0, so a known password would hand platform-admin access to anyone on
+# the network. OTARI_SMOKE_PASSWORD overrides it, and --reset draws a new one.
+if [ -n "${OTARI_SMOKE_PASSWORD:-}" ]; then
+  PASSWORD="$OTARI_SMOKE_PASSWORD"
+else
+  if [ ! -f "$STATE/password" ]; then
+    python3 -c 'import secrets; print(secrets.token_urlsafe(12))' > "$STATE/password"
+    chmod 600 "$STATE/password"
+  fi
+  PASSWORD="$(cat "$STATE/password")"
+fi
 if [ ! -f "$STATE/seeded" ]; then
   OTARI_BASE="http://127.0.0.1:$PORT" OTARI_MASTER_KEY="$MASTER_KEY" OTARI_LOG="$STATE/gateway.log" \
     OTARI_SMOKE_PASSWORD="$PASSWORD" python3 "$HERE/seed.py"

@@ -25,6 +25,7 @@ import {
 import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { isDeploymentOperator } from "@/features/organization/roles"
 import { PriceEditor } from "@/features/pricing/PriceEditor"
+import { UNIT_LABELS } from "@/features/pricing/units"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useConfirmPricingRefresh,
@@ -367,14 +368,6 @@ function DriftCell({ row }: { row: PriceRow }) {
       {formatDrift(drift.output_delta_percent)}
     </span>
   )
-}
-
-// What a row's rates are per. A tool's row is per million requests, and the
-// column heads say "/ 1M", so the unit is the lane that keeps that honest.
-const UNIT_LABELS: Record<string, string> = {
-  tokens: "tokens",
-  requests: "requests",
-  images: "images",
 }
 
 const COLUMNS: DataTableColumn<PriceRow>[] = [

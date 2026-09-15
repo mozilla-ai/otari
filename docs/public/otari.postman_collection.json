@@ -1574,7 +1574,7 @@
         {
           "name": "Get Catalog Model",
           "request": {
-            "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
+            "description": "One model and every offering of it this caller may use.\n\nThe whole merged catalog is built and grouped to answer for one model. That\nis deliberate: the identity a model is found by is a property of the group,\nso narrowing the build to one model would need the grouping done first. The\nquery count is constant; the cost is CPU per page view, growing with the\nsize of the catalog rather than with the number of readers.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
             "header": [],
             "method": "GET",
             "url": {
@@ -5309,7 +5309,15 @@
                 "pricing",
                 "drift"
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/drift"
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/drift?limit="
             }
           }
         },

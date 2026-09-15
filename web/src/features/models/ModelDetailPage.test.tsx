@@ -107,6 +107,7 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
 
 const GLM_DETAIL: CatalogModelDetail = {
   ...GLM,
+  default_pricing: true,
   offerings: [
     offering({}),
     offering({
@@ -365,6 +366,7 @@ describe("ModelDetailPage", () => {
       if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
         return jsonResponse({
           ...GLM_DETAIL,
+          default_pricing: false,
           offerings: [
             offering({
               pricing: null,

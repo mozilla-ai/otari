@@ -44,24 +44,28 @@ export function UseModelDrawer({
 }) {
   const deployment = useDeployment()
   const baseUrl = resolveSnippetBaseUrl(deployment)
-  const [choice, setChoice] = useState(GATEWAY_PICKS)
+  // "Let the gateway choose" is only a choice where the gateway has indexed the
+  // model; without an id to send, the request has to name a provider, so the
+  // first offering stands as the default rather than an option that would
+  // quietly pin one under a label saying it had not.
+  const [choice, setChoice] = useState(
+    model.selector ? GATEWAY_PICKS : (model.offerings[0]?.selector ?? ""),
+  )
   const [language, setLanguage] = useState("curl")
 
   const cheapest = model.offerings.find((o) => o.selector === model.resolves_to)
-  // The gateway's own pick is the model id, where the gateway has indexed it;
-  // until then the cheapest offering's selector stands in.
-  const gatewayModel =
-    model.selector ??
-    (model.offerings[0] ? selectorFor(model.offerings[0]) : "")
   const pinned = model.offerings.find((o) => o.selector === choice)
-  const sendAs = pinned ? selectorFor(pinned) : gatewayModel
-  const options = [
-    { value: GATEWAY_PICKS, label: "Let the gateway choose" },
-    ...model.offerings.map((offering) => ({
-      value: offering.selector,
-      label: `${offering.provider} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
-    })),
-  ]
+  const sendAs = pinned ? selectorFor(pinned) : (model.selector ?? "")
+  const offeringOptions = model.offerings.map((offering) => ({
+    value: offering.selector,
+    label: `${offering.provider} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
+  }))
+  const options = model.selector
+    ? [
+        { value: GATEWAY_PICKS, label: "Let the gateway choose" },
+        ...offeringOptions,
+      ]
+    : offeringOptions
   const input = {
     baseUrl: baseUrl ?? "",
     apiKey: "$OTARI_API_KEY",

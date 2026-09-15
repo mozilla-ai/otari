@@ -414,6 +414,38 @@ def test_a_visitor_reads_the_catalog_only_while_it_is_public(
 
 
 @pytest.fixture
+def hosted_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True, mode="hosted"))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_visitor_in_hosted_mode_reads_the_deployments_own_instances(
+    hosted_public_client: TestClient, master_header: dict[str, str]
+) -> None:
+    """What ``public_catalog`` publishes where ``providers:`` is process-global.
+
+    Hosted mode keys provider credentials on the instance name alone, so the
+    configured instances are the deployment's own rather than any tenant's, and
+    that is exactly what a visitor is shown: the same deployment rates, the same
+    ``deployment`` credential, and nothing an organization holds.
+    """
+    _price(hosted_public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+
+    body = _get(hosted_public_client, f"{API_ROOT}/catalog/models")
+    assert [model["id"] for model in body["models"]] == ["z-ai/glm-5.3"]
+
+    detail = _get(hosted_public_client, f"{API_ROOT}/catalog/models/z-ai/glm-5.3")
+    assert [offering["provider"] for offering in detail["offerings"]] == ["nebius"]
+    offering = detail["offerings"][0]
+    assert offering["credential"] == "deployment"
+    assert offering["price_source"] == "deployment"
+    assert offering["usage_30d"] is None
+
+
+@pytest.fixture
 def throttled_public_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
     mcs.clear_catalog_cache()
     try:

@@ -2063,6 +2063,11 @@
             "description": "The largest any offering serves.",
             "title": "Context Window"
           },
+          "default_pricing": {
+            "description": "Whether an unpriced model is metered at the genai-prices default.",
+            "title": "Default Pricing",
+            "type": "boolean"
+          },
           "deprecated": {
             "default": false,
             "description": "True only when every offering with metadata says so.",
@@ -2281,6 +2286,7 @@
           "price_sources",
           "unpriced_count",
           "discovered",
+          "default_pricing",
           "offerings",
           "also_available_from"
         ],
@@ -18936,7 +18942,7 @@
     },
     "/api/v1/catalog/models/{model_id}": {
       "get": {
-        "description": "One model and every offering of it this caller may use.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
+        "description": "One model and every offering of it this caller may use.\n\nThe whole merged catalog is built and grouped to answer for one model. That\nis deliberate: the identity a model is found by is a property of the group,\nso narrowing the build to one model would need the grouping done first. The\nquery count is constant; the cost is CPU per page view, growing with the\nsize of the catalog rather than with the number of readers.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days.",
         "operationId": "catalog-get_catalog_model",
         "parameters": [
           {
@@ -25202,6 +25208,20 @@
       "get": {
         "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
         "operationId": "pricing-list_pricing_drift",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -25216,6 +25236,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

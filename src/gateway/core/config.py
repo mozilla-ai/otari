@@ -98,7 +98,8 @@ OTARI_ENV_PREFIX = "OTARI_"
 # pricing prefix for gateway-run tools; ``hosted`` is the namespace a hosted
 # edition serves its own deployment-owned offerings under, so a self-configured
 # instance of that name would be indistinguishable from one in the catalog.
-RESERVED_PROVIDER_INSTANCE_NAMES: frozenset[str] = frozenset({"otari", "hosted"})
+HOSTED_OFFERING_INSTANCE = "hosted"
+RESERVED_PROVIDER_INSTANCE_NAMES: frozenset[str] = frozenset({"otari", HOSTED_OFFERING_INSTANCE})
 PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
 
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"

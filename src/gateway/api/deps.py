@@ -494,6 +494,13 @@ async def verify_catalog_reader_or_public(
     are on theirs: ``rate_limit_rpm`` keys on an authenticated user and covers
     no anonymous path, so it is not what stands between an open catalog and a
     scraper.
+
+    Two things that throttle is not, both documented beside the setting in
+    ``docs/configuration.md``. The address is the socket's, and the CLI starts
+    uvicorn without proxy headers, so behind a reverse proxy every visitor
+    shares one bucket; a deployment that terminates TLS elsewhere throttles
+    there. And the counter is per process, so N workers serve N times the
+    configured number.
     """
     if session_identity is not None:
         return None, True

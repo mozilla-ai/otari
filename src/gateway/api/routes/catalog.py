@@ -23,7 +23,6 @@ public description and capabilities describe the model, and a member choosing
 one needs them as much as an operator does.
 """
 
-import asyncio
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -43,34 +42,28 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader_or_public,
 )
-from gateway.api.routes.models import (
-    ALIAS_OWNED_BY,
-    MergedCatalog,
-    ModelObject,
-    ModelPricingInfo,
-    _pricing_info,
-    build_merged_catalog,
-)
-from gateway.core.config import GatewayConfig
-from gateway.core.database import create_session
-from gateway.log_config import logger
+from gateway.core.config import HOSTED_OFFERING_INSTANCE, GatewayConfig
+from gateway.core.metered_pricing import effective_rates
 from gateway.models.entities import APIKey, PricingSnapshot, UsageLog
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.services.catalog_selectors import (
-    build_selector_index,
     current_selector_index,
     model_selector_for_slug,
-    set_selector_index,
     short_selector_for,
+)
+from gateway.services.merged_catalog_service import (
+    MergedCatalog,
+    ModelPricingInfo,
+    PriceSource,
+    build_merged_catalog,
+    viewer_price,
 )
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     background_catalog_enabled,
-    cached_models_dev_catalog,
     load_models_dev_catalog,
     models_dev_provider_id,
-    parse_entry,
 )
 from gateway.services.model_identity import (
     ModelIdentity,
@@ -78,15 +71,18 @@ from gateway.services.model_identity import (
     clean_model_id,
     group_offerings,
     identity_key,
-    slugify,
 )
 from gateway.services.pricing_refresh_service import GENAI_PRICES_SOURCE
 from gateway.services.pricing_service import (
     default_pricing_enabled,
-    default_pricing_reference,
     load_organization_override_index,
     normalize_effective_at,
-    resolve_organization_override,
+    pricing_key_forms,
+)
+from gateway.services.selector_index_service import (
+    offering_seed,
+    real_offerings,
+    rebuild_selector_index,
 )
 from gateway.services.workspace_scope import organization_for_key_id
 
@@ -111,10 +107,9 @@ operator_router = APIRouter(
 # it as "nobody" rather than as a key that failed to verify.
 CatalogCaller = tuple[APIKey | None, bool] | None
 
-PriceSource = Literal["organization", "deployment", "defaults"]
-# ``hosted`` is the reserved instance a hosted edition serves deployment-owned
-# offerings under (``RESERVED_PROVIDER_INSTANCE_NAMES``); the base gateway never
-# configures one, so the label only ever appears where an overlay contributes it.
+# The reserved instance a hosted edition serves deployment-owned offerings under;
+# the base gateway never configures one, so the label only ever appears where an
+# overlay contributes such an offering.
 Credential = Literal["deployment", "organization", "hosted"]
 
 # The window the viewer's own usage is rolled up over on a detail read.
@@ -251,6 +246,9 @@ class CatalogElsewhere(BaseModel):
 class CatalogModelDetail(CatalogModelSummary):
     """One model with everything the detail page shows."""
 
+    default_pricing: bool = Field(
+        description="Whether an unpriced model is metered at the genai-prices default.",
+    )
     offerings: list[CatalogOffering]
     also_available_from: list[CatalogElsewhere]
 
@@ -276,32 +274,6 @@ class _Offering:
     metadata: ModelCatalogEntry | None
     model_id: str
     """The provider's own id, which a usage row carries beside the instance."""
-
-
-def _split_selector(obj: ModelObject) -> tuple[str, str]:
-    """The instance and the provider's own model id a merged selector names."""
-    instance, separator, model_id = obj.id.partition(":")
-    if not separator:
-        return obj.owned_by, obj.id
-    return instance, model_id
-
-
-def _metadata_entry(catalog: dict[str, Any] | None, provider_type: str, model_id: str) -> ModelCatalogEntry | None:
-    """models.dev's entry for a model under a provider type, or None.
-
-    Looked up directly rather than through ``build_metadata_map`` so an
-    organization's key, which is not a ``providers:`` instance, is enriched too.
-    """
-    if not catalog:
-        return None
-    provider = catalog.get(models_dev_provider_id(provider_type))
-    if not isinstance(provider, dict):
-        return None
-    models = provider.get("models")
-    if not isinstance(models, dict):
-        return None
-    model = models.get(model_id)
-    return parse_entry(model) if isinstance(model, dict) else None
 
 
 async def _viewer_organization(
@@ -405,72 +377,6 @@ class _Grouped:
     """Whose overrides priced the offerings; None for a visitor."""
 
 
-def _real_offerings(merged: MergedCatalog) -> list[ModelObject]:
-    """The selectors themselves, sorted so grouping is order-stable.
-
-    Aliases and policies are names over selectors and live on Routing.
-    """
-    return sorted(
-        (obj for obj in merged.models.values() if obj.owned_by != ALIAS_OWNED_BY and obj.pricing_source != "dynamic"),
-        key=lambda obj: obj.id,
-    )
-
-
-def _seed(
-    config: GatewayConfig, catalog: dict[str, Any] | None, obj: ModelObject
-) -> tuple[OfferingSeed, ModelCatalogEntry | None, str, str, str]:
-    """One offering's identity seed, with the facts the seed was read from."""
-    instance, model_id = _split_selector(obj)
-    provider_type = config.provider_instance_type(instance)
-    metadata = _metadata_entry(catalog, provider_type, model_id)
-    seed = OfferingSeed(
-        selector=obj.id,
-        provider_type=provider_type,
-        model_id=model_id,
-        name=metadata.name if metadata else None,
-    )
-    return seed, metadata, instance, model_id, provider_type
-
-
-async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fetch: bool = False) -> None:
-    """Index the short spellings from the deployment's own catalog view.
-
-    The master key's view, which is every configured instance priced from the
-    deployment's list and the defaults: what a bare slug resolves to must not
-    depend on who asks, since the same request from two keys should reach the
-    same offering.
-
-    ``fetch`` lets a request-time rebuild pull models.dev the way a page load
-    does. The scheduled rebuild reads the cache as it stands instead: fetching
-    from a background task would bind the catalog's fetch lock to that task's
-    loop, and the cache is warm within a tick of any page load anyway. Discovery
-    is read the same way, and for a second reason: dialing here would fan out to
-    every configured provider on a timer the operator never asked for, and would
-    dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning is that
-    the reads do their own dialing.
-    """
-    merged = await build_merged_catalog(db, config, auth=(None, True), session_identity=None, cached_only=not fetch)
-    catalog = (
-        await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
-        if fetch
-        else cached_models_dev_catalog(config)
-    )
-    rows: list[tuple[str, str, str, float | None]] = []
-    seeds: list[OfferingSeed] = []
-    for obj in _real_offerings(merged):
-        seed, _metadata, instance, model_id, _provider_type = _seed(config, catalog, obj)
-        seeds.append(seed)
-        rate = obj.pricing.input_price_per_million if obj.pricing is not None else None
-        # The short id is spelled the way the catalog spells a name, so the
-        # short selector and the model id agree: `fireworks:glm-5.3-flash`.
-        rows.append((obj.id, instance, slugify(clean_model_id(model_id).model), rate))
-    identities = {identity.id: (identity.key, identity.selectors) for identity in group_offerings(seeds).values()}
-    set_selector_index(build_selector_index(rows, identities))
-
-
-SELECTOR_INDEX_INTERVAL_SECONDS = 60.0
-
-
 class SelectorIndexResponse(BaseModel):
     """What the rebuilt index knows."""
 
@@ -492,25 +398,6 @@ async def refresh_selector_index(
     )
 
 
-async def run_selector_index_refresher(config: GatewayConfig, interval: float | None = None) -> None:
-    """Keep the selector index current with discovery, pricing and providers.
-
-    Rebuilt on a short fixed interval rather than hooked into every writer that
-    could change it (a price set, a provider added, a discovery tick): the
-    build is one catalog read, and a spelling that lags a minute behind a
-    change is a far smaller hazard than one hook missed.
-    """
-    while True:
-        try:
-            async with create_session() as session:
-                await rebuild_selector_index(session, config)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("catalog selector index rebuild failed; retrying on the next tick", exc_info=True)
-        await asyncio.sleep(interval if interval is not None else SELECTOR_INDEX_INTERVAL_SECONDS)
-
-
 async def _group(
     db: AsyncSession,
     config: GatewayConfig,
@@ -521,11 +408,13 @@ async def _group(
 ) -> _Grouped:
     catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
     now = normalize_effective_at(None)
-    real = _real_offerings(merged)
+    real = real_offerings(merged)
 
     organization_id = await _viewer_organization(db, caller, session_identity)
     overrides = (
-        await load_organization_override_index(db, organization_id, (obj.id for obj in real))
+        await load_organization_override_index(
+            db, organization_id, (key for obj in real for key in pricing_key_forms(obj.id))
+        )
         if organization_id is not None
         else {}
     )
@@ -533,22 +422,12 @@ async def _group(
     seeds: list[OfferingSeed] = []
     offerings: dict[str, _Offering] = {}
     for obj in real:
-        seed, metadata, instance, model_id, provider_type = _seed(config, catalog, obj)
+        seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj)
         seeds.append(seed)
 
-        override = resolve_organization_override(overrides, [obj.id], now)
-        pricing: ModelPricingInfo | None
-        source: PriceSource | None
-        reference: str | None
-        if override is not None:
-            pricing, source, reference = _pricing_info(override), "organization", obj.id
-        elif obj.pricing is not None and obj.pricing_source == "configured":
-            pricing, source, reference = obj.pricing, "deployment", obj.id
-        elif obj.pricing is not None and obj.pricing_source == "default":
-            pricing, source = obj.pricing, "defaults"
-            reference = default_pricing_reference(instance, model_id, now)
-        else:
-            pricing, source, reference = None, None, None
+        pricing, source, reference = viewer_price(
+            obj, overrides, instance=instance, model_id=model_id, as_of=now
+        )
 
         offerings[obj.id] = _Offering(
             wire=CatalogOffering(
@@ -598,8 +477,13 @@ async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offeri
 
 
 def _credential(config: GatewayConfig, instance: str) -> Credential:
-    """Whose key an instance runs on, from its name alone."""
-    if instance == "hosted":
+    """Whose key an instance runs on, from its name alone.
+
+    The reserved name is the seam: ``config`` refuses it in ``providers:``
+    precisely so that an offering carrying it came from an overlay, which is
+    what makes the name readable here without the route knowing the overlay.
+    """
+    if instance == HOSTED_OFFERING_INSTANCE:
         return "hosted"
     return "deployment" if instance in config.providers else "organization"
 
@@ -611,32 +495,17 @@ def _first(values: Iterable[str | None]) -> str | None:
 def _rates_at_context(pricing: ModelPricingInfo, at_context: int | None) -> tuple[float, float]:
     """The input and output rate a request of ``at_context`` tokens is metered at.
 
-    The tier is the one settlement would pick: the highest cliff at or below
-    the request's input tokens, each of its rates falling back to the base
-    where the tier leaves one unset. No context asked for means the base rates.
+    Through the cost core's own tier selection, so a compare-at rate on the list
+    page cannot drift from the rate settlement charges. No context asked for
+    means the base rates.
     """
-    rates = (pricing.input_price_per_million, pricing.output_price_per_million)
     if at_context is None:
-        return rates
-    # A tier arrives as the model or, off a stored row, as the dict it was kept as.
-    tiers = [
-        tier if isinstance(tier, dict) else tier.model_dump()
-        for tier in pricing.pricing_tiers
-    ]
-    eligible = [
-        tier
-        for tier in tiers
-        if isinstance(tier.get("min_input_tokens"), int | float) and tier["min_input_tokens"] <= at_context
-    ]
-    if not eligible:
-        return rates
-    tier = max(eligible, key=lambda t: float(t["min_input_tokens"]))
-    input_rate = tier.get("input_price_per_million")
-    output_rate = tier.get("output_price_per_million")
-    return (
-        float(input_rate) if isinstance(input_rate, int | float) else rates[0],
-        float(output_rate) if isinstance(output_rate, int | float) else rates[1],
-    )
+        return (pricing.input_price_per_million, pricing.output_price_per_million)
+    # ``effective_rates`` reads a tier as a mapping; a stored row keeps them as
+    # dicts already, while a configured one arrives as the model.
+    tiers = [tier if isinstance(tier, dict) else tier.model_dump() for tier in pricing.pricing_tiers]
+    rates = effective_rates(pricing.model_copy(update={"pricing_tiers": tiers}), at_context)
+    return (float(rates.input_price_per_million), float(rates.output_price_per_million))
 
 
 def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int | None = None) -> CatalogModelSummary:
@@ -780,6 +649,12 @@ async def get_catalog_model(
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
+    The whole merged catalog is built and grouped to answer for one model. That
+    is deliberate: the identity a model is found by is a property of the group,
+    so narrowing the build to one model would need the grouping done first. The
+    query count is constant; the cost is CPU per page view, growing with the
+    size of the catalog rather than with the number of readers.
+
     A model the caller may not see answers 404, the same as one that does not
     exist, so the route cannot be used to probe the catalog behind an allow-list.
     A signed-in caller's offerings also carry their organization's own usage of
@@ -801,6 +676,7 @@ async def get_catalog_model(
     )
     return CatalogModelDetail(
         **summary.model_dump(),
+        default_pricing=default_pricing_enabled(),
         offerings=offerings,
         also_available_from=_elsewhere(
             grouped, identity.key, {models_dev_provider_id(o.provider_type) for o in offerings}

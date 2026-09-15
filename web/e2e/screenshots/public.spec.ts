@@ -250,3 +250,133 @@ test("OAuth callback on a gateway that configures no provider", async ({
   ).toBeVisible()
   await captureScreenshot(page, "oauth-callback-unavailable")
 })
+
+// The public catalog (otari#700), which is off in `e2e/otari.yml` and priced
+// from rows this project has no session to write. Both are stubbed on the same
+// two seams the captures above use: the bootstrap the shell reads before it
+// mounts, and the catalog reads the page makes.
+const CATALOG_OFFERINGS = [
+  {
+    selector: "nebius:zai-org/GLM-5.3",
+    short_selector: "nebius:glm-5.3",
+    provider: "nebius",
+    provider_type: "nebius",
+    credential: "deployment",
+    discovered: true,
+    context_window: 131072,
+    max_output_tokens: 16384,
+    quantization: null,
+    pricing: {
+      input_price_per_million: 0.5,
+      output_price_per_million: 2,
+      pricing_tiers: [],
+      unit: "tokens",
+    },
+    price_source: "deployment",
+    price_reference: "nebius:zai-org/GLM-5.3",
+    metadata_input_price_per_million: 0.6,
+    metadata_output_price_per_million: 2.2,
+    usage_30d: null,
+  },
+  {
+    selector: "fireworks:accounts/fireworks/models/glm-5p3",
+    short_selector: "fireworks:glm-5.3",
+    provider: "fireworks",
+    provider_type: "fireworks",
+    credential: "deployment",
+    discovered: true,
+    context_window: 131072,
+    max_output_tokens: 16384,
+    quantization: null,
+    pricing: {
+      input_price_per_million: 0.7,
+      output_price_per_million: 2.5,
+      pricing_tiers: [],
+      unit: "tokens",
+    },
+    price_source: "deployment",
+    price_reference: "fireworks:accounts/fireworks/models/glm-5p3",
+    metadata_input_price_per_million: null,
+    metadata_output_price_per_million: null,
+    usage_30d: null,
+  },
+]
+
+const CATALOG_MODEL = {
+  id: "z-ai/glm-5.3",
+  selector: "z-ai/glm-5.3",
+  resolves_to: "nebius:zai-org/GLM-5.3",
+  name: "GLM-5.3",
+  vendor: "z-ai",
+  description: "A frontier open-weights model served by several providers.",
+  family: "glm",
+  capabilities: {
+    reasoning: true,
+    tool_call: true,
+    structured_output: true,
+    attachment: false,
+    temperature: true,
+  },
+  input_modalities: ["text"],
+  output_modalities: ["text"],
+  context_window: 131072,
+  max_output_tokens: 16384,
+  release_date: "2026-07-01",
+  knowledge_cutoff: "2026-01",
+  open_weights: true,
+  deprecated: false,
+  offering_count: 2,
+  provider_count: 2,
+  providers: ["fireworks", "nebius"],
+  selectors: CATALOG_OFFERINGS.map((offering) => offering.selector),
+  price_sources: ["deployment"],
+  unpriced_count: 0,
+  discovered: true,
+  min_input_price_per_million: 0.5,
+  min_output_price_per_million: 2,
+}
+
+async function withPublicCatalog(page: Page): Promise<void> {
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    const bootstrap = await response.json()
+    await route.fulfill({
+      response,
+      json: { ...bootstrap, public_catalog: true },
+    })
+  })
+  await page.route("**/v1/catalog/models**", async (route) => {
+    const isDetail = new URL(route.request().url()).pathname.includes(
+      "/catalog/models/",
+    )
+    await route.fulfill({
+      json: isDetail
+        ? {
+            ...CATALOG_MODEL,
+            default_pricing: true,
+            offerings: CATALOG_OFFERINGS,
+            also_available_from: [{ provider_type: "groq", name: "Groq" }],
+          }
+        : {
+            default_pricing: true,
+            defaults_as_of: null,
+            metadata_available: true,
+            models: [CATALOG_MODEL],
+          },
+    })
+  })
+}
+
+test("public catalog", async ({ page }) => {
+  await withPublicCatalog(page)
+  await page.goto("/#/models")
+  await expect(page.getByRole("link", { name: /GLM-5.3/ })).toBeVisible()
+  await captureScreenshot(page, "public-catalog")
+})
+
+test("public model page", async ({ page }) => {
+  await withPublicCatalog(page)
+  await page.goto("/#/models/z-ai/glm-5.3")
+  await expect(page.getByRole("heading", { name: /GLM-5.3/ })).toBeVisible()
+  await captureScreenshot(page, "public-model-detail")
+})

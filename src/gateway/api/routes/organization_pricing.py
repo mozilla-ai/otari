@@ -27,15 +27,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.core.config import GatewayConfig
+from gateway.models.entities import OrganizationModelPricing
+from gateway.models.money import as_float
 
 # The tier shape comes from the deployment pricing route rather than a second
 # copy here. An override resolves into a transient ``ModelPricing`` and is read by
 # the same cost-math core, so a tier that meant something different on this
 # surface would be a silent mispricing.
-from gateway.api.routes.pricing import PricingTier
-from gateway.core.config import GatewayConfig
-from gateway.models.entities import OrganizationModelPricing
-from gateway.models.money import as_float
+from gateway.models.pricing_schemas import PricingTier
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,

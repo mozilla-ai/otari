@@ -1,8 +1,16 @@
 # Catalog smoke
 
-A standalone gateway on your machine, reachable from the LAN, with three
-people to sign in as. Bring your own provider keys; the catalog is empty
-until you do.
+A hand-run demo, not a CI gate: nothing runs this, and unlike
+`scripts/oss_edition_smoke.py` it wants `uv`, `pnpm` and a dashboard build. It
+puts a standalone gateway on your machine, reachable from the LAN, with three
+people to sign in as. Bring your own provider keys; the catalog is empty until
+you do.
+
+Do not leave it running. It binds `0.0.0.0`, serves the catalog publicly, and
+prints the master key, so anyone on the network who reaches the port can use
+the deployment. The sign-in password is drawn at random per `.state/`
+directory (`OTARI_SMOKE_PASSWORD` overrides it), which keeps a passer-by from
+signing in as the platform admin, and is not a reason to leave it up.
 
 ```sh
 demo/catalog-smoke/run.sh            # builds the dashboard, boots, seeds, prints who to sign in as

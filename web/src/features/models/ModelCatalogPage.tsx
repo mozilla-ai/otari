@@ -13,6 +13,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
@@ -105,7 +106,7 @@ function FilterGroup({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex min-h-9 w-full items-center justify-between gap-2 text-left text-sm text-foreground"
+        className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-2 text-left text-sm text-foreground lg:min-h-8"
       >
         <span className="flex items-center gap-2">
           {label}
@@ -118,7 +119,12 @@ function FilterGroup({
           className={`h-4 w-4 shrink-0 text-subtle transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
-      <div hidden={!open} className="flex flex-col gap-1.5 pb-2">
+      {/* The rail is what a phone opens from "Filters", so its rows carry the
+          touch floor there and shrink back on a pointer. */}
+      <div
+        hidden={!open}
+        className="flex flex-col gap-1.5 pb-2 [&_label]:min-h-11 [&_label]:items-center lg:[&_label]:min-h-8"
+      >
         {children}
       </div>
     </div>
@@ -131,7 +137,7 @@ function toggle(list: string[], value: string, on: boolean): string[] {
     : list.filter((entry) => entry !== value)
 }
 
-/** A one-of-many choice in the rail, as a native radio list. */
+/** A one-of-many choice in the rail, labeled by the group it sits in. */
 function RadioList({
   name,
   value,
@@ -144,24 +150,13 @@ function RadioList({
   options: { value: string; label: string }[]
 }) {
   return (
-    <div role="radiogroup" aria-label={name} className="flex flex-col gap-1">
-      {options.map((option) => (
-        <label
-          key={option.value}
-          className="flex min-h-8 cursor-pointer items-center gap-2 text-sm text-foreground"
-        >
-          <input
-            type="radio"
-            name={name}
-            value={option.value}
-            checked={value === option.value}
-            onChange={() => onChange(option.value)}
-            className="accent-[var(--color-control-indicator)]"
-          />
-          {option.label}
-        </label>
-      ))}
-    </div>
+    <RadioGroup
+      label={name}
+      hideLabel
+      value={value}
+      onChange={onChange}
+      options={options}
+    />
   )
 }
 
@@ -320,11 +315,9 @@ function Sep() {
 function ModelCard({
   model,
   publicView,
-  onOpen,
 }: {
   model: CatalogModelSummary
   publicView: boolean
-  onOpen: (modelId: string) => void
 }) {
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
   const titleClass = "text-heading text-link hover:text-link-hover break-words"
@@ -341,14 +334,13 @@ function ModelCard({
               {title}
             </a>
           ) : (
+            // No onClick: the link navigates on a plain click by itself, and
+            // intercepting one would take Cmd/Ctrl-click and middle-click
+            // (which opens a new tab) with it. `onOpen` is the table row's.
             <Link
               to="/models/$"
               params={{ _splat: model.id }}
               className={titleClass}
-              onClick={(event) => {
-                event.preventDefault()
-                onOpen(model.id)
-              }}
             >
               {title}
             </Link>
@@ -627,6 +619,13 @@ export function ModelCatalogView({
 
           {catalog.isPending && !catalog.data ? (
             <PageLoading label="Loading models…" />
+          ) : catalog.isError && !catalog.data ? (
+            // The banner above says what went wrong; without this the list
+            // falls through to "No models yet", which reads as an empty
+            // deployment rather than a load that failed.
+            <EmptyMessage minHeightClass="min-h-[12rem]">
+              The catalog could not be loaded.
+            </EmptyMessage>
           ) : view === "table" ? (
             <TableScrollFrame className="otari-models-table">
               <DataTable
@@ -656,11 +655,7 @@ export function ModelCatalogView({
             <ul aria-label="Models" className="flex flex-col gap-3">
               {pageRows.map((model) => (
                 <li key={model.id}>
-                  <ModelCard
-                    model={model}
-                    publicView={publicView}
-                    onOpen={onOpen}
-                  />
+                  <ModelCard model={model} publicView={publicView} />
                 </li>
               ))}
             </ul>
@@ -687,9 +682,12 @@ export function ModelCatalogPage() {
   const navigate = useNavigate()
   // A provider clicked on the Providers page arrives as ?provider=<instance>,
   // pre-selecting that provider's filter so the list shows only its models.
+  // The key remounts the view when that param changes, since the filter it
+  // seeds is state the reader edits from there on.
   const providerParam = useUrlValue("provider")
   return (
     <ModelCatalogView
+      key={providerParam}
       initialProvider={providerParam}
       onOpen={(id) => {
         void navigate({ to: "/models/$", params: { _splat: id } })

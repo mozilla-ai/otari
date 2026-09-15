@@ -35,7 +35,9 @@ from pathlib import Path
 BASE = os.environ["OTARI_BASE"]
 MASTER_KEY = os.environ["OTARI_MASTER_KEY"]
 LOG = Path(os.environ["OTARI_LOG"])
-PASSWORD = os.environ.get("OTARI_SMOKE_PASSWORD", "smoke-test-1234")
+# Set by run.sh, which draws a random one per state directory. No default: this
+# password owns the deployment and the gateway listens on the LAN.
+PASSWORD = os.environ["OTARI_SMOKE_PASSWORD"]
 
 OPERATOR = "operator@otari.local"
 ACME_ADMIN = "admin@acme.local"
@@ -147,6 +149,10 @@ def signup_and_verify(email: str) -> None:
     must(status, payload, f"verifying {email}")
 
 
+def switch_to(organization_id: str) -> tuple[int, dict | list | None]:
+    return call("POST", "/v1/organizations/me/switch", {"organization_id": organization_id})
+
+
 def sign_in_works(email: str) -> bool:
     status, _ = call("POST", "/v1/auth/session", {"email": email, "password": PASSWORD}, auth=False)
     return status == 200
@@ -155,11 +161,14 @@ def sign_in_works(email: str) -> bool:
 def main() -> None:
     claim_operator()
     acme, home = ensure_acme()
-    call("POST", "/v1/organizations/me/switch", {"organization_id": acme})
+    # Checked, not assumed: a failed switch would leave the next calls acting in
+    # the previous organization and put both identities in the wrong one, which
+    # the sign-in checks below would still call a success.
+    must(*switch_to(acme), "switching to Acme")
     workspaces = active_workspaces()
     add_member(ACME_ADMIN, "admin", workspaces)
     add_member(ACME_MEMBER, "member", workspaces)
-    call("POST", "/v1/organizations/me/switch", {"organization_id": home})
+    must(*switch_to(home), "switching back to the operator's own organization")
     for email in (ACME_ADMIN, ACME_MEMBER):
         signup_and_verify(email)
     for email in (OPERATOR, ACME_ADMIN, ACME_MEMBER):

@@ -107,6 +107,7 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
 
 const GLM_DETAIL: CatalogModelDetail = {
   ...GLM,
+  default_pricing: true,
   offerings: [
     offering({}),
     offering({

@@ -11,6 +11,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { UNIT_LABELS } from "@/features/pricing/units"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useDeleteOrganizationPricing,
@@ -149,6 +150,13 @@ export function RateOverridesCard() {
       header: "Cache write / 1M",
       align: "end",
       cell: (row) => rate(row.cache_write_price_per_million),
+    },
+    {
+      id: "unit",
+      header: "Per 1M",
+      cell: (row) => (
+        <span className="text-muted">{UNIT_LABELS[row.unit] ?? row.unit}</span>
+      ),
     },
     {
       id: "period",

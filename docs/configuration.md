@@ -191,6 +191,12 @@ snapshot on its own:
   accepts it.
 - `auto` fetches on the same schedule and applies a changed snapshot at once.
 
+Rejecting a pending update means "not now": nothing remembers what was
+rejected, so the next check re-offers the same update while upstream still
+differs from what is active. One worker performs each check, whichever claims
+the tick first, so a deployment running several does not fetch or accept an
+update once per worker.
+
 Every accepted snapshot is recorded with who accepted it, `operator` or
 `schedule`, and how many models it priced; `GET /api/v1/pricing/snapshots` lists
 the history, which keeps the newest thirty. `GET /api/v1/pricing/drift` puts every stored deployment rate beside
@@ -217,6 +223,19 @@ Anonymous reads are throttled per client address by
 budget: `rate_limit_rpm` keys on an authenticated user and covers no anonymous
 path, and `dashboard_login_rate_limit_per_minute` is sized for password
 attempts, not for browsing. Set it to `null` to remove the limit.
+
+Two limits of that throttle are worth knowing before a catalog is put on the
+open internet. The address is the socket's, and the bundled server is started
+without proxy headers, so behind a reverse proxy every visitor shares the
+proxy's address and one scraper exhausts the budget for everyone; put the
+throttle in the proxy instead. And the counter is per worker, so a deployment
+running N workers serves up to N times the configured number.
+
+In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
+process-wide `providers:` instances, which in that mode are the deployment's
+own rather than any tenant's, priced at the deployment's rates. No
+organization's providers, overrides, or usage are public, whatever the flag is
+set to.
 
 The instance names `otari` and `hosted` are reserved for a managed platform's
 own offerings and are refused in `providers:`.

@@ -51,6 +51,7 @@ const GLM: CatalogModelSummary = {
 
 const GLM_DETAIL: CatalogModelDetail = {
   ...GLM,
+  default_pricing: true,
   description: "Z.ai's flagship.",
   offerings: [
     {

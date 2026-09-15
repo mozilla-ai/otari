@@ -4,14 +4,14 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot, set_custom_snapshot
 from genai_prices.types import Provider, _providers_from_raw
 from genai_prices.update_prices import DEFAULT_UPDATE_URL, UpdatePrices
-from sqlalchemy import delete, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -23,6 +23,10 @@ from gateway.services.pricing_service import normalize_effective_at, reset_price
 _PREVIEW_CHANGE_LIMIT = 100
 GENAI_PRICES_SOURCE = "genai-prices"
 GENAI_PRICES_PENDING_SOURCE = "genai-prices-pending"
+# Not a snapshot: the row every worker's poller claims a tick on. It lives in the
+# same table because a claim is exactly one row with a timestamp, and the table
+# already is that.
+GENAI_PRICES_POLL_CLAIM_SOURCE = "genai-prices-poll-claim"
 # Reloading the accepted snapshot is cheap only when it changed, so the refresher
 # compares against this before touching the price cache. Matches the alias and
 # provider refreshers' cadence.
@@ -323,6 +327,41 @@ async def poll_price_updates(session: AsyncSession, policy: str) -> str:
     return "pending"
 
 
+async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> bool:
+    """Whether this worker owns the next scheduled check.
+
+    Every worker and every replica runs the poller, and nothing else separates
+    them: each compares the fetch against its own in-memory snapshot, so under
+    ``auto`` they would each confirm the same update and write a history row for
+    it. The claim is one conditional ``UPDATE``, so the first statement to land
+    owns the tick and the rest skip it, and it is honored only while it is older
+    than one interval, so a worker that dies holding it costs one tick.
+    """
+    now = datetime.now(UTC)
+    result = await session.execute(
+        update(PricingSnapshot)
+        .where(
+            PricingSnapshot.source == GENAI_PRICES_POLL_CLAIM_SOURCE,
+            PricingSnapshot.updated_at <= now - timedelta(seconds=interval_seconds),
+        )
+        .values(updated_at=now)
+    )
+    # getattr with a default: mypy sees .execute() as Result, and rowcount lives
+    # on CursorResult. Matches budget_service's conditional updates.
+    if getattr(result, "rowcount", 0) == 1:
+        await session.commit()
+        return True
+    # Either a sibling holds the tick or the row has never been written; the
+    # insert decides which, and losing that race is a sibling's claim too.
+    session.add(PricingSnapshot(source=GENAI_PRICES_POLL_CLAIM_SOURCE, snapshot="", updated_at=now))
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        return False
+    return True
+
+
 async def run_price_update_poller(config: GatewayConfig) -> None:
     """Check upstream genai-prices on a schedule, forever.
 
@@ -338,6 +377,8 @@ async def run_price_update_poller(config: GatewayConfig) -> None:
             continue
         try:
             async with create_session() as db:
+                if not await claim_poll_tick(db, config.pricing_refresh_interval_seconds):
+                    continue
                 outcome = await poll_price_updates(db, config.pricing_refresh)
             logger.info("Scheduled genai-prices check: %s", outcome)
         except asyncio.CancelledError:
@@ -347,7 +388,12 @@ async def run_price_update_poller(config: GatewayConfig) -> None:
 
 
 async def reject_price_refresh(session: AsyncSession) -> bool:
-    """Discard the pending snapshot without changing active pricing."""
+    """Discard the pending snapshot without changing active pricing.
+
+    Reject means "not now", not "never": nothing records what was rejected, so
+    the next scheduled check under ``review`` re-pends the same update while
+    upstream still differs from the active snapshot.
+    """
 
     # See confirm_price_refresh: best-effort lock, a no-op on SQLite.
     pending_row = (

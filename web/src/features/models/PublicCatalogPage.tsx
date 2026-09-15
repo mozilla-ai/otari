@@ -15,7 +15,11 @@ export function PublicCatalogPage({ modelId }: { modelId?: string }) {
   return (
     <div className="flex min-h-full flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 md:px-6">
-        <img src="/favicon.svg" alt="" className="h-6 w-[26px]" />
+        <img
+          src={`${import.meta.env.BASE_URL}favicon.svg`}
+          alt=""
+          className="h-6 w-[26px]"
+        />
         <a
           href="#/"
           className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"

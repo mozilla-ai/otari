@@ -17,7 +17,13 @@ export function publicCatalogPath(
   // the id whole.
   const match = /^\/models\/(.+)$/.exec(path)
   if (!match) return null
-  return { modelId: decodeURIComponent(match[1] ?? "") }
+  try {
+    return { modelId: decodeURIComponent(match[1] ?? "") }
+  } catch {
+    // A malformed escape (`#/models/%`) is not a model id; it is not the
+    // public catalog's hash at all.
+    return null
+  }
 }
 
 /** The hash a public catalog link points at. */

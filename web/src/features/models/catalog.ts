@@ -202,6 +202,9 @@ export function filterModels(
           .toISOString()
           .slice(0, 10)
       : null
+  // "Past year" is a window, not a floor: a model dated in the future (an
+  // announced release, or a dataset typo) is not something released recently.
+  const releasedBefore = now.toISOString().slice(0, 10)
   return models.filter((model) => {
     if (query && !matchesQuery(model, query)) return false
     if (
@@ -254,7 +257,9 @@ export function filterModels(
     }
     if (
       releasedAfter !== null &&
-      (model.release_date == null || model.release_date < releasedAfter)
+      (model.release_date == null ||
+        model.release_date < releasedAfter ||
+        model.release_date > releasedBefore)
     ) {
       return false
     }

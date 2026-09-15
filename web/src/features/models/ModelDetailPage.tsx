@@ -23,7 +23,7 @@ import {
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
-import { useCatalog, useCatalogModel } from "@/shared/api/models"
+import { useCatalogModel } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   formatContext,
@@ -342,7 +342,6 @@ export function ModelDetailView({
   const organization = useOrganizationContext(!publicView)
   const canPrice = !publicView && isDeploymentOperator(organization.data)
   const canOverride = !publicView && !canPrice && canManage(organization.data)
-  const catalog = useCatalog()
   const selected = useCatalogModel(modelId)
   const [quantization, setQuantization] = useState("all")
   const [useModel, setUseModel] = useState(false)
@@ -351,8 +350,11 @@ export function ModelDetailView({
     direction: "asc" | "desc"
   }>({ column: "input", direction: "asc" })
 
-  if (selected.error) return <ErrorBanner error={selected.error} />
   const model = selected.data
+  // Only a failure with nothing to show replaces the page. A background
+  // refetch that fails (every pricing, provider, alias and settings write
+  // invalidates this key) keeps the rendered model and says so above it.
+  if (selected.isError && !model) return <ErrorBanner error={selected.error} />
   if (selected.isPending || !model) {
     return <PageLoading label="Loading model…" />
   }
@@ -377,7 +379,7 @@ export function ModelDetailView({
     .sort(compareOfferings(sort.column, sort.direction))
   const withUsage = !publicView && hasUsage(model.offerings)
   const unpriced = model.offerings.filter((o) => o.pricing === null).length
-  const defaultPricing = catalog.data?.default_pricing
+  const defaultPricing = model.default_pricing
   const capabilities = CAPABILITY_LABELS.filter(
     ({ key }) => model.capabilities[key],
   )
@@ -418,6 +420,8 @@ export function ModelDetailView({
           </Link>
         )}
       </nav>
+
+      {selected.isError ? <ErrorBanner error={selected.error} /> : null}
 
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-4">

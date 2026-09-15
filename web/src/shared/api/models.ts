@@ -19,7 +19,8 @@ import {
 // like `/v1/models`; the detail is keyed under the list so a pricing write that
 // invalidates CATALOG takes every open detail with it.
 // Keyed beside the model id so a detail read and a list read never share a
-// cache entry, while both still fall under the CATALOG prefix invalidations use.
+// cache entry (a model whose id is `list` included), while both still fall
+// under the CATALOG prefix invalidations use.
 export function useCatalog() {
   return useQuery({
     ...NO_RETRY,
@@ -32,7 +33,7 @@ export function useCatalog() {
 export function useCatalogModel(modelId: string | undefined) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG, modelId],
+    queryKey: [CATALOG, "model", modelId],
     queryFn: () =>
       // Segment by segment: the id carries its vendor, `z-ai/glm-5.3`, and
       // the slash is the path's, not the id's to encode.

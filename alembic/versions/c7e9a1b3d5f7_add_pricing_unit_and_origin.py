@@ -9,13 +9,14 @@ convention made a column. Existing rows default to ``tokens``; the one family
 the key spelling identifies for certain, the reserved ``otari:`` prefix of a
 gateway-run tool, is backfilled to ``requests``.
 
-``origin`` says which path wrote a deployment price: the config file, the API, or
-a migration. The three disagree about what a repeat write means, and without a
-record of who wrote a row the config loader cannot tell a stale copy of its own
-entry from a rate an operator set deliberately. Nullable, with no backfill: a
-row written before this column cannot say where it came from, and inventing an
-origin would be worse than admitting the gap. The organization override table
-takes both columns too, so the two price lists stay one shape.
+``origin`` says which path wrote a deployment price, the config file or the API.
+It is written on insert and reported on a read (Model pricing shows it beside
+the drift report), so a rate the config file re-seeds on every restart is
+distinguishable from one an operator set. Nothing decides anything on it today:
+the config loader still keeps any existing row untouched. Nullable, with no
+backfill: a row written before this column cannot say where it came from, and
+inventing an origin would be worse than admitting the gap. The organization
+override table takes both columns too, so the two price lists stay one shape.
 
 Revision ID: c7e9a1b3d5f7
 Revises: f1c4a8e2d6b9

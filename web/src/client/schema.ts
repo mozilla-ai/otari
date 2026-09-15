@@ -970,6 +970,12 @@ export interface paths {
          * Get Catalog Model
          * @description One model and every offering of it this caller may use.
          *
+         *     The whole merged catalog is built and grouped to answer for one model. That
+         *     is deliberate: the identity a model is found by is a property of the group,
+         *     so narrowing the build to one model would need the grouping done first. The
+         *     query count is constant; the cost is CPU per page view, growing with the
+         *     size of the catalog rather than with the number of readers.
+         *
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
@@ -5638,6 +5644,11 @@ export interface components {
              * @description The largest any offering serves.
              */
             context_window?: number | null;
+            /**
+             * Default Pricing
+             * @description Whether an unpriced model is metered at the genai-prices default.
+             */
+            default_pricing: boolean;
             /**
              * Deprecated
              * @description True only when every offering with metadata says so.
@@ -16396,7 +16407,9 @@ export interface operations {
     };
     "pricing-list_pricing_drift": {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -16410,6 +16423,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingDriftRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

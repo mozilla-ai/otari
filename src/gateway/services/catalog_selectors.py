@@ -10,14 +10,14 @@ caller send what the catalog shows:
   on that instance; and
 - a **model selector**, the catalog's id (``openai/gpt-oss-120b``, or the
   bare slug where the vendor is unknown), which resolves to the cheapest
-  offering of that model the deployment serves.
+  offering of that model the deployment serves, and only ever to one that
+  vendor serves where the vendor is also a provider's name.
 
 The index is process-wide and rebuilt from the deployment's own catalog view
 (the configured instances, priced from the deployment's list and the
-defaults) at startup and on a schedule; the catalog route feeds it as well
-whenever it builds that view. It is consulted after aliases and static
-policies and before the ordinary split, and only for a selector that names
-no offering already, so a real selector is never rewritten.
+defaults) at startup and on a schedule. It is consulted after aliases and
+static policies and before the ordinary split, and only for a selector that
+names no offering already, so a real selector is never rewritten.
 
 Resolution is synchronous because :func:`provider_kwargs.resolve_provider_selector`
 is, which is why the index is a snapshot rather than a lookup.
@@ -26,7 +26,37 @@ is, which is why the index is a snapshot rather than a lookup.
 from __future__ import annotations
 
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+
+from any_llm import LLMProvider
+
+# Every name any-llm would dispatch on. A slug whose vendor is one of these is
+# also a legacy ``provider/model`` request, and the two readings must not be
+# allowed to reach different providers; see :func:`build_selector_index`.
+_PROVIDER_NAMES = frozenset(provider.value.lower() for provider in LLMProvider)
+
+
+@dataclass(frozen=True)
+class OfferingRow:
+    """One selector the deployment serves, as the index needs to see it."""
+
+    selector: str
+    instance: str
+    """The ``providers:`` name, which is what a selector is addressed by."""
+    provider_type: str
+    """The any-llm provider the instance dispatches to."""
+    cleaned_id: str
+    """The model id as the catalog spells it, for the short selector."""
+    input_rate: float | None
+
+
+def _names_a_provider(vendor: str, offerings: Sequence[OfferingRow]) -> bool:
+    """Whether a slug's vendor could also be read as a provider to dispatch to."""
+    lowered = vendor.lower()
+    return lowered in _PROVIDER_NAMES or any(
+        lowered in (row.instance.lower(), row.provider_type.lower()) for row in offerings
+    )
 
 
 @dataclass(frozen=True)
@@ -99,26 +129,36 @@ def model_selector_for_slug(slug: str) -> str | None:
 
 
 def build_selector_index(
-    offerings: list[tuple[str, str, str, float | None]],
+    offerings: Sequence[OfferingRow],
     identities: dict[str, tuple[str, tuple[str, ...]]],
 ) -> SelectorIndex:
-    """Fold ``(selector, instance, cleaned id, input rate)`` rows and the grouped identities into an index.
+    """Fold the deployment's offerings and the grouped identities into an index.
 
     A short spelling is kept only where one offering on the instance cleans to
     it, so two variants of a model on one provider (a base and a quantized
     build cleaning to the same id) get no short form rather than a wrong one.
     A slug resolves to its cheapest priced offering, ties to the first, and to
     the first offering when none is priced.
+
+    A slug whose vendor is also the name of a provider (``openai/gpt-4o``, read
+    the other way, is the legacy spelling of a request to OpenAI) is answered
+    only from that provider's own offerings, and dropped where it serves none:
+    a selector that names a provider reaches that provider or fails, and is
+    never redirected to another one.
     """
-    full = frozenset(selector for selector, _, _, _ in offerings)
+    full = frozenset(row.selector for row in offerings)
     by_short: dict[str, list[str]] = {}
-    for selector, instance, cleaned, _ in offerings:
-        by_short.setdefault(f"{instance}:{cleaned}".lower(), []).append(selector)
+    for row in offerings:
+        by_short.setdefault(f"{row.instance}:{row.cleaned_id}".lower(), []).append(row.selector)
     short = {spelling: targets[0] for spelling, targets in by_short.items() if len(targets) == 1}
     model_selectors = {target: spelling for spelling, target in short.items()}
-    rates = {selector: rate for selector, _, _, rate in offerings}
+    rates = {row.selector: row.input_rate for row in offerings}
+    serves = {row.selector: {row.instance.lower(), row.provider_type.lower()} for row in offerings}
     models: dict[str, str] = {}
     for slug, (_key, selectors) in identities.items():
+        vendor, slash, _rest = slug.partition("/")
+        if slash and _names_a_provider(vendor, offerings):
+            selectors = tuple(s for s in selectors if vendor.lower() in serves.get(s, frozenset()))
         if not selectors:
             continue
         priced = [s for s in selectors if rates.get(s) is not None]

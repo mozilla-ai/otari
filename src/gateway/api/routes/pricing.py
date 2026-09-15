@@ -13,6 +13,7 @@ from gateway.api.deps import get_config, get_db, require_deployment_operator, ve
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.models.money import as_float, to_usd, to_usd_or_none
+from gateway.models.pricing_schemas import PricingTier
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
@@ -30,6 +31,7 @@ from gateway.services.pricing_service import (
     default_pricing_enabled,
     default_pricing_reference,
     normalize_effective_at,
+    rates_in_force,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
 
@@ -48,30 +50,6 @@ catalog_router = APIRouter(
     tags=["pricing"],
     dependencies=[Depends(verify_catalog_reader)],
 )
-
-
-class PricingTier(BaseModel):
-    """Whole-request price cliff selected by total billable input tokens."""
-
-    min_input_tokens: int = Field(gt=0)
-    input_price_per_million: float | None = Field(default=None, ge=0)
-    output_price_per_million: float | None = Field(default=None, ge=0)
-    cache_read_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
-
-    @model_validator(mode="after")
-    def validate_has_rate_override(self) -> "PricingTier":
-        rates = (
-            self.input_price_per_million,
-            self.output_price_per_million,
-            self.cache_read_price_per_million,
-            self.cache_write_price_per_million,
-            self.cache_write_1h_price_per_million,
-        )
-        if all(rate is None for rate in rates):
-            raise ValueError("pricing tier must override at least one price field")
-        return self
 
 
 class SetPricingRequest(BaseModel):
@@ -321,6 +299,7 @@ async def list_pricing_snapshots(
 @operator_router.get("/drift", response_model=list[PricingDriftRow])
 async def list_pricing_drift(
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> list[PricingDriftRow]:
     """Every stored deployment rate in force today, beside today's default for it.
 
@@ -332,25 +311,12 @@ async def list_pricing_drift(
     so they are left out.
     """
     now = normalize_effective_at(None)
-    latest_effective = (
-        select(ModelPricing.model_key.label("model_key"), func.max(ModelPricing.effective_at).label("effective_at"))
-        .where(ModelPricing.effective_at <= now)
-        .group_by(ModelPricing.model_key)
-        .subquery()
-    )
-    stmt = (
-        select(ModelPricing)
-        .join(
-            latest_effective,
-            (ModelPricing.model_key == latest_effective.c.model_key)
-            & (ModelPricing.effective_at == latest_effective.c.effective_at),
-        )
-        .where(ModelPricing.model_key.notlike(f"{GATEWAY_TOOL_PRICING_PROVIDER}:%"))
-        .order_by(ModelPricing.model_key)
-    )
     rows: list[PricingDriftRow] = []
     defaults_on = default_pricing_enabled()
-    for pricing in (await db.execute(stmt)).scalars():
+    in_force = await rates_in_force(
+        db, as_of=now, limit=limit, exclude_key_prefix=f"{GATEWAY_TOOL_PRICING_PROVIDER}:"
+    )
+    for pricing in in_force:
         provider_part, separator, model_part = pricing.model_key.partition(":")
         provider = provider_part if separator else None
         model_name = model_part if separator else pricing.model_key

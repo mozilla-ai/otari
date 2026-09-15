@@ -9,6 +9,7 @@ Enforces:
 5. OSS/enterprise boundary: OSS code must not import the enterprise overlay.
 6. Port boundaries: a port may describe the domain but not import a caller or an adapter.
 7. Composition root: only gateway/container.py may name a concrete adapter.
+8. Entrypoint purity: gateway/main.py may not import a route module.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -146,6 +147,21 @@ RULES: dict[str, LayerRule] = {
 }
 
 
+# Rules for one file rather than a layer. ``gateway/main.py`` is the process
+# entrypoint and composes the app, so no directory rule covers it, yet a
+# background task or a piece of domain logic it reaches for belongs in
+# ``services/`` exactly as it does everywhere else. Without this, a route
+# module imported by the lifespan (the selector index refresher, otari#1015)
+# passes every other check.
+FILE_RULES: dict[str, LayerRule] = {
+    "gateway/main.py": {
+        "allowed": ["gateway.api.main", "gateway.api.deps", "gateway.services", "gateway.core"],
+        "forbidden": ["gateway.api.routes"],
+        "description": "Application entrypoint",
+    },
+}
+
+
 # The one file allowed to name a concrete adapter, and the package the adapters
 # themselves live in (an adapter may of course refer to its siblings). Everything
 # else under gateway/ answers to the root rule's ban above.
@@ -200,6 +216,9 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         reverse=True,
     )
     forbidden = [(prefix, layer_rule["description"]) for _, layer_rule in matches for prefix in layer_rule["forbidden"]]
+    file_rule = FILE_RULES.get(relative_path)
+    if file_rule is not None:
+        forbidden = [(prefix, file_rule["description"]) for prefix in file_rule["forbidden"]] + forbidden
     if relative_path == COMPOSITION_ROOT or relative_path.startswith(ADAPTERS_PACKAGE):
         forbidden = [entry for entry in forbidden if entry[0] != ADAPTER_IMPORT]
     if not forbidden:

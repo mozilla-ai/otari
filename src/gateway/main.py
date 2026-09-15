@@ -15,7 +15,6 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.api.routes.catalog import run_selector_index_refresher
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
@@ -72,6 +71,7 @@ from gateway.services.search_tool_store_service import (
     run_search_tool_refresher,
 )
 from gateway.services.secret_box import validate_secret_key
+from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.errors import TenancyError
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,

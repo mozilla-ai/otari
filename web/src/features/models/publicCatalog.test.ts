@@ -20,6 +20,8 @@ describe("publicCatalogPath", () => {
     })
     expect(publicCatalogPath("#/")).toBeNull()
     expect(publicCatalogPath("#/keys")).toBeNull()
+    // A malformed percent escape is not a model id, and decoding one throws.
+    expect(publicCatalogPath("#/models/%")).toBeNull()
   })
 
   it("round-trips through the href", () => {

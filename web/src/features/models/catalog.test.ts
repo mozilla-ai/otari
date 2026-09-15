@@ -200,6 +200,20 @@ describe("filterModels, the price and release filters", () => {
       filterModels(priced, { ...ANY, releasedWithinDays: 5 * 365 }, now),
     ).toHaveLength(3)
   })
+
+  it("drops a release dated after today from every window", () => {
+    const withFuture = [
+      ...priced,
+      model({ id: "not-out-yet", release_date: "2027-01-01" }),
+    ]
+    for (const releasedWithinDays of [365, 5 * 365]) {
+      expect(
+        filterModels(withFuture, { ...ANY, releasedWithinDays }, now).map(
+          (m) => m.id,
+        ),
+      ).not.toContain("not-out-yet")
+    }
+  })
 })
 
 describe("compareModels", () => {
