@@ -35,6 +35,7 @@ const MEMBERSHIPS = [
 interface ApiOptions {
   activation?: WorkspaceActivation
   models?: string[]
+  apiKey?: string
 }
 
 /**
@@ -47,6 +48,7 @@ interface ApiOptions {
  */
 function mockApi({
   activation = workspaceActivation(),
+  apiKey = KEY,
   models = ["openai:gpt-4o-mini"],
 }: ApiOptions = {}) {
   let current = activation
@@ -58,7 +60,7 @@ function mockApi({
       if (url.includes("/activation/key")) {
         // Distinct per workspace, so a key left over from another one is
         // recognizable rather than indistinguishable.
-        const key = url.includes(OTHER_WORKSPACE) ? OTHER_KEY : KEY
+        const key = url.includes(OTHER_WORKSPACE) ? OTHER_KEY : apiKey
         return Response.json({
           key,
           key_id: "88888888-8888-8888-8888-888888888888",
@@ -300,13 +302,54 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    expect(await screen.findByLabelText("Your API key")).not.toHaveValue(KEY)
+    expect(await screen.findByLabelText("Your API key")).toHaveValue(
+      "gw-setup••••••••-key",
+    )
     await user.click(await screen.findByRole("button", { name: "cURL" }))
     expect(snippet("curl")).not.toHaveTextContent(KEY)
+    expect(snippet("curl")).toHaveTextContent("gw-setup••••••••-key")
 
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
     expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
+
+    await user.click(screen.getByRole("button", { name: "Hide Your API key" }))
+    expect(screen.getByLabelText("Your API key")).toHaveValue(
+      "gw-setup••••••••-key",
+    )
+    expect(snippet("curl")).not.toHaveTextContent(KEY)
+    expect(snippet("curl")).toHaveTextContent("gw-setup••••••••-key")
+  })
+
+  it.each(["", "short-key", "123456789012345"])(
+    "fully conceals a short activation key (%j) in the field and examples",
+    async (apiKey) => {
+      mockApi({ apiKey })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      expect(await screen.findByLabelText("Your API key")).toHaveValue(
+        "••••••••••••••••",
+      )
+      await user.click(screen.getByRole("button", { name: "cURL" }))
+      expect(snippet("curl")).toHaveTextContent("Otari-Key: ••••••••••••••••")
+    },
+  )
+
+  it("copies the full activation key while keeping its fingerprint on screen", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderGuide()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Copy Your API key" }),
+    )
+
+    expect(await navigator.clipboard.readText()).toBe(KEY)
+    expect(screen.getByLabelText("Your API key")).toHaveValue(
+      "gw-setup••••••••-key",
+    )
+    expect(await screen.findByText("Copied to clipboard.")).toBeInTheDocument()
   })
 
   it("offers an agent prompt, cURL, Python and TypeScript", async () => {
