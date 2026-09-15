@@ -442,6 +442,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Own Profile
+         * @description Change the name the caller is known by on this deployment.
+         *
+         *     Always the caller's own identity. The same shape
+         *     ``GET /api/v1/organizations/me`` carries as ``caller`` comes back, so a
+         *     client can seat the answer where it read the old value rather than refetch
+         *     the whole membership context.
+         */
+        patch: operations["auth-update_own_profile"];
+        trace?: never;
+    };
     "/api/v1/auth/resend-verification": {
         parameters: {
             query?: never;
@@ -10701,6 +10726,20 @@ export interface components {
             reject_user_mismatch?: boolean | null;
         };
         /**
+         * UpdateProfileRequest
+         * @description The caller's own display name, or ``null`` to go back to having none.
+         * @example {
+         *       "full_name": "Ada Lovelace"
+         *     }
+         */
+        UpdateProfileRequest: {
+            /**
+             * Full Name
+             * @description The name to be known by on this deployment, or null to have none. Whitespace is collapsed, and a value with nothing else in it is stored as null, which leaves every surface naming this identity by its address again.
+             */
+            full_name: string | null;
+        };
+        /**
          * UpdateScopedBudgetRequest
          * @description Request model for updating a scoped budget.
          */
@@ -12632,6 +12671,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-update_own_profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerIdentityPublic"];
+                };
             };
             /** @description Validation Error */
             422: {

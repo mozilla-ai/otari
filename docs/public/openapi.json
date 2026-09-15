@@ -12576,6 +12576,32 @@
         "title": "UpdateOwnKeyRequest",
         "type": "object"
       },
+      "UpdateProfileRequest": {
+        "description": "The caller's own display name, or ``null`` to go back to having none.",
+        "example": {
+          "full_name": "Ada Lovelace"
+        },
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name to be known by on this deployment, or null to have none. Whitespace is collapsed, and a value with nothing else in it is stored as null, which leaves every surface naming this identity by its address again.",
+            "title": "Full Name"
+          }
+        },
+        "required": [
+          "full_name"
+        ],
+        "title": "UpdateProfileRequest",
+        "type": "object"
+      },
       "UpdateScopedBudgetRequest": {
         "description": "Request model for updating a scoped budget.",
         "properties": {
@@ -17486,6 +17512,56 @@
           }
         },
         "summary": "Confirm Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/profile": {
+      "patch": {
+        "description": "Change the name the caller is known by on this deployment.\n\nAlways the caller's own identity. The same shape\n``GET /api/v1/organizations/me`` carries as ``caller`` comes back, so a\nclient can seat the answer where it read the old value rather than refetch\nthe whole membership context.",
+        "operationId": "auth-update_own_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerIdentityPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Own Profile",
         "tags": [
           "auth"
         ]

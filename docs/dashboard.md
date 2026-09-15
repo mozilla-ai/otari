@@ -50,6 +50,12 @@ a password, which can be before the operator claims the deployment: a member
 added to the roster and signed up signs in there. While both credentials still
 work, the page offers the master-key box beside the form.
 
+Account settings also carries the name you are known by, which is not a
+credential: it is what the account menu, the organization roster and the user
+column on Usage and Activity show. Someone an admin added to the roster by
+address has no name until they set one here. Clearing it puts those surfaces
+back to naming you by your sign-in address.
+
 ## First-run walkthrough
 
 1. Start Otari in standalone mode.

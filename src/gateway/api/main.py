@@ -9,6 +9,7 @@ from gateway.api.routes import (
     auth_oauth,
     auth_password,
     auth_password_reset,
+    auth_profile,
     auth_session,
     auth_signup,
     auth_webauthn,
@@ -153,6 +154,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(admin.router)
     api.include_router(auth_session.router)
     api.include_router(auth_password.router)
+    api.include_router(auth_profile.router)
     api.include_router(auth_signup.router)
     api.include_router(auth_password_reset.router)
     api.include_router(auth_webauthn.router)

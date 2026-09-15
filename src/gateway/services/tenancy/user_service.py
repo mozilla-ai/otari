@@ -236,6 +236,24 @@ async def set_password(
     await db.refresh(identity)
 
 
+async def update_full_name(db: AsyncSession, identity: User, *, full_name: str | None) -> User:
+    """Set the name an identity goes by, or clear it, and commit.
+
+    Whitespace is collapsed to single spaces and a value that holds nothing else
+    becomes NULL, which is the same state an identity starts in: a roster entry
+    added by address has no name until somebody supplies one, and going back to
+    that has to be reachable from the surface that supplies it. Every reader
+    already falls back to the address, so clearing is a choice rather than a
+    broken row.
+    """
+    normalized = " ".join(full_name.split()) if full_name else ""
+    identity.full_name = normalized or None
+    db.add(identity)
+    await db.commit()
+    await db.refresh(identity)
+    return identity
+
+
 async def create_user_for_signup(
     db: AsyncSession,
     config: GatewayConfig,
@@ -628,6 +646,7 @@ __all__ = [
     "resend_verification_email",
     "reset_password",
     "set_password",
+    "update_full_name",
     "update_password",
     "verify_email",
 ]

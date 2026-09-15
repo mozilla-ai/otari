@@ -760,6 +760,40 @@
           }
         },
         {
+          "name": "Update Own Profile",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"full_name\": \"Ada Lovelace\"\n}"
+            },
+            "description": "Change the name the caller is known by on this deployment.\n\nAlways the caller's own identity. The same shape\n``GET /api/v1/organizations/me`` carries as ``caller`` comes back, so a\nclient can seat the answer where it read the old value rather than refetch\nthe whole membership context.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "profile"
+              ],
+              "raw": "{{baseUrl}}/api/v1/auth/profile"
+            }
+          }
+        },
+        {
           "name": "Resend Verification",
           "request": {
             "body": {

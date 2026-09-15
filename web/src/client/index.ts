@@ -69,6 +69,14 @@ export type SetPasswordRequest = Schemas["SetPasswordRequest"]
 export type PasswordResponse = Schemas["PasswordResponse"]
 
 // ---------------------------------------------------------------------------
+// The one thing about itself an identity may change that is not a credential:
+// the name it goes by. `PATCH /v1/auth/profile` answers with the same
+// `CallerIdentity` the membership context carries, so the account page can seat
+// the new name where the shell read the old one.
+// ---------------------------------------------------------------------------
+export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
+
+// ---------------------------------------------------------------------------
 // The public auth flows (otari#650): signup, email verification, and password
 // recovery. Every one of them answers a caller who holds neither the master key
 // nor a session, so the address or the token in the request is the whole of
@@ -423,6 +431,8 @@ export type SwitchOrganizationRequest =
   Schemas["SwitchActiveOrganizationRequest"]
 /** An organization plus the caller's standing in it: what every tenancy page reads first. */
 export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
+/** Who is signed in, as against what they may do: the person the chrome draws. */
+export type CallerIdentity = Schemas["CallerIdentityPublic"]
 // The caller's own workspace memberships, carried on the context so the shell
 // can seed its switcher from the call it already makes. Not a directory of the
 // organization's workspaces: listing those is a separate authorized read.
