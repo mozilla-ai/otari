@@ -123,6 +123,11 @@ describe("Sparkline", () => {
 
     expect(screen.getByRole("img", { name: "Spend trend" })).toBeInTheDocument()
     expect(container.querySelector(".recharts-line")).not.toBeNull()
+    expect(screen.getByRole("img", { name: "Spend trend" })).toHaveClass(
+      "pointer-events-none",
+    )
+    expect(container.querySelector("svg")).toHaveAttribute("tabindex", "-1")
+    expect(screen.queryByRole("application")).not.toBeInTheDocument()
   })
 })
 
