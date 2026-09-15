@@ -29,6 +29,7 @@ from gateway.repositories.tenancy import (
     OrganizationRepository,
     OrgProviderKeyRepository,
     UserRepository,
+    WorkspaceProviderKeyOverrideRepository,
     WorkspaceRepository,
 )
 from gateway.services.organization_pricing_service import (
@@ -616,6 +617,7 @@ class _FakeHostedModelProvider:
     """
 
     def __init__(self, *, served: str | None = None, denied: str | None = None) -> None:
+        """Name the one provider this stub serves, or the one it refuses; both default to neither."""
         self._served = served
         self._denied = denied
 
@@ -627,6 +629,7 @@ class _FakeHostedModelProvider:
         provider: str,
         model: str | None,
     ) -> HostedCredential | None:
+        """Answer exactly as configured, ignoring every argument but ``provider``."""
         del organization_id, workspace_id, model
         if provider == self._denied:
             raise HostedAccessDeniedError(f"{provider} is not enabled for this organization")
@@ -674,6 +677,11 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
         name="Acme", slug="acme-hosted-byo", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role="admin", name="admin person")
+    # A workspace with no override at all: it inherits the organization's key by
+    # default, so it must not by itself defeat the exemption.
+    await WorkspaceRepository(async_db).create_workspace(
+        name="Platform", organization_id=organization.id, created_by_user_id=None
+    )
     await OrgProviderKeyRepository(async_db).create_key(
         organization_id=organization.id,
         provider="openai",
@@ -692,6 +700,48 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
     assert created.model_key == _MODEL_KEY
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_that_disabled_its_only_byo_key_defeats_the_organizations_exemption(
+    async_db: AsyncSession,
+) -> None:
+    """One workspace disabling the org's only matching key reopens the hosted-credential question.
+
+    Pricing is organization-wide, so an override this method allowed would then
+    price that workspace's hosted-served traffic at the organization's own rate
+    too. The key still exists and is otherwise live; only this one workspace has
+    turned it off for itself.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-disabled", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Platform", organization_id=organization.id, created_by_user_id=None
+    )
+    key = await OrgProviderKeyRepository(async_db).create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="prod",
+        encrypted_api_key=None,
+        last4=None,
+        api_base="https://openai.example.test/v1",
+        client_args=None,
+    )
+    await WorkspaceProviderKeyOverrideRepository(async_db).create(
+        workspace_id=workspace.id,
+        organization_id=organization.id,
+        org_provider_key_id=key.id,
+        is_default=False,
+        disabled=True,
+    )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
 
 @pytest.mark.asyncio

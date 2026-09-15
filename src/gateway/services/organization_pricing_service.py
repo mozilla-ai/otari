@@ -50,7 +50,12 @@ from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
-from gateway.repositories.tenancy import OrgProviderKeyRepository
+from gateway.repositories.tenancy import (
+    OrgProviderKeyRepository,
+    WorkspaceProviderKeyOverrideRepository,
+    WorkspaceRepository,
+    resolve_active_key,
+)
 from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.provider_kwargs import is_deployment_instance_key, provider_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -106,6 +111,10 @@ class OrganizationPricingService:
         *,
         model_provider: ModelProviderPort | None,
     ):
+        """Bind the request's session, provider map, and hosted-credential port.
+
+        ``model_provider`` has no default; see the inline comment below for why.
+        """
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
@@ -219,38 +228,78 @@ class OrganizationPricingService:
         return credential is not None
 
     async def _organization_has_byo_credential(self, organization_id: uuid.UUID, provider: str) -> bool:
-        """Whether this organization holds a key of its own that could actually serve ``provider``.
+        """Whether every workspace in this organization would actually dispatch ``provider`` on its own key.
 
         Adapts the existence check `organization_model_access.resolve_session_catalog_scope`
-        already uses to build an owner/admin's BYO catalog allowlist, tightened for
-        a money-relevant question rather than a visibility one: a row is not enough
-        on its own, because `key_is_usable` only asks whether its secret decrypts,
-        which a row with none (``encrypted_api_key`` and ``api_base`` both unset)
-        trivially passes despite dispatch having nothing to send upstream with it.
-        Requiring one of those two fields is what tells a real credential (an
-        encrypted key, or a keyless backend's own base URL) apart from a row that
-        cannot serve a request at all, so an organization cannot mint a
-        never-dispatchable key purely to satisfy this check.
+        already uses to build an owner/admin's BYO catalog allowlist, tightened twice
+        over for a money-relevant question rather than a visibility one.
 
-        Any live, qualifying key counts, in any workspace: pricing is
-        organization-wide, not workspace-scoped, so that is the right question here,
-        rather than `resolve_active_key`'s per-workspace tiering (which would need a
-        workspace this surface does not have). A key a workspace has disabled for
-        itself still counts, for the same reason: the row still means the
-        organization holds the credential. A key disabled in *every* workspace, so
-        that no request actually dispatches on it while still qualifying here, is
-        the one case this cannot tell apart from a live one; closing that needs a
-        walk over every workspace's resolution, which is future work, not a reason
-        to hold up the much larger gap this method exists to close.
+        First, a row is not enough on its own: `key_is_usable` only asks whether its
+        secret decrypts, which a row with neither (``encrypted_api_key`` and
+        ``api_base`` both unset) trivially passes despite dispatch having nothing to
+        send upstream with it. Requiring one of those two fields is what tells a
+        real credential (an encrypted key, or a keyless backend's own base URL)
+        apart from a row that cannot serve a request at all, so an organization
+        cannot mint a never-dispatchable key purely to satisfy this check.
+
+        Second, existing is not enough either: a workspace can disable an
+        otherwise-live key for itself (`WorkspaceProviderKeyOverride.disabled`), and
+        the request-path cache honors that, so a key this method saw as live can
+        still leave that one workspace's dispatch falling through to a hosted
+        credential. Pricing is organization-wide, so an override this method allows
+        would then price *that* workspace's hosted-served traffic at the
+        organization's own rate too. Closing that means asking the same question
+        `resolve_active_key` answers for a single workspace, for every workspace the
+        organization has: this counts the organization BYO only when none of them
+        would fall through. A workspace that never touches this provider at all
+        still passes, because with no override on file it inherits the
+        organization's default candidate the same as one that does.
         """
         normalized = provider_key(provider)
-        keys = await OrgProviderKeyRepository(self.db).list_live_keys(organization_id)
-        return any(
-            provider_key(key.provider) == normalized
+        key_repository = OrgProviderKeyRepository(self.db)
+        keys = await key_repository.list_live_keys(organization_id)
+        matching_keys = [
+            key
+            for key in keys
+            if provider_key(key.provider) == normalized
             and (key.encrypted_api_key is not None or key.api_base is not None)
             and key_is_usable(key)
-            for key in keys
+        ]
+        if not matching_keys:
+            return False
+
+        workspace_ids = await self._all_workspace_ids(organization_id)
+        if not workspace_ids:
+            return True
+
+        matching_key_ids = {key.id for key in matching_keys}
+        candidates_by_workspace = await WorkspaceProviderKeyOverrideRepository(self.db).candidates_for_workspaces(
+            organization_id=organization_id,
+            workspace_ids=workspace_ids,
         )
+        for workspace_id in workspace_ids:
+            candidates = [
+                (key, override)
+                for key, override in candidates_by_workspace.get(workspace_id, [])
+                if provider_key(key.provider) == normalized
+            ]
+            active = resolve_active_key(candidates)
+            if active is None or active.id not in matching_key_ids:
+                return False
+        return True
+
+    async def _all_workspace_ids(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Every workspace id this organization has, paged past `WorkspaceRepository`'s default limit."""
+        workspace_repository = WorkspaceRepository(self.db)
+        ids: list[uuid.UUID] = []
+        skip = 0
+        limit = 100
+        while True:
+            page, total = await workspace_repository.get_by_organization(organization_id, skip=skip, limit=limit)
+            ids.extend(workspace.id for workspace in page)
+            skip += limit
+            if skip >= total:
+                return ids
 
     async def raise_if_overlapping(
         self,
