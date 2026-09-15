@@ -23,10 +23,13 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
+    OrgProviderKeyRepository,
     UserRepository,
+    WorkspaceProviderKeyOverrideRepository,
     WorkspaceRepository,
 )
 from gateway.services.organization_pricing_service import (
@@ -475,7 +478,7 @@ async def test_a_management_role_may_write_an_override(async_db: AsyncSession, r
     )
     identity = await _identity(async_db, organization, role=role, name=f"{role} person")
 
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
     assert created.organization_id == organization.id
@@ -490,7 +493,7 @@ async def test_a_non_management_role_may_not_write_an_override(async_db: AsyncSe
         name="Acme", slug=f"acme-{role}", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role=role, name=f"{role} person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
 
     with pytest.raises(NotAuthorizedError):
         await service.create_for_caller(identity, _MODEL_KEY, _rates())
@@ -524,9 +527,7 @@ async def _operator(db: AsyncSession, organization: Organization) -> User:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["owner", "admin"])
-async def test_an_organization_may_not_price_a_model_the_deployment_supplies(
-    async_db: AsyncSession, role: str
-) -> None:
+async def test_an_organization_may_not_price_a_model_the_deployment_supplies(async_db: AsyncSession, role: str) -> None:
     """The deployment holds that credential, so it settles the bill and sets the rate.
 
     Without this an organization admin could store a zero for a model the
@@ -537,7 +538,7 @@ async def test_an_organization_may_not_price_a_model_the_deployment_supplies(
         name="Acme", slug=f"acme-managed-{role}", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role=role, name=f"{role} person")
-    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG, model_provider=None)
 
     with pytest.raises(OrganizationPricingManagedModelError) as refused:
         await service.create_for_caller(identity, _MANAGED_KEY, _rates(input_price_per_million=0.0))
@@ -552,7 +553,7 @@ async def test_an_organization_may_still_price_a_model_it_supplies_the_key_for(a
         name="Acme", slug="acme-byo", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role="admin", name="admin person")
-    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG, model_provider=None)
 
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
@@ -570,7 +571,7 @@ async def test_a_deployment_operator_may_price_a_model_the_deployment_supplies(a
         name="Acme", slug="acme-operator", created_by_user_id=None
     )
     identity = await _operator(async_db, organization)
-    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG, model_provider=None)
 
     created = await service.create_for_caller(identity, _MANAGED_KEY, _rates())
 
@@ -594,17 +595,236 @@ async def test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organiz
     identity = await _identity(async_db, organization, role="admin", name="admin person")
     # Stored through a config that knows no instances, which is the deployment as
     # it was before the instance existed.
-    stored = await OrganizationPricingService(async_db, GatewayConfig()).create_for_caller(
+    stored = await OrganizationPricingService(async_db, GatewayConfig(), model_provider=None).create_for_caller(
         identity, _MANAGED_KEY, _rates()
     )
 
-    service = OrganizationPricingService(async_db, _MANAGED_CONFIG)
+    service = OrganizationPricingService(async_db, _MANAGED_CONFIG, model_provider=None)
     with pytest.raises(OrganizationPricingManagedModelError):
         await service.replace_for_caller(
             identity,
             stored.id,
             _rates(input_price_per_million=0.0, effective_from=stored.effective_from),
         )
+
+
+class _FakeHostedModelProvider:
+    """A stub ``ModelProviderPort`` that serves or refuses one fixed provider.
+
+    Stands in for an overlay's hosted-inference adapter: ``config.providers``
+    knows nothing about it, which is the point, because these tests are for the
+    refusal path ``is_deployment_instance_key`` cannot see on its own.
+    """
+
+    def __init__(self, *, served: str | None = None, denied: str | None = None) -> None:
+        """Name the one provider this stub serves, or the one it refuses; both default to neither."""
+        self._served = served
+        self._denied = denied
+
+    async def resolve_hosted_credential(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
+        provider: str,
+        model: str | None,
+    ) -> HostedCredential | None:
+        """Answer exactly as configured, ignoring every argument but ``provider``."""
+        del organization_id, workspace_id, model
+        if provider == self._denied:
+            raise HostedAccessDeniedError(f"{provider} is not enabled for this organization")
+        if provider == self._served:
+            return HostedCredential(api_key="x", api_base=None, response_provider=provider)
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["owner", "admin"])
+async def test_an_organization_may_not_price_a_model_a_hosted_credential_serves(
+    async_db: AsyncSession, role: str
+) -> None:
+    """A bare key still refuses when no BYO credential is what actually serves it.
+
+    ``_MODEL_KEY`` names no configured instance, so ``is_deployment_instance_key``
+    alone would wave this through. The bound port answering "I would serve
+    'openai' myself" is what otherwise lets an organization undercut a hosted
+    fleet it never supplied the key for.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug=f"acme-hosted-{role}", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role=role, name=f"{role} person")
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError) as refused:
+        await service.create_for_caller(identity, _MODEL_KEY, _rates(input_price_per_million=0.0))
+
+    assert _MODEL_KEY in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db: AsyncSession) -> None:
+    """A hosted fleet existing for the same provider name does not reach an org with its own key.
+
+    The dispatch ladder tries the organization's own BYO key before it ever asks
+    the hosted-credential port, so an organization holding one for ``openai``
+    prices its own traffic exactly as it always could, even on a deployment that
+    also happens to run a hosted ``openai`` fleet for organizations with none.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-byo", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    # A workspace with no override at all: it inherits the organization's key by
+    # default, so it must not by itself defeat the exemption.
+    await WorkspaceRepository(async_db).create_workspace(
+        name="Platform", organization_id=organization.id, created_by_user_id=None
+    )
+    await OrgProviderKeyRepository(async_db).create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="prod",
+        encrypted_api_key=None,
+        last4=None,
+        # A keyless-backend credential still counts as BYO: the base URL is
+        # what dispatch would actually send the request to.
+        api_base="https://openai.example.test/v1",
+        client_args=None,
+    )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_that_disabled_its_only_byo_key_defeats_the_organizations_exemption(
+    async_db: AsyncSession,
+) -> None:
+    """One workspace disabling the org's only matching key reopens the hosted-credential question.
+
+    Pricing is organization-wide, so an override this method allowed would then
+    price that workspace's hosted-served traffic at the organization's own rate
+    too. The key still exists and is otherwise live; only this one workspace has
+    turned it off for itself.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-disabled", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Platform", organization_id=organization.id, created_by_user_id=None
+    )
+    key = await OrgProviderKeyRepository(async_db).create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="prod",
+        encrypted_api_key=None,
+        last4=None,
+        api_base="https://openai.example.test/v1",
+        client_args=None,
+    )
+    await WorkspaceProviderKeyOverrideRepository(async_db).create(
+        workspace_id=workspace.id,
+        organization_id=organization.id,
+        org_provider_key_id=key.id,
+        is_default=False,
+        disabled=True,
+    )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+
+@pytest.mark.asyncio
+async def test_a_key_row_with_no_credential_material_does_not_exempt_the_organization(
+    async_db: AsyncSession,
+) -> None:
+    """A row with neither a key nor a base URL cannot serve a request, so it does not count.
+
+    Otherwise an organization could mint a key row purely to satisfy the BYO
+    check while every real request for the provider still dispatches on the
+    deployment's hosted credential, pricing traffic it never actually paid for.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-decoy", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    await OrgProviderKeyRepository(async_db).create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="decoy",
+        encrypted_api_key=None,
+        last4=None,
+        api_base=None,
+        client_args=None,
+    )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+
+@pytest.mark.asyncio
+async def test_a_hosted_access_refusal_still_counts_as_deployment_supplied(async_db: AsyncSession) -> None:
+    """``HostedAccessDeniedError`` means the port owns this key too, just for someone else.
+
+    The candidate still resolves on a deployment-owned upstream; the
+    organization not being entitled to it is a reason to keep the rate off this
+    table, not a loophole into setting one.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-denied", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(denied="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_operator_may_price_a_model_a_hosted_credential_serves(async_db: AsyncSession) -> None:
+    """The same operator exemption applies through this door as through config.providers."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-operator", created_by_user_id=None
+    )
+    identity = await _operator(async_db, organization)
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
+
+
+@pytest.mark.asyncio
+async def test_an_organization_may_price_a_model_no_hosted_credential_serves(async_db: AsyncSession) -> None:
+    """A port bound but silent on this provider leaves the BYO path untouched."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-unserved", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="anthropic")
+    )
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
 
 
 @pytest.mark.asyncio
@@ -616,7 +836,7 @@ async def test_any_member_may_read_the_overrides(async_db: AsyncSession, role: s
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
     reader = await _identity(async_db, organization, role=role, name=f"{role} reader")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     await service.create_for_caller(owner, _MODEL_KEY, _rates())
 
     visible, total = await service.list_for_caller(reader)
@@ -646,7 +866,7 @@ async def test_a_negative_rate_is_refused_at_the_service_boundary(async_db: Asyn
         name="Acme", slug=f"acme-negative-{field}", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
 
     with pytest.raises(TenancyValidationError) as caught:
         await service.create_for_caller(owner, _MODEL_KEY, _rates(**{field: -1.0}))
@@ -664,7 +884,7 @@ async def test_another_organizations_override_is_a_404_not_a_403(async_db: Async
     mine = await OrganizationRepository(async_db).create_organization(name="Mine", slug="mine", created_by_user_id=None)
     their_owner = await _identity(async_db, theirs, role="owner", name="their owner")
     my_owner = await _identity(async_db, mine, role="owner", name="my owner")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     their_override = await service.create_for_caller(their_owner, _MODEL_KEY, _rates())
 
     with pytest.raises(OrganizationPricingNotFoundError):
@@ -684,7 +904,7 @@ async def test_the_overlap_rule_is_scoped_to_one_organization(async_db: AsyncSes
     )
     first_owner = await _identity(async_db, first, role="owner", name="first owner")
     second_owner = await _identity(async_db, second, role="owner", name="second owner")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     period = _rates(effective_from=datetime.now(UTC) - timedelta(days=1))
 
     await service.create_for_caller(first_owner, _MODEL_KEY, period)
@@ -701,7 +921,7 @@ async def test_a_second_overlapping_period_is_refused_for_one_organization(
         name="Acme", slug="acme-overlap", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     await service.create_for_caller(owner, _MODEL_KEY, _rates(effective_from=datetime.now(UTC) - timedelta(days=1)))
 
     with pytest.raises(OrganizationPricingOverlapError):
@@ -790,7 +1010,7 @@ async def test_deleting_an_override_returns_the_model_to_the_deployment_list(
             output_price_per_million=20.0,
         )
     )
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     override = await service.create_for_caller(owner, _MODEL_KEY, _rates())
     await async_db.commit()
 
@@ -896,7 +1116,7 @@ async def test_a_racing_duplicate_period_is_a_conflict_not_an_integrity_error(
         name="Acme", slug="acme-race", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     rates = _rates()
 
     await service.create_for_caller(owner, _MODEL_KEY, rates)
@@ -929,7 +1149,7 @@ async def test_the_race_conflict_names_the_period_it_actually_hit(
         name="Acme", slug="acme-race-message", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     start = datetime.now(UTC)
     bounded = _rates(effective_from=start, effective_to=start + timedelta(days=1))
 
@@ -964,7 +1184,7 @@ async def test_a_check_violation_is_not_reported_as_a_conflict(
         name="Acme", slug="acme-check", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
 
     # The service's own rate validation would refuse this first, so bypass it to
     # reach the table's CHECK, which is the constraint under test.
@@ -998,7 +1218,7 @@ async def test_an_update_that_fails_for_another_reason_is_not_reported_as_a_conf
         name="Acme", slug="acme-update-check", created_by_user_id=None
     )
     owner = await _identity(async_db, organization, role="owner", name="owner person")
-    service = OrganizationPricingService(async_db, GatewayConfig())
+    service = OrganizationPricingService(async_db, GatewayConfig(), model_provider=None)
     period = _rates()
     stored = await service.create_for_caller(owner, _MODEL_KEY, period)
     await async_db.commit()
