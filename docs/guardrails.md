@@ -132,6 +132,28 @@ the dashboard falls back to naming a profile by hand. The same fallback covers
 an entry that points at an endpoint of its own: only `guardrails_url` is read
 here, because a URL taken from an entry would be one a caller chose.
 
+### Which guardrails Otari can run itself
+
+`GET /api/v1/tool-settings/guardrails/catalog` lists the guardrails Otari can
+build and call without a service in front of them, with the constructor and
+per-call arguments each one takes. It is the operator-side counterpart of the
+profiles read above: the same picker, for a guardrail this deployment configures
+rather than one an operator's `service.yaml` already built.
+
+It is not every guardrail [any-guardrail](https://github.com/mozilla-ai/any-guardrail)
+ships. A guardrail runs either as a call to a hosted API or by holding model
+weights in the process running it, and Otari does the first only. The second
+belongs in the guardrails service `guardrails_url` points at, which is what the
+`/profiles` half of this page describes, so the two catalogs divide on exactly
+that line. The rule is any-guardrail's own backend metadata rather than a list
+Otari keeps, and it counts a guardrail's alternate backends too: one that
+defaults to a local model and also answers over a hosted API is listed, because
+the hosted path is the one Otari would take.
+
+The catalog reaches no service, so unlike the profiles read it has no
+unavailable state. It is on the operator gate, because it is the picker behind a
+form that stores a vendor credential for the whole deployment.
+
 ### How the layers compose
 
 Three layers can name a guardrail: the caller's request, the caller's
