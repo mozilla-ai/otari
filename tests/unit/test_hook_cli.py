@@ -59,7 +59,10 @@ def test_pretooluse_blocks_a_forbidden_edit(monkeypatch: pytest.MonkeyPatch, rep
         httpx,
         "post",
         lambda *a, **k: _FakeResponse(
-            {"blocked": True, "results": [{"gate_id": "g", "outcome": "fail", "message": "no"}]}
+            {
+                "blocked": True,
+                "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
         ),
     )
     payload = {
@@ -107,19 +110,87 @@ def test_pretooluse_ignores_non_edit_tools(monkeypatch: pytest.MonkeyPatch, repo
 
 def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args=[], returncode=0, stdout=" M CHANGELOG.md\n", stderr="")
+        # -z's real shape: NUL-delimited, no trailing newline per record.
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=" M CHANGELOG.md\0", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
-            {"blocked": True, "results": [{"gate_id": "g", "outcome": "fail", "message": "no"}]}
-        ),
-    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": True,
+                "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
     payload = {"hook_event_name": "Stop", "cwd": str(repo)}
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
+    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+
+
+def test_stop_event_parses_a_rename_as_its_new_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """-z reports a rename/copy as two consecutive tokens: new path, then old path."""
+    captured: dict[str, Any] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="R  renamed.txt\0original.txt\0", stderr="")
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["changed_paths"] == ["renamed.txt"]
+
+
+def test_stop_event_does_not_misparse_a_filename_containing_an_arrow(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """An untracked file literally named 'a -> b.txt' is one token, not a false rename.
+
+    The old human-readable-format parser split any entry containing the
+    substring " -> " as though it were a rename's "old -> new", which would
+    have truncated this filename to whatever followed the last " -> " in it.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="?? weird -> name.txt\0", stderr="")
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["changed_paths"] == ["weird -> name.txt"]
+
+
+def test_stop_event_reports_a_non_ascii_filename_unescaped(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """-z never quotes/octal-escapes a path, unlike the human-readable format."""
+    captured: dict[str, Any] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="?? café.txt\0", stderr="")
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["changed_paths"] == ["café.txt"]
 
 
 def test_stop_event_does_not_block_when_git_status_fails(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -206,3 +277,39 @@ def test_falls_back_to_configured_master_key_and_localhost(
     assert result.exit_code == 0, result.output
     assert captured["url"] == "http://localhost:8000/api/v1/hooks/check"
     assert captured["headers"]["Otari-Key"] == "Bearer test-master-key"
+
+
+def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """blocked=False is set whenever nothing required failed, even if an advisory gate did.
+
+    Checking only `blocked` before deciding whether to print anything would
+    silently drop that advisory warning: it is never true on its own.
+    """
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "blocked": False,
+                "results": [
+                    {"gate_id": "g", "enforcement": "advisory", "outcome": "fail", "message": "please reconsider"}
+                ],
+            }
+        ),
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "README.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    # Plain stderr text is invisible to Claude Code on a non-blocking hook
+    # (it only reaches its own debug log): the message must be a
+    # `systemMessage` on stdout, the field Claude Code's hook protocol
+    # surfaces to the user for exactly this case.
+    assert result.stderr == ""
+    stdout_payload = json.loads(result.stdout)
+    assert "please reconsider" in stdout_payload["systemMessage"]
+    assert "advisory" in stdout_payload["systemMessage"].lower()

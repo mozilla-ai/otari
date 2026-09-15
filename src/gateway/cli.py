@@ -253,23 +253,34 @@ def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
     own evidence in its own way, not through this function.
     """
     result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
         cwd=repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",  # not the platform locale default, which is not always UTF-8
         timeout=10,
         check=False,
     )
     if result.returncode != 0:
         return None
+    # -z: NUL-delimited and never quotes or octal-escapes a path (unlike the
+    # human-readable format, which renders a non-ASCII name like "café.txt"
+    # as the escaped "caf\303\251.txt" and would report an untracked file
+    # literally named "weird -> name.txt" as a rename by matching " -> " as
+    # a substring of the one path it has, rather than the separator between
+    # two). A rename or copy (status X or Y is 'R'/'C') is two consecutive
+    # tokens, new path then old path, not one token with an arrow in it.
+    tokens = result.stdout.split("\0")
     paths = []
-    for line in result.stdout.splitlines():
-        if not line:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if not token:
+            index += 1
             continue
-        entry = line[3:]
-        if " -> " in entry:
-            entry = entry.split(" -> ", 1)[1]
-        paths.append(entry.strip('"'))
+        status, path = token[:2], token[3:]
+        paths.append(path)
+        index += 2 if ("R" in status or "C" in status) else 1
     return paths
 
 
@@ -365,14 +376,28 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
         click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
         return
 
-    if not result.get("blocked"):
+    # Mirrors Outcome's own non-blocking set (types.py), not just "pass":
+    # a future gate type's not_applicable is a clean result too, and must not
+    # get reported here as something the caller needs to look at.
+    failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
+    if not failing:
         return
 
     summary = "\n".join(
-        f"  [x] {gate['gate_id']}: {gate['message']}" for gate in result["results"] if gate["outcome"] != "pass"
+        f"  [{'x' if gate['enforcement'] == 'required' else '!'}] {gate['gate_id']}: {gate['message']}"
+        for gate in failing
     )
-    click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}", err=True)
-    raise SystemExit(2)
+    if result.get("blocked"):
+        click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}", err=True)
+        raise SystemExit(2)
+    # An advisory gate failed but nothing required did: warn without
+    # blocking. Checking `blocked` alone here would silently drop this,
+    # since only a required failure can ever set it true. Exit 0 with a
+    # plain stderr message is invisible to the user: Claude Code only
+    # surfaces a non-blocking hook's stderr in its own debug log, never in
+    # the transcript or to the model. `systemMessage` on stdout is the
+    # documented field for a visible, non-blocking hook message.
+    click.echo(json.dumps({"systemMessage": f"otari hook: advisory warning(s) ({harness}, {event}):\n{summary}"}))
 
 
 @cli.group()

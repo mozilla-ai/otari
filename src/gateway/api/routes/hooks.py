@@ -41,6 +41,35 @@ router = APIRouter(
 _MAX_CHANGED_PATHS = 10_000
 _MAX_PATH_LENGTH = 4096
 
+# A per-match cost bound (domain/evaluators.py) does not bound the total cost
+# of one request: MAX_POLICY_BYTES and _MAX_CHANGED_PATHS are each generous
+# enough alone that maxing out both dimensions at once measured multiple
+# seconds of matching in testing (100 forbidden globs x 10,000 changed paths,
+# realistic lengths, took over 2.5s). This estimates total match work as
+# pattern_count * total_path_length + path_count * total_pattern_length,
+# which is what the matcher's own cost scales with, and rejects a request
+# whose combination is disproportionate rather than let it run. Chosen with
+# a safety margin under the ~350M-work / 0.58s point measured in benchmarking
+# (tests/unit/agent_runtime/test_evaluators.py); a realistic policy (tens of
+# gates, a handful of forbidden globs each) against a large changed-file set
+# stays at least an order of magnitude under it.
+_MAX_MATCH_WORK = 50_000_000
+
+# A byte-weighted budget alone understates a request built from many *short*
+# patterns and paths: each _segment_matches call costs a near-constant Python
+# function-call overhead regardless of how few bytes it compares, so a
+# request that is cheap by total bytes can still mean millions of individual
+# calls. 2,500 one-byte forbidden globs against 10,000 one-byte changed paths
+# measured 50,000,000 estimated work, exactly at (not over) _MAX_MATCH_WORK,
+# for 25,000,000 real match calls that took ~5s. This bounds the raw call
+# count directly, independent of length; benchmarking the same degenerate
+# shape (short, non-matching, all-distinct strings, so neither the matcher's
+# own short-circuits nor the deduplication in domain.policy and
+# changed_path_evidence collapse the work) measured 2,000,000 calls at
+# ~0.39-0.4s regardless of how that count split between pattern_count and
+# path_count.
+_MAX_COMPARISONS = 1_000_000
+
 
 class PolicyCheckRequest(BaseModel):
     """A policy body plus the evidence to check it against, both caller-supplied."""
@@ -59,7 +88,11 @@ class PolicyCheckRequest(BaseModel):
 
     @property
     def changed_path_evidence(self) -> ChangedPathEvidence:
-        return ChangedPathEvidence(changed_paths=tuple(self.changed_paths))
+        # A duplicate path adds nothing a single copy wouldn't already tell a
+        # gate; collapsing it here means the work-budget check below and the
+        # actual matching agree on the same, cheaper count rather than one
+        # estimating off raw input and the other paying for the duplicates.
+        return ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(self.changed_paths)))
 
 
 class GateResultResponse(BaseModel):
@@ -97,7 +130,28 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
         if len(path) > _MAX_PATH_LENGTH:
             raise HTTPException(status_code=422, detail=f"changed_paths entry exceeds {_MAX_PATH_LENGTH} characters.")
 
+    # Built once and reused below: gate.forbidden is already deduplicated at
+    # parse time (domain.policy), and changed_path_evidence deduplicates
+    # changed_paths the same way, so this estimate and the actual evaluation
+    # below always agree on the same, cheaper counts.
     evidence = request.changed_path_evidence
+    pattern_count = sum(len(gate.forbidden) for gate in spec.gates)
+    total_pattern_length = sum(len(glob) for gate in spec.gates for glob in gate.forbidden)
+    path_count = len(evidence.changed_paths)
+    total_path_length = sum(len(path) for path in evidence.changed_paths)
+    estimated_work = pattern_count * total_path_length + path_count * total_pattern_length
+    comparisons = pattern_count * path_count
+    if estimated_work > _MAX_MATCH_WORK or comparisons > _MAX_COMPARISONS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"This policy and evidence would take an estimated {estimated_work:,} match operations "
+                f"across {comparisons:,} pattern/path comparisons, over this build's limits "
+                f"({_MAX_MATCH_WORK:,} and {_MAX_COMPARISONS:,} respectively). Narrow the policy's "
+                "forbidden globs or the submitted changed_paths."
+            ),
+        )
+
     results = [evaluate_changed_path(gate, evidence) for gate in spec.gates]
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)
 
