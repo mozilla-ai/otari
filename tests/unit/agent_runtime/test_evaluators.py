@@ -1,4 +1,6 @@
-from gateway.agent_runtime.domain.evaluators import evaluate_changed_path
+import time
+
+from gateway.agent_runtime.domain.evaluators import _segment_matches, _segments_match, evaluate_changed_path
 from gateway.agent_runtime.domain.types import ChangedPathEvidence, ChangedPathGate, Outcome
 
 
@@ -51,3 +53,88 @@ def test_advisory_gate_does_not_block_required() -> None:
     result = evaluate_changed_path(gate, ChangedPathEvidence(changed_paths=("CHANGELOG.md",)))
     assert result.outcome is Outcome.FAIL
     assert result.enforcement == "advisory"
+
+
+# --- _segment_matches: correctness -----------------------------------------
+#
+# A prior version of this matcher had two review-caught bugs: a false
+# negative ('*a' failed to match 'a', which could let a forbidden path pass
+# undetected) and an O(pattern * text) rescan on mismatch that a naive
+# backtracking regex would also have had (just with a lower, non-exponential
+# ceiling). Both are pinned here so neither can silently come back.
+
+
+def test_leading_star_matches_with_zero_characters_consumed() -> None:
+    assert _segment_matches("*a", "a") is True
+
+
+def test_trailing_star_matches_with_zero_characters_consumed() -> None:
+    assert _segment_matches("a*", "a") is True
+
+
+def test_star_matches_the_empty_segment() -> None:
+    assert _segment_matches("*", "") is True
+
+
+def test_empty_pattern_matches_only_empty_text() -> None:
+    assert _segment_matches("", "") is True
+    assert _segment_matches("", "x") is False
+
+
+def test_adjacent_stars_behave_as_one() -> None:
+    assert _segment_matches("a***b", "ab") is True
+    assert _segment_matches("a***b", "axyzb") is True
+    assert _segment_matches("a***b", "ba") is False
+
+
+def test_multiple_middle_chunks_match_in_order() -> None:
+    assert _segment_matches("a*b*c", "aXbYc") is True
+    assert _segment_matches("a*b*c", "aXYc") is False  # no 'b' between the anchors
+    assert _segment_matches("a*b*c", "cba") is False  # right characters, wrong order
+
+
+# --- _segment_matches: the two adversarial patterns from review -------------
+
+
+def test_original_adversarial_pattern_resolves_quickly() -> None:
+    """The initial regex-based fix's ReDoS: many 'a*' repeats, no closing match."""
+    pattern = "a*" * 30 + "END"
+    start = time.time()
+    result = _segment_matches(pattern, "a" * 200)
+    assert time.time() - start < 0.1
+    assert result is False
+
+
+def test_long_literal_suffix_after_a_single_star_resolves_quickly() -> None:
+    """The rescan bug the two-pointer fix introduced: no repeated backtracking
+
+    is possible now, since each literal chunk is located once, but this is
+    exactly the shape (long literal after '*', no match at the end) that
+    made the two-pointer version measure seconds against just a few paths.
+    """
+    pattern = "*" + "a" * 2048 + "b"
+    paths = tuple(f"path{i}.txt" for i in range(10))
+    start = time.time()
+    results = [_segment_matches(pattern, path) for path in paths]
+    assert time.time() - start < 0.1
+    assert not any(results)
+
+
+# --- _segments_match: '**' crossing directories -----------------------------
+
+
+def test_double_star_requires_at_least_one_segment() -> None:
+    assert _segments_match(["src", "**"], ["src"]) is False
+    assert _segments_match(["src", "**"], ["src", "a"]) is True
+
+
+def test_double_star_with_segments_on_both_sides() -> None:
+    pattern = ["src", "**", "tests", "*.py"]
+    assert _segments_match(pattern, ["src", "middle", "tests", "x.py"]) is True
+    assert _segments_match(pattern, ["src", "a", "b", "tests", "x.py"]) is True
+    assert _segments_match(pattern, ["src", "tests", "x.py"]) is False  # nothing for ** to consume
+
+
+def test_leading_double_star() -> None:
+    assert _segments_match(["**", "foo.py"], ["a", "b", "foo.py"]) is True
+    assert _segments_match(["**", "foo.py"], ["foo.py"]) is False  # still needs >=1 segment

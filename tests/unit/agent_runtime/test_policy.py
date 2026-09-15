@@ -65,6 +65,33 @@ def test_parses_a_valid_policy() -> None:
         ),
         # Not a YAML mapping at all.
         "- just\n- a\n- list\n",
+        # schema_version, type, and enforcement checked via `in` on a set of
+        # strings: an unhashable value (YAML's `[]`) raises TypeError there
+        # unless isinstance is checked first. Each of these must come back as
+        # a PolicyError (422), not an unhandled TypeError (500).
+        'schema_version: []\npolicy:\n  id: x\ngates: []\n',
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: []\n    enforcement: required\n"
+            '    forbidden: ["a"]\n    message: m\n'
+        ),
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: changed_path\n    enforcement: []\n"
+            '    forbidden: ["a"]\n    message: m\n'
+        ),
+        # A numeric mapping key ends up in the same "unknown fields" set as
+        # any string keys alongside it; formatting that error must not itself
+        # raise (sorting or joining a set that mixes str and int raises
+        # TypeError before the intended PolicyError is ever built).
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n42: oops\n',
+        # More than one standalone '**' in one glob: bounded so the
+        # segment-crossing matcher never needs to try more than one split.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            '  - id: g\n    type: changed_path\n    enforcement: required\n'
+            '    forbidden: ["a/**/b/**/c"]\n    message: m\n'
+        ),
     ],
 )
 def test_rejects_malformed_policy(broken: str) -> None:
@@ -76,3 +103,31 @@ def test_rejects_oversized_policy() -> None:
     huge = VALID_POLICY + ("# padding\n" * 200_000)
     with pytest.raises(PolicyError):
         parse_policy(huge, source="test.yml")
+
+
+def test_duplicate_forbidden_globs_collapse_to_one() -> None:
+    """A repeated glob matches nothing a single copy wouldn't, and multiplies
+
+    the Hook Server's per-request match work for zero effect on the result;
+    review caught a request built from 2,500 copies of one forbidden glob
+    that took seconds to evaluate before this collapsed at parse time.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        '  - id: g\n    type: changed_path\n    enforcement: required\n'
+        '    forbidden: ["a", "a", "b", "a"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert spec.gates[0].forbidden == ("a", "b")
+
+
+def test_unhashable_yaml_mapping_key_is_rejected_not_a_500() -> None:
+    """YAML's explicit-key syntax permits a sequence as a mapping key, which
+
+    Python cannot hash. The duplicate-key check must not let that raise a
+    bare TypeError in place of the PolicyError every other malformed policy
+    gets.
+    """
+    policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n? [a, b]\n: c\n'
+    with pytest.raises(PolicyError):
+        parse_policy(policy, source="test.yml")
