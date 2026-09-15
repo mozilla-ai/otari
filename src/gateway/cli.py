@@ -353,7 +353,15 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
     else:
         return  # An event this harness integration does not check yet.
 
-    gateway_config = load_config(config)
+    try:
+        gateway_config = load_config(config)
+    except ValueError as exc:
+        # load_config runs GatewayConfig.validate_mode_selection(), which
+        # raises on a real misconfiguration (e.g. OTARI_MODE=hybrid with no
+        # OTARI_AI_TOKEN). That is a setup problem, not a required gate
+        # failing, so it falls under this command's own fail-open contract.
+        click.echo(f"otari hook: could not load config ({exc}), not blocking.", err=True)
+        return
     # host is a bind address (0.0.0.0 is the documented default), not a connect
     # target; a client dials localhost instead.
     connect_host = "localhost" if gateway_config.host == "0.0.0.0" else gateway_config.host  # noqa: S104

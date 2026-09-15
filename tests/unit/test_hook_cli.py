@@ -240,6 +240,30 @@ def test_missing_credential_does_not_block(monkeypatch: pytest.MonkeyPatch, repo
     assert "no API key or master key resolved" in result.output
 
 
+def test_invalid_config_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """load_config runs GatewayConfig.validate_mode_selection(), which raises
+
+    ValueError on a real misconfiguration (e.g. OTARI_MODE=hybrid with no
+    OTARI_AI_TOKEN set). That is a setup problem, not a required gate
+    failing, so it must fail open like every other setup failure this
+    command handles, not surface as an unhandled traceback.
+    """
+
+    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
+        raise ValueError("Hybrid mode (legacy value 'platform') requires OTARI_AI_TOKEN to be set.")
+
+    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert "could not load config" in result.output
+
+
 def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
         raise httpx.ConnectError("connection refused")
