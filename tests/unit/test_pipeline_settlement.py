@@ -57,8 +57,10 @@ from gateway.core.config import GatewayConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
+from gateway.services.routing.compiler import CompiledPlan
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.types.attempt import Attempt
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -104,6 +106,7 @@ def _ctx(
     rate_limit_info: RateLimitInfo | None = None,
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
+    plan: CompiledPlan | None = None,
 ) -> RequestContext:
     return RequestContext(
         config=config,
@@ -119,6 +122,7 @@ def _ctx(
         started_at=time.monotonic(),
         workspace_id=workspace_id,
         organization_id=organization_id,
+        plan=plan,
     )
 
 
@@ -1603,6 +1607,7 @@ async def _run_standalone(
     db: Any = None,
     display_model: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    plan: CompiledPlan | None = None,
 ) -> tuple[Any, Response]:
     """Drive the standalone non-streaming path with a faked provider call."""
 
@@ -1620,6 +1625,7 @@ async def _run_standalone(
         reservation=reservation,
         rate_limit_info=rate_limit_info,
         workspace_id=workspace_id,
+        plan=plan,
     )
     response = Response()
     returned = await run_standalone_non_stream(
@@ -1703,6 +1709,62 @@ async def test_standalone_non_stream_applies_rate_limit_headers(monkeypatch: pyt
 
     assert response.headers["X-RateLimit-Limit"] == "60"
     assert response.headers["X-RateLimit-Remaining"] == "59"
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_sets_routing_and_cost_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    _, response = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
+
+    assert response.headers["x-otari-backend"] == str(LLMProvider.OPENAI)
+    assert response.headers["x-otari-response-cost"] == "0.25"
+    assert response.headers["x-otari-attempted-fallbacks"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_omits_cost_header_when_nothing_settled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chat's ``log_success_without_usage`` still writes a row for a usage-less
+    result, but the fake settlement (like the real one) returns no cost for
+    it, so the header must not claim a cost of zero for an unknown one."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    _, response = await _run_standalone(monkeypatch, result=_completion(usage=None), reservation=_reservation())
+
+    assert "x-otari-response-cost" not in response.headers
+    assert response.headers["x-otari-backend"] == str(LLMProvider.OPENAI)
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_reports_fallback_count_from_attribution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``position`` is 1-indexed (the primary candidate is 1), so a request
+    served by the third candidate fell over twice before it landed."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    def fake_attribution_for(ctx: Any, attempt: Any, *, absorbed: bool = False) -> pipeline.RoutingAttribution:
+        return pipeline.RoutingAttribution(
+            policy_name="p", selection_reason="fallback", position=3, attempt_count=3, request_group_id="g1"
+        )
+
+    monkeypatch.setattr(pipeline, "_attribution_for", fake_attribution_for)
+
+    # A single-candidate plan still routes through the patched `_attribution_for`;
+    # the plan's own attempt position is irrelevant, the patch controls the value.
+    plan = CompiledPlan(
+        policy_name="p", attempts=[Attempt(position=1, instance="openai", provider=LLMProvider.OPENAI, model="gpt-4")]
+    )
+    _, response = await _run_standalone(
+        monkeypatch, result=_completion(usage=_usage()), reservation=_reservation(), plan=plan
+    )
+
+    assert response.headers["x-otari-attempted-fallbacks"] == "2"
 
 
 @pytest.mark.asyncio
